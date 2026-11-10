@@ -105,6 +105,7 @@ import works.merc.keryx.app.resources.home_starred
 import works.merc.keryx.app.ui.common.FlatButton
 import works.merc.keryx.app.ui.common.FlatTonalButton
 import works.merc.keryx.app.ui.common.KeryxExpandedSearchBar
+import works.merc.keryx.app.ui.common.KeryxBadgedIcon
 import works.merc.keryx.app.ui.common.KeryxIcon
 import works.merc.keryx.app.ui.common.KeryxIcons
 import works.merc.keryx.app.ui.common.KeryxPaneTopBar
@@ -127,7 +128,8 @@ import works.merc.keryx.app.ui.common.TooltipIconButton
  * @param focused Whether the pane currently has focus.
  * @param onActivated Called when the pane becomes active.
  * @param modifier Modifier applied to the pane.
- * @param notifVm Optional view model providing notifications for the toolbar.
+ * @param notifVm Supplies the notification count badged on the drawer button (the notification
+ *   center itself is opened from `FeedListPane`'s footer row — see [NotificationCenterRow]).
  * @param onSelectionAdvance Called after an article is selected, in addition to [onActivated] —
  *   see `HomeScreen`'s pane-layout wiring. No-op at both [PaneLayout.Triple] and [PaneLayout.Dual],
  *   where every pane `visiblePanes` returns is already on screen and there is nowhere to advance
@@ -217,6 +219,8 @@ fun ArticleListPane(
     val listMode by vm.mode.collectAsState()
     val starredModeEnabled by vm.starredModeEnabled.collectAsState()
     val newestFirst by vm.newestFirst.collectAsState()
+    // notifVm is fixed per call site, so this conditional collect never changes shape.
+    val notificationCount = notifVm?.let { it.items.collectAsState().value.size } ?: 0
 
     // Two independent LazyListStates, one per mode, both declared unconditionally so switching
     // between them (typing/clearing a query) never disposes either one's scroll position — see
@@ -429,7 +433,7 @@ fun ArticleListPane(
         listState = listState,
         returnRipplePulse = returnRipplePulse,
         onActivated = onActivated,
-        notifVm = notifVm,
+        notificationCount = notificationCount,
         onOpenDrawer = if (barShown) null else onOpenDrawer,
         title = if (barShown) null else title,
         onSearchClick = if (barShown) null else onSearchClick,
@@ -480,7 +484,9 @@ private fun NoSearchResultsHint(scopedBelowAllFeeds: Boolean) {
 
 /**
  * The top bar shared by every mode [ArticleListPaneContent] renders (the current filter's own list,
- * or its search results): list-mode chip, notifications bell, mark-all-read. Hide read is a
+ * or its search results): list-mode chip, mark-all-read. The notification center is opened from
+ * `FeedListPane`'s footer instead ([NotificationCenterRow]); at a narrow layout its count is badged on
+ * the drawer button ([notificationCount]). Hide read is a
  * View-menu command rather than a toolbar button: it is rarely needed, since a manual refresh or
  * sync, a filter switch and choosing Unread all clear the read rows the same way.
  *
@@ -520,7 +526,7 @@ internal fun ArticleListTopBar(
     onMarkAllRead: () -> Unit,
     starredModeEnabled: Boolean = true,
     sortEnabled: Boolean = true,
-    notifVm: NotificationCenterViewModel? = null,
+    notificationCount: Int = 0,
     onOpenDrawer: (() -> Unit)? = null,
     title: String? = null,
     onSearchClick: (() -> Unit)? = null,
@@ -534,7 +540,9 @@ internal fun ArticleListTopBar(
                     title = title.orEmpty(),
                     navigationIcon = {
                         TooltipIconButton(tooltip = openDrawerLabel, onClick = onOpenDrawer) {
-                            KeryxIcon(KeryxIcons.Menu, contentDescription = openDrawerLabel)
+                            // The notification center lives in the drawer's footer, so while the
+                            // drawer is closed its count rides on the button that opens it.
+                            KeryxBadgedIcon(KeryxIcons.Menu, contentDescription = openDrawerLabel, count = notificationCount)
                         }
                     },
                 ) {
@@ -571,9 +579,6 @@ internal fun ArticleListTopBar(
                 }
                 Spacer(Modifier.weight(1f))
                 ToolbarIconGroup {
-                    if (notifVm != null) {
-                        NotificationsBell(notifVm)
-                    }
                     val markAllReadTooltip = stringResource(Res.string.home_mark_all_read)
                     TooltipIconButton(tooltip = markAllReadTooltip, onClick = onMarkAllRead) {
                         KeryxIcon(KeryxIcons.DoneAll, contentDescription = markAllReadTooltip)
@@ -731,7 +736,7 @@ internal fun ArticleListPaneContent(
     listState: LazyListState = rememberLazyListState(),
     focused: Boolean = true,
     onActivated: () -> Unit = {},
-    notifVm: NotificationCenterViewModel? = null,
+    notificationCount: Int = 0,
     onOpenDrawer: (() -> Unit)? = null,
     title: String? = null,
     onSearchClick: (() -> Unit)? = null,
@@ -784,7 +789,7 @@ internal fun ArticleListPaneContent(
             onSetNewestFirst = onSetNewestFirst,
             onMarkAllRead = onMarkAllRead,
             sortEnabled = sortEnabled,
-            notifVm = notifVm,
+            notificationCount = notificationCount,
             onOpenDrawer = onOpenDrawer,
             title = title,
             onSearchClick = onSearchClick,

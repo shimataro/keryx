@@ -659,6 +659,44 @@ class ArticleListPaneTest {
     }
 
     @Test
+    fun drawerButtonShowsTheNotificationCountAsABadge() = runDesktopComposeUiTest {
+        setContent {
+            ArticleListTopBar(
+                listMode = ArticleListMode.All,
+                onSelectListMode = {},
+                newestFirst = true,
+                onSetNewestFirst = {},
+                onMarkAllRead = {},
+                notificationCount = 2,
+                onOpenDrawer = {},
+            )
+        }
+        waitForIdle()
+
+        onNodeWithContentDescription("フィード一覧を開く").assertExists()
+        onNodeWithText("2").assertExists()
+    }
+
+    @Test
+    fun drawerButtonShowsNoBadgeWithoutNotifications() = runDesktopComposeUiTest {
+        setContent {
+            ArticleListTopBar(
+                listMode = ArticleListMode.All,
+                onSelectListMode = {},
+                newestFirst = true,
+                onSetNewestFirst = {},
+                onMarkAllRead = {},
+                notificationCount = 0,
+                onOpenDrawer = {},
+            )
+        }
+        waitForIdle()
+
+        onNodeWithContentDescription("フィード一覧を開く").assertExists()
+        onNodeWithText("0").assertDoesNotExist()
+    }
+
+    @Test
     fun articleListTopBarHasNoSortButton() = runDesktopComposeUiTest {
         // The sort order lives in the mode chip's menu (sortOrderMenuEntries), not on the toolbar.
         setContent {

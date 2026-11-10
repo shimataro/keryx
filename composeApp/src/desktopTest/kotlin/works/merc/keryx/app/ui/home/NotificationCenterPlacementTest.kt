@@ -1,0 +1,211 @@
+package works.merc.keryx.app.ui.home
+
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.size
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.v2.runDesktopComposeUiTest
+import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.runBlocking
+import org.koin.compose.KoinApplication
+import org.koin.core.context.GlobalContext
+import org.koin.core.context.loadKoinModules
+import org.koin.core.context.startKoin
+import org.koin.core.context.unloadKoinModules
+import org.koin.core.context.stopKoin
+import org.koin.dsl.koinConfiguration
+import org.koin.dsl.module
+import works.merc.keryx.app.core.AppNotification
+import works.merc.keryx.app.core.AppNotificationLevel
+import works.merc.keryx.app.core.Clock
+import works.merc.keryx.app.core.NotificationText
+import works.merc.keryx.app.domain.NotificationCenter
+import works.merc.keryx.app.inMemoryDb
+import works.merc.keryx.app.presentation.home.HomeViewModel
+import works.merc.keryx.app.presentation.home.NotificationAlerts
+import works.merc.keryx.app.ui.i18n.resolveNotificationText
+import kotlin.test.Test
+import kotlin.test.assertEquals
+
+/**
+ * The notification center's entry point is a row in the feed list's footer ([NotificationCenterRow]),
+ * shown only while the center holds something. The article list no longer carries any entry point of
+ * its own: at a layout where the feed list is a drawer, the count rides on the drawer button instead.
+ */
+@OptIn(ExperimentalTestApi::class)
+class NotificationCenterPlacementTest {
+
+    /** The label of the footer row (`Res.string.home_notifications`). */
+    private val rowLabel = "通知"
+
+    private val notificationText = NotificationText.FeedGone("placement-test-feed")
+
+    private fun shown(): String = runBlocking { resolveNotificationText(notificationText) }
+
+    private fun newCenter(count: Int): NotificationCenter {
+        val center = NotificationCenter()
+        repeat(count) { i ->
+            center.add(
+                AppNotification(
+                    id = "n$i",
+                    level = AppNotificationLevel.WARNING,
+                    text = notificationText,
+                    timestampMillis = 0L,
+                    action = null,
+                ),
+            )
+        }
+        return center
+    }
+
+    /**
+     * Drives the panes exactly as `HomeScreen` wires them for any [layout]/navigation-stack [depth].
+     * The feed list receives [notifVm] (which may be null); the article list always receives the real
+     * view model. A stand-in replaces `ArticleDetailPane` (a native WebView this harness cannot host).
+     */
+    @Composable
+    private fun ContentAreaTestHost(
+        vm: HomeViewModel,
+        notifVm: NotificationCenterViewModel?,
+        articleNotifVm: NotificationCenterViewModel,
+        layout: PaneLayout,
+        depth: Int,
+    ) {
+        KoinApplication(
+            configuration = koinConfiguration {
+                modules(module {
+                    single { testMenuController }
+                    single<Clock> { Clock { 0L } }
+                })
+            },
+        ) {
+            val visible = visiblePanes(layout, depth)
+            Box(Modifier.size(1000.dp, 600.dp)) {
+                Row(Modifier.fillMaxSize()) {
+                    visible.forEach { pane ->
+                        when (pane) {
+                            HomePane.FeedList -> FeedListPane(
+                                vm = vm,
+                                focused = true,
+                                dragOverlay = remember { FeedDragOverlayState() },
+                                onActivated = {},
+                                modifier = Modifier.size(300.dp, 600.dp),
+                                notifVm = notifVm,
+                            )
+                            HomePane.ArticleList -> ArticleListPane(
+                                vm = vm,
+                                focused = true,
+                                onActivated = {},
+                                modifier = Modifier.size(300.dp, 600.dp),
+                                notifVm = articleNotifVm,
+                            )
+                            HomePane.ArticleDetail -> Box(Modifier.size(300.dp, 600.dp))
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private fun runWithHost(
+        layout: PaneLayout,
+        depth: Int,
+        notifications: Int,
+        passNotifVmToFeedList: Boolean = true,
+        assertions: (labelCount: Int) -> Unit,
+    ) = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        val center = newCenter(notifications)
+        val notifVm = NotificationCenterViewModel(center, NotificationAlerts(center))
+        useHomeViewModel(driver, db) { fixture ->
+            setContent {
+                ContentAreaTestHost(fixture.vm, notifVm.takeIf { passNotifVmToFeedList }, notifVm, layout, depth)
+            }
+            waitForIdle()
+            assertions(onAllNodesWithText(rowLabel).fetchSemanticsNodes().size)
+        }
+    }
+
+    @Test
+    fun theArticleListNeverShowsANotificationEntryPoint() {
+        // The feed list is given no notifVm, so any "通知" node or bell icon would have to come from
+        // the article list. Checked at every layout and depth, with notifications present.
+        for (depth in 1..3) {
+            for (layout in listOf(PaneLayout.Single, PaneLayout.Dual, PaneLayout.Triple)) {
+                runWithHost(layout, depth, notifications = 3, passNotifVmToFeedList = false) { count ->
+                    assertEquals(0, count, "$layout depth $depth: text node")
+                }
+            }
+        }
+    }
+
+    @Test
+    fun theArticleListHasNoBellIconEvenWithNotifications() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        val center = newCenter(2)
+        val notifVm = NotificationCenterViewModel(center, NotificationAlerts(center))
+        useHomeViewModel(driver, db) { fixture ->
+            setContent { ContentAreaTestHost(fixture.vm, null, notifVm, PaneLayout.Dual, 2) }
+            waitForIdle()
+            assertEquals(0, onAllNodesWithContentDescription(rowLabel).fetchSemanticsNodes().size)
+        }
+    }
+
+    @Test
+    fun theFeedListShowsExactlyOneRowWhenThereIsANotification() {
+        runWithHost(PaneLayout.Triple, 1, notifications = 1) { assertEquals(1, it) }
+        runWithHost(PaneLayout.Triple, 3, notifications = 5) { assertEquals(1, it) }
+    }
+
+    @Test
+    fun theFeedListShowsNoRowWhenTheCenterIsEmpty() {
+        runWithHost(PaneLayout.Triple, 1, notifications = 0) { assertEquals(0, it) }
+    }
+
+    @Test
+    fun theFeedListShowsNoRowWithoutANotificationViewModel() {
+        runWithHost(PaneLayout.Triple, 1, notifications = 3, passNotifVmToFeedList = false) { assertEquals(0, it) }
+    }
+
+    @Test
+    fun theRowShowsTheCountAndOpensThePanelOnClick() = runDesktopComposeUiTest {
+        // The panel is hosted in a Popup, whose content resolves Koin from the global context rather
+        // than the test's KoinApplication, so the Clock it injects is registered globally here.
+        val clockModule = module { single<Clock> { Clock { 0L } } }
+        // Another test may have left a global Koin started; load into it, or start one, then undo.
+        val startedHere = GlobalContext.getOrNull() == null
+        if (startedHere) startKoin { modules(clockModule) } else loadKoinModules(clockModule)
+        try {
+            runPanelScenario()
+        } finally {
+            if (startedHere) stopKoin() else unloadKoinModules(clockModule)
+        }
+    }
+
+    private suspend fun androidx.compose.ui.test.ComposeUiTest.runPanelScenario() {
+        val (driver, db) = inMemoryDb()
+        val center = newCenter(2)
+        val notifVm = NotificationCenterViewModel(center, NotificationAlerts(center))
+        useHomeViewModel(driver, db) { fixture ->
+            setContent { ContentAreaTestHost(fixture.vm, notifVm, notifVm, PaneLayout.Triple, 1) }
+            waitForIdle()
+
+            onNodeWithText("2").assertExists()
+            onAllNodesWithText(shown()).fetchSemanticsNodes().let { assertEquals(0, it.size) }
+
+            onNodeWithText(rowLabel).performClick()
+            waitForIdle()
+
+            // Both notifications render in the panel.
+            assertEquals(2, onAllNodesWithText(shown()).fetchSemanticsNodes().size)
+        }
+    }
+}

@@ -6,8 +6,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 /**
- * A lightweight, dismissable panel opened from a control (the notification bell, a tag's color
- * dot) — see `ui/home/ArticleRowComponents.kt`'s `NotificationsBell` and
+ * A lightweight, dismissable panel opened from a control (the notification center's footer row, a
+ * tag's color dot) — see `ui/home/NotificationCenterRow.kt`'s `NotificationCenterRow` and
  * `ui/home/TagColorPicker.kt`'s `TagColorPickerPopup`.
  *
  * Desktop's `actual` is an anchored, focusable, dismiss-on-click-outside `Popup` — see the
@@ -23,7 +23,10 @@ import androidx.compose.ui.unit.dp
  *
  * @param alignment Anchor alignment on desktop (ignored on Android, where a bottom sheet has no
  *   anchor of its own).
- * @param anchorOffsetY How far below the anchor's top edge to open, on desktop only.
+ * @param anchorOffsetY A vertical offset from the [alignment] point, on desktop only — positive moves
+ *   the panel down (`TopStart` + a positive offset opens below the anchor's top edge), negative moves
+ *   it up (`BottomStart` + minus the anchor's height opens above the anchor, as
+ *   `NotificationCenterRow` does at the bottom of the window).
  */
 @Composable
 expect fun KeryxAnchoredPanel(
