@@ -9,6 +9,10 @@ import SwiftUI
 /// by the announcement `HomeObservable.copyArticleUrl` posts alongside it.
 struct TransientToast: View {
     let state: TransientToastState
+    /// The symbol before the message: a checkmark for a confirmation, a warning for an alert.
+    var systemImage: String = "checkmark"
+    /// The accessibility identifier UI tests wait on.
+    var identifier: String = "copy-toast"
     /// Whether the new-articles pill is on screen at the bottom of the list
     /// (`HomeObservable.newArticlesPillAtBottom`): the toast then sits above it instead of covering it.
     let liftedAbovePill: Bool
@@ -24,10 +28,10 @@ struct TransientToast: View {
     var body: some View {
         ZStack {
             if let message = state.message {
-                PillLabel(title: message, systemImage: "checkmark")
+                PillLabel(title: message, systemImage: systemImage)
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel(message)
-                    .accessibilityIdentifier("copy-toast")
+                    .accessibilityIdentifier(identifier)
                     .padding(.bottom, bottomPadding)
                     .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
             }
