@@ -19,8 +19,10 @@ import org.koin.compose.KoinIsolatedContext
 import org.koin.dsl.koinApplication
 import org.koin.dsl.module
 import works.merc.keryx.app.core.AppNotification
+import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.Clock
+import works.merc.keryx.app.core.InfoDialogText
 import works.merc.keryx.app.core.NotificationText
 import works.merc.keryx.app.domain.NotificationCenter
 import works.merc.keryx.app.inMemoryDb
@@ -202,6 +204,51 @@ class NotificationCenterPlacementTest {
     @Test
     fun theFeedListShowsNoRowWithoutANotificationViewModel() {
         runWithHost(PaneLayout.Triple, 1, notifications = 3, passNotifVmToFeedList = false) { assertEquals(0, it) }
+    }
+
+    @Test
+    fun aRowActionThatChangesNoSelectionReportsNavigationWithoutAdvancingTheSelection() = runDesktopComposeUiTest {
+        // In the drawer, "navigated" closes the drawer; advancing the selection would also move the
+        // keyboard's pane, which an explanation dialog (or a settings tab, or a web page) must not do.
+        val (driver, db) = inMemoryDb()
+        val center = NotificationCenter()
+        center.add(
+            AppNotification(
+                id = "info",
+                level = AppNotificationLevel.WARNING,
+                text = notificationText,
+                timestampMillis = 0L,
+                action = AppNotificationAction.ShowInfoDialog(InfoDialogText.APP_TRANSLOCATED),
+            ),
+        )
+        val notifVm = NotificationCenterViewModel(center, NotificationAlerts(center))
+        var navigated = 0
+        var advanced = 0
+        useHomeViewModel(driver, db) { fixture ->
+            setContent {
+                KoinIsolatedContext(context = remember { isolatedKoin() }) {
+                    FeedListPane(
+                        vm = fixture.vm,
+                        focused = true,
+                        dragOverlay = remember { FeedDragOverlayState() },
+                        onActivated = {},
+                        modifier = Modifier.size(300.dp, 600.dp),
+                        onSelectionAdvance = { advanced++ },
+                        notifVm = notifVm,
+                        onNotificationNavigated = { navigated++ },
+                    )
+                }
+            }
+            waitForIdle()
+
+            onNodeWithText(rowLabel).performClick()
+            waitForIdle()
+            onNodeWithText(shown()).performClick()
+            waitForIdle()
+
+            assertEquals(1, navigated)
+            assertEquals(0, advanced)
+        }
     }
 
     @Test

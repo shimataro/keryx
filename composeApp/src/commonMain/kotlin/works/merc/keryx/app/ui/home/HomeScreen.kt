@@ -640,6 +640,7 @@ fun HomeScreen() {
                                         renameSelectedRequestId = feedListRenameRequestId,
                                         deleteSelectedRequestId = feedListDeleteRequestId,
                                         notifVm = notifVm,
+                                        onNotificationNavigated = { scope.launch { drawerState.close() } },
                                         onSelectionAdvance = {
                                             // Also advances focusedPane, not just the drawer: at
                                             // PaneLayout.Dual, closing the drawer without this could
