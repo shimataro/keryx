@@ -34,3 +34,21 @@ enum AlertToastAnnouncement {
         markSurfaced()
     }
 }
+
+/// Which alerts VoiceOver has already been told about, keyed by `AlertKey` (`AppNotification.alertKey()`).
+///
+/// Kept apart from `NotificationAlerts`' "announced" bookkeeping on purpose: an alert whose toast was cut
+/// short (the scene went inactive, or the Settings sheet opened) stays pending, so its toast is shown again
+/// once announcing is allowed — but its text was already spoken, so speaking it again would only repeat it.
+/// Held by `HomeView` for its lifetime, so it outlives the `.task` that restarts whenever announcing becomes
+/// allowed or stops being allowed. Never pruned, like `NotificationAlerts`' own set: it holds only the
+/// handful of distinct alerts a session produces.
+@MainActor
+final class SpokenAlerts {
+    private var keys: Set<AnyHashable> = []
+
+    /// Records `key` as spoken and returns whether this is the first time it was seen.
+    func markSpoken(_ key: AnyHashable) -> Bool {
+        keys.insert(key).inserted
+    }
+}

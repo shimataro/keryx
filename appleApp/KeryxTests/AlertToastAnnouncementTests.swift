@@ -40,4 +40,12 @@ struct AlertToastAnnouncementTests {
 
         #expect(marked == 0)
     }
+
+    @Test func eachAlertIsSpokenOnlyTheFirstTimeItsKeyIsSeen() {
+        let spoken = SpokenAlerts()
+
+        #expect(spoken.markSpoken("sync-failed"))
+        #expect(!spoken.markSpoken("sync-failed"))
+        #expect(spoken.markSpoken("feed-gone"))
+    }
 }
