@@ -25,6 +25,18 @@ import works.merc.keryx.app.ui.common.KeryxAnchoredPanel
 import works.merc.keryx.app.ui.common.KeryxIcon
 import works.merc.keryx.app.ui.common.KeryxIcons
 
+/** The gap between [NotificationCenterRow] and the panel that opens above it (desktop only). */
+private val PanelGap = 4.dp
+
+/**
+ * How many notifications [notifVm] holds, `0` without one. `notifVm` is fixed per call site
+ * (`HomeScreen` always passes one; tests may not), so this conditional collect never changes shape
+ * between recompositions.
+ */
+@Composable
+internal fun notificationCountOf(notifVm: NotificationCenterViewModel?): Int =
+    notifVm?.let { it.items.collectAsState().value.size } ?: 0
+
 /**
  * The notification center's entry point: a row fixed to the bottom of `FeedListPane`, always shown so
  * it stays in one place (an empty center opens to [NotificationCenterSheet]'s own empty state). The
@@ -38,18 +50,6 @@ import works.merc.keryx.app.ui.common.KeryxIcons
  * once the panel has closed, so a caller hosting this inside the narrow layout's drawer can close
  * the drawer and show the destination.
  */
-/** The gap between [NotificationCenterRow] and the panel that opens above it (desktop only). */
-private val PanelGap = 4.dp
-
-/**
- * How many notifications [notifVm] holds, `0` without one. `notifVm` is fixed per call site
- * (`HomeScreen` always passes one; tests may not), so this conditional collect never changes shape
- * between recompositions.
- */
-@Composable
-internal fun notificationCountOf(notifVm: NotificationCenterViewModel?): Int =
-    notifVm?.let { it.items.collectAsState().value.size } ?: 0
-
 @Composable
 internal fun NotificationCenterRow(
     notifVm: NotificationCenterViewModel,
