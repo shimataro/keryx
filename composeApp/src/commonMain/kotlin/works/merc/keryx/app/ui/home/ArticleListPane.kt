@@ -97,17 +97,17 @@ import works.merc.keryx.app.resources.home_refresh_this_list
 import works.merc.keryx.app.resources.home_search_clear
 import works.merc.keryx.app.resources.home_search_no_results
 import works.merc.keryx.app.resources.home_search_placeholder
+import works.merc.keryx.app.resources.home_search
 import works.merc.keryx.app.resources.home_search_too_short
 import works.merc.keryx.app.resources.home_search_try_all_feeds
 import works.merc.keryx.app.resources.home_show_all_articles
-import works.merc.keryx.app.resources.home_search
 import works.merc.keryx.app.resources.home_sort_newest
 import works.merc.keryx.app.resources.home_sort_oldest
 import works.merc.keryx.app.resources.home_starred
 import works.merc.keryx.app.ui.common.FlatButton
 import works.merc.keryx.app.ui.common.FlatTonalButton
-import works.merc.keryx.app.ui.common.KeryxExpandedSearchBar
 import works.merc.keryx.app.ui.common.KeryxBadgedIcon
+import works.merc.keryx.app.ui.common.KeryxExpandedSearchBar
 import works.merc.keryx.app.ui.common.KeryxIcon
 import works.merc.keryx.app.ui.common.KeryxIcons
 import works.merc.keryx.app.ui.common.KeryxPaneTopBar
@@ -221,8 +221,7 @@ fun ArticleListPane(
     val listMode by vm.mode.collectAsState()
     val starredModeEnabled by vm.starredModeEnabled.collectAsState()
     val newestFirst by vm.newestFirst.collectAsState()
-    // notifVm is fixed per call site, so this conditional collect never changes shape.
-    val notificationCount = notifVm?.let { it.items.collectAsState().value.size } ?: 0
+    val notificationCount = notificationCountOf(notifVm)
 
     // Two independent LazyListStates, one per mode, both declared unconditionally so switching
     // between them (typing/clearing a query) never disposes either one's scroll position — see

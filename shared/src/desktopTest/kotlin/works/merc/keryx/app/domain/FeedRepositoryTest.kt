@@ -878,7 +878,7 @@ class FeedRepositoryTest {
 
     @Test
     fun aFeedThatStaysGoneKeepsASingleNotification(): Unit = runBlocking {
-        // A gone feed is still refreshed every cycle; the bell must not gain a copy per cycle.
+        // A gone feed is still refreshed every cycle; the notification center must not gain a copy per cycle.
         val (driver, db) = inMemoryDb()
         try {
             val repo = newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK) })

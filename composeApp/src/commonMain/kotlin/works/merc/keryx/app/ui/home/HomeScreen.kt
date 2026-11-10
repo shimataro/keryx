@@ -784,7 +784,7 @@ fun HomeScreen() {
 
 /**
  * Resolves a notification's next action whose target lives on this screen — hosted at the screen
- * level, outside the bell popup which dismisses on focus loss. `ShowSettingsTab` is resolved by
+ * level, outside the notification panel, which dismisses on focus loss. `ShowSettingsTab` is resolved by
  * `App` instead (the settings dialog lives there).
  */
 @Composable

@@ -3,6 +3,7 @@ package works.merc.keryx.app.ui.home
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -37,6 +38,18 @@ import works.merc.keryx.app.ui.common.KeryxIcons
  * once the panel has closed, so a caller hosting this inside the narrow layout's drawer can close
  * the drawer and show the destination.
  */
+/** The gap between [NotificationCenterRow] and the panel that opens above it (desktop only). */
+private val PanelGap = 4.dp
+
+/**
+ * How many notifications [notifVm] holds, `0` without one. `notifVm` is fixed per call site
+ * (`HomeScreen` always passes one; tests may not), so this conditional collect never changes shape
+ * between recompositions.
+ */
+@Composable
+internal fun notificationCountOf(notifVm: NotificationCenterViewModel?): Int =
+    notifVm?.let { it.items.collectAsState().value.size } ?: 0
+
 @Composable
 internal fun NotificationCenterRow(
     notifVm: NotificationCenterViewModel,
@@ -78,7 +91,7 @@ internal fun NotificationCenterRow(
                 // Bottom-aligned with the row, then lifted by its own height: the panel's bottom
                 // edge meets the row's top edge.
                 alignment = Alignment.BottomStart,
-                anchorOffsetY = with(density) { -rowHeightPx.toDp() } - 4.dp,
+                anchorOffsetY = with(density) { -rowHeightPx.toDp() } - PanelGap,
             ) {
                 // Close the panel once a notification's action leads somewhere, so the destination
                 // (feed list selection / settings dialog / explanation dialog) is actually visible.

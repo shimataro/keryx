@@ -163,7 +163,7 @@ class CloudSession(
      * ([validAccessToken]): a refreshed token is exactly as sensitive as the original, and the
      * refresh path recurs — which is why the entry is added with
      * [NotificationCenter.addCoalescing], so a persistently unavailable secret store leaves one
-     * bell entry rather than one per refresh. Coalescing keys on the text, so the two outcomes
+     * notification-center entry rather than one per refresh. Coalescing keys on the text, so the two outcomes
      * above collapse independently of each other.
      */
     private suspend fun saveTokensReportingFallback(provider: Provider, tokens: OAuthTokens) {

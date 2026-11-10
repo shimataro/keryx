@@ -183,7 +183,7 @@ struct KeryxApp: App {
     }
 
     /// The iOS counterpart of the macOS `Settings` scene above, presented from the sidebar's gear
-    /// button or a bell row's `ShowSettingsTab` (`SettingsNavigation.isSheetPresented`).
+    /// button or a notification-center row's `ShowSettingsTab` (`SettingsNavigation.isSheetPresented`).
     @ViewBuilder
     private var settingsSheet: some View {
         if let sdk = model.sdk, let preferences = model.preferences, let cloudSync = model.cloudSync,
