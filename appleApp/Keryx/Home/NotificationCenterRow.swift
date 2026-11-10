@@ -1,15 +1,21 @@
 import KeryxShared
 import SwiftUI
 
-/// The notification center bell — lives in `ArticleListView`'s header at every layout width (see
-/// `error-design.md`'s "Notification Center"). Only `ResetCloudData` is excluded from row-clicking
+/// The notification center's entry point: a row pinned to the bottom of the sidebar (`FeedListView`),
+/// shown only while the notification center holds something — the caller decides, as Compose's own
+/// `NotificationCenterRow` (`NotificationCenterRow.kt`) does — so it takes no toolbar slot for a list
+/// that is empty most of the time (see `error-design.md`'s "Notification Center"). Tapping it opens the
+/// list in a popover (a sheet at a compact width). Only `ResetCloudData` is excluded from row-clicking
 /// (destructive, own inline confirm); every other row's action runs on tap and closes the popover
 /// afterward, matching Compose's own `onNavigated` (`NotificationCenterSheet.kt`).
-struct NotificationBell: View {
+struct NotificationCenterRow: View {
     let home: HomeObservable
     let notifications: NotificationCenterObservable
     let settingsNavigation: SettingsNavigation
     var focusedPane: FocusState<HomeFocusedPane?>.Binding
+    /// Shows the article list after a "show feed" action selected a feed — the sidebar is what an
+    /// iPhone has on screen while this row is tapped (`FeedListView.onOpenArticleList`).
+    var onShowFeed: () -> Void = {}
 
     #if os(macOS)
     @Environment(\.openSettings) private var openSettings
@@ -25,26 +31,25 @@ struct NotificationBell: View {
         Button {
             isShowingPopover = true
         } label: {
-            // A `Label` so the toolbar's overflow menu gets a title; the badge stays on the icon.
-            Label {
-                Text(L("home_notifications"))
-            } icon: {
-                Image(systemName: "bell")
-                    .overlay(alignment: .topTrailing) {
-                        if unreadCount > 0 {
-                            Text("\(unreadCount)")
-                                .font(.system(size: 9, weight: .bold))
-                                .foregroundStyle(.white)
-                                .padding(2)
-                                .background(Circle().fill(.red))
-                                .offset(x: 6, y: -6)
-                        }
-                    }
+            // Laid out like a sidebar row: the bell, the name, and the count at the trailing edge
+            // where the feed rows show their unread counts.
+            HStack {
+                Label(L("home_notifications"), systemImage: "bell")
+                Spacer(minLength: 8)
+                Text("\(unreadCount)")
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
             }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
         .help(L("home_notifications"))
-        .accessibilityValue(unreadCount > 0 ? "\(unreadCount)" : "")
-        .task { await notifications.startObserving() }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(L("home_notifications"))
+        .accessibilityValue("\(unreadCount)")
+        .accessibilityAddTraits(.isButton)
         .popover(isPresented: $isShowingPopover) {
             popoverContent
         }
@@ -264,6 +269,7 @@ struct NotificationBell: View {
             )
             focusedPane.wrappedValue = .articleList
             isShowingPopover = false
+            onShowFeed()
         case .showSettingsTab(let a):
             // Selected before opening, so a Settings window that isn't open yet still opens on it.
             settingsNavigation.show(tabId: a.tabId)
