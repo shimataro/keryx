@@ -184,10 +184,10 @@
     デスクトップの macOS ツールバー風カプセルの代わりの装飾なし `Row`、M3 自身の `PlainTooltip`）、
     KeryxRaisedSurface（デスクトップのヘアライン枠フラットカードの代わりに、明確に色調の異なる
     `colorScheme.surfaceContainerHigh` トーナルコンテナ）、KeryxBadgedIcon（デスクトップの
-    自作ピルの代わりに M3 自身の `BadgedBox`/`Badge` — `NotificationsBell` が使用）,
+    自作ピルの代わりに M3 自身の `BadgedBox`/`Badge` — ドロワーボタンの通知件数が使用）,
     KeryxSettingRow（行全体がタップ対象になる本物の M3 `ListItem` — `SettingsComponents.kt` の
     `LinkRow`/`ActionLinkRow`/`SwitchRow` を支える）, KeryxAnchoredPanel（本物の M3
-    `ModalBottomSheet` — `NotificationsBell` の通知ポップオーバーと `TagColorPickerPopup` を
+    `ModalBottomSheet` — `NotificationCenterRow` の通知パネルと `TagColorPickerPopup` を
     支える。単なる作法の一致ではなく必須の対応でもある — 素の `Popup` のままだと、デスクトップの
     ヘビーウェイト WebView が素の Compose オーバーレイの手前に来るのと同じ理由で、記事リーダーの
     `WebView` の背後に隠れてしまう。下記「Article Reader」参照）, KeryxPaneTopBar（本物の M3
@@ -440,7 +440,7 @@ drop テーブルとして渡している。
 
 `domain/UpdateRepository` は上記の `SyncRepository` と同じ種類の、アプリのライフタイムを持つ
 Koin `single` のオーケストレーターであり、`StateFlow<UpdateState>` を UI 側の各面（Updates タブ、
-トレイ、ベル）が読む——設定ダイアログを閉じても進行中のダウンロードはキャンセルされない。これは
+トレイ、通知センター）が読む——設定ダイアログを閉じても進行中のダウンロードはキャンセルされない。これは
 3 つのシームを組み合わせる: `domain/UpdateChecker`（候補選択とバージョン比較のポリシーのみ——
 GitHub Releases への HTTP リクエストと JSON パースは `data/remote/ReleaseFeedSource` に住み、
 `UpdateChecker` は自分のコンストラクタと同じ引数から内部でそれを組み立てる。依存として
@@ -1958,8 +1958,9 @@ iOS 27.1 シミュレーターで計測した結果と、そこから決めた�
 
 - **ツールバーの優先度。** 縦のバーは、項目が入りきらないと下から順に「…」に入れる。外側ディスプレイの横向き
   では、全既読が真っ先に「…」に入り、検索ボタンは押しつぶされて空の円になっていた。iOS 27 以降、記事一覧の
-  項目には `visibilityPriority` を付けている。通知ベル（バッジ付きの項目）と全既読（よく使う操作）は `.high`、
-  一覧モードのメニュー（表示順もここに含む）は `.low` で、HIG が求める順序に従っている。横のバーはこの
+  項目には `visibilityPriority` を付けている。全既読（よく使う操作）は `.high`、一覧モードのメニュー
+  （表示順もここに含む）は `.low` で、HIG が求める順序に従っている（以前ここにあった通知ベルは、サイドバーの
+  下端に移った）。横のバーはこの
   優先度を無視する（並び替えボタンがあった頃の計測では、横向きの内側ディスプレイで幅 360pt の記事一覧の列で
   並び替えと全既読が「…」に入っていた）ので、効くのは縦のバーだけである。iOS 26 以前では、項目は従来どおり 2 つのグループのまま。
   `visibilityPriority` は iOS 27 SDK にしかないため、この分岐は `#if compiler(>=6.4)`（Xcode 27）でだけ
