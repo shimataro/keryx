@@ -16,6 +16,8 @@ struct HomeView: View {
     @FocusState private var focusedPane: HomeFocusedPane?
     #if os(iOS)
     @Environment(\.scenePhase) private var scenePhase
+    /// Alerts already spoken to VoiceOver — see `SpokenAlerts`.
+    @State private var spokenAlerts = SpokenAlerts()
 
     /// Whether a newly raised warning/error may be announced in the alert toast now.
     private var canAnnounceAlerts: Bool {
@@ -225,13 +227,16 @@ struct HomeView: View {
         // Announces each newly raised warning/error once (Android's foreground Snackbar
         // counterpart): restarted whenever announcing becomes allowed or stops being allowed, so an
         // alert that arrived in the background, or behind the Settings sheet, shows once Home is in
-        // front again.
+        // front again. A toast cut short is shown again, but not spoken again (`SpokenAlerts`).
         .task(id: canAnnounceAlerts) {
             guard canAnnounceAlerts else { return }
             for await alert in notifications.alerts.alertToSurface {
                 guard let alert else { continue }
                 let message = notificationText(alert.text)
-                VoiceOverAnnouncement.post(message)
+                // Spoken as the toast appears, not after it has stayed up.
+                if spokenAlerts.markSpoken(alert.alertKey()) {
+                    VoiceOverAnnouncement.post(message)
+                }
                 await AlertToastAnnouncement.announce(
                     message,
                     show: { home.alertToast.show($0) },
