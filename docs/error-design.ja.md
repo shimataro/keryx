@@ -179,11 +179,13 @@ SwiftUI アプリは String Catalog で。唯一の例外は新着記事の OS �
   ないため（[external-spec.ja.md](external-spec.ja.md) §9 の「更新のフィードバック」を参照）。いずれの場合も
   共有ゲート `NewArticleNotifier.notifyIfEnabled`（新着件数 > 0 かつ `notificationEnabled` 設定）を経由する。
 - **入口は、フィード一覧の下端の行で、常に表示する。** 行には通知センターの名前と、通知があるときは
-  件数を表示し（0 件のときは件数を出さず、開くと「通知はありません」と表示）（Compose は `ui/home/NotificationCenterRow.kt`、SwiftUI は `NotificationCenterRow.swift`）、押すと
-  行の上に一覧を開く（Android はボトムシート、iPhone の狭い幅ではシート）。履歴はほとんどの時間空なので、
-  ツールバーの枠は使わない。また、出たり消えたりせず同じ場所にあるので、上のフィード一覧の高さも変わらない。フィード一覧がドロワーになる幅（Compose の狭い幅）では、ドロワーを開くボタンに
-  件数をバッジで表示する。記事一覧と `ArticleDetailPane` には入口を置かない（正確な規則は `ui-guidelines`
-  スキルを参照）。
+  件数を表示する。0 件のときは件数を出さず、開くと「通知はありません」と表示する。行を押すと、行の上に
+  一覧を開く。Android ではボトムシート、iPhone の狭い幅ではシートになる。行の実装は、Compose が
+  `ui/home/NotificationCenterRow.kt`、SwiftUI が `NotificationCenterRow.swift` にある。履歴はほとんどの
+  時間空なので、ツールバーの枠は使わない。また、出たり消えたりせず同じ場所にあるので、上のフィード一覧の
+  高さも変わらない。フィード一覧がドロワーになる幅（Compose の狭い幅）では、ドロワーを開くボタンに件数を
+  バッジで表示する。記事一覧と `ArticleDetailPane` には入口を置かない。正確な規則は `ui-guidelines`
+  スキルを参照。
 - バックグラウンド更新中の警告は UI コンテキストが無いため通知センターにのみ記録し、
   **OS 通知には出さない**（OS 通知は新着記事専用。上記参照）。そのため Android では
   `ForegroundAlertSnackbar`（`ui/home/HomeScreen.kt`）が、`WARNING`/`ERROR` の発生時点で
@@ -206,7 +208,9 @@ SwiftUI アプリは String Catalog で。唯一の例外は新着記事の OS �
   約 4 秒表示し（「URL をコピーしました」のトーストと同時なら、その上に表示）、VoiceOver で 1 回読み上げる。
   Android の Snackbar と同じ共有の `presentation/home/NotificationAlerts` を使うので、繰り返し起きるアラートは
   どちらでも 1 回しか知らせない。Snackbar と同じく、見えない間（シーンがアクティブでない、設定シートが Home を
-  覆っている）は待ち、表示しきってから提示済みにする（`AlertToastAnnouncement.swift`）。トーストは押せない。
+  覆っている）は待ち、表示しきってから提示済みにする（`AlertToastAnnouncement.swift`）。Snackbar と違い、表示中に
+  届いた新しいアラートは表示中のものを置き換えず、その次に表示する。`NotificationAlerts.markAlertsSurfaced(shown)` は
+  表示したものとそれより古いものだけを提示済みにし、新しいものは残すため。トーストは押せない。
   次の手順は文言自体と通知センターの行が担う。macOS ではトーストを出さない（行のあるサイドバーが常に表示されて
   いるため）。
 - **通知センターに残るすべての通知はネクストアクションを持つ**（`AppNotificationAction`）。行をクリックすると
