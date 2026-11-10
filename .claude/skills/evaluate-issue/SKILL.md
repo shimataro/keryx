@@ -154,7 +154,7 @@ Any failed request below: output the error and end this URL (`Fetch failed: <rea
    If the response has a `pull_request` field, the number is a pull request: end this URL
    (`Not an issue`) and suggest `/evaluate-review` for review comments. Keep `title`, `body`,
    `state`, `state_reason`, `locked`, `user` (login and `type` — `Bot` for an automated author),
-   `labels`, `created_at` and `html_url`.
+   `labels`, `created_at`, `html_url` and `url` (the API URL, in GitHub's canonical casing).
 2. Fetch the conversation and the cross-references:
 
    ```bash
@@ -170,8 +170,10 @@ Any failed request below: output the error and end this URL (`Fetch failed: <rea
    gh api repos/{owner}/{repo}/issues/comments/{comment_id}
    ```
 
-   Its `issue_url` must equal `https://api.github.com/repos/{owner}/{repo}/issues/{number}`; if
-   not, output the expected and actual values and end this URL (`Not in this issue`).
+   Its `issue_url` must equal the issue's `url` from step 1 exactly. Both come from the API in
+   GitHub's canonical casing, so an issue URL typed as `Shimataro/Keryx` is not rejected — a URL
+   built from `{owner}/{repo}` would keep the typed casing and never match. If not equal, output
+   the expected and actual values and end this URL (`Not in this issue`).
 4. Warn — and continue — when the issue is closed (show `state_reason`), locked, or referenced
    by a pull request (show it and whether it is merged): the work may already be done or
    declined. Step 7.1 takes this into account.
