@@ -51,7 +51,7 @@ Every place that reports a result uses only these labels — plus the suffix
 | Item / URL | `Plan rejected` | The user rejected the plan (9.3) |
 | Item / URL | `Working tree not clean` | Uncommitted changes at 9.1 or 9.4 |
 | URL | `Invalid URL` | Step 2 |
-| URL | `Wrong repository` | The URL's repository is not this checkout's (Step 3) |
+| URL | `Wrong repository` | No remote of this checkout points at the URL's repository (Step 3) |
 | URL | `Not an issue` | The number is a pull request (Step 4) |
 | URL | `Not in this issue` | The linked comment belongs to another issue (Step 4) |
 | URL | `Fetch failed: <reason>` | A Step 4 request failed |
@@ -101,15 +101,28 @@ The URL must match `https://github.com/<owner>/<repo>/issues/<number>`, optional
 
 ### Step 3 — Verify repository and checkout
 
-1. Compare `{owner}/{repo}` with this checkout's repository:
+1. Find the git remote of this checkout that points at `{owner}/{repo}` — the **issue remote**
+   used by every later step. Check the checkout's own remotes, not `gh repo view`: that answers
+   which repository `gh` targets (`gh repo set-default` can point it elsewhere), not what this
+   checkout is.
 
    ```bash
-   gh repo view --json nameWithOwner,defaultBranchRef --jq '.nameWithOwner, .defaultBranchRef.name'
+   git remote -v
    ```
 
-   Compare case-insensitively. On a mismatch, output both names and end this URL
-   (`Wrong repository`) — the code here cannot answer for another repository. If the request
-   fails, warn and continue, using `v0` as the default branch.
+   Reduce each `(fetch)` URL to `owner/repo` (`git@github.com:<owner>/<repo>.git` or
+   `https://github.com/<owner>/<repo>[.git]`) and compare it with `{owner}/{repo}`
+   case-insensitively. Several matches → prefer `origin`, otherwise the first. No match, or not
+   a git repository → output the remotes found and end this URL (`Wrong repository`) — the code
+   here cannot answer for another repository. Never continue without a match.
+
+   Then get the default branch from the validated repository itself:
+
+   ```bash
+   gh api repos/{owner}/{repo} --jq .default_branch
+   ```
+
+   If this fails, end this URL (`Fetch failed: <reason>`).
 2. **Freshness** — answers and verdicts must reflect the current code. Run
    `git fetch origin <default>` and check `git merge-base --is-ancestor origin/<default> HEAD`.
    If HEAD does not contain `origin/<default>`, output the state and ask via `AskUserQuestion`:
