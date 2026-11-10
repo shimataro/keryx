@@ -116,6 +116,10 @@
     <string name="home_no_feeds">No feeds yet</string>
     <string name="home_no_articles">No articles</string>
     <string name="home_open_feed_list">Open feed list</string>
+    <plurals name="home_open_feed_list_with_notifications">
+        <item quantity="one">Open feed list, %1$d notification</item>
+        <item quantity="other">Open feed list, %1$d notifications</item>
+    </plurals>
     <string name="home_list_mode">Articles to show</string>
     <string name="home_list_mode_all">All</string>
     <string name="home_list_mode_unread">Unread</string>

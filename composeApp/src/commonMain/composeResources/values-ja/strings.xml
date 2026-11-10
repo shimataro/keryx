@@ -111,6 +111,9 @@
     <string name="home_no_feeds">フィードが登録されていません</string>
     <string name="home_no_articles">記事がありません</string>
     <string name="home_open_feed_list">フィード一覧を開く</string>
+    <plurals name="home_open_feed_list_with_notifications">
+        <item quantity="other">フィード一覧を開く（通知 %1$d 件）</item>
+    </plurals>
     <string name="home_list_mode">表示する記事</string>
     <string name="home_list_mode_all">すべて</string>
     <string name="home_list_mode_unread">未読</string>

@@ -20,6 +20,7 @@ import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
@@ -673,8 +674,9 @@ class ArticleListPaneTest {
         }
         waitForIdle()
 
-        onNodeWithContentDescription("フィード一覧を開く").assertExists()
-        onNodeWithText("2").assertExists()
+        // The count is read with the button's name, not as a bare number after it.
+        onNodeWithContentDescription("フィード一覧を開く（通知 2 件）").assertExists()
+        onAllNodesWithText("2").assertCountEquals(0)
     }
 
     @Test
