@@ -209,6 +209,16 @@ class NotificationCenterPlacementTest {
     }
 
     @Test
+    fun narrowLayoutsShowNoRowOutsideTheDrawer() {
+        // At Single and Dual the feed list is a drawer, not one of the visible panes, so the content
+        // area must not grow a row of its own; the drawer button's badge carries the count there.
+        for (depth in 1..3) {
+            runWithHost(PaneLayout.Single, depth, notifications = 2) { assertEquals(0, it, "Single depth $depth") }
+        }
+        runWithHost(PaneLayout.Dual, 1, notifications = 2) { assertEquals(0, it, "Dual") }
+    }
+
+    @Test
     fun theFeedListShowsNoRowWithoutANotificationViewModel() {
         runWithHost(PaneLayout.Triple, 1, notifications = 3, passNotifVmToFeedList = false) { assertEquals(0, it) }
     }
