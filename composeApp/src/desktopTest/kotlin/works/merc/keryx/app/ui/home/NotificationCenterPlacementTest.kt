@@ -1,26 +1,41 @@
 package works.merc.keryx.app.ui.home
 
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PixelMap
+import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsFocused
-import androidx.compose.ui.test.requestFocus
-import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.requestFocus
 import androidx.compose.ui.test.v2.runDesktopComposeUiTest
 import androidx.compose.ui.unit.dp
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertNotEquals
 import kotlinx.coroutines.runBlocking
 import org.koin.compose.KoinIsolatedContext
 import org.koin.dsl.koinApplication
@@ -36,8 +51,6 @@ import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.presentation.home.HomeViewModel
 import works.merc.keryx.app.presentation.home.NotificationAlerts
 import works.merc.keryx.app.ui.i18n.resolveNotificationText
-import kotlin.test.Test
-import kotlin.test.assertEquals
 
 /**
  * The notification center's entry point is a row in the feed list's footer ([NotificationCenterRow]),
@@ -293,6 +306,45 @@ class NotificationCenterPlacementTest {
         waitForIdle()
         onNodeWithText(rowLabel).assert(SemanticsMatcher.keyIsDefined(SemanticsActions.Collapse))
     }
+
+    @Test
+    fun theRowIsHighlightedOnlyWhileItHoldsKeyboardFocus() = runDesktopComposeUiTest {
+        // The highlight is a background tone with no semantics of its own, so compare captures. The
+        // platform's focus indication (listRowSurface) also changes the row while it is focused, so
+        // the row's own highlight is told apart by toggling LocalKeyboardEngaged, which gates it
+        // alone.
+        val center = newCenter(1)
+        val notifVm = NotificationCenterViewModel(center, NotificationAlerts(center))
+        var keyboardEngaged by mutableStateOf(true)
+        setContent {
+            KoinIsolatedContext(context = remember { isolatedKoin() }) {
+                CompositionLocalProvider(LocalKeyboardEngaged provides keyboardEngaged) {
+                    Column {
+                        NotificationCenterRow(notifVm = notifVm, count = 1)
+                        Box(Modifier.size(10.dp).testTag("elsewhere").focusable())
+                    }
+                }
+            }
+        }
+        waitForIdle()
+        fun capture() = pixelsOf(onNodeWithText(rowLabel).captureToImage().toPixelMap())
+        val unfocused = capture()
+
+        onNodeWithText(rowLabel).requestFocus()
+        waitForIdle()
+        val focused = capture()
+        keyboardEngaged = false
+        waitForIdle()
+        val focusedWithoutKeyboard = capture()
+        assertNotEquals(focusedWithoutKeyboard, focused, "the row is highlighted while it holds keyboard focus")
+
+        keyboardEngaged = true
+        onNodeWithTag("elsewhere").requestFocus()
+        waitForIdle()
+        assertEquals(unfocused, capture(), "the highlight clears once focus leaves the row")
+    }
+
+    private fun pixelsOf(map: PixelMap): List<Color> = List(map.width * map.height) { map[it % map.width, it / map.width] }
 
     @Test
     fun theRowShowsTheCountAndOpensThePanelOnClick() = runDesktopComposeUiTest {
