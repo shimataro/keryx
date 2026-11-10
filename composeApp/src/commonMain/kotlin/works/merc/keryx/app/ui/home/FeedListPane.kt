@@ -142,6 +142,11 @@ internal const val FEED_LIST_DRAG_HOST_TEST_TAG = "feed-list-drag-host"
  * @param notifVm Backs the footer's notification center row ([NotificationCenterRow]), always shown
  *   (its count only while the notification center holds something). `null` (tests only) leaves the
  *   row out.
+ * @param onNotificationNavigated Runs after a notification center row's action led somewhere (the
+ *   panel has closed by then) — the drawer passes "close the drawer", so the destination shows.
+ *   Deliberately not [onSelectionAdvance]: most actions (a dialog, a settings tab, a web page) change
+ *   no selection, so they must not move the keyboard's pane either; `ShowFeedDetail`'s own pane is
+ *   decided by `PendingNotificationActionHost`.
  * @param isTouchPrimary Overridable for tests only — see `feedListReorderDrag`'s own KDoc.
  * @param hasNativeAppMenu Overridable for tests only — see `platform/PlatformOs.kt`'s own KDoc.
  *   Gates this pane's header (an `app_name` title instead of none) and its settings footer row
@@ -161,6 +166,7 @@ internal fun FeedListPane(
     deleteSelectedRequestId: Int = 0,
     onSelectionAdvance: (() -> Unit)? = null,
     notifVm: NotificationCenterViewModel? = null,
+    onNotificationNavigated: () -> Unit = {},
     isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
     hasNativeAppMenu: Boolean = works.merc.keryx.app.platform.hasNativeAppMenu,
 ) {
@@ -818,8 +824,7 @@ internal fun FeedListPane(
                     NotificationCenterRow(
                         notifVm = notifVm,
                         count = notificationCount,
-                        // In the narrow layout's drawer this closes it, so the destination shows.
-                        onNavigated = { onSelectionAdvance?.invoke() },
+                        onNavigated = onNotificationNavigated,
                         isTouchPrimary = isTouchPrimary,
                     )
                 }
