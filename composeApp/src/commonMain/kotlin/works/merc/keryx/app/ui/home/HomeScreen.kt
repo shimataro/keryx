@@ -859,8 +859,8 @@ internal fun ForegroundAlertSnackbar(
         if (!windowFocused) return@LaunchedEffect
         notifVm.alertToSurface.filterNotNull().collectLatest { alert ->
             // collectLatest: a newer alert cancels whatever is showing and replaces it, matching
-            // Material 3's one-Snackbar-at-a-time rule. The replacement's markAlertsSurfaced()
-            // covers the cancelled one too, so nothing is left to re-announce itself later.
+            // Material 3's one-Snackbar-at-a-time rule. The replacement's markAlertsSurfaced(alert)
+            // covers the cancelled, older one too, so nothing is left to re-announce itself later.
             val act = notificationRowAction(
                 alert,
                 onRequestHostAction = { notifVm.requestAction(alert) },
@@ -874,7 +874,7 @@ internal fun ForegroundAlertSnackbar(
             )
             // After, not before: marking first would burn an alert whose Snackbar is cancelled a
             // moment later by a lost window focus, leaving it announced but never actually seen.
-            notifVm.markAlertsSurfaced()
+            notifVm.markAlertsSurfaced(alert)
             if (result == SnackbarResult.ActionPerformed) act?.invoke()
         }
     }

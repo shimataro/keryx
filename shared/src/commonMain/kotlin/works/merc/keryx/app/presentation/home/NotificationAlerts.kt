@@ -56,15 +56,24 @@ class NotificationAlerts(
         }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     /**
-     * Marks every alert currently in the notification center as announced.
+     * Marks [shown] — the alert a transient surface has just finished showing — as announced, along
+     * with every older warning/error still in the notification center.
      *
-     * Deliberately all of them, not just the one that was shown: when several arrive at once only
-     * the newest is announced (a transient surface shows one at a time, and the notification center's row
-     * already carries the count), so marking one at a time would walk backwards through the queue
-     * and end on the *oldest*.
+     * The older ones too: when several arrive at once only the newest is announced (a transient
+     * surface shows one at a time, and the notification center's row already carries the count), so
+     * marking only the shown one would walk backwards through the queue and end on the *oldest*.
+     * But not the newer ones: an alert raised while [shown] was on screen has not been seen, so it
+     * stays pending and [alertToSurface] offers it next. [shown] is found by id, or by its
+     * [AlertKey] when a recurrence has since replaced it under a fresh id; when it has been dismissed
+     * in the meantime, only [shown] itself is marked.
      */
-    fun markAlertsSurfaced() {
-        val keys = center.items.value.filter { it.level != AppNotificationLevel.INFO }.map { it.alertKey() }
+    fun markAlertsSurfaced(shown: AppNotification) {
+        val shownKey = shown.alertKey()
+        val items = center.items.value
+        // items is newest-first, so everything from shown's position on is shown or older.
+        val index = items.indexOfFirst { it.id == shown.id || it.alertKey() == shownKey }
+        val older = if (index < 0) emptyList() else items.drop(index)
+        val keys = older.filter { it.level != AppNotificationLevel.INFO }.map { it.alertKey() } + shownKey
         surfacedAlerts.update { it + keys }
     }
 }

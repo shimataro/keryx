@@ -234,7 +234,7 @@ struct HomeView: View {
                 await AlertToastAnnouncement.announce(
                     message,
                     show: { home.alertToast.show($0) },
-                    markSurfaced: { notifications.alerts.markAlertsSurfaced() }
+                    markSurfaced: { notifications.alerts.markAlertsSurfaced(shown: alert) }
                 )
                 if Task.isCancelled { break }
             }
