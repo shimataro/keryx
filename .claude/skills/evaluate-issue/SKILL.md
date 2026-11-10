@@ -124,15 +124,19 @@ The URL must match `https://github.com/<owner>/<repo>/issues/<number>`, optional
 
    If this fails, end this URL (`Fetch failed: <reason>`).
 2. **Freshness** — answers and verdicts must reflect the current code. Run
-   `git fetch origin <default>` and check `git merge-base --is-ancestor origin/<default> HEAD`.
-   If HEAD does not contain `origin/<default>`, output the state and ask via `AskUserQuestion`:
+   `git fetch <remote> <default>` (`<remote>` is the issue remote from 3.1) and check its exit
+   status: if it fails, the existing `<remote>/<default>` may be stale and would pass the check
+   below regardless, so output the error and ask via `AskUserQuestion` whether to **continue
+   with a warning** that the comparison may use stale code, or **cancel** (`Cancelled`).
+   Then check `git merge-base --is-ancestor <remote>/<default> HEAD`.
+   If HEAD does not contain `<remote>/<default>`, output the state and ask via `AskUserQuestion`:
    - **Fast-forward** (Recommended) — offered only when the current branch is the default
-     branch: `git merge --ff-only origin/<default>`. If git refuses, report it and ask again
+     branch: `git merge --ff-only <remote>/<default>`. If git refuses, report it and ask again
      without this option.
    - **Continue on the current HEAD** — with a warning that the evaluation uses older code.
    - **Cancel evaluation** — stop the whole run (`Cancelled`).
 3. **Unrelated work** — if the current branch is not a version branch (`v*`) and has commits
-   that `origin/<default>` lacks (`git log --oneline origin/<default>..HEAD` is not empty), Step 9
+   that `<remote>/<default>` lacks (`git log --oneline <remote>/<default>..HEAD` is not empty), Step 9
    would commit on top of that unrelated work. Show those commits and ask via
    `AskUserQuestion` whether to **continue on this branch** or **cancel** (`Cancelled`) so the
    user can switch first.
@@ -217,7 +221,7 @@ whether it is worth doing.
   check whether the latest release contains it:
 
   ```bash
-  tag="$(git describe --tags --abbrev=0 origin/<default>)"
+  tag="$(git describe --tags --abbrev=0 <remote>/<default>)"
   git merge-base --is-ancestor <commit_sha> "$tag" && echo released || echo unreleased
   ```
 
