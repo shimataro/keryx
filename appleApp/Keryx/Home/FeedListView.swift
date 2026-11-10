@@ -12,6 +12,9 @@ import SwiftUI
 /// menus, and drag-and-drop (feed reorder/move-to-folder/tag-attach, folder reorder).
 struct FeedListView: View {
     let home: HomeObservable
+    /// The notification center, whose entry point (`NotificationCenterRow`) is pinned to the bottom
+    /// of this sidebar while it holds something.
+    let notifications: NotificationCenterObservable
     @Bindable var dialogs: SidebarDialogState
     /// Opens the iOS Settings sheet from the toolbar's gear button (macOS reaches Settings from the
     /// app menu instead).
@@ -56,6 +59,23 @@ struct FeedListView: View {
 
     var body: some View {
         rows
+        // The notification center's entry point, pinned below the rows only while it holds
+        // something: it shortens the list's viewport without moving any row already on screen.
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if !notifications.items.isEmpty {
+                VStack(spacing: 0) {
+                    Divider()
+                    NotificationCenterRow(
+                        home: home,
+                        notifications: notifications,
+                        settingsNavigation: settingsNavigation,
+                        focusedPane: focusedPane,
+                        onShowFeed: onOpenArticleList
+                    )
+                }
+                .background(.bar)
+            }
+        }
         .toolbar { toolbarContent }
         #if os(iOS)
         .navigationTitle(L("app_name"))

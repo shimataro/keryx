@@ -1,14 +1,13 @@
 import KeryxShared
 import SwiftUI
 
-/// The center pane: toolbar (the list mode menu, which also holds the sort order; mark-all-read;
-/// the notification bell),
+/// The center pane: toolbar (the list mode menu, which also holds the sort order; mark-all-read —
+/// the notification center lives at the bottom of the sidebar instead, `NotificationCenterRow`),
 /// the article rows themselves (search-highlighted when a query is active), the "new articles"
 /// pill, and the four empty states — see `external-spec.md` §7's article-list bullets and the M2
 /// research notes.
 struct ArticleListView: View {
     let home: HomeObservable
-    let notifications: NotificationCenterObservable
     let settingsNavigation: SettingsNavigation
     @Bindable var dialogs: SidebarDialogState
     var focusedPane: FocusState<HomeFocusedPane?>.Binding
@@ -297,16 +296,13 @@ struct ArticleListView: View {
         if #available(iOS 27.0, *) {
             // A vertical bar (iPhone Duo's outer display, and landscape on its inner one) overflows
             // from the bottom up, which hid Mark All as Read first and squeezed the search button
-            // out of shape. The HIG asks to keep frequent actions and badged items visible longest,
-            // so the bell and Mark All as Read outrank the rest. A horizontal bar ignores these.
+            // out of shape. The HIG asks to keep frequent actions visible longest, so Mark All as
+            // Read outranks the list mode menu. A horizontal bar ignores these.
             ToolbarItem(placement: .navigation) { listModeMenu }
                 .visibilityPriority(.low)
 
             FlexibleToolbarSpacer()
 
-            // Separate items, since a priority applies to a whole item or group.
-            ToolbarItem(placement: .primaryAction) { notificationBellButton }
-                .visibilityPriority(.high)
             ToolbarItem(placement: .primaryAction) { markAllReadButton }
                 .visibilityPriority(.high)
         } else {
@@ -331,7 +327,6 @@ struct ArticleListView: View {
         FlexibleToolbarSpacer()
 
         ToolbarItemGroup(placement: .primaryAction) {
-            notificationBellButton
             markAllReadButton
         }
     }
@@ -377,10 +372,6 @@ struct ArticleListView: View {
         .help(L("home_list_mode"))
         .accessibilityLabel(L("home_list_mode"))
         .accessibilityValue(L(Self.listModeLabelKey(home.listMode)))
-    }
-
-    private var notificationBellButton: some View {
-        NotificationBell(home: home, notifications: notifications, settingsNavigation: settingsNavigation, focusedPane: focusedPane)
     }
 
     private var markAllReadButton: some View {

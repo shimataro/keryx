@@ -100,6 +100,7 @@ struct HomeView: View {
         NavigationSplitView(preferredCompactColumn: compactColumnBinding) {
             FeedListView(
                 home: home,
+                notifications: notifications,
                 dialogs: sidebarDialogs,
                 settingsNavigation: settingsNavigation,
                 focusedPane: $focusedPane,
@@ -121,7 +122,6 @@ struct HomeView: View {
         } content: {
             ArticleListView(
                 home: home,
-                notifications: notifications,
                 settingsNavigation: settingsNavigation,
                 dialogs: sidebarDialogs,
                 focusedPane: $focusedPane,
@@ -174,6 +174,11 @@ struct HomeView: View {
         .modifier(HiddenSplitViewTitle())
         .task {
             await home.startObserving()
+        }
+        // Here rather than in the sidebar's notification row, which only exists while there is
+        // something to show — it needs the items to decide that.
+        .task {
+            await notifications.startObserving()
         }
         .task {
             await applyInitialFocus()
