@@ -382,9 +382,12 @@ If no item is Fix & commit, output `No implementation plan is needed.` and go to
       attempted but is not included yet and remains under consideration.
    4. On success, commit per `.claude/etc/per-item-commit.md` §4 (on a `v*` branch it runs
       `/feature-branch` before the first commit).
-5. **Hand-off** — output the line to put in the pull request's body (`Closes #{number}`, or
-   `Refs #{number}` when only part of the issue was done) and a reply draft (8.3's form) for
-   each committed item reporting what was done. Never push and never post.
+5. **Hand-off** — if at least one item was committed in 9.4, output the line to put in the pull
+   request's body (`Closes #{number}`, or `Refs #{number}` when only part of the issue was done)
+   and a reply draft (8.3's form) for each committed item reporting what was done. If nothing
+   was committed (every item failed verification), output no reference line and say there is
+   nothing to put in a pull request; the failed items' replies come from 9.4.3. Never push and
+   never post.
 
 ### Step 10 — Closing summary
 
