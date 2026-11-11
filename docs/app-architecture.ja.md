@@ -439,8 +439,10 @@ drop テーブルとして渡している。
 ### アプリ内アップデート
 
 `domain/UpdateRepository` は上記の `SyncRepository` と同じ種類の、アプリのライフタイムを持つ
-Koin `single` のオーケストレーターであり、`StateFlow<UpdateState>` を UI 側の各面（Updates タブ、
-トレイ、通知センター）が読む——設定ダイアログを閉じても進行中のダウンロードはキャンセルされない。これは
+Koin `single` のオーケストレーターであり、`StateFlow<UpdateState>` をアップデートの状態を表示する
+UI 側の各面（Updates タブ、トレイ）が読む——設定ダイアログを閉じても進行中のダウンロードはキャンセルされない。
+通知センターはこの状態を読まない。`UpdateRepository` が選んだ通知だけを `NotificationCenter` に投稿する
+（`background-update.ja.md` の「アプリ内アップデート」参照）。これは
 3 つのシームを組み合わせる: `domain/UpdateChecker`（候補選択とバージョン比較のポリシーのみ——
 GitHub Releases への HTTP リクエストと JSON パースは `data/remote/ReleaseFeedSource` に住み、
 `UpdateChecker` は自分のコンストラクタと同じ引数から内部でそれを組み立てる。依存として

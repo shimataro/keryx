@@ -450,8 +450,10 @@ resolves the live DB's real path per platform (see `db-schema.md`).
 ### In-App Update
 
 `domain/UpdateRepository` is the same kind of app-lifetime, Koin-`single` orchestrator as
-`SyncRepository` above — a `StateFlow<UpdateState>` every UI surface (Updates tab, tray, notification center)
-reads, so a closed settings dialog doesn't cancel an in-flight download. It composes three seams:
+`SyncRepository` above — a `StateFlow<UpdateState>` the UI surfaces that show the update's state
+(Updates tab, tray) read, so a closed settings dialog doesn't cancel an in-flight download. The
+notification center does not read this state: `UpdateRepository` posts only selected notices to
+`NotificationCenter` (see "In-App Update" in `background-update.md`). It composes three seams:
 `domain/UpdateChecker` (candidate selection and version-comparison policy only — the GitHub
 Releases HTTP request and JSON parsing live in `data/remote/ReleaseFeedSource`, which
 `UpdateChecker` builds internally from the same constructor params rather than taking one as a

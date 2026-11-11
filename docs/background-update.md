@@ -249,10 +249,12 @@ so it and any in-flight download outlive a closed settings dialog) drives it pas
 `Failed` reachable from `Checking`/`Downloading`/`Verifying`/`Installing` (`retryFailed` branches an
 `Installing`-stage failure to `retryInstall`, matching `UpdateStage`'s four values `CHECK`, `DOWNLOAD`,
 `VERIFY`, `INSTALL` — see below for the one Android install failure that never reaches `Failed` at
-all). Every surface — the Updates settings
-tab, the one update menu item the desktop tray and the Help menu share (both resolved by
-`tray/UpdateMenuEntry.kt`'s `updateMenuEntry`), the notification center — reads this same
-state, so they can never disagree about what's currently true. **No step ever runs unattended**: a
+all). Every surface that shows the update's state — the Updates settings
+tab, and the one update menu item the desktop tray and the Help menu share (both resolved by
+`tray/UpdateMenuEntry.kt`'s `updateMenuEntry`) — reads this same
+state, so they can never disagree about what's currently true. The notification center is not one
+of them: it gets only the notices `UpdateRepository` posts to it at a few moments (see below), so a
+state change such as a download failure need not appear there. **No step ever runs unattended**: a
 check never auto-downloads, and a downloaded file never auto-installs — download and install are
 each a separate, explicit click (Updates tab button, or that menu item).
 
