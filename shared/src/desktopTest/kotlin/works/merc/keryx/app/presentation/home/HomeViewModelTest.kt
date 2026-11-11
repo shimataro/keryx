@@ -142,6 +142,9 @@ private fun KeryxDatabase.insertArticle(
 private class GetByIdFailingSqlDriver(private val delegate: SqlDriver) : SqlDriver by delegate {
     @kotlin.concurrent.Volatile var failGetById = false
 
+    /** Runs as an article's by-id lookup starts — lets a test act at that exact point. */
+    @kotlin.concurrent.Volatile var onGetById: (() -> Unit)? = null
+
     override fun <R> executeQuery(
         identifier: Int?,
         sql: String,
@@ -149,7 +152,9 @@ private class GetByIdFailingSqlDriver(private val delegate: SqlDriver) : SqlDriv
         parameters: Int,
         binders: (app.cash.sqldelight.db.SqlPreparedStatement.() -> Unit)?,
     ): app.cash.sqldelight.db.QueryResult<R> {
-        if (failGetById && sql.startsWith("SELECT articles.") && sql.endsWith("FROM articles WHERE id = ?")) {
+        val isGetById = sql.startsWith("SELECT articles.") && sql.endsWith("FROM articles WHERE id = ?")
+        if (isGetById) onGetById?.invoke()
+        if (failGetById && isGetById) {
             throw IllegalStateException("database is locked")
         }
         return delegate.executeQuery(identifier, sql, mapper, parameters, binders)
@@ -3457,6 +3462,34 @@ class HomeViewModelTest {
         testScheduler.advanceUntilIdle()
 
         assertTrue(vm.selectedArticleShownUnread.value)
+    }
+
+    /**
+     * The article list is collected eagerly from the ViewModel's construction, on a background
+     * dispatcher; production's Main.immediate starts that collector at once. A restored read article
+     * must already be pinned when the first list is published, or an unread-only list subscribed to
+     * right then lacks its row — and the iOS list's one-time scroll to the restored selection is lost.
+     * Here the restore lookup holds the background dispatcher, standing in for a background thread that
+     * has not caught up with the pin yet: whatever the list holds by then is what a subscriber sees.
+     */
+    @Test
+    fun restoredReadArticleIsPinnedInTheFirstPublishedUnreadOnlyList() = runTest {
+        Dispatchers.setMain(UnconfinedTestDispatcher(mainScheduler))
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 1L)
+        db.insertArticle("a2", "f1", isRead = 0L)
+        val store = LocalSettingsStore(dirOverride = dir)
+        store.save(store.load().copy(lastArticleId = "a1", lastUnreadOnly = true))
+        val holding = HoldingDispatcher()
+        lookups.onGetById = { holding.hold() }
+
+        val vm = newViewModel(dispatcher = holding)
+        lookups.onGetById = null
+
+        val firstPublished = vm.articlesWithFilter.value.rows.map { it.id }
+        assertTrue(firstPublished.isEmpty() || "a1" in firstPublished, "published before the pin: $firstPublished")
+        holding.release()
+        assertTrue("a1" in vm.articlesWithFilter.value.rows.map { it.id })
     }
 
     @Test

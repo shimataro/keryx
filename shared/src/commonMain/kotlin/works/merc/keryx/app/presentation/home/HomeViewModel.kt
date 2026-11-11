@@ -363,13 +363,39 @@ class HomeViewModel(
     private val _newestFirst = MutableStateFlow(settingsRepository.getLocalSettings().lastNewestFirst ?: true)
     val newestFirst: StateFlow<Boolean> = _newestFirst
 
+    // The last-selected article, restored at launch (not via selectArticle(), to avoid re-marking it as
+    // read and clobbering another device's "mark as unread" sync via read_at last-write-wins). Looked
+    // up here, before [_pinnedReadStates] and the eagerly collected article list, so its pin is in
+    // place before that list first emits. A tombstone can land while the app is closed, so the
+    // restored row is filtered the same way selectArticle filters a concurrently-deleted one —
+    // otherwise the next launch would select and pin deleted content.
+    //
+    // Best effort (docs/error-design.md): a failing lookup restores nothing. A selection whose body
+    // lookup failed is persisted too (see applyHydratedSelection), so a lookup that fails every time
+    // would otherwise throw out of this constructor on every launch and Home would never open.
+    private val restoredArticle: Articles? = settingsRepository.getLocalSettings().lastArticleId
+        ?.let { id ->
+            runCatchingUnlessCancelled { articleRepository.getArticleById(id) }.getOrElse { e ->
+                Log.warn(TAG, "Restoring the last selected article failed", e)
+                null
+            }
+        }
+        ?.takeIf { it.deleted_at == null }
+
     // Read state the user just set on an article while browsing the current filter: read (as a side
     // effect of selection, or an explicit "mark as read") or unread (an explicit "mark as unread"). The
     // pinned value outruns the DB write still in flight, and a read one also keeps the row visible (in
     // read styling) until the user reloads/syncs or switches filters, so the list doesn't shift under
     // the user while reading down an unread list. An unread pin is what keeps the row from dropping out
     // of an unread-only list in the window before its "mark as unread" write lands.
-    private val _pinnedReadStates = MutableStateFlow<Map<String, ArticleListRow>>(emptyMap())
+    //
+    // Seeded with the restored article's pin rather than pinned in `init`: the article list below is
+    // collected eagerly from construction, on [dispatcher], so a pin set later could miss its first
+    // emission, and an unread-only list published then would lack the restored row.
+    private val _pinnedReadStates = MutableStateFlow<Map<String, ArticleListRow>>(
+        // Keep it visible in an unread-only list, mirroring selectArticle()'s pinning.
+        restoredArticle?.takeIf { it.is_read == 1L }?.let { mapOf(it.id to it.toListRow()) } ?: emptyMap(),
+    )
 
     // Articles unstarred while browsing the Starred filter. Kept visible (with the star cleared)
     // until the user switches filters, so the list doesn't shift under the user the instant they
@@ -903,28 +929,8 @@ class HomeViewModel(
     val initialHomePane: InitialHomePane
 
     init {
-        // Restore the last-selected article (not via selectArticle(), to avoid re-marking it as
-        // read and clobbering another device's "mark as unread" sync via read_at last-write-wins).
-        // A tombstone can land while the app is closed, so the restored row is filtered the same way
-        // selectArticle filters a concurrently-deleted one — otherwise the next launch would select
-        // and pin deleted content.
-        //
-        // Best effort (docs/error-design.md): a failing lookup restores nothing. A selection whose body
-        // lookup failed is persisted too (see applyHydratedSelection), so a lookup that fails every time
-        // would otherwise throw out of this constructor on every launch and Home would never open.
-        val restoredArticle = settingsRepository.getLocalSettings().lastArticleId
-            ?.let { id ->
-                runCatchingUnlessCancelled { articleRepository.getArticleById(id) }.getOrElse { e ->
-                    Log.warn(TAG, "Restoring the last selected article failed", e)
-                    null
-                }
-            }
-            ?.takeIf { it.deleted_at == null }
+        // The restored article (see [restoredArticle]) is already pinned (see [_pinnedReadStates]).
         if (restoredArticle != null) {
-            if (restoredArticle.is_read == 1L) {
-                // Keep it visible in an unread-only list, mirroring selectArticle()'s pinning.
-                _pinnedReadStates.update { it + (restoredArticle.id to restoredArticle.toListRow()) }
-            }
             _selectedArticle.value = restoredArticle
             // Seed the navigation cursor too, so the first arrow key steps from the restored
             // article instead of jumping back to the top of the list.
