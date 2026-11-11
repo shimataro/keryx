@@ -12,7 +12,7 @@ import works.merc.keryx.app.core.NotificationText
 import works.merc.keryx.app.core.alertKey
 
 /**
- * Session-only notification history (the bell icon). Repositories push
+ * Session-only notification history (the notification center). Repositories push
  * warnings/errors here; the UI observes [items]. Not persisted.
  */
 class NotificationCenter {

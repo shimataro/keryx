@@ -199,10 +199,10 @@ Tests live next to the code they test: `shared/src/{commonTest,desktopTest,andro
     macOS-toolbar-style capsule, and M3's own `PlainTooltip`, respectively), KeryxRaisedSurface (a distinctly-tinted
     `colorScheme.surfaceContainerHigh` tonal container instead of desktop's hairline-bordered flat
     card), KeryxBadgedIcon (M3's own `BadgedBox`/`Badge` instead of desktop's hand-rolled pill —
-    used by `NotificationsBell`), KeryxSettingRow (a real M3 `ListItem`, whose own tap target covers
+    used by the drawer button's notification count), KeryxSettingRow (a real M3 `ListItem`, whose own tap target covers
     the whole row — backs `SettingsComponents.kt`'s `LinkRow`/`ActionLinkRow`/`SwitchRow`),
-    KeryxAnchoredPanel (a real M3 `ModalBottomSheet` — backs `NotificationsBell`'s notification
-    popover and `TagColorPickerPopup`; necessary, not just idiomatic, since a bare `Popup` there
+    KeryxAnchoredPanel (a real M3 `ModalBottomSheet` — backs `NotificationCenterRow`'s notification
+    panel and `TagColorPickerPopup`; necessary, not just idiomatic, since a bare `Popup` there
     would composite behind the article reader's `WebView` the same way a bare Compose overlay does
     on desktop, see "Article Reader" below), KeryxPaneTopBar (a real M3 `TopAppBar` — backs each of
     the 3 panes' own header row, not a shared app-wide bar), DatabaseMerger/DatabaseSnapshot
@@ -450,8 +450,10 @@ resolves the live DB's real path per platform (see `db-schema.md`).
 ### In-App Update
 
 `domain/UpdateRepository` is the same kind of app-lifetime, Koin-`single` orchestrator as
-`SyncRepository` above — a `StateFlow<UpdateState>` every UI surface (Updates tab, tray, bell)
-reads, so a closed settings dialog doesn't cancel an in-flight download. It composes three seams:
+`SyncRepository` above — a `StateFlow<UpdateState>` the UI surfaces that show the update's state
+(Updates tab, tray) read, so a closed settings dialog doesn't cancel an in-flight download. The
+notification center does not read this state: `UpdateRepository` posts only selected notices to
+`NotificationCenter` (see "In-App Update" in `background-update.md`). It composes three seams:
 `domain/UpdateChecker` (candidate selection and version-comparison policy only — the GitHub
 Releases HTTP request and JSON parsing live in `data/remote/ReleaseFeedSource`, which
 `UpdateChecker` builds internally from the same constructor params rather than taking one as a
@@ -603,6 +605,20 @@ to the host executable, which fails with Access Denied whenever that location is
 (an uncaught exception from the failed creation also left the library's creation-retry timer
 running forever, which was the cause of an
 app-wide freeze on click).
+
+**A pushed document is pushed as soon as the view is ready, and checked until it is on screen.**
+`shouldLoadArticleHtml` pushes a new document whenever the view is past `Initializing`, without
+waiting for `Finished`: while the article on screen keeps starting navigations of its own (its script
+setting `location`), the native view stays loading and a guard that waited for `Finished` never
+pushed the next document at all. Such a navigation also drops a document load still in flight, and
+the library reports nothing about it — the loading flag stays set and the URL is `about:blank`
+either way — so `ArticleWebView` tags each document with a `<meta name="keryx-document">` carrying
+a marker unique to that push (`readerDocumentMarker`, not a hash of the HTML, which could collide
+with the document still on screen) and, every second after a push, reads that tag back from the page; a document
+not yet on screen is pushed again, up to `:shared`'s `READER_DOCUMENT_RELOAD_LIMIT` times
+(`presentation/article/ReaderDocumentLoad.kt`, the rule the SwiftUI reader follows too). Measured on
+desktop with an article whose script sets `location` every millisecond: the previous article stayed
+on screen under the new selection in 4 of 150 quick switches before, 0 after.
 
 **The reading position survives Android killing the process in the background.** `ArticleWebView`
 records the native view's vertical scroll position as a fraction of its scrollable height
@@ -1749,7 +1765,12 @@ override, stays out of the template.
   guard has a known gap (an anchor inside a closed shadow root); see "A feed body's own JavaScript
   runs inside the article reader" in [known-issues.md](known-issues.md). This keeps the app from
   being an in-app browser, which Apple's age-rating questionnaire would count as unrestricted web
-  access. The Compose readers do not apply the main-frame rule.
+  access. The Compose readers do not apply the main-frame rule. Because WebKit drops a document load
+  still in flight when another top-level navigation starts (one the gate refuses included), the
+  reader tracks its own load until it commits and loads the document again when a top-level
+  navigation is refused or its load fails before then, up to a fixed number of times per document
+  (`:shared`'s `presentation/article/ReaderDocumentLoad.kt`) — otherwise the previous article stayed
+  on screen while the list showed the new selection.
 - **The SwiftUI reader reloads its document when WebKit's content process dies.** iOS may terminate
   the `WKWebView`'s WebContent process while the app is in the background — while the external
   browser a link opened is in front, say — which leaves the reader blank. `ArticleWebView`'s
@@ -2038,10 +2059,11 @@ exists. What was measured on the iOS 27.1 simulator, and what follows from it:
 
 - **Toolbar priorities.** A vertical bar overflows its items into "…" from the bottom up, which on the
   outer display in landscape hid Mark All as Read first and squeezed the search button into an empty
-  circle. From iOS 27 the article list's items carry `visibilityPriority`: the notification bell (a
-  badged item) and Mark All as Read (a frequent action) `.high`, the sort button and the list mode
-  menu `.low` — the order the HIG asks for. A horizontal bar ignores these priorities (the
-  inner display's 360pt article list column in landscape still overflows sort and Mark All as Read),
+  circle. From iOS 27 the article list's items carry `visibilityPriority`: Mark All as Read (a frequent
+  action) `.high`, the list mode menu (which also holds the sort order) `.low` — the order the HIG
+  asks for. A horizontal bar ignores these priorities (measured
+  while the bar still held a sort button, the inner display's 360pt article list column in landscape
+  overflowed sort and Mark All as Read),
   so this changes vertical bars only. Before iOS 27 the items stay in their two groups.
   `visibilityPriority` exists only in the iOS 27 SDK, so this branch compiles only under
   `#if compiler(>=6.4)` (Xcode 27); a release built with the pinned Xcode 26.6 keeps the two groups

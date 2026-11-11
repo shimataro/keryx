@@ -17,11 +17,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -62,40 +58,8 @@ import works.merc.keryx.app.resources.article_state_starred
 import works.merc.keryx.app.resources.article_state_unread
 import works.merc.keryx.app.resources.article_star
 import works.merc.keryx.app.resources.article_unstar
-import works.merc.keryx.app.resources.home_notifications
-import works.merc.keryx.app.ui.common.KeryxAnchoredPanel
-import works.merc.keryx.app.ui.common.KeryxBadgedIcon
 import works.merc.keryx.app.ui.common.KeryxIcon
 import works.merc.keryx.app.ui.common.KeryxIcons
-import works.merc.keryx.app.ui.common.TooltipIconButton
-
-/**
- * Displays the notifications button, unread notification count, and notification popup.
- *
- * @param notifVm The view model providing notification items and handling notification actions.
- */
-@Composable
-internal fun NotificationsBell(notifVm: NotificationCenterViewModel) {
-    val notifications by notifVm.items.collectAsState()
-    var showNotifications by remember { mutableStateOf(false) }
-    Box {
-        val notificationsTooltip = stringResource(Res.string.home_notifications)
-        TooltipIconButton(tooltip = notificationsTooltip, onClick = { showNotifications = !showNotifications }) {
-            KeryxBadgedIcon(KeryxIcons.Notifications, contentDescription = notificationsTooltip, count = notifications.size)
-        }
-        if (showNotifications) {
-            KeryxAnchoredPanel(
-                onDismissRequest = { showNotifications = false },
-                alignment = Alignment.TopEnd,
-                anchorOffsetY = 48.dp,
-            ) {
-                // Close the popover once a notification's action leads somewhere, so the destination
-                // (feed list selection / settings dialog / explanation dialog) is actually visible.
-                NotificationCenterSheet(notifVm, onNavigated = { showNotifications = false })
-            }
-        }
-    }
-}
 
 internal data class ArticleRowMetrics(val rowHeight: Dp, val faviconSize: Dp)
 

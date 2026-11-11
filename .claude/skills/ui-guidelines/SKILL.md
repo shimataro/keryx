@@ -113,28 +113,33 @@ not in global chrome:
   row. There is no separate "Search" filter or sidebar row any more — typing
   into the field narrows whichever feed/folder/tag is already selected (see
   "Adaptive pane layout & touch affordances" below).
-- Sort / mark all read — header row of `ArticleListPane`, unchanged at every
-  layout.
-- List mode — the same header row, leading: a `MenuChip` naming the current
-  `ArticleListMode` (All / Unread / Starred) inside a `NativeMenuAnchor`, whose
-  native menu offers all three. A pop-up button rather than a
-  `SegmentedControl`, because three labelled segments do not fit the pane's
-  240dp minimum width beside the other controls; the chip is filled whenever
-  the mode narrows the list.
+- Mark all read — header row of `ArticleListPane`, unchanged at every layout.
+- List mode and sort order — the same header row, leading: a `MenuChip`
+  wearing `KeryxIcons.FilterList` and naming the current `ArticleListMode`
+  (All / Unread / Starred) inside a `NativeMenuAnchor`, whose native menu
+  offers all three, then a separator and "Newest first" / "Oldest first"
+  (`sortOrderMenuEntries`; `NativeMenu` has no section header). A pop-up
+  button rather than a `SegmentedControl`, because three labelled segments do
+  not fit the pane's 240dp minimum width beside the other controls; the chip
+  is filled whenever the mode narrows the list. The sort order has no toolbar
+  button of its own (it is rarely changed — `external-spec.md` §7); the
+  SwiftUI app puts it in the same menu, in a titled `Section`.
 - Hide read — not in the header row: a View-menu command only (`AppMenuTree`,
   the SwiftUI `HomeCommands`), since a manual refresh or sync, a filter switch
   and choosing Unread already clear the kept read rows (`external-spec.md` §7).
-- Notifications (the bell) — `ArticleListPane`'s own header row, at every
-  layout and every reachable depth: the article list is visible everywhere
-  except `PaneLayout.Single`'s article-detail depth (see `visiblePanes` in
-  `app-architecture.md`), so unlike before the feed list became a drawer,
-  there is no narrow-layout screen the bell would otherwise be unreachable
-  from, and `FeedListPane` never has to host a second one. It is a single
-  icon and therefore stays bare (no `ToolbarIconGroup` capsule), separated
-  from the add/refresh/sync cluster by the standard 8dp and placed ahead of
-  it. `ArticleDetailPane` deliberately has none at any layout — a reading
-  screen carries no notification entry point, matching how Android's own
-  apps treat a detail destination.
+- Notifications — not in any toolbar: `NotificationCenterRow`, a `SidebarRow`
+  in `FeedListPane`'s fixed footer (above Android's settings row), always
+  shown so it stays in one place, its count drawn only above zero. The history
+  is empty most of the time, so a permanent toolbar slot for it was wasted room;
+  a sidebar row costs little and, unlike a row that comes and goes, never
+  changes the list's height. The bell lived
+  in the feed list once before and moved to `ArticleListPane`'s header when the
+  feed list became a drawer at narrower widths, where it could no longer be
+  seen; that gap is now covered by a count badge on `ArticleListTopBar`'s
+  drawer button (`KeryxBadgedIcon`), plus Android's `ForegroundAlertSnackbar`
+  for the moment an alert arrives. `ArticleListPane` and `ArticleDetailPane`
+  have no entry point of their own (`NotificationCenterPlacementTest` pins
+  this). The SwiftUI app puts the same row at the bottom of its sidebar.
 
 Panes are tinted left-to-right with increasingly bright Material3 tonal
 surface roles, so boundaries read from tone alone rather than requiring a
@@ -1310,7 +1315,7 @@ side, Android's own Material 3 ripple/shapes/components on the other:
   confirmation dialog behind it.
   **That confirmation dialog passes `KeryxAlertDialog(destructive = true)`** — as
   does every confirmation whose action deletes or resets something (delete
-  folder/tag, unsubscribe, reset sync data, from Settings or the bell). Android's
+  folder/tag, unsubscribe, reset sync data, from Settings or the notification center). Android's
   `actual` paints the confirm `TextButton`'s *text* in `colorScheme.error` (a
   text button has no container, so `errorContainer` has nothing to tint; this is
   M3's own treatment of a destructive dialog action); desktop's `actual` ignores
@@ -1351,8 +1356,8 @@ side, Android's own Material 3 ripple/shapes/components on the other:
   when checked. The Android `actual`s delegate to M3's own `Switch`/`Checkbox`
   — see the `KeryxTextField` bullet below for why that's the right call on
   that platform. `KeryxBadgedIcon` (`ui/common/KeryxBadge.kt`, expect/actual) —
-  the count badge overlaid on an icon (currently only the notification bell,
-  in `ArticleListPane` and — at a single-pane width — `FeedListPane`) — follows
+  the count badge overlaid on an icon (currently only `ArticleListTopBar`'s
+  drawer button, carrying the notification center's count) — follows
   the same split: desktop's `actual` draws a
   hand-rolled `Box`/`Text` pill (`error` fill, `onError` text), Android's
   `actual` uses M3's own `BadgedBox`/`Badge`. Don't add a raw `Box`/`Text` pill
@@ -1369,7 +1374,7 @@ side, Android's own Material 3 ripple/shapes/components on the other:
   section above; don't use `OutlinedTextField`/`BasicTextField` directly at a
   call site.
 - **Icon set — chrome vs. semantic state**: action/chrome icons (add, refresh,
-  cloud sync, settings, folder/tag management, search, notifications, sort,
+  cloud sync, settings, folder/tag management, search, notifications, filter,
   mark-all-read, open-in-browser, back, close) use the
   `KeryxIcons.XOutlined` (or bare-name, single-variant) entry. Icons that
   encode persistent state rather than an action — `Star`/`StarBorder`,
@@ -1402,8 +1407,9 @@ side, Android's own Material 3 ripple/shapes/components on the other:
   two-state icon (as the folder/tag expand chevron already does, picking
   between `ExpandMore`/`ChevronRight`) over transforming one shared asset —
   it's immune to this class of mistake by construction.
-  **`ArticleListPane.kt`'s sort button is the case that proves the rule.** It
-  used to flip a single `KeryxIcons.Sort` vertically for
+  **`ArticleListPane.kt`'s former sort button is the case that proved the
+  rule** (the button has since been replaced by check items in the list mode
+  menu, so the assets below are gone; the lesson stands). It used to flip a single `KeryxIcons.Sort` vertically for
   ascending/descending, and this document previously recorded that as
   "confirmed still safe" on Android because Material Symbols' `sort` is the
   same three-bar shape. That reasoning was wrong: desktop's Tabler
@@ -1411,33 +1417,12 @@ side, Android's own Material 3 ripple/shapes/components on the other:
   (whose own lengths are 9/7/7, not a staircase), and Material Symbols' `sort`
   has no arrow at all, so the flip was effectively invisible on Android —
   where, with no menu bar and a tooltip that only appears on long-press,
-  nothing else showed the current order either. It now uses
+  nothing else showed the current order either. It then used
   `KeryxIcons.SortDescending`/`SortAscending`, while retaining the selected directional glyph
   when the button is disabled (the search
-  scope). Desktop's two directional entries are Tabler's own
-  `sort-descending`/`sort-ascending`; Android's are **local composites** —
-  Material Symbols ships no directional sort glyph
-  (google/material-design-icons#189), so `ic_sort_{ascending,descending}_material.xml`
-  place the stock `sort` and `arrow_downward`/`arrow_upward` paths side by side
-  via `<group>` transforms rather than redrawing either by hand. **On both
-  platforms the bar staircase reverses along with the arrow**, so direction is
-  carried twice over: desktop gets that for free (Tabler ships `sort-descending`
-  and `sort-ascending` as two glyphs, 9/7/7 vs 7/7/9), and the Android
-  ascending composite mirrors the stock `sort` bars vertically to match.
-  Three things about those two files are load-bearing and easy to undo by
-  accident, so each carries its own comment saying so: both groups take the
-  **same uniform scale** (scaling only one, or scaling either non-uniformly,
-  leaves the bars and the arrow's shaft at different stroke weights inside one
-  glyph); the source paths are the **wght 700** variants, not the default
-  weight — at 125 units thick instead of 80, they land at roughly the 2px of
-  the default-weight icons beside them in the toolbar once scaled down to fit
-  two glyphs in one 24dp box; and the ascending file's bars are that mirror,
-  which reads as a swap of the outer two bar widths because the three bar bands
-  are symmetric about y 480.5. Diffing either file's path data against the
-  stock default-weight glyph will therefore show differences on all three
-  counts — none of them is a defect to "correct". They are also the repo's only
-  `<group>`-using vector assets; Compose Multiplatform's own `XmlVectorParser`
-  supports the full `pivot`/`scale`/`translate`/`rotation` set on every target. `KeryxIcons.ArrowBack`
+  scope) — on Android a local composite of the stock `sort` and
+  `arrow_downward`/`arrow_upward` paths, since Material Symbols ships no
+  directional sort glyph (google/material-design-icons#189). `KeryxIcons.ArrowBack`
   is the other concrete instance of this fix: `ChevronRight` used to double as
   a flipped (`scaleX = -1f`) "back" icon at three call sites
   (`ArticleListPane`/`ArticleDetailPane`'s back buttons,
@@ -1512,7 +1497,7 @@ side, Android's own Material 3 ripple/shapes/components on the other:
   already separates the dialog), but Android's `actual` **ignores both** and lets `AlertDialogDefaults`'
   own values apply, for the same reason `KeryxRaisedSurface` does.
 - **Icon grouping — `ToolbarIconGroup`** (`ui/common/TooltipIconButton.kt`, expect/actual): related
-  toolbar icons (e.g. add feed/refresh/cloud sync, search/notifications, sort/mark-all-read,
+  toolbar icons (e.g. add feed/refresh/cloud sync, search/notifications/mark-all-read,
   the article reader's star / read-unread / open-in-browser / copy-url / share, which is one cluster) are clustered via `ToolbarIconGroup`, separated from
   other clusters in the same row by an 8dp `Spacer`. Desktop's `actual` renders the cluster as a
   rounded capsule with the flat surface pattern's tokens (`surfaceContainerHighest` fill +
@@ -1578,8 +1563,8 @@ side, Android's own Material 3 ripple/shapes/components on the other:
     URL-copied confirmation — see `ArticleUrlCopier`'s own KDoc: reported via a real M3 `Snackbar`,
     from the shared copy handler on every route, below API 33 only, where the OS itself doesn't
     already show a clipboard-copy confirmation. The second is `HomeScreen`'s `ForegroundAlertSnackbar`,
-    which announces a warning/error the moment it is raised — the bell's badge alone only reaches a
-    user already looking at the pane hosting it, and these alerts are raised asynchronously by the
+    which announces a warning/error the moment it is raised — the notification center's footer row
+    (or the drawer button's badge) only reaches a user already looking at it, and these alerts are raised asynchronously by the
     startup tasks and the background worker with no OS notification behind them; see
     `docs/error-design.md`. OPML import/export results are not among them: they are shown inline in
     Settings ▸ Data on every route. Desktop has no snackbar at all, per this app's
@@ -1654,11 +1639,12 @@ side, Android's own Material 3 ripple/shapes/components on the other:
 - **Popup vs. Dialog**: non-modal, anchored info panels (no scrim, dismiss on
   outside click, positioned relative to the control that opened them) use
   `KeryxAnchoredPanel` (see above) — `NotificationCenterSheet`, opened from
-  whichever pane currently hosts the bell (see "Pane structure & tonal roles"
-  above), is the first example (a `Box` around the
-  `TooltipIconButton` holds local `showNotifications` state and anchors the
-  panel with `alignment = Alignment.TopEnd` + a small `anchorOffsetY`, desktop-only
-  positioning — see `KeryxAnchoredPanel`'s own KDoc). The tag
+  `NotificationCenterRow` at the bottom of the feed list (see "Pane structure &
+  tonal roles" above), is the first example (a `Box` around the row holds local
+  `showNotifications` state and anchors the panel with `alignment =
+  Alignment.BottomStart` + minus the row's measured height as `anchorOffsetY`, so
+  it opens above the row rather than off the bottom of the window — desktop-only
+  positioning, see `KeryxAnchoredPanel`'s own KDoc). The tag
   color picker is the second: `TagColorPickerPopup`
   (`ui/home/TagColorPicker.kt`), anchored to the tag row's own color dot, which
   is clickable at all times and independent of whether that row is being

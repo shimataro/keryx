@@ -26,6 +26,7 @@ import works.merc.keryx.app.resources.ic_error_outlined_material
 import works.merc.keryx.app.resources.ic_expand_more_material
 import works.merc.keryx.app.resources.ic_file_download_material
 import works.merc.keryx.app.resources.ic_file_upload_material
+import works.merc.keryx.app.resources.ic_filter_list_material
 import works.merc.keryx.app.resources.ic_folder_material
 import works.merc.keryx.app.resources.ic_info_material
 import works.merc.keryx.app.resources.ic_link_material
@@ -39,8 +40,6 @@ import works.merc.keryx.app.resources.ic_refresh_material
 import works.merc.keryx.app.resources.ic_search_material
 import works.merc.keryx.app.resources.ic_share_material
 import works.merc.keryx.app.resources.ic_smartphone_material
-import works.merc.keryx.app.resources.ic_sort_ascending_material
-import works.merc.keryx.app.resources.ic_sort_descending_material
 import works.merc.keryx.app.resources.ic_star_border_material
 import works.merc.keryx.app.resources.ic_star_material
 import works.merc.keryx.app.resources.ic_storage_material
@@ -79,6 +78,7 @@ actual object KeryxIcons {
     actual val ExpandMore: DrawableResource = Res.drawable.ic_expand_more_material
     actual val FileDownload: DrawableResource = Res.drawable.ic_file_download_material
     actual val FileUpload: DrawableResource = Res.drawable.ic_file_upload_material
+    actual val FilterList: DrawableResource = Res.drawable.ic_filter_list_material
     actual val Info: DrawableResource = Res.drawable.ic_info_material
     actual val Link: DrawableResource = Res.drawable.ic_link_material
     actual val LinkOff: DrawableResource = Res.drawable.ic_link_off_material
@@ -88,10 +88,6 @@ actual object KeryxIcons {
     actual val Refresh: DrawableResource = Res.drawable.ic_refresh_material
     actual val Search: DrawableResource = Res.drawable.ic_search_material
     actual val Share: DrawableResource = Res.drawable.ic_share_material
-    // Material Symbols ships no directional sort glyph, so these are local composites of the
-    // stock `sort` (bars only) plus `arrow_downward`/`arrow_upward`.
-    actual val SortAscending: DrawableResource = Res.drawable.ic_sort_ascending_material
-    actual val SortDescending: DrawableResource = Res.drawable.ic_sort_descending_material
     actual val Storage: DrawableResource = Res.drawable.ic_storage_material
     actual val ThisDevice: DrawableResource = Res.drawable.ic_smartphone_material
     actual val Tune: DrawableResource = Res.drawable.ic_tune_material

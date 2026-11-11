@@ -565,6 +565,7 @@ fun HomeScreen() {
                             onTextInputFocusChange = { feedListTextInput = it },
                             renameSelectedRequestId = feedListRenameRequestId,
                             deleteSelectedRequestId = feedListDeleteRequestId,
+                            notifVm = notifVm,
                         )
                         ResizableDivider(onDrag = { deltaPx ->
                             layoutVm.setFeedListPaneWidth(feedListPaneWidth + with(density) { deltaPx.toDp().value })
@@ -638,6 +639,8 @@ fun HomeScreen() {
                                         onTextInputFocusChange = { feedListTextInput = it },
                                         renameSelectedRequestId = feedListRenameRequestId,
                                         deleteSelectedRequestId = feedListDeleteRequestId,
+                                        notifVm = notifVm,
+                                        onNotificationNavigated = { scope.launch { drawerState.close() } },
                                         onSelectionAdvance = {
                                             // Also advances focusedPane, not just the drawer: at
                                             // PaneLayout.Dual, closing the drawer without this could
@@ -747,7 +750,7 @@ fun HomeScreen() {
     // other pane content — including the article reader's native WebView, which (like desktop's
     // heavyweight AWT WebView — see app-architecture.md's "Article Reader") always composites
     // above ordinary Compose content in the same window. A Popup instead renders through its own
-    // separate window-level layer, the same mechanism KeryxAnchoredPanel/NotificationsBell already
+    // separate window-level layer, the same mechanism KeryxAnchoredPanel/NotificationCenterRow already
     // rely on to draw above regular content, so the snackbar stays visible with an article open.
     if (snackbarHostState != null) {
         Popup(
@@ -781,7 +784,7 @@ fun HomeScreen() {
 
 /**
  * Resolves a notification's next action whose target lives on this screen — hosted at the screen
- * level, outside the bell popup which dismisses on focus loss. `ShowSettingsTab` is resolved by
+ * level, outside the notification panel, which dismisses on focus loss. `ShowSettingsTab` is resolved by
  * `App` instead (the settings dialog lives there).
  */
 @Composable
@@ -828,8 +831,8 @@ internal fun PendingNotificationActionHost(
 /**
  * Announces a warning/error in a Snackbar the moment it is raised, wherever the user happens to be.
  *
- * The bell's badge alone is a passive signal — it only reaches a user who is already looking at the
- * pane that hosts it, and these alerts are raised asynchronously by the startup tasks and the
+ * The notification center's footer row (and, at a narrow layout, the drawer button's badge) is a
+ * passive signal — it only reaches a user who is already looking at it, and these alerts are raised asynchronously by the startup tasks and the
  * background refresh worker, neither of which posts an OS notification (see `error-design.md`).
  * A Snackbar is Material 3's own answer for a non-blocking problem report, and this app's host for
  * it already renders through a `Popup`, so it stays visible above the article reader's WebView at
@@ -857,8 +860,8 @@ internal fun ForegroundAlertSnackbar(
         if (!windowFocused) return@LaunchedEffect
         notifVm.alertToSurface.filterNotNull().collectLatest { alert ->
             // collectLatest: a newer alert cancels whatever is showing and replaces it, matching
-            // Material 3's one-Snackbar-at-a-time rule. The replacement's markAlertsSurfaced()
-            // covers the cancelled one too, so nothing is left to re-announce itself later.
+            // Material 3's one-Snackbar-at-a-time rule. The replacement's markAlertsSurfaced(alert)
+            // covers the cancelled, older one too, so nothing is left to re-announce itself later.
             val act = notificationRowAction(
                 alert,
                 onRequestHostAction = { notifVm.requestAction(alert) },
@@ -872,7 +875,7 @@ internal fun ForegroundAlertSnackbar(
             )
             // After, not before: marking first would burn an alert whose Snackbar is cancelled a
             // moment later by a lost window focus, leaving it announced but never actually seen.
-            notifVm.markAlertsSurfaced()
+            notifVm.markAlertsSurfaced(alert)
             if (result == SnackbarResult.ActionPerformed) act?.invoke()
         }
     }

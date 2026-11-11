@@ -160,7 +160,7 @@ Any failed request below: output the error and end this URL (`Fetch failed: <rea
 **Line-comment fields** — kept for every line comment fetched here: `id`, `html_url`, `body`,
 `path`, `line` / `original_line` (ending line), `start_line` / `original_start_line` (starting
 line of a multi-line comment), `side` / `start_side` (`LEFT` or `RIGHT`), `diff_hunk`,
-`original_commit_id` and `commit_id`. The reviewed revision is `original_commit_id` (the commit
+`original_commit_id`, `commit_id` and `in_reply_to_id` (absent on a thread's first comment). The reviewed revision is `original_commit_id` (the commit
 the comment was left on), with `original_line` / `original_start_line` its position there — on
 the `RIGHT` side only: a `LEFT` line is a deleted line, which exists only on the diff's base side;
 GitHub moves `commit_id` and `line` / `start_line` along as the PR advances, so they give the
@@ -429,15 +429,51 @@ Directly after the detail block, output a suggested reply for the reviewer as a 
 Compose it from the Step 7 Reasoning as plain, polite prose for a public PR reply (no internal
 labels like "Confidence: Low"), opening with a brief nod to what the item pointed out. Write it
 in the language of the reviewer's own `body`; if that cannot be confidently identified, use
-English. For example:
+English.
+
+**Every suggested reply is paired with the URL it answers** — never output a reply block on its
+own. Put a `**Reply to**: <url>` line directly above the code block, where `<url>` is the item's
+Comment URL from 8.1 (if that fell back to `path`:`line`, show that instead; the pairing still
+holds):
+
+- **Thread-capable target** (`#discussion_r…`, a line-comment item) — the reply is posted in that
+  thread. If the item is the thread's first comment (no `in_reply_to_id`), the thread already
+  identifies what it answers, so the reply body does not repeat the URL. If the item is itself a
+  reply in the thread (`in_reply_to_id` set), GitHub threads are flat and cannot show which reply
+  it answers, so open the reply body with the target URL, using the same lead-in as below.
+- **Any other target** (`#pullrequestreview-…` for a review-body item, `#issuecomment-…`, and
+  anything else that is not `#discussion_r…`) — GitHub has no thread reply for it, so the reply
+  lands in the PR's conversation. Also open the reply body itself with the target URL, phrased in
+  the reply's language: `In reply to <url>:` in English, `<url> への返信です：` in Japanese, and an
+  equally natural lead-in for any other language.
+
+For example:
+
+````markdown
+**Reply to**: https://github.com/<owner>/<repo>/pull/<number>#discussion_r<id>
 
 ```markdown
 Thanks for the review. After checking, I've concluded no change is needed here because 〈reason〉.
 ```
+````
+
+````markdown
+**Reply to**: https://github.com/<owner>/<repo>/pull/<number>#discussion_r<id>
 
 ```markdown
 ご指摘ありがとうございます。確認した結果、〈理由〉のため、現状のコードに変更は不要と判断しました。
 ```
+````
+
+````markdown
+**Reply to**: https://github.com/<owner>/<repo>/pull/<number>#pullrequestreview-<id>
+
+```markdown
+In reply to https://github.com/<owner>/<repo>/pull/<number>#pullrequestreview-<id>:
+
+Thanks for the review. 〈Which part is being fixed, and why the rest is left as-is.〉
+```
+````
 
 #### 8.3 — Nothing to fix
 

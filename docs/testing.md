@@ -426,7 +426,7 @@ The unchanged-transfer skip (see "Skipping Unchanged Transfers" in [sync-archite
 
 Cloud-data corruption recovery needs a real cloud connection end to end, so confirm by hand, once per connected provider (Dropbox / OneDrive / Google Drive):
 
-- Replace the cloud `keryx.db.gz` with an arbitrary non-gzip file, then sync: the bell notification offers "同期データをリセット" (`ResetCloudData`). Running it leaves a `keryx-YYYYMMDD-HHMMSS.db.gz.bak` archive in the provider's app folder alongside a freshly re-created `keryx.db.gz` — the old file is not simply deleted.
+- Replace the cloud `keryx.db.gz` with an arbitrary non-gzip file, then sync: the notification center's entry offers "同期データをリセット" (`ResetCloudData`). Running it leaves a `keryx-YYYYMMDD-HHMMSS.db.gz.bak` archive in the provider's app folder alongside a freshly re-created `keryx.db.gz` — the old file is not simply deleted.
 - Download `keryx.db.gz`, decompress it, then relax its `feeds` table's `UNIQUE(url)` constraint (SQLite has no `ALTER TABLE ... DROP CONSTRAINT`; recreate the table without it and copy the existing rows across) so a duplicate `url` can actually be inserted, then add a `feeds` row whose `url` duplicates an existing one (only reachable this way — the app's own schema, and the app itself, never produce this), re-compress, re-upload, then sync: the same `ResetCloudData` notification appears — confirms constraint-violating cloud data is treated the same as outright corruption.
 - **Legacy fallback** (see "Compressed Upload / Legacy Fallback" in [sync-architecture.md](sync-architecture.md)): with a provider connected, manually delete `keryx.db.gz` from the app folder if present and upload a plain (uncompressed) `keryx.db` in its place (e.g. one downloaded from a fresh `createFresh` before this feature, or by decompressing a `.gz` by hand) — this simulates a cloud this device has never synced to since compression was added. Sync: the app must download and merge the plain file, then create a fresh `keryx.db.gz` (visible in the provider's activity log as a create, not an update) — while the plain `keryx.db` is left in the folder completely untouched. Sync again with nothing else changed: only the one metadata check for `keryx.db.gz` happens (no payload download or upload), confirming the plain file is never read again.
 - With the cloud DB still unusable, trigger several automatic syncs (toggle read/star repeatedly, or wait for the background interval) and confirm no further download happens (no network activity, no repeated/duplicate notification) until the data is reset — then confirm a manual "sync now" *does* still attempt a real sync (and fails again) even while automatic syncs are suppressed.
@@ -1096,7 +1096,7 @@ confirmation, on all three desktop platforms (build with `createDistributable`/`
 - **macOS**: launch `Keryx.app` once, then double-click an `.opml` file in Finder → Keryx activates,
   Settings opens on the Data tab with the import button's spinner, the result text appears there and
   the subscriptions appear; also confirm right-click → "Open With" → Keryx. Nothing is added to the
-  notification bell.
+  notification center.
 - **Windows**: launch the installed app once, then double-click an `.opml` file in Explorer.
 - **Linux**: launch the packaged app once (registers on startup), then confirm
   `xdg-mime query filetype some.opml` reports `application/x-opml+xml` and
@@ -1239,12 +1239,12 @@ device/emulator unless a step says otherwise:
   into a neighbouring, unopened article's body. Use the "next/previous article" custom actions to
   move between articles — the destination's title is announced.
 
-### (Android) The notification bell and the foreground alert Snackbar
+### (Android) The notification center row and the foreground alert Snackbar
 
-Where the bell is drawn is covered by `NotificationBellPlacementTest.kt` (it's always
-`ArticleListPane`'s own header now — see "Home's adaptive pane layout" in `app-architecture.md` for
-why the feed list, a modal drawer at every narrow layout, never has to host a second one), and the
-Snackbar's own policy by `ForegroundAlertSnackbarTest.kt` / `NotificationCenterViewModelTest.kt`.
+Where the notification center's entry point is drawn is covered by
+`NotificationCenterPlacementTest.kt`: a row in the feed list's footer, always shown, never in the
+article list, and at a narrow layout reached through the drawer, whose button carries the count as a
+badge (see "Notification Center" in `error-design.md`). The Snackbar's own policy by `ForegroundAlertSnackbarTest.kt` / `NotificationCenterViewModelTest.kt`.
 What no test can cover is that the Snackbar is actually *visible* where the platform draws it, and
 whether `LocalWindowInfo`'s focus flag behaves as assumed on a real device. Confirm on a phone-sized
 device/emulator:
@@ -1259,8 +1259,9 @@ device/emulator:
   nothing is announced then, and the Snackbar appears once it is closed. If it is instead announced
   and lost underneath, `LocalWindowInfo.isWindowFocused` does not go false for a Compose `Dialog`
   on this platform — record that as a known limitation rather than removing the gate.
-- Rotate to landscape (two panes) and try a tablet-width device (three panes): exactly one bell,
-  never two.
+- Rotate to landscape (two panes) and try a tablet-width device (three panes): exactly one
+  notification row — in the drawer at two panes, in the sidebar at three — or, with the drawer
+  closed, the drawer button's badge, showing the right count.
 - With cloud sync connected, the feed list toolbar's five icons fit without wrapping, including at
   the OS's largest display size.
 - At a phone width, in Settings ▸ Cloud sync with a provider connected: the provider name fits on

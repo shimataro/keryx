@@ -14,6 +14,19 @@ struct HomeView: View {
     let preferences: PreferencesObservable
 
     @FocusState private var focusedPane: HomeFocusedPane?
+    #if os(iOS)
+    @Environment(\.scenePhase) private var scenePhase
+    /// Alerts already spoken to VoiceOver — see `SpokenAlerts`.
+    @State private var spokenAlerts = SpokenAlerts()
+
+    /// Whether a newly raised warning/error may be announced in the alert toast now.
+    private var canAnnounceAlerts: Bool {
+        AlertToastAnnouncement.canAnnounce(
+            sceneActive: scenePhase == .active,
+            settingsSheetPresented: settingsNavigation.isSheetPresented
+        )
+    }
+    #endif
     #if os(macOS)
     @State private var feedListWidthSaveTask: Task<Void, Never>?
     @State private var articleListWidthSaveTask: Task<Void, Never>?
@@ -100,6 +113,7 @@ struct HomeView: View {
         NavigationSplitView(preferredCompactColumn: compactColumnBinding) {
             FeedListView(
                 home: home,
+                notifications: notifications,
                 dialogs: sidebarDialogs,
                 settingsNavigation: settingsNavigation,
                 focusedPane: $focusedPane,
@@ -121,7 +135,6 @@ struct HomeView: View {
         } content: {
             ArticleListView(
                 home: home,
-                notifications: notifications,
                 settingsNavigation: settingsNavigation,
                 dialogs: sidebarDialogs,
                 focusedPane: $focusedPane,
@@ -175,6 +188,12 @@ struct HomeView: View {
         .task {
             await home.startObserving()
         }
+        // Here, for Home's whole lifetime, rather than in the sidebar's notification row: the alert
+        // toast below reads the same notification center, and a compact width can show Home
+        // without the sidebar (and so without the row) on screen.
+        .task {
+            await notifications.startObserving()
+        }
         .task {
             await applyInitialFocus()
         }
@@ -193,7 +212,38 @@ struct HomeView: View {
         // The one place the URL-copy confirmation is drawn, over every column, so it shows whichever
         // route copied and whatever is on screen.
         .overlay(alignment: .bottom) {
-            TransientToast(state: home.copyToast, liftedAbovePill: home.newArticlesPillAtBottom)
+            // The alert toast above the copy toast, so both can show at once without replacing
+            // each other.
+            VStack(spacing: 0) {
+                TransientToast(
+                    state: home.alertToast,
+                    systemImage: "exclamationmark.triangle.fill",
+                    identifier: "alert-toast",
+                    liftedAbovePill: home.newArticlesPillAtBottom && home.copyToast.message == nil
+                )
+                TransientToast(state: home.copyToast, liftedAbovePill: home.newArticlesPillAtBottom)
+            }
+        }
+        // Announces each newly raised warning/error once (Android's foreground Snackbar
+        // counterpart): restarted whenever announcing becomes allowed or stops being allowed, so an
+        // alert that arrived in the background, or behind the Settings sheet, shows once Home is in
+        // front again. A toast cut short is shown again, but not spoken again (`SpokenAlerts`).
+        .task(id: canAnnounceAlerts) {
+            guard canAnnounceAlerts else { return }
+            for await alert in notifications.alerts.alertToSurface {
+                guard let alert else { continue }
+                let message = notificationText(alert.text)
+                // Spoken as the toast appears, not after it has stayed up.
+                if spokenAlerts.markSpoken(alert.alertKey()) {
+                    VoiceOverAnnouncement.post(message)
+                }
+                await AlertToastAnnouncement.announce(
+                    message,
+                    show: { home.alertToast.show($0) },
+                    markSurfaced: { notifications.alerts.markAlertsSurfaced(shown: alert) }
+                )
+                if Task.isCancelled { break }
+            }
         }
         // Mounted on every layout (the detail column is not, at a compact width until an article is
         // opened), so WebKit can start while the app is idle rather than on the first article.

@@ -11,8 +11,8 @@ import kotlin.test.assertTrue
 class KeyringTokenStorageTest {
     /**
      * With no OS secret store available, [KeyringTokenStorage.save] must route the token to the
-     * fallback *and* report that it did — that outcome is what makes `CloudSession` raise its bell
-     * warning. The keyring is injected as null rather than left to `Keyring.create()`: on a
+     * fallback *and* report that it did — that outcome is what makes `CloudSession` raise its
+     * notification-center warning. The keyring is injected as null rather than left to `Keyring.create()`: on a
      * developer machine that would open (and write to) the real login keyring.
      */
     @Test

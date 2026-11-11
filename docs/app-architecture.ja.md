@@ -184,10 +184,10 @@
     デスクトップの macOS ツールバー風カプセルの代わりの装飾なし `Row`、M3 自身の `PlainTooltip`）、
     KeryxRaisedSurface（デスクトップのヘアライン枠フラットカードの代わりに、明確に色調の異なる
     `colorScheme.surfaceContainerHigh` トーナルコンテナ）、KeryxBadgedIcon（デスクトップの
-    自作ピルの代わりに M3 自身の `BadgedBox`/`Badge` — `NotificationsBell` が使用）,
+    自作ピルの代わりに M3 自身の `BadgedBox`/`Badge` — ドロワーボタンの通知件数が使用）,
     KeryxSettingRow（行全体がタップ対象になる本物の M3 `ListItem` — `SettingsComponents.kt` の
     `LinkRow`/`ActionLinkRow`/`SwitchRow` を支える）, KeryxAnchoredPanel（本物の M3
-    `ModalBottomSheet` — `NotificationsBell` の通知ポップオーバーと `TagColorPickerPopup` を
+    `ModalBottomSheet` — `NotificationCenterRow` の通知パネルと `TagColorPickerPopup` を
     支える。単なる作法の一致ではなく必須の対応でもある — 素の `Popup` のままだと、デスクトップの
     ヘビーウェイト WebView が素の Compose オーバーレイの手前に来るのと同じ理由で、記事リーダーの
     `WebView` の背後に隠れてしまう。下記「Article Reader」参照）, KeryxPaneTopBar（本物の M3
@@ -439,8 +439,10 @@ drop テーブルとして渡している。
 ### アプリ内アップデート
 
 `domain/UpdateRepository` は上記の `SyncRepository` と同じ種類の、アプリのライフタイムを持つ
-Koin `single` のオーケストレーターであり、`StateFlow<UpdateState>` を UI 側の各面（Updates タブ、
-トレイ、ベル）が読む——設定ダイアログを閉じても進行中のダウンロードはキャンセルされない。これは
+Koin `single` のオーケストレーターであり、`StateFlow<UpdateState>` をアップデートの状態を表示する
+UI 側の各面（Updates タブ、トレイ）が読む——設定ダイアログを閉じても進行中のダウンロードはキャンセルされない。
+通知センターはこの状態を読まない。`UpdateRepository` が選んだ通知だけを `NotificationCenter` に投稿する
+（`background-update.ja.md` の「アプリ内アップデート」参照）。これは
 3 つのシームを組み合わせる: `domain/UpdateChecker`（候補選択とバージョン比較のポリシーのみ——
 GitHub Releases への HTTP リクエストと JSON パースは `data/remote/ReleaseFeedSource` に住み、
 `UpdateChecker` は自分のコンストラクタと同じ引数から内部でそれを組み立てる。依存として
@@ -594,6 +596,18 @@ Android（API 29 以降のみ——`setVerticalScrollbarThumbDrawable`／
 作ろうとし、その場所が書き込み不可の場合は Access Denied で失敗する（この生成失敗の例外が uncaught の
 まま伝播し、ライブラリの生成リトライタイマが止まらなくなることが、クリック時にアプリ全体がフリーズする
 原因でもあった）。
+
+**文書はビューの準備ができしだい読み込ませ、画面に出るまで確かめる。** `shouldLoadArticleHtml` は、
+ビューが `Initializing` を過ぎていれば `Finished` を待たずに新しい文書を読み込ませる。表示中の記事が自分で
+遷移を始め続けている間（スクリプトが `location` を設定する場合）はネイティブビューが読み込み中のままになり、
+`Finished` を待つ判定では次の文書をまったく読み込ませなかったため。こうした遷移は進行中の文書の読み込みも
+止めるが、ライブラリはそれを何も報告しない（読み込み中のフラグは立ったままで、URL はどちらも `about:blank`）。
+そこで `ArticleWebView` は各文書に、その読み込みごとに一意のマーカー（`readerDocumentMarker`。画面上の文書と
+衝突しうる HTML のハッシュではない）を入れた `<meta name="keryx-document">` を付け、
+読み込ませてから 1 秒ごとにページからその値を読み戻す。まだ画面に出ていない文書は、`:shared` の
+`READER_DOCUMENT_RELOAD_LIMIT` 回まで読み込ませ直す（`presentation/article/ReaderDocumentLoad.kt`。SwiftUI の
+リーダーも同じ規則に従う）。1 ミリ秒ごとに `location` を設定するスクリプトを含む記事でデスクトップ版を実測した
+ところ、素早い切り替え 150 回中、新しい選択の下に前の記事が残ったのは修正前 4 回、修正後 0 回だった。
 
 **Android がバックグラウンドでプロセスを終了させても、読んでいた位置は残る。** `ArticleWebView` は
 ネイティブビューの縦スクロール位置をスクロール可能な高さに対する割合として記録し
@@ -1687,6 +1701,10 @@ App Store ビルドへ渡ってはならない設定は、テンプレートに�
   既知の穴（closed な shadow root 内のアンカー）がある：known-issues.ja.md の
   「フィード本文のスクリプトが記事リーダー内で実行される」を参照。これでアプリがアプリ内ブラウザにならず、Apple の
   年齢制限の質問票で「無制限の Web アクセス」とみなされない。Compose のリーダーにはメインフレームの規則を適用しない。
+  WebKit は別の最上位の遷移が始まると（ゲートが拒否する遷移でも）進行中の文書の読み込みを止めるので、リーダーは
+  自分の読み込みをコミットまで追跡し、それまでに最上位の遷移を拒否したとき、または読み込みが失敗したときに、
+  文書 1 つにつき決まった回数まで文書を読み直す（`:shared` の `presentation/article/ReaderDocumentLoad.kt`）。
+  これがないと、一覧は新しい選択を示しているのに、前の記事が表示されたまま残っていた。
 - **SwiftUI のリーダーは WebKit のコンテンツプロセスが落ちたら文書を読み込み直す。** iOS はアプリが
   バックグラウンドにある間（リンクから開いた外部ブラウザが前面にある間など）に `WKWebView` の WebContent
   プロセスを終了させることがあり、そのままではリーダーが白紙になる。`ArticleWebView` の
@@ -1942,10 +1960,10 @@ iOS 27.1 シミュレーターで計測した結果と、そこから決めた�
 
 - **ツールバーの優先度。** 縦のバーは、項目が入りきらないと下から順に「…」に入れる。外側ディスプレイの横向き
   では、全既読が真っ先に「…」に入り、検索ボタンは押しつぶされて空の円になっていた。iOS 27 以降、記事一覧の
-  項目には `visibilityPriority` を付けている。通知ベル（バッジ付きの項目）と全既読（よく使う操作）は `.high`、
-  並び替えボタンと一覧モードのメニューは `.low` で、HIG が求める順序に従っている。横のバーはこの
-  優先度を無視する（横向きの内側ディスプレイで幅 360pt の記事一覧の列では、並び替えと全既読が変わらず「…」に
-  入る）ので、効くのは縦のバーだけである。iOS 26 以前では、項目は従来どおり 2 つのグループのまま。
+  項目には `visibilityPriority` を付けている。全既読（よく使う操作）は `.high`、一覧モードのメニュー
+  （表示順もここに含む）は `.low` で、HIG が求める順序に従っている。横のバーはこの
+  優先度を無視する（並び替えボタンがあった頃の計測では、横向きの内側ディスプレイで幅 360pt の記事一覧の列で
+  並び替えと全既読が「…」に入っていた）ので、効くのは縦のバーだけである。iOS 26 以前では、項目は従来どおり 2 つのグループのまま。
   `visibilityPriority` は iOS 27 SDK にしかないため、この分岐は `#if compiler(>=6.4)`（Xcode 27）でだけ
   コンパイルされる。Xcode 26.6 に固定したリリースのビルドでは、iOS 27 上でも 2 つのグループのままになる。
 - **外側ディスプレイの一覧の上にある空白の帯**（82pt。ナビゲーションタイトルを持たない記事詳細の上は 24pt）は、

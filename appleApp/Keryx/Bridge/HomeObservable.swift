@@ -183,6 +183,9 @@ final class HomeObservable: ObservableAssignment {
     /// and the reader's ✓ is often off screen (a long-pressed row is not selected, and at iPhone width
     /// the reader is not shown) — that is every copy, as Android below API 33 does with its snackbar.
     let copyToast: TransientToastState
+    /// The iOS toast that announces a newly raised warning/error (`AlertToastAnnouncement`), drawn
+    /// by `HomeView` alongside `copyToast` so neither replaces the other.
+    let alertToast = TransientToastState(duration: AlertToastAnnouncement.duration)
     /// The toolbar status area's refresh status — "checking", then the result — for the refreshes the
     /// user started, fed from `manualRefreshStatus` (`HeldRefreshStatus`). iOS only — macOS keeps its
     /// spinning Refresh button.

@@ -58,7 +58,7 @@ class ForegroundAlertSnackbarTest {
     }
 
     @Test
-    fun anInfoNotificationIsLeftToTheBellsBadge() = runDesktopComposeUiTest {
+    fun anInfoNotificationIsLeftToTheNotificationCenter() = runDesktopComposeUiTest {
         // A new-version notice or a finished OPML import is not an alert.
         val center = NotificationCenter()
         val vm = NotificationCenterViewModel(center, NotificationAlerts(center))
@@ -95,7 +95,7 @@ class ForegroundAlertSnackbarTest {
 
     @Test
     fun onlyTheNewestOfSeveralSimultaneousAlertsIsAnnounced() = runDesktopComposeUiTest {
-        // Material 3 shows one Snackbar at a time, and the bell's badge already carries the count.
+        // Material 3 shows one Snackbar at a time, and the notification center's row already carries the count.
         val center = NotificationCenter()
         val vm = NotificationCenterViewModel(center, NotificationAlerts(center))
         val hostState = SnackbarHostState()

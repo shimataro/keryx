@@ -17,10 +17,10 @@ import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
-import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
@@ -37,9 +37,9 @@ import androidx.compose.ui.unit.dp
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.data.local.db.Articles
 import works.merc.keryx.app.platform.NativeCheckMenuItem
+import works.merc.keryx.app.platform.NativeMenuSeparator
 import works.merc.keryx.app.platform.NativeMenuShortcut
 import works.merc.keryx.app.presentation.home.ArticleListMode
-import works.merc.keryx.app.ui.common.KeryxIcons
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -54,7 +54,6 @@ import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -78,7 +77,7 @@ class ArticleListPaneTest {
             selectedId = null,
             listMode = ArticleListMode.All,
             onSelectListMode = {},
-            onToggleSort = {},
+            onSetNewestFirst = {},
             onMarkAllRead = {},
             onSelectArticle = {},
             modifier = Modifier.size(360.dp, 600.dp),
@@ -137,7 +136,7 @@ class ArticleListPaneTest {
             selectedId = null,
             listMode = ArticleListMode.All,
             onSelectListMode = {},
-            onToggleSort = {},
+            onSetNewestFirst = {},
             onMarkAllRead = {},
             onSelectArticle = {},
             modifier = Modifier.size(360.dp, 600.dp),
@@ -283,7 +282,7 @@ class ArticleListPaneTest {
                 revealRequest = revealRequest,
                 listMode = ArticleListMode.All,
                 onSelectListMode = {},
-                onToggleSort = {},
+                onSetNewestFirst = {},
                 onMarkAllRead = {},
                 onSelectArticle = {},
                 modifier = Modifier.size(360.dp, 400.dp),
@@ -323,7 +322,7 @@ class ArticleListPaneTest {
                 revealRequest = revealRequest,
                 listMode = ArticleListMode.All,
                 onSelectListMode = {},
-                onToggleSort = {},
+                onSetNewestFirst = {},
                 onMarkAllRead = {},
                 onSelectArticle = {},
                 modifier = Modifier.size(360.dp, 400.dp),
@@ -364,7 +363,7 @@ class ArticleListPaneTest {
                 selectedId = items[22].id,
                 listMode = ArticleListMode.All,
                 onSelectListMode = {},
-                onToggleSort = {},
+                onSetNewestFirst = {},
                 onMarkAllRead = {},
                 onSelectArticle = {},
                 modifier = Modifier.size(360.dp, 400.dp),
@@ -392,7 +391,7 @@ class ArticleListPaneTest {
                 selectedId = selected?.id,
                 listMode = ArticleListMode.All,
                 onSelectListMode = {},
-                onToggleSort = {},
+                onSetNewestFirst = {},
                 onMarkAllRead = {},
                 onSelectArticle = {},
                 modifier = Modifier.size(360.dp, 400.dp),
@@ -429,7 +428,7 @@ class ArticleListPaneTest {
                 selectedId = null,
                 listMode = ArticleListMode.All,
                 onSelectListMode = {},
-                onToggleSort = {},
+                onSetNewestFirst = {},
                 onMarkAllRead = {},
                 onSelectArticle = {},
                 modifier = Modifier.size(360.dp, 400.dp),
@@ -460,7 +459,7 @@ class ArticleListPaneTest {
                 revealRequest = revealRequest,
                 listMode = ArticleListMode.All,
                 onSelectListMode = {},
-                onToggleSort = {},
+                onSetNewestFirst = {},
                 onMarkAllRead = {},
                 onSelectArticle = {},
                 modifier = Modifier.size(360.dp, containerHeight),
@@ -508,7 +507,7 @@ class ArticleListPaneTest {
                 selectedId = null,
                 listMode = ArticleListMode.All,
                 onSelectListMode = {},
-                onToggleSort = {},
+                onSetNewestFirst = {},
                 onMarkAllRead = {},
                 onSelectArticle = { selectCount++ },
                 onActivated = { activateCount++ },
@@ -535,7 +534,7 @@ class ArticleListPaneTest {
                 selectedId = null,
                 listMode = ArticleListMode.All,
                 onSelectListMode = {},
-                onToggleSort = {},
+                onSetNewestFirst = {},
                 onMarkAllRead = {},
                 onSelectArticle = {},
                 modifier = Modifier.size(360.dp, 400.dp),
@@ -562,7 +561,7 @@ class ArticleListPaneTest {
                 selectedId = null,
                 listMode = ArticleListMode.All,
                 onSelectListMode = {},
-                onToggleSort = {},
+                onSetNewestFirst = {},
                 onMarkAllRead = {},
                 onSelectArticle = {},
                 modifier = Modifier.size(360.dp, 400.dp),
@@ -585,7 +584,7 @@ class ArticleListPaneTest {
                 selectedId = null,
                 listMode = ArticleListMode.All,
                 onSelectListMode = {},
-                onToggleSort = {},
+                onSetNewestFirst = {},
                 onMarkAllRead = {},
                 onSelectArticle = {},
                 modifier = Modifier.size(360.dp, 400.dp),
@@ -614,7 +613,7 @@ class ArticleListPaneTest {
                 selectedId = null,
                 listMode = ArticleListMode.All,
                 onSelectListMode = {},
-                onToggleSort = {},
+                onSetNewestFirst = {},
                 onMarkAllRead = {},
                 onSelectArticle = { selectCount++ },
                 onActivated = { activateCount++ },
@@ -661,51 +660,60 @@ class ArticleListPaneTest {
     }
 
     @Test
-    fun articleListTopBarSortButtonDisabledInSearchModeDoesNotInvokeCallback() = runDesktopComposeUiTest {
-        var toggleSortCount = 0
-
+    fun drawerButtonShowsTheNotificationCountAsABadge() = runDesktopComposeUiTest {
         setContent {
             ArticleListTopBar(
                 listMode = ArticleListMode.All,
                 onSelectListMode = {},
                 newestFirst = true,
-                onToggleSort = { toggleSortCount++ },
+                onSetNewestFirst = {},
                 onMarkAllRead = {},
-                sortEnabled = false,
+                notificationCount = 2,
+                onOpenDrawer = {},
             )
         }
         waitForIdle()
 
-        // sortEnabled=false uses the "disabled while searching" tooltip text as its contentDescription.
-        onNodeWithContentDescription("検索中は並び替えできません").assertIsNotEnabled()
-        onNodeWithContentDescription("検索中は並び替えできません").performClick()
-        waitForIdle()
-
-        assertEquals(0, toggleSortCount)
+        // The count is read with the button's name, not as a bare number after it.
+        onNodeWithContentDescription("フィード一覧を開く（通知 2 件）").assertExists()
+        onAllNodesWithText("2").assertCountEquals(0)
     }
 
     @Test
-    fun articleListTopBarSortButtonEnabledInNormalModeInvokesCallback() = runDesktopComposeUiTest {
-        var toggleSortCount = 0
-
+    fun drawerButtonShowsNoBadgeWithoutNotifications() = runDesktopComposeUiTest {
         setContent {
             ArticleListTopBar(
                 listMode = ArticleListMode.All,
                 onSelectListMode = {},
                 newestFirst = true,
-                onToggleSort = { toggleSortCount++ },
+                onSetNewestFirst = {},
                 onMarkAllRead = {},
-                sortEnabled = true,
+                notificationCount = 0,
+                onOpenDrawer = {},
             )
         }
         waitForIdle()
 
-        // sortEnabled=true + newestFirst=true shows the "switch to oldest first" tooltip.
-        onNodeWithContentDescription("古い順").assertIsEnabled()
-        onNodeWithContentDescription("古い順").performClick()
+        onNodeWithContentDescription("フィード一覧を開く").assertExists()
+        onNodeWithText("0").assertDoesNotExist()
+    }
+
+    @Test
+    fun articleListTopBarHasNoSortButton() = runDesktopComposeUiTest {
+        // The sort order lives in the mode chip's menu (sortOrderMenuEntries), not on the toolbar.
+        setContent {
+            ArticleListTopBar(
+                listMode = ArticleListMode.All,
+                onSelectListMode = {},
+                newestFirst = true,
+                onSetNewestFirst = {},
+                onMarkAllRead = {},
+            )
+        }
         waitForIdle()
 
-        assertEquals(1, toggleSortCount)
+        onNodeWithContentDescription("古い順").assertDoesNotExist()
+        onNodeWithContentDescription("新しい順").assertDoesNotExist()
     }
 
     @Test
@@ -716,31 +724,13 @@ class ArticleListPaneTest {
                 listMode = ArticleListMode.Unread,
                 onSelectListMode = {},
                 newestFirst = true,
-                onToggleSort = {},
+                onSetNewestFirst = {},
                 onMarkAllRead = {},
             )
         }
         waitForIdle()
 
         onNodeWithContentDescription("既読記事を非表示").assertDoesNotExist()
-    }
-
-    @Test
-    fun sortDirectionIconDistinguishesTheTwoDirections() {
-        // The regression this guards: both directions used to share one asset, flipped vertically at
-        // the call site, which reads as a direction only on an icon set whose sort glyph has an arrow.
-        assertNotEquals(
-            sortDirectionIcon(newestFirst = true),
-            sortDirectionIcon(newestFirst = false),
-        )
-    }
-
-    @Test
-    fun sortDirectionIconStaysDirectionalWhileDisabled() {
-        // The disabled search scope must show the same directional glyph as the enabled state — only
-        // TooltipIconButton's own dimmed styling should convey "disabled", not a different glyph.
-        assertEquals(KeryxIcons.SortDescending, sortDirectionIcon(newestFirst = true))
-        assertEquals(KeryxIcons.SortAscending, sortDirectionIcon(newestFirst = false))
     }
 
     @Test
@@ -751,7 +741,7 @@ class ArticleListPaneTest {
                 listMode = mode,
                 onSelectListMode = {},
                 newestFirst = true,
-                onToggleSort = {},
+                onSetNewestFirst = {},
                 onMarkAllRead = {},
             )
         }
@@ -788,6 +778,35 @@ class ArticleListPaneTest {
     }
 
     @Test
+    fun sortOrderMenuEntriesFollowASeparatorAndCheckTheCurrentOrder() {
+        val labels = SortOrderLabels(newestFirst = "Newest", oldestFirst = "Oldest")
+        val chosen = mutableListOf<Boolean>()
+
+        val entries = sortOrderMenuEntries(newestFirst = false, enabled = true, labels) { chosen += it }
+
+        assertEquals(NativeMenuSeparator, entries.first())
+        val items = entries.drop(1).map { it as NativeCheckMenuItem }
+        assertEquals(listOf("Newest", "Oldest"), items.map { it.label })
+        assertEquals(listOf(false, true), items.map { it.checked })
+        assertTrue(items.all { it.enabled })
+        items[0].onClick()
+        items[1].onClick()
+        assertEquals(listOf(true, false), chosen)
+    }
+
+    @Test
+    fun sortOrderMenuEntriesAreDisabledButStillCheckedDuringSearch() {
+        val labels = SortOrderLabels(newestFirst = "Newest", oldestFirst = "Oldest")
+
+        val items = sortOrderMenuEntries(newestFirst = true, enabled = false, labels) {}
+            .drop(1).map { it as NativeCheckMenuItem }
+
+        assertTrue(items.none { it.enabled })
+        // The current order stays checked while it cannot be changed (search keeps FTS rank order).
+        assertEquals(listOf(true, false), items.map { it.checked })
+    }
+
+    @Test
     fun anEmptyStarredModeListOffersToShowAllArticles() = runDesktopComposeUiTest {
         var showAllCount = 0
         setContent {
@@ -797,7 +816,7 @@ class ArticleListPaneTest {
                 selectedId = null,
                 listMode = ArticleListMode.Starred,
                 onSelectListMode = {},
-                onToggleSort = {},
+                onSetNewestFirst = {},
                 onMarkAllRead = {},
                 onSelectArticle = {},
                 onShowAllArticles = { showAllCount++ },
@@ -824,7 +843,7 @@ class ArticleListPaneTest {
                 listMode = ArticleListMode.All,
                 onSelectListMode = {},
                 newestFirst = true,
-                onToggleSort = {},
+                onSetNewestFirst = {},
                 onMarkAllRead = {},
             )
         }
@@ -938,7 +957,7 @@ class ArticleListPaneTest {
                 listMode = ArticleListMode.All,
                 onSelectListMode = {},
                 newestFirst = true,
-                onToggleSort = {},
+                onSetNewestFirst = {},
                 onMarkAllRead = {},
                 onOpenDrawer = {},
                 onSearchClick = { clicked = true },
@@ -958,7 +977,7 @@ class ArticleListPaneTest {
                 listMode = ArticleListMode.All,
                 onSelectListMode = {},
                 newestFirst = true,
-                onToggleSort = {},
+                onSetNewestFirst = {},
                 onMarkAllRead = {},
                 onOpenDrawer = {},
             )
@@ -977,7 +996,7 @@ class ArticleListPaneTest {
                 listMode = ArticleListMode.All,
                 onSelectListMode = {},
                 newestFirst = true,
-                onToggleSort = {},
+                onSetNewestFirst = {},
                 onMarkAllRead = {},
                 onSearchClick = {},
             )

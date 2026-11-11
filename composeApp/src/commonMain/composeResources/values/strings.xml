@@ -116,15 +116,19 @@
     <string name="home_no_feeds">No feeds yet</string>
     <string name="home_no_articles">No articles</string>
     <string name="home_open_feed_list">Open feed list</string>
+    <plurals name="home_open_feed_list_with_notifications">
+        <item quantity="one">Open feed list, %1$d notification</item>
+        <item quantity="other">Open feed list, %1$d notifications</item>
+    </plurals>
     <string name="home_list_mode">Articles to show</string>
     <string name="home_list_mode_all">All</string>
     <string name="home_list_mode_unread">Unread</string>
     <string name="home_list_mode_starred">Starred</string>
     <string name="home_no_starred_articles">No starred articles here</string>
     <string name="home_show_all_articles">Show all articles</string>
+    <string name="home_sort_section">Sort Order</string>
     <string name="home_sort_newest">Newest first</string>
     <string name="home_sort_oldest">Oldest first</string>
-    <string name="home_sort_disabled_search">Sorting is unavailable during search</string>
     <string name="home_already_subscribed">You’re already subscribed to this feed</string>
     <string name="home_sync">Sync</string>
     <string name="home_syncing">Syncing…</string>

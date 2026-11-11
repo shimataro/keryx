@@ -33,6 +33,14 @@
 - Apple SDK の検索インデックスの準備（`KeryxSdk.start` の `createTable()` と `prepareSearchIndex()`）。
   失敗しても、次の起動か更新がテーブルを作り直して補完するまで、検索に欠ける行が出るだけである。
   `start` から伝播させると、「データベースが新しすぎる」画面として表示されてしまう。
+- 選択した記事の本文の読み込み（`HomeViewModel.applyHydratedSelection`）。失敗したとき（読み込みの接続が
+  `busy_timeout` を待ち切った場合など）は、選択した記事の見出しを本文なしで表示する（`ReaderContent.Header`）。
+  記事一覧・ツールバー・リーダーはすべてその記事のままで、選び直せば読み込みを再試行する。伝播させると、
+  Android と Apple ではアプリが終了し、デスクトップでは新しい選択の下に前の記事がリーダーに残ってしまう。
+- 起動時の、前回選択していた記事の復元（`HomeViewModel` の `init`）。失敗したときは、何も保存されていなかった
+  ものとして記事を復元しない。本文の読み込みに失敗した選択も次の起動のために保存されるので、毎回失敗する読み込み
+  （Android の `CursorWindow` に収まらない大きな行など）だと、伝播させれば起動のたびに ViewModel の生成が例外で
+  失敗し、Home が開かなくなってしまう。
 
 これ以外の DB アクセスは従来どおり例外を伝播させる。新しい best-effort のアクセスは、理由とともにこの一覧に追加する。
 （ユーザーが始めた操作——OPML の import や export——が失敗した場合は、この例外に当たらない。握りつぶさず、その操作の
@@ -170,12 +178,18 @@ SwiftUI アプリは String Catalog で。唯一の例外は新着記事の OS �
   アプリを見ているユーザーには新着が届く様子が既に見えており、頼んでいない更新のために割り込む価値は
   ないため（[external-spec.ja.md](external-spec.ja.md) §9 の「更新のフィードバック」を参照）。いずれの場合も
   共有ゲート `NewArticleNotifier.notifyIfEnabled`（新着件数 > 0 かつ `notificationEnabled` 設定）を経由する。
-- ベルアイコンにバッジ（件数）。ベルは幅を問わず（デスクトップの3ペイン定常状態を含む）
-  `ArticleListPane` のヘッダ行にある（正確な規則は `ui-guidelines` スキルを参照）。`ArticleDetailPane` には意図的に置かない。
+- **入口は、フィード一覧の下端の行で、常に表示する。** 行には通知センターの名前と、通知があるときは
+  件数を表示する。0 件のときは件数を出さず、開くと「通知はありません」と表示する。行を押すと、行の上に
+  一覧を開く。Android ではボトムシート、iPhone の狭い幅ではシートになる。行の実装は、Compose が
+  `ui/home/NotificationCenterRow.kt`、SwiftUI が `NotificationCenterRow.swift` にある。履歴はほとんどの
+  時間空なので、ツールバーの枠は使わない。また、出たり消えたりせず同じ場所にあるので、上のフィード一覧の
+  高さも変わらない。フィード一覧がドロワーになる幅（Compose の狭い幅）では、ドロワーを開くボタンに件数を
+  バッジで表示する。記事一覧と `ArticleDetailPane` には入口を置かない。正確な規則は `ui-guidelines`
+  スキルを参照。
 - バックグラウンド更新中の警告は UI コンテキストが無いため通知センターにのみ記録し、
   **OS 通知には出さない**（OS 通知は新着記事専用。上記参照）。そのため Android では
   `ForegroundAlertSnackbar`（`ui/home/HomeScreen.kt`）が、`WARNING`/`ERROR` の発生時点で
-  Snackbar によっても通知する: バッジだけでは「ベルのあるペインを既に見ているユーザー」にしか
+  Snackbar によっても通知する: 下端の行（またはドロワーボタンのバッジ）だけでは「それを既に見ているユーザー」にしか
   届かず、これらのアラートは `runAndroidStartupTasks` や `FeedRefreshWorker` が非同期に積むため。
   `INFO` は対象外（新バージョン通知はアラートではない）。詳細:
   - 提示済みの判定は `core/AppNotification.kt` の `AlertKey`（レベル + テキスト + アクション）を
@@ -186,10 +200,22 @@ SwiftUI アプリは String Catalog で。唯一の例外は新着記事の OS �
     アプリがバックグラウンドにある間、通知シェードが下りている間、設定ダイアログ（独立ウィンドウ）が
     開いている間はアラートを保留する — 誰も見ていないウィンドウに出しても、Snackbar が見られないまま
     タイムアウトして消費されてしまうため。フォーカスが戻った時点で提示する。
-  - Snackbar のアクションは、その通知自身のネクストアクション（下表）を実行する。ベルの行と同じ
+  - Snackbar のアクションは、その通知自身のネクストアクション（下表）を実行する。通知センターの行と同じ
     `notificationRowAction` を通る。`ResetCloudData` は専用の確認を経る必要があるためアクションなしで通知する。
   - 同時に複数届いた場合は最新の 1 件のみを通知する（Material 3 は同時に 1 件）。件数はバッジが伝える。
-- **ベルに残るすべての通知はネクストアクションを持つ**（`AppNotificationAction`）。行をクリックすると
+- **iOS / iPadOS では、同じアラートを一時的なトーストで知らせる。** 入口のあるサイドバーは、iPhone では最初の
+  画面にしか表示されず、iPad では隠せるため、新しく発生した `WARNING`/`ERROR` を画面下部のトーストで
+  約 4 秒表示し（「URL をコピーしました」のトーストと同時なら、その上に表示）、VoiceOver で 1 回読み上げる。
+  Android の Snackbar と同じ共有の `presentation/home/NotificationAlerts` を使うので、繰り返し起きるアラートは
+  どちらでも 1 回しか知らせない。Snackbar と同じく、見えない間（シーンがアクティブでない、設定シートが Home を
+  覆っている）は待ち、表示しきってから提示済みにする（`AlertToastAnnouncement.swift`）。Snackbar と違い、表示中に
+  届いた新しいアラートは表示中のものを置き換えず、その次に表示する。`NotificationAlerts.markAlertsSurfaced(shown)` は
+  表示したものとそれより古いものだけを提示済みにし、新しいものは残すため。ただし、表示を待っている間や別の
+  トーストの表示中に複数届いた場合は、Snackbar と同じく最新の 1 件だけを表示する。`markAlertsSurfaced(shown)` が
+  それより古いものも一緒に提示済みにするためで、件数は通知センターの行が伝える。トーストは押せない。
+  次の手順は文言自体と通知センターの行が担う。macOS ではトーストを出さない（行のあるサイドバーが常に表示されて
+  いるため）。
+- **通知センターに残るすべての通知はネクストアクションを持つ**（`AppNotificationAction`）。行をクリックすると
   そのアクションが実行され、`ResetCloudData` だけは破壊的操作のため行クリックではなく専用の
   インライン確認ボタンを持つ。クリック可能な行は、設定画面の `LinkRow` と同じ見た目
   （primary 色 + hover 時に下線）でそれを示す。
@@ -221,7 +247,7 @@ Repository は通知の `text` をデータ（`NotificationText.FeedGone(title)`
 | `CloudAuthException` / `SchemaVersionException` | ❌ | ✅ |
 | `CloudDataIncompatibleException`（破損/非互換なクラウドDB／制約違反データ） | ❌（リセットまたは手動同期の成功まで**自動**同期そのものが抑制される — `SyncTrigger.AUTOMATIC` ゲート。[sync-architecture.ja.md](sync-architecture.ja.md)「自動同期の抑制」参照） | ✅ |
 | `FeedNotFoundException(isGone=true)` | ❌ | ✅ |
-| `UpdateException`（チェック/ダウンロード/検証/インストールの失敗） | ❌（ユーザーが Updates 設定タブの「再試行」、またはトレイ／Help メニューのアップデート項目（Updates タブを開く）を押した時のみ再試行） | ❌（代わりに Updates タブ（とトレイ／Help メニュー項目のラベル）で提示する——[background-update.ja.md](background-update.ja.md) の「アプリ内アップデート」参照。ベルに届くのは「更新があります」/「インストール準備完了」という情報通知のみで、上記の `ShowSettingsTab`/`OpenUrl` 経由） |
+| `UpdateException`（チェック/ダウンロード/検証/インストールの失敗） | ❌（ユーザーが Updates 設定タブの「再試行」、またはトレイ／Help メニューのアップデート項目（Updates タブを開く）を押した時のみ再試行） | ❌（代わりに Updates タブ（とトレイ／Help メニュー項目のラベル）で提示する——[background-update.ja.md](background-update.ja.md) の「アプリ内アップデート」参照。通知センターに届くのは「更新があります」/「インストール準備完了」という情報通知のみで、上記の `ShowSettingsTab`/`OpenUrl` 経由） |
 
 \* `FeedFetcher` が自動リトライするのは実際のタイムアウト時のみで、`FEED_TIMEOUT_RETRY_COUNT` 回まで追加試行する。
 タイムアウト以外の `FeedFetchException`（5xx ステータス等）は同一フェッチ内では再試行しない。
@@ -230,7 +256,7 @@ Repository は通知の `text` をデータ（`NotificationText.FeedGone(title)`
 エラー（`CloudStorageException` を含む）は即座に return する。ここでの「自動リトライ」はループ内の再試行では
 なく、次回のスケジュール済み同期試行を指す。
 
-\*\*\* 失敗したフィードごとに 1 件ずつ入るわけではない（失敗中のフィードはフィード一覧で示す）。ベルに入るのは、
+\*\*\* 失敗したフィードごとに 1 件ずつ入るわけではない（失敗中のフィードはフィード一覧で示す）。通知センターに入るのは、
 1 回の更新で対象のどのフィードにも接続できなかったときの `NotificationText.RefreshFailed` の警告 1 件だけで（上記の
 「次のアクション」の表を参照）、同じ内容はまとめられる。いずれかのフィードが応答した更新（成功でもエラーでも）では
 何も追加しない。

@@ -31,7 +31,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.Clock
+import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.READER_HEADER_FIRST_GRACE_MS
+import works.merc.keryx.app.core.runCatchingUnlessCancelled
 import works.merc.keryx.app.core.SEARCH_DEBOUNCE_MS
 import works.merc.keryx.app.core.searchTerms
 import works.merc.keryx.app.core.decodeArticleFilter
@@ -68,6 +70,8 @@ import works.merc.keryx.app.presentation.sameListOrBothEmpty
  * a refresh's per-feed commits.
  */
 internal const val SEARCH_ARTICLE_CHANGE_DEBOUNCE_MS = 100L
+
+private const val TAG = "HomeViewModel"
 
 /**
  * Debounced FTS results tagged with the query/filter that produced them (see
@@ -904,8 +908,17 @@ class HomeViewModel(
         // A tombstone can land while the app is closed, so the restored row is filtered the same way
         // selectArticle filters a concurrently-deleted one — otherwise the next launch would select
         // and pin deleted content.
+        //
+        // Best effort (docs/error-design.md): a failing lookup restores nothing. A selection whose body
+        // lookup failed is persisted too (see applyHydratedSelection), so a lookup that fails every time
+        // would otherwise throw out of this constructor on every launch and Home would never open.
         val restoredArticle = settingsRepository.getLocalSettings().lastArticleId
-            ?.let { articleRepository.getArticleById(it) }
+            ?.let { id ->
+                runCatchingUnlessCancelled { articleRepository.getArticleById(id) }.getOrElse { e ->
+                    Log.warn(TAG, "Restoring the last selected article failed", e)
+                    null
+                }
+            }
             ?.takeIf { it.deleted_at == null }
         if (restoredArticle != null) {
             if (restoredArticle.is_read == 1L) {
@@ -1121,7 +1134,24 @@ class HomeViewModel(
         // thread: this pulls the whole row including `content`, and the JVM driver opens a fresh
         // connection per statement, so under a sync merge's or refresh's write lock it can wait out
         // the whole busy_timeout. Held arrow keys would do that ~30 times a second.
-        val full = withContext(dispatcher) { articleRepository.getArticleById(article.id) }
+        //
+        // Best effort (docs/error-design.md): a lookup that fails — its connection waited out the whole
+        // busy_timeout, say — shows this selection's header instead of the body, so the list, the toolbar
+        // and the reader all stay on it and choosing it again tries again. Propagated, it would end the
+        // app on Android and Apple, and leave the previous article in the reader on desktop.
+        val full = runCatchingUnlessCancelled {
+            withContext(dispatcher) { articleRepository.getArticleById(article.id) }
+        }.getOrElse { e ->
+            Log.warn(TAG, "Loading the selected article's body failed", e)
+            if (token == latestSelectionToken && selectionCursorId == article.id) {
+                _headerArticleId.value = article.id
+                // It is still the selection on screen, so it is the one the next launch restores. Whether
+                // it was tombstoned is unknown here, but the launch-time restore filters tombstones itself,
+                // and restores nothing if its own lookup of this article fails again.
+                settingsRepository.mutateLocalSettings { it.copy(lastArticleId = article.id) }
+            }
+            return
+        }
         // A null (or tombstoned) row means a sync merge deleted it between the emission the user
         // clicked and the click itself: leave the selection and the persisted id entirely alone, and
         // take back the pin selectArticle added, rather than resurrecting deleted content into the
@@ -1682,11 +1712,20 @@ class HomeViewModel(
     }
 
     /**
-     * Toggles between newest-first and oldest-first article ordering.
+     * Toggles between newest-first and oldest-first article ordering (the View menu's route).
      */
     fun toggleSort() {
-        _newestFirst.value = !_newestFirst.value
-        settingsRepository.mutateLocalSettings { it.copy(lastNewestFirst = _newestFirst.value) }
+        setNewestFirst(!_newestFirst.value)
+    }
+
+    /**
+     * Sets the article ordering explicitly (the list mode menu's check items) and saves it for the
+     * next launch. Choosing the order already in effect changes nothing and writes nothing.
+     */
+    fun setNewestFirst(newestFirst: Boolean) {
+        if (_newestFirst.value == newestFirst) return
+        _newestFirst.value = newestFirst
+        settingsRepository.mutateLocalSettings { it.copy(lastNewestFirst = newestFirst) }
     }
 
     // --- Search controls ---

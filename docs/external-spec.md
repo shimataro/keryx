@@ -91,7 +91,7 @@ data exists in the cloud it is automatically merged (imported) during the initia
 - Feed health management: 301/308 auto-updates the subscription URL (notification), 410 Gone shows a warning in the notification center, consecutive errors show an indicator in the feed list
 - In-app update on Windows, Linux, and Android (download and install, not just a link to the release
   page), and through Sparkle in the macOS build from GitHub Releases; the Mac App Store build has no
-  update controls, since the App Store updates it. Updates are surfaced via the notification-center bell, desktop
+  update controls, since the App Store updates it. Updates are surfaced via the notification center, desktop
   task tray, and application menu; clicking any of those routes opens Settings ▸ Updates. Every
   download and install is an explicit user action; downloaded files are verified against the GitHub
   release's SHA-256 digest (EdDSA signature on macOS) before installation. Install forms the app
@@ -107,7 +107,14 @@ data exists in the cloud it is automatically merged (imported) during the initia
   lasts for the session only; while the subscription list's own Starred item is selected it is shown
   checked and disabled. **All / Unread** are saved and restored at the next launch. See
   [app-architecture.md](app-architecture.md) for the details.
-- **Unread mode deliberately does not hide an article the instant it becomes read** (so the list doesn't shift under the reader while reading down it). The read articles kept on screen — all but the one currently selected — go when the user next refreshes (Refresh All or a pull) or syncs by hand, switches to another feed, folder or tag, or chooses Unread from another mode; none of these leaves Unread mode. The View menu's "Hide Read Articles" (desktop and macOS, and on iPad the menu bar of iPadOS 26 and later) does the same on demand, without refreshing; it is disabled whenever there's nothing to hide — no read article other than the one currently selected, or a mode other than Unread. It is deliberately not a toolbar button: it is rarely needed with the routes above, and the toolbar's room goes to the actions used more often — on a narrow iPhone a sixth item would push Mark All as Read into the overflow menu.
+- **The sort order (newest first / oldest first) is chosen in the same pop-up button's menu**, below the
+  three modes, rather than with a toolbar button of its own: it is rarely changed, and the toolbar's
+  room goes to the actions used more often. The button wears a filter icon (filled while a mode narrows
+  the list) and keeps naming the current mode where it shows text; it does not show the order. The order
+  is saved and restored at the next launch, the View menu (desktop and macOS) keeps its own "Toggle Sort
+  Order", and while search results are showing the order items are disabled, since results keep their
+  own ranking.
+- **Unread mode deliberately does not hide an article the instant it becomes read** (so the list doesn't shift under the reader while reading down it). The read articles kept on screen — all but the one currently selected — go when the user next refreshes (Refresh All or a pull) or syncs by hand, switches to another feed, folder or tag, or chooses Unread from another mode; none of these leaves Unread mode. The View menu's "Hide Read Articles" (desktop and macOS, and on iPad the menu bar of iPadOS 26 and later) does the same on demand, without refreshing; it is disabled whenever there's nothing to hide — no read article other than the one currently selected, or a mode other than Unread. It is deliberately not a toolbar button: it is rarely needed with the routes above, and the toolbar's room goes to the actions used more often — a narrow iPhone's bar already overflowed Mark All as Read into the overflow menu when it also held a sort button, which is why the sort order moved into the mode menu.
 - **New articles that arrive beyond the current scroll position, toward the list's fresh end, surface
   as a floating pill** (e.g. "12 new articles") rather than silently piling up; tapping it jumps to
   them. The fresh end follows the sort direction, and scrolling to it clears the pill. Articles that

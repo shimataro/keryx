@@ -27,6 +27,7 @@ import works.merc.keryx.app.resources.ic_error_outlined
 import works.merc.keryx.app.resources.ic_expand_more_outlined
 import works.merc.keryx.app.resources.ic_file_download_outlined
 import works.merc.keryx.app.resources.ic_file_upload_outlined
+import works.merc.keryx.app.resources.ic_filter_list_outlined
 import works.merc.keryx.app.resources.ic_folder_filled
 import works.merc.keryx.app.resources.ic_info_outlined
 import works.merc.keryx.app.resources.ic_link_off_outlined
@@ -39,8 +40,6 @@ import works.merc.keryx.app.resources.ic_public_outlined
 import works.merc.keryx.app.resources.ic_refresh_outlined
 import works.merc.keryx.app.resources.ic_search_outlined
 import works.merc.keryx.app.resources.ic_share_outlined
-import works.merc.keryx.app.resources.ic_sort_ascending_outlined
-import works.merc.keryx.app.resources.ic_sort_descending_outlined
 import works.merc.keryx.app.resources.ic_star_border
 import works.merc.keryx.app.resources.ic_star_filled
 import works.merc.keryx.app.resources.ic_storage_outlined
@@ -68,6 +67,7 @@ actual object KeryxIcons {
     actual val ExpandMore: DrawableResource = Res.drawable.ic_expand_more_outlined
     actual val FileDownload: DrawableResource = Res.drawable.ic_file_download_outlined
     actual val FileUpload: DrawableResource = Res.drawable.ic_file_upload_outlined
+    actual val FilterList: DrawableResource = Res.drawable.ic_filter_list_outlined
     actual val Info: DrawableResource = Res.drawable.ic_info_outlined
     actual val Link: DrawableResource = Res.drawable.ic_link_outlined
     actual val LinkOff: DrawableResource = Res.drawable.ic_link_off_outlined
@@ -77,8 +77,6 @@ actual object KeryxIcons {
     actual val Refresh: DrawableResource = Res.drawable.ic_refresh_outlined
     actual val Search: DrawableResource = Res.drawable.ic_search_outlined
     actual val Share: DrawableResource = Res.drawable.ic_share_outlined
-    actual val SortAscending: DrawableResource = Res.drawable.ic_sort_ascending_outlined
-    actual val SortDescending: DrawableResource = Res.drawable.ic_sort_descending_outlined
     actual val Storage: DrawableResource = Res.drawable.ic_storage_outlined
     actual val ThisDevice: DrawableResource = Res.drawable.ic_computer_outlined
     actual val Tune: DrawableResource = Res.drawable.ic_tune_outlined

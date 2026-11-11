@@ -135,6 +135,27 @@ private fun KeryxDatabase.insertArticle(
     )
 }
 
+/**
+ * Fails the article-by-id lookup (`articles.getById`, the body a selection loads) while [failGetById]
+ * is set — standing in for a lookup whose connection waited out the whole `busy_timeout`.
+ */
+private class GetByIdFailingSqlDriver(private val delegate: SqlDriver) : SqlDriver by delegate {
+    @kotlin.concurrent.Volatile var failGetById = false
+
+    override fun <R> executeQuery(
+        identifier: Int?,
+        sql: String,
+        mapper: (app.cash.sqldelight.db.SqlCursor) -> app.cash.sqldelight.db.QueryResult<R>,
+        parameters: Int,
+        binders: (app.cash.sqldelight.db.SqlPreparedStatement.() -> Unit)?,
+    ): app.cash.sqldelight.db.QueryResult<R> {
+        if (failGetById && sql.startsWith("SELECT articles.") && sql.endsWith("FROM articles WHERE id = ?")) {
+            throw IllegalStateException("database is locked")
+        }
+        return delegate.executeQuery(identifier, sql, mapper, parameters, binders)
+    }
+}
+
 /** Counts the FTS `MATCH` queries run through it — one per search that reached the index. */
 private class SearchCountingSqlDriver(private val delegate: SqlDriver) : SqlDriver by delegate {
     var matchQueries = 0
@@ -161,6 +182,7 @@ private const val PUMP_UNTIL_YIELD_MS = 5L
 class HomeViewModelTest {
 
     private lateinit var driver: CountingSqlDriver
+    private lateinit var lookups: GetByIdFailingSqlDriver
     private lateinit var db: KeryxDatabase
     private val dir = FileIO.join(AppDirs.tempDir(), "home-vm-test-${Random.nextInt()}")
 
@@ -182,7 +204,8 @@ class HomeViewModelTest {
         Dispatchers.setMain(StandardTestDispatcher(mainScheduler))
         val (d, _) = inMemoryDb()
         // Wrapped so a test can assert which actions re-execute the article-list query.
-        driver = CountingSqlDriver(d)
+        lookups = GetByIdFailingSqlDriver(d)
+        driver = CountingSqlDriver(lookups)
         db = KeryxDatabase(driver)
     }
 
@@ -2093,6 +2116,142 @@ class HomeViewModelTest {
         assertEquals(1L, dbIsRead("a1"))
         assertEquals("a1", vm.selectedArticle.value?.id)
         assertEquals(1L, vm.selectedArticle.value?.is_read)
+    }
+
+    /**
+     * Two selections of different articles whose lookups finish in the opposite order (the first
+     * one's body is slower to load): once the newer selection is on screen, the older lookup
+     * landing late must neither replace it nor touch the toolbar's row.
+     */
+    @Test
+    fun aSlowerEarlierSelectionFinishingAfterTheNewerOneDoesNotReplaceIt() = runTest {
+        val parking = ParkingDispatcher()
+        val vm = newViewModelWithHydrationOn(parking, "a1", "a2")
+
+        parking.hold()
+        vm.selectArticle(vm.row("a1"))
+        val older = parking.parkLast()
+        vm.selectArticle(vm.row("a2"))
+        val newer = parking.parkLast()
+        // The newer lookup lands inside the grace period, before the older one.
+        parking.run(newer)
+        testScheduler.runCurrent()
+        assertEquals("a2", vm.readerArticleId())
+        parking.run(older)
+        settle(parking)
+        parking.release()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals("a2", vm.readerArticleId())
+        assertEquals("a2", vm.selectedArticleId.value)
+        assertEquals("a2", vm.selectedArticleRow.value?.id)
+    }
+
+    /**
+     * [aSlowerEarlierSelectionFinishingAfterTheNewerOneDoesNotReplaceIt] with both lookups held past
+     * the grace period, so the newer selection's header is shown first: the older lookup landing
+     * after the newer one's body must not replace it either.
+     */
+    @Test
+    fun aSlowerEarlierSelectionLandingAfterTheNewerOnesHeaderAndBodyDoesNotReplaceIt() = runTest {
+        val parking = ParkingDispatcher()
+        val vm = newViewModelWithHydrationOn(parking, "a1", "a2")
+
+        parking.hold()
+        vm.selectArticle(vm.row("a1"))
+        val older = parking.parkLast()
+        vm.selectArticle(vm.row("a2"))
+        val newer = parking.parkLast()
+        settle(parking)
+        assertEquals("header:a2", vm.readerArticleId())
+        parking.run(newer)
+        settle(parking)
+        assertEquals("a2", vm.readerArticleId())
+        parking.run(older)
+        settle(parking)
+        parking.release()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals("a2", vm.readerArticleId())
+        assertEquals("a2", vm.selectedArticleId.value)
+        assertEquals("a2", vm.selectedArticleRow.value?.id)
+    }
+
+    /**
+     * A body lookup that fails inside the grace period (its connection waited out the whole
+     * busy_timeout) must not leave the previous article in the reader under the new selection: the
+     * reader shows the new selection's header, matching the list and the toolbar, and the failure is
+     * not thrown out of the ViewModel (where it would end the app on Android and Apple).
+     */
+    @Test
+    fun aBodyLookupThatFailsShowsTheNewSelectionsHeaderNotThePreviousArticle() = runTest {
+        val holding = HoldingDispatcher()
+        val vm = newViewModelShowing("a1", holding, "a1", "a2")
+
+        lookups.failGetById = true
+        vm.selectArticle(vm.row("a2"))
+        testScheduler.advanceUntilIdle()
+        lookups.failGetById = false
+
+        assertEquals("header:a2", vm.readerArticleId())
+        assertEquals("a2", vm.selectedArticleId.value)
+        assertEquals("a2", vm.selectedArticleRow.value?.id)
+    }
+
+    /** [aBodyLookupThatFailsShowsTheNewSelectionsHeaderNotThePreviousArticle] after the grace period. */
+    @Test
+    fun aBodyLookupThatFailsAfterTheGracePeriodKeepsTheNewSelectionsHeader() = runTest {
+        val holding = HoldingDispatcher()
+        val vm = newViewModelShowing("a1", holding, "a1", "a2")
+
+        holding.hold()
+        vm.selectArticle(vm.row("a2"))
+        testScheduler.advanceTimeBy(READER_HEADER_FIRST_GRACE_MS + 1)
+        assertEquals("header:a2", vm.readerArticleId())
+        lookups.failGetById = true
+        holding.release()
+        testScheduler.advanceUntilIdle()
+        lookups.failGetById = false
+
+        assertEquals("header:a2", vm.readerArticleId())
+        assertEquals("a2", vm.selectedArticleId.value)
+        assertEquals("a2", vm.selectedArticleRow.value?.id)
+    }
+
+    /**
+     * A selection whose body lookup failed is still the one the list, the toolbar and the reader show,
+     * so it is the one the next launch restores — not the article selected before it.
+     */
+    @Test
+    fun aBodyLookupThatFailsStillPersistsTheNewSelectionForTheNextLaunch() = runTest {
+        val holding = HoldingDispatcher()
+        val vm = newViewModelShowing("a1", holding, "a1", "a2")
+        assertEquals("a1", LocalSettingsStore(dirOverride = dir).load().lastArticleId)
+
+        lookups.failGetById = true
+        vm.selectArticle(vm.row("a2"))
+        testScheduler.advanceUntilIdle()
+        lookups.failGetById = false
+
+        // A successful lookup persists a2 as well, so check this went through the failure path.
+        assertEquals("header:a2", vm.readerArticleId())
+        assertEquals("a2", LocalSettingsStore(dirOverride = dir).load().lastArticleId)
+    }
+
+    /** Choosing the article again after a failed lookup loads its body. */
+    @Test
+    fun choosingTheArticleAgainAfterAFailedLookupLoadsItsBody() = runTest {
+        val holding = HoldingDispatcher()
+        val vm = newViewModelShowing("a1", holding, "a1", "a2")
+
+        lookups.failGetById = true
+        vm.selectArticle(vm.row("a2"))
+        testScheduler.advanceUntilIdle()
+        lookups.failGetById = false
+        vm.selectArticle(vm.row("a2"))
+        testScheduler.advanceUntilIdle()
+
+        assertEquals("a2", vm.readerArticleId())
     }
 
     /**
@@ -5699,6 +5858,29 @@ class HomeViewModelTest {
         assertEquals(InitialHomePane.FeedList, vm.initialHomePane)
     }
 
+    /**
+     * A selection whose body lookup failed is persisted for the next launch, so a lookup that fails
+     * every time (a row too large for Android's CursorWindow, say) must not throw out of the
+     * ViewModel's construction there — Home would never open, on every launch. It is restored as
+     * nothing instead.
+     */
+    @Test
+    fun restartRestoresNothingWhenTheSavedArticlesLookupFails() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1")
+        val store = LocalSettingsStore(dirOverride = dir)
+        store.save(store.load().copy(lastFilter = "feed:f1", lastArticleId = "a1", lastFocusedPane = "ArticleDetail"))
+
+        lookups.failGetById = true
+        val vm = newViewModel()
+        lookups.failGetById = false
+
+        assertEquals(ArticleFilter.Feed("f1"), vm.filter.value)
+        assertFalse(vm.articleRestoredOnLaunch)
+        assertNull(vm.selectedArticleId.value)
+        assertEquals(InitialHomePane.FeedList, vm.initialHomePane)
+    }
+
     @Test
     fun restartPinsRestoredReadArticleSoItStaysVisibleInUnreadOnlyList() = runTest {
         db.insertFeed("f1")
@@ -5773,6 +5955,47 @@ class HomeViewModelTest {
 
         assertTrue(vm2.unreadOnly.value)
         assertFalse(vm2.newestFirst.value)
+    }
+
+    @Test
+    fun setNewestFirstUpdatesTheOrderAndPersistsIt() = runTest {
+        val store = LocalSettingsStore(dirOverride = dir)
+        val vm = newViewModel()
+        subscribeAll(vm)
+
+        vm.setNewestFirst(false)
+        assertFalse(vm.newestFirst.value)
+        assertEquals(false, store.load().lastNewestFirst)
+
+        vm.setNewestFirst(true)
+        assertTrue(vm.newestFirst.value)
+        assertEquals(true, store.load().lastNewestFirst)
+    }
+
+    @Test
+    fun setNewestFirstToTheCurrentOrderWritesNothing() = runTest {
+        val store = LocalSettingsStore(dirOverride = dir)
+        val vm = newViewModel()
+        subscribeAll(vm)
+
+        vm.setNewestFirst(true)
+
+        assertTrue(vm.newestFirst.value)
+        assertNull(store.load().lastNewestFirst)
+    }
+
+    @Test
+    fun toggleSortAndSetNewestFirstShareOneState() = runTest {
+        val vm = newViewModel()
+        subscribeAll(vm)
+
+        vm.setNewestFirst(false)
+        vm.toggleSort()
+        assertTrue(vm.newestFirst.value)
+
+        vm.toggleSort()
+        vm.setNewestFirst(false)
+        assertFalse(vm.newestFirst.value)
     }
 
     @Test
