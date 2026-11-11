@@ -3471,6 +3471,7 @@ class HomeViewModelTest {
      * right then lacks its row — and the iOS list's one-time scroll to the restored selection is lost.
      * Here the restore lookup holds the background dispatcher, standing in for a background thread that
      * has not caught up with the pin yet: whatever the list holds by then is what a subscriber sees.
+     * A subscriber receives every list published, not just the last, so each loaded one is checked.
      */
     @Test
     fun restoredReadArticleIsPinnedInTheFirstPublishedUnreadOnlyList() = runTest {
@@ -3485,10 +3486,15 @@ class HomeViewModelTest {
 
         val vm = newViewModel(dispatcher = holding)
         lookups.onGetById = null
+        val published = mutableListOf<List<String>>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            vm.articlesWithFilter.collect { published += it.rows.map { row -> row.id } }
+        }
 
-        val firstPublished = vm.articlesWithFilter.value.rows.map { it.id }
-        assertTrue(firstPublished.isEmpty() || "a1" in firstPublished, "published before the pin: $firstPublished")
         holding.release()
+        val loaded = published.filter { it.isNotEmpty() }
+        assertTrue(loaded.isNotEmpty(), "no loaded list was published: $published")
+        assertTrue(loaded.all { "a1" in it }, "published without the pin: $published")
         assertTrue("a1" in vm.articlesWithFilter.value.rows.map { it.id })
     }
 
