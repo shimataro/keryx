@@ -432,6 +432,12 @@ struct HomeView: View {
     }
 
     private func handleKeyPress(_ press: KeyPress) -> KeyPress.Result {
+        // A sidebar sheet/alert (add feed, new folder/tag, …) is presented from inside this view, so
+        // keys typed into its text field bubble up to this handler too. Leave them all alone while one
+        // is up: a bare J/K would otherwise be eaten as next/previous article before the field (or its
+        // IME) ever sees it, and ↑/↓ would move the selection underneath the sheet. Mirrors the menu
+        // bar's own `HomeCommands.bareKeysActive` guard.
+        if sidebarDialogs.isPresenting { return .ignored }
         guard let (key, modifiers) = mapKey(press) else { return .ignored }
         guard let shortcut = HomeShortcutsKt.homeShortcutFor(
             key: key,
