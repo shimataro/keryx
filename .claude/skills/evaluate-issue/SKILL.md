@@ -124,10 +124,23 @@ The URL must match `https://github.com/<owner>/<repo>/issues/<number>`, optional
 
    If this fails, end this URL (`Fetch failed: <reason>`).
 2. **Freshness** — answers and verdicts must reflect the current code. Run
-   `git fetch <remote> <default>` (`<remote>` is the issue remote from 3.1) and check its exit
-   status: if it fails, the existing `<remote>/<default>` may be stale and would pass the check
-   below regardless, so output the error and ask via `AskUserQuestion` whether to **continue
-   with a warning** that the comparison may use stale code, or **cancel** (`Cancelled`).
+
+   ```bash
+   git fetch <remote> "+refs/heads/<default>:refs/remotes/<remote>/<default>"
+   ```
+
+   (`<remote>` is the issue remote from 3.1). Spell the refspec out: on a remote whose
+   configured refspec leaves the default branch out (a `--single-branch` clone, say),
+   `git fetch <remote> <default>` succeeds without updating `<remote>/<default>`, and every
+   check below (and in 3.3 and 7.1) would compare against a stale or missing ref.
+
+   Check its exit status: if it fails, the existing `<remote>/<default>` may be stale and would
+   pass the check below regardless, so output the error and ask via `AskUserQuestion` whether
+   to **continue with a warning** that the comparison may use stale code, or **cancel**
+   (`Cancelled`). If the user continues and `<remote>/<default>` does not exist at all, skip
+   this check and 3.3 with a warning, and treat 7.1's released/unreleased question as
+   undeterminable.
+
    Then check `git merge-base --is-ancestor <remote>/<default> HEAD`.
    If HEAD does not contain `<remote>/<default>`, output the state and ask via `AskUserQuestion`:
    - **Fast-forward** (Recommended) — offered only when the current branch is the default
