@@ -1053,8 +1053,9 @@ How it turns out when something does not go as intended:
 
 | Case | Result |
 | --- | --- |
-| The outline or its data source is not found, or not shaped as expected | The guard is not installed: sidebar drag and drop does nothing (no crash). A fault is logged once (`SidebarDropGuard` category); moving and tagging remain available from the context menu |
-| The sections are not laid out as expected | The drop is refused; nothing moves |
+| No outline is found next to the guard | The guard is not installed: sidebar drag and drop does nothing (no crash), and moving and tagging remain available from the context menu. No fault is logged: the outline is looked for again on every update, and missing it for a moment right after launch is normal. The integration test catches this case |
+| The outline is found, but it has no data source or its classes lack a method the guard overrides | The guard is not installed, with the same result. A fault is logged once (`SidebarDropGuard` category) |
+| The sections are not laid out as expected | The guard is installed, but each affected drop is refused and nothing moves. No fault is logged |
 | KVO observes the outline, before or after the guard is installed | No effect: the methods are on SwiftUI's classes, which KVO's class inherits from. Covered by a test |
 | Another `List` in the app shares the classes | Its outline has no handler attached, so every method goes on to the original implementation |
 | SwiftUI's own implementation of a replaced method changes later | Other drags get the kept original, or the superclass's method looked up per call |

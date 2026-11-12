@@ -1876,8 +1876,8 @@ On macOS, `SidebarDropGuard` decides where a drop lands and applies it (the posi
   feed's id, the outline would take the copy and the original for one item, highlighting the wrong
   row and proposing positions that do not exist.
 - If SwiftUI's internals change so that the guard cannot be installed, sidebar drag and drop does
-  nothing (it does not crash), a fault is logged (`SidebarDropGuard` category), and moving and
-  tagging remain available from the context menu. `KeryxTests/SidebarDropGuardTests.swift` hosts a
+  nothing (it does not crash), and moving and tagging remain available from the context menu. A
+  fault is logged (`SidebarDropGuard` category) when the outline is found but cannot be guarded. `KeryxTests/SidebarDropGuardTests.swift` hosts a
   `List` shaped like the sidebar and checks the guard's assumptions, so CI catches such a change.
 
 ### Sidebar (iOS)
