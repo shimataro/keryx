@@ -112,6 +112,11 @@ enum SidebarDropGuardInstaller {
             receiver, outline, info, item, childIndex in
             let operation: NSDragOperation? = MainActor.assumeIsolated {
                 guard let kind = SidebarDropHandler.kind(of: info), let handler = handler(of: outline) else { return nil }
+                // Only a drag from this app is the sidebar's own (AppKit gives another app's drag no
+                // source). The item a drop resolves to is the one the last drag here started with, which
+                // a cancelled drag leaves behind, so another app's drag that merely names our types
+                // would move or tag that feed. Refused here, not handed to SwiftUI either.
+                guard info.draggingSource != nil else { return [] }
                 return handler.validate(outline, dragging: kind, proposedItem: item, childIndex: childIndex)
             }
             return operation?.rawValue ?? original.imp(as: Validate.self)?(receiver, validate, outline, info, item, childIndex) ?? 0

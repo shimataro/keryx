@@ -234,6 +234,18 @@ struct SidebarDropGuardTests {
     }
 
     @Test
+    func aDragFromAnotherAppIsRefused() throws {
+        let outline = try guardedOutline()
+        let folders = try #require(SidebarDropOutline(outline, folderCount: 2, tagCount: 1).foldersSection)
+        recorder.actions = [.ontoFolder(index: 0): FeedListDropActionMoveFeed(feedId: "f", folderId: "d1", targetFeedId: nil)]
+        let info = StandInDraggingInfo(carrying: feedListFeedDragType, over: outline, fromAnotherApp: true)
+
+        #expect(validate(outline, info, proposing: outline.child(0, ofItem: folders), at: sidebarDropOntoRowIndex) == [])
+        #expect(!outline.performDragOperation(info))
+        #expect(recorder.applied.isEmpty)
+    }
+
+    @Test
     func aDropWhoseDestinationChangedUnderTheDragIsRefused() throws {
         let outline = try guardedOutline()
         let folders = try #require(SidebarDropOutline(outline, folderCount: 2, tagCount: 1).foldersSection)
@@ -369,13 +381,17 @@ struct SidebarDropGuardTests {
 private final class StandInDraggingInfo: NSObject, @preconcurrency NSDraggingInfo {
     let draggingPasteboard: NSPasteboard
     private let destination: NSView
+    private let source: AnyObject?
 
-    init(carrying type: UTType, over destination: NSView) {
+    /// - Parameter fromAnotherApp: Whether the drag comes from another application, which AppKit
+    ///   gives no source; otherwise the outline itself is the source, as for the sidebar's own rows.
+    init(carrying type: UTType, over destination: NSView, fromAnotherApp: Bool = false) {
         draggingPasteboard = NSPasteboard.withUniqueName()
         let pasteboardType = NSPasteboard.PasteboardType(type.identifier)
         draggingPasteboard.declareTypes([pasteboardType], owner: nil)
         draggingPasteboard.setData(Data("id".utf8), forType: pasteboardType)
         self.destination = destination
+        source = fromAnotherApp ? nil : destination
     }
 
     var draggingDestinationWindow: NSWindow? { destination.window }
@@ -383,7 +399,7 @@ private final class StandInDraggingInfo: NSObject, @preconcurrency NSDraggingInf
     var draggingLocation: NSPoint { .zero }
     var draggedImageLocation: NSPoint { .zero }
     var draggedImage: NSImage? { nil }
-    var draggingSource: Any? { nil }
+    var draggingSource: Any? { source }
     var draggingSequenceNumber: Int { 1 }
     func slideDraggedImage(to screenPoint: NSPoint) {}
     var draggingFormation: NSDraggingFormation = .default
