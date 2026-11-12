@@ -1830,9 +1830,9 @@ accent-tinted by the source list — while the selection and a drop target keep 
 colors.
 
 Drag and drop applies the same shared rules as Compose
-(`presentation/home/FeedListDrag.kt`'s `resolveFeedListDropHighlight`/`resolveFeedListDropAction`);
-only the feedback is per UI, and on macOS it follows the source-list conventions of
-`NSOutlineView`/Finder (`Home/FeedListDropPresentation.swift`).
+(`presentation/home/FeedListDrag.kt`'s `resolveFeedListDropHighlight`/`resolveFeedListDropAction`).
+On macOS, `SidebarDropGuard` decides where a drop lands and applies it (the positions are read in
+`Home/FeedListDropPresentation.swift`), and the feedback is `NSOutlineView`'s own, as in Finder.
 
 - **A drag starts through `.itemProvider`, the `List`'s own row-drag hook.** The list then tells a
   click from a drag anywhere in the row. SwiftUI's gesture-based sources do not work in these rows:
@@ -1852,19 +1852,26 @@ only the feedback is per UI, and on macOS it follows the source-list conventions
     proposed row (`SidebarDropOutline`), picks where the item lands
     (`sidebarDropDestination`), and accepts it only when the shared rules resolve an action there
     (`feedListInsertAction` / `resolveFeedListDropAction`). It then sets that destination with
-    `setDropItem` and returns "move". The outline's `performDragOperation:` applies that same
-    destination through `applyFeedListDropAction`, so what is shown and what happens never disagree.
+    `setDropItem` and returns "move", keeping the action it resolved. The outline's
+    `performDragOperation:` applies that action through `applyFeedListDropAction` only if the
+    destination still resolves to it — a sync that reorders the sidebar under the drag makes the
+    drop refused rather than sent somewhere other than what was highlighted.
   - A folder only goes between folders: anywhere on or inside a folder (its row, its feeds) is the
     slot just after it, and the Folders header is the first slot. The slots just before and after
     the dragged folder show a line too, and dropping there leaves the order as it is.
   - A feed goes onto a folder, "No folder" or a tag row, or between the feeds of a folder or of "No
-    folder". A feed's copy under a tag stands for that tag. Anything else (inside a feed row) is
+    folder". A feed's copy under a tag stands for that tag (the shared `FeedListDropTarget.FeedInTag`,
+    as in Compose and on iOS), and the tag's own row is highlighted. Anything else (inside a feed row) is
     refused, and the outline proposes the next position instead.
   - Drags of any other type go on to SwiftUI's implementation untouched.
 - Feedback is the outline's own: the insertion line, the full-row highlight of a drop target, and
-  spring-loading (a collapsed folder opens under a hovering feed). A folder drag does not spring
-  folders open (`expandItem:expandChildren:` is skipped). The cursor stays the system's: a drop
-  that resolves to nothing is refused and the item slides back, with no forbidden cursor.
+  spring-loading (a collapsed folder opens under a hovering feed). Only a folder under a dragged
+  feed springs open — a folder drag opens nothing, and a tag never opens. The guard refuses the
+  rest in the outline's `expandItem:`, which SwiftUI's outline overrides to record the row as
+  expanded, so a refused one leaves the sidebar's state as it was; SwiftUI applies its own
+  expansion state another way, so an expansion it asks for mid-drag still happens. The cursor stays
+  the system's: a drop that resolves to nothing is refused and the item slides back, with no
+  forbidden cursor.
 - A feed's copy under a tag gets an id of its own (`TagFeedRowID`: tag id + feed id). With the
   feed's id, the outline would take the copy and the original for one item, highlighting the wrong
   row and proposing positions that do not exist.
@@ -1972,14 +1979,15 @@ item gets overwritten. As in Notes, the collection view therefore takes the dele
   session's `localContext`; the session is restricted to the app and its item provider carries no data.
   Only the lifted row is dragged — never a header, All/Starred, a tag, or the row being renamed.
 - **Onto a row or between rows.** A feed over a folder row (below its top quarter, which stays the gap
-  above it), the "No folder" header or a tag row is proposed as `.insertIntoDestinationIndexPath`, and
+  above it), the "No folder" header, a tag row or a feed's copy under a tag (which stands for the tag,
+  `FeedListDropTarget.FeedInTag`) is proposed as `.insertIntoDestinationIndexPath`, and
   the cell's drop state paints it in `SelectionColor`; anywhere else it is a gap
   (`.insertAtDestinationIndexPath`), which UIKit draws by opening space. A gap's index is counted the way
   UIKit numbers a move: with the dragged row (and, for a folder, its feeds — the outline collapses a
   lifted folder) left out. While the finger is over the gap it has already opened, UIKit reports the
   dragged row's own index path, so the previous position is kept then; at the drop the coordinator's
   destination is the real gap. Every position becomes a `FeedListDropTarget` and half, goes through
-  `resolveFeedListDropAction` — `nil` is `.forbidden`, e.g. inside the tags, above a section's first
+  `resolveFeedListDropAction` — `nil` is `.forbidden`, e.g. between rows of the tags, above a section's first
   row for a feed, or just below a collapsed folder — and is applied with `applyFeedListDropAction`.
 - **Dropping onto a row shrinks the preview into its center** (`UIDragPreviewTarget`) instead of using
   UIKit's default, a snapshot of the dragged row fitted to the target's bounds, which would lay the dragged

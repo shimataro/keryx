@@ -37,18 +37,18 @@ struct SidebarDropResolverTests {
         (.noFolderHeader, 0.0, .noFolderHeader),
         (.tag("t1"), 0.1, .tag("t1")),
         (.feed("a"), 0.5, nil),
-        (.feedInTag(feedId: "a", tagId: "t1"), 0.5, nil),
+        (.feedInTag(feedId: "a", tagId: "t1"), 0.5, .feedInTag(feedId: "a", tagId: "t1")),
         (.sectionHeader(.folders), 0.5, nil),
         (.all, 0.5, nil),
     ] as [(SidebarItemID, Double, SidebarItemID?)])
-    func aFeedDropsOntoFoldersBelowTheirTopQuarterAndOntoHeadersAndTags(item: SidebarItemID, fraction: Double, expected: SidebarItemID?) {
+    func aFeedDropsOntoFoldersBelowTheirTopQuarterAndOntoHeadersTagsAndTheirFeeds(item: SidebarItemID, fraction: Double, expected: SidebarItemID?) {
         #expect(SidebarDropResolver.intoTarget(over: item, fraction: fraction, dragging: FeedListDragPayload(kind: .feed, id: "u1")) == expected)
     }
 
     @Test
     func aFolderNeverDropsOntoARow() {
         let payload = FeedListDragPayload(kind: .folder, id: "d2")
-        for item in [SidebarItemID.folder("d1"), .noFolderHeader, .tag("t1")] {
+        for item in [SidebarItemID.folder("d1"), .noFolderHeader, .tag("t1"), .feedInTag(feedId: "a", tagId: "t1")] {
             #expect(SidebarDropResolver.intoTarget(over: item, fraction: 0.5, dragging: payload) == nil)
             #expect(action(.into(item), dragging: .folder("d2")) == nil)
         }
@@ -61,6 +61,7 @@ struct SidebarDropResolverTests {
         #expect(action(.into(.noFolderHeader), dragging: .feed("a")) == "move a to - before u1")
         #expect(action(.into(.tag("t2")), dragging: .feed("a")) == "tag a with t2")
         #expect(action(.into(.tag("t1")), dragging: .feedInTag(feedId: "a", tagId: "t1")) == "tag a with t1")
+        #expect(action(.into(.feedInTag(feedId: "a", tagId: "t2")), dragging: .feed("u1")) == "tag u1 with t2")
     }
 
     // MARK: - Gaps

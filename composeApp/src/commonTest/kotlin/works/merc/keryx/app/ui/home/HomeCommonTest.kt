@@ -507,7 +507,15 @@ class HomeCommonTest {
 
     @Test
     fun parseFeedListRowKeyDoesNotMistakeATagFeedRowForItsTagsOwnRow() {
-        assertEquals(FeedListRowKey.Other, parseFeedListRowKey("tag-t1-feed-f1"))
+        assertEquals(FeedListRowKey.TagFeed("t1", "f1"), parseFeedListRowKey("tag-t1-feed-f1"))
+    }
+
+    @Test
+    fun parseFeedListRowKeyReadsATagFeedRowWithHyphenatedIds() {
+        assertEquals(
+            FeedListRowKey.TagFeed("aaaa-bbbb", "cccc-dddd"),
+            parseFeedListRowKey(tagFeedRowKey("aaaa-bbbb", "cccc-dddd")),
+        )
     }
 
     @Test

@@ -95,14 +95,11 @@ func feedListInsertAction(
 ) -> FeedListDropAction? {
     guard group.accepts(dragging.kind) else { return nil }
     let insert: (target: FeedListDropTarget, half: FeedListRowHalf)?
-    if case .folders(let folderIds) = group, let own = folderIds.firstIndex(of: dragging.id), offset == own || offset == own + 1 {
-        if own + 1 < folderIds.count {
-            insert = (FeedListDropTargetFolderHeader(folderId: folderIds[own + 1]), .top)
-        } else if own > 0 {
-            insert = (FeedListDropTargetFolderHeader(folderId: folderIds[own - 1]), .bottom)
-        } else {
-            insert = nil
-        }
+    if case .folders(let folderIds) = group, let ownIndex = folderIds.firstIndex(of: dragging.id) {
+        let isBesideDraggedFolder = offset == ownIndex || offset == ownIndex + 1
+        insert = isBesideDraggedFolder
+            ? folderSlotBesideDraggedFolder(folderIds, ownIndex: ownIndex)
+            : feedListInsertTarget(in: group, at: offset)
     } else {
         insert = feedListInsertTarget(in: group, at: offset)
     }
@@ -110,6 +107,22 @@ func feedListInsertAction(
     return FeedListDragKt.resolveFeedListDropAction(
         item: dragging.toShared(), target: insert.target, half: insert.half, index: index
     )
+}
+
+/// The slot beside the folder at `ownIndex` (the one being dragged), described from a neighbouring
+/// folder: the next one's top half, else the previous one's bottom half — `nil` when it is the only
+/// folder, with nothing to be reordered against.
+private func folderSlotBesideDraggedFolder(
+    _ folderIds: [String],
+    ownIndex: Int
+) -> (target: FeedListDropTarget, half: FeedListRowHalf)? {
+    if ownIndex + 1 < folderIds.count {
+        return (FeedListDropTargetFolderHeader(folderId: folderIds[ownIndex + 1]), .top)
+    }
+    if ownIndex > 0 {
+        return (FeedListDropTargetFolderHeader(folderId: folderIds[ownIndex - 1]), .bottom)
+    }
+    return nil
 }
 
 /// A row of the outline behind the macOS sidebar's `List`, as `SidebarDropGuard` reads it — what a
@@ -135,7 +148,7 @@ enum SidebarOutlineRow: Equatable {
 
 /// Where a drop on the macOS sidebar lands — the row the outline highlights or the slot its
 /// insertion line marks.
-enum SidebarDropDestination: Equatable {
+enum SidebarDropDestination: Hashable {
     /// Slot `index` among the folders.
     case folderSlot(index: Int)
     /// Onto the folder at `index`: the feed moves into it.
@@ -144,6 +157,8 @@ enum SidebarDropDestination: Equatable {
     case ontoNoFolder
     /// Onto the tag at `index`: the feed is tagged.
     case ontoTag(index: Int)
+    /// Onto a feed's copy under the tag at `tagIndex`, which stands for that tag: the feed is tagged.
+    case ontoFeedInTag(tagIndex: Int)
     /// Slot `offset` among the feeds of the folder at `index`.
     case intoFolder(index: Int, offset: Int)
     /// Slot `offset` among the feeds in no folder.
@@ -162,8 +177,9 @@ let sidebarDropOntoRowIndex = -1
 ///   is the first slot, and anywhere on or in a folder — its own row, its feeds — is the slot just
 ///   after that folder.
 /// - A feed dropped onto a folder, the "No folder" header or a tag goes into it; onto a feed's copy
-///   under a tag, it goes to that tag. Between rows it goes into a folder's feeds or the
-///   unfoldered ones, at a slot that exists (`childIndex` at most `childCount`).
+///   under a tag, it goes to that tag (the shared `FeedListDropTarget.FeedInTag`). Between rows it
+///   goes into a folder's feeds or the unfoldered ones, at a slot that exists (`childIndex` at
+///   most `childCount`).
 /// - Anything else is refused — a feed row's own inside, say, which the outline proposes but which
 ///   holds nothing.
 ///
@@ -186,7 +202,8 @@ func sidebarDropDestination(
             switch row {
             case .folder(let index): return .ontoFolder(index: index)
             case .noFolderSection: return .ontoNoFolder
-            case .tag(let index), .feedInTag(let index): return .ontoTag(index: index)
+            case .tag(let index): return .ontoTag(index: index)
+            case .feedInTag(let index): return .ontoFeedInTag(tagIndex: index)
             default: return nil
             }
         }

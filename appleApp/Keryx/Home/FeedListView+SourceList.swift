@@ -16,6 +16,8 @@ extension FeedListView {
     /// spacing between them is left to the system.
     @ViewBuilder
     var listContent: some View {
+        // `SidebarDropGuard` reads this `List` by its sections, in this order (`SidebarRootSection`):
+        // adding, removing or reordering a section means changing that too.
         List(selection: selectionKeyBinding) {
             Section {
                 allRow
@@ -52,8 +54,8 @@ extension FeedListView {
         .background(SidebarDropGuard(
             folderCount: sortedFolders.count,
             tagCount: sortedTags.count,
-            canDrop: { dropAction(for: $0) != nil },
-            drop: applyDrop(at:)
+            resolve: dropAction(for:),
+            apply: applyDrop(_:)
         ))
         // ←/→ move between panes (`external-spec.md` §9), so they are taken here before the
         // outline's own expand/collapse handling sees them; the disclosure triangles still expand
@@ -88,8 +90,9 @@ extension FeedListView {
 
     /// The shared action the dragged item takes when dropped at `destination` — a position in the
     /// outline, resolved to ids here and then through `resolveFeedListDropAction`, the same rules the
-    /// Compose app applies — or `nil` where the drop would do nothing. `SidebarDropGuard` asks it
-    /// both to decide whether a drop is allowed and to apply it, so the two never disagree.
+    /// Compose app applies — or `nil` where the drop would do nothing. `SidebarDropGuard` resolves a
+    /// drop with it while the item hovers, and again just before applying it, so a drop goes only
+    /// where it was shown.
     private func dropAction(for destination: SidebarDropDestination) -> FeedListDropAction? {
         guard let dragging = draggingItem else { return nil }
         func ontoRow(_ target: FeedListDropTarget) -> FeedListDropAction? {
@@ -112,6 +115,10 @@ extension FeedListView {
             let tags = sortedTags
             guard tags.indices.contains(index) else { return nil }
             return ontoRow(FeedListDropTargetTagHeader(tagId: tags[index].id))
+        case .ontoFeedInTag(let index):
+            let tags = sortedTags
+            guard tags.indices.contains(index) else { return nil }
+            return ontoRow(FeedListDropTargetFeedInTag(tagId: tags[index].id))
         case .intoFolder(let index, let offset):
             guard folders.indices.contains(index) else { return nil }
             let folder = folders[index]
@@ -121,8 +128,7 @@ extension FeedListView {
         }
     }
 
-    private func applyDrop(at destination: SidebarDropDestination) {
-        guard let action = dropAction(for: destination) else { return }
+    private func applyDrop(_ action: FeedListDropAction) {
         draggingItem = nil
         applyFeedListDropAction(action, home: home)
     }
@@ -237,9 +243,8 @@ extension FeedListView {
 
     /// A feed row is only ever a drag *source*: a feed is dropped between feed rows, never onto one
     /// (`sidebarDropDestination`). A copy nested under an expanded tag is draggable too, but nothing
-    /// is inserted among a tag's copies — a feed dropped there goes to the tag itself, matching
-    /// Compose's own `FeedListRowKey.Other` classification for it (`FeedListRowKeys.kt`'s own
-    /// `parseFeedListRowKey`).
+    /// is inserted among a tag's copies — a feed dropped there goes to the tag itself, by the shared
+    /// rules' `FeedListDropTarget.FeedInTag`, as in Compose and on iOS.
     ///
     /// `item` is `.feed` for a feed in its folder group or among the unfoldered feeds, `.feedInTag`
     /// for its copy under an expanded tag.

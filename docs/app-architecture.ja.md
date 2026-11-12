@@ -1758,8 +1758,8 @@ App Store ビルドへ渡ってはならない設定は、テンプレートに�
 
 ドラッグ＆ドロップは、Compose と同じ共有ルール
 （`presentation/home/FeedListDrag.kt` の `resolveFeedListDropHighlight`/`resolveFeedListDropAction`）を適用する。
-UI ごとに異なるのはフィードバックだけで、macOS では `NSOutlineView`/Finder のソースリストの慣習に従う
-（`Home/FeedListDropPresentation.swift`）。
+macOS では、ドロップの行き先を決めて適用するのは `SidebarDropGuard`（位置の読み取りは
+`Home/FeedListDropPresentation.swift`）で、フィードバックは Finder と同じく `NSOutlineView` 自身のものを使う。
 
 - **ドラッグは `List` 自身の行ドラッグ用フックである `.itemProvider` で開始する。** クリックとドラッグの判定は、
   行全体で `List` が行う。SwiftUI のジェスチャー方式のドラッグ元は、これらの行では使えない。`.onDrag`/`.draggable`
@@ -1777,18 +1777,23 @@ UI ごとに異なるのはフィードバックだけで、macOS では `NSOutl
   - データソースの `outlineView(_:validateDrop:proposedItem:proposedChildIndex:)` は、提案された行を読み
     （`SidebarDropOutline`）、項目の行き先を決め（`sidebarDropDestination`）、共通の規則でそこにアクションが
     作れるとき（`feedListInsertAction` / `resolveFeedListDropAction`）だけ受け付ける。そして `setDropItem` で
-    その行き先を設定し、「移動」を返す。アウトラインの `performDragOperation:` は、同じ行き先を
-    `applyFeedListDropAction` で適用する。そのため、表示と結果が食い違わない。
+    その行き先を設定し、「移動」を返す。解決したアクションは覚えておく。アウトラインの `performDragOperation:` は、
+    その行き先がまだ同じアクションに解決されるときだけ、それを `applyFeedListDropAction` で適用する。ドラッグ中に
+    sync がサイドバーの並びを変えた場合は、強調していたのと違う場所に入れず、ドロップを拒否する。
   - フォルダーはフォルダーの間にだけ入る。フォルダーの上や中（その行、その中のフィード）はそのフォルダーの
     すぐ後ろ、Folders の見出しは先頭になる。ドラッグ中のフォルダーのすぐ前と後ろにも線が出て、落としても
     順序は変わらない。
   - フィードは、フォルダー・「フォルダーなし」・タグの行の上か、フォルダーや「フォルダーなし」のフィードの間に
-    入る。タグの下のフィードのコピーは、そのタグとして扱う。それ以外（フィード行の中）は拒否し、アウトラインが
+    入る。タグの下のフィードのコピーは、そのタグとして扱い（Compose や iOS と同じく共有の
+    `FeedListDropTarget.FeedInTag`）、タグ自身の行を強調する。それ以外（フィード行の中）は拒否し、アウトラインが
     次の候補の位置を提案し直す。
   - ほかの型のドラッグは、そのまま SwiftUI の実装に渡す。
 - フィードバックはアウトライン自身のものを使う。挿入線、ドロップ先の行全体の強調、スプリングロード（フィードを
-  重ねた閉じたフォルダーが開く）。フォルダーのドラッグでは、フォルダーを開かない（`expandItem:expandChildren:` を
-  飛ばす）。カーソルはシステムのまま。何も起きないドロップは拒否され、項目は元の位置に戻る。禁止カーソルは出さない。
+  重ねた閉じたフォルダーが開く）。開くのは、フィードをドラッグしているときのフォルダーだけで、フォルダーの
+  ドラッグでは何も開かず、タグは開かない。それ以外はアウトラインの `expandItem:` で断る。SwiftUI のアウトラインは
+  `expandItem:` で行を開いたことを記録するので、断ればサイドバーの状態は変わらない。SwiftUI は自分の開閉状態を
+  別の経路で反映するので、ドラッグ中に SwiftUI が求めた展開は行われる。カーソルはシステムのまま。何も起きない
+  ドロップは拒否され、項目は元の位置に戻る。禁止カーソルは出さない。
 - タグの下のフィードのコピーには、専用の ID（`TagFeedRowID`：タグの ID + フィードの ID）を付ける。フィードの ID の
   ままだと、アウトラインがコピーと本体を 1 つの項目と取り違え、別の行を強調したり、存在しない位置を提案したりする。
 - SwiftUI の内部が変わってガードを取り付けられないときは、サイドバーのドラッグ＆ドロップが何も起きなくなる
@@ -1884,13 +1889,14 @@ HIG が「表示中のビューの検索」に勧める位置であり、メー�
   受け渡す。セッションはアプリ内に限り、アイテムプロバイダーはデータを持たない。ドラッグするのは持ち上げた行
   だけで、ヘッダー、すべて／スター付き、タグ、名前変更中の行はドラッグしない。
 - **行の上か、行の間か。** フィードをフォルダーの行（上 1/4 はその上の行間のまま）、「フォルダーなし」の
-  ヘッダー、タグの行に重ねると `.insertIntoDestinationIndexPath` を提案し、セルのドロップ状態で `SelectionColor` の
+  ヘッダー、タグの行、タグの下のフィードのコピー（そのタグとして扱う。`FeedListDropTarget.FeedInTag`）に重ねると
+  `.insertIntoDestinationIndexPath` を提案し、セルのドロップ状態で `SelectionColor` の
   ハイライトを描く。それ以外は行間（`.insertAtDestinationIndexPath`）で、UIKit が隙間を開けて示す。
   行間の位置は UIKit が移動を数えるのと同じく、ドラッグ中の行（フォルダーならその中のフィードも。持ち上げた
   フォルダーはアウトラインが畳む）を除いて数える。開いた隙間の上に指があるあいだ、UIKit はドラッグ中の行自身の
   インデックスパスを返すので、そのときは直前の位置を保つ。ドロップ時のコーディネーターの行き先は本当の隙間で
   ある。どの位置も `FeedListDropTarget` と上下半分に直して `resolveFeedListDropAction` に通し、`nil` なら
-  `.forbidden`（タグの中、フィードにとってのセクションの先頭、閉じたフォルダーのすぐ下など）、そうでなければ
+  `.forbidden`（タグの行の間、フィードにとってのセクションの先頭、閉じたフォルダーのすぐ下など）、そうでなければ
   `applyFeedListDropAction` で適用する。
 - **行の上へのドロップは、プレビューをその行の中央へ縮める**（`UIDragPreviewTarget`）。UIKit の既定は
   ドラッグ中の行のスナップショットをターゲットの bounds いっぱいに合わせるので、ドロップのアニメーションの間

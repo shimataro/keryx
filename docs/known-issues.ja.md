@@ -979,12 +979,12 @@ gate は pop の終わりではなく始まりで開く。シミュレータで�
 
 ### 症状
 
-v0.27.0、macOS 26.7.1 で、サイドバーのフォルダーをフォルダーの間に落とすと、トラップ（`EXC_BREAKPOINT`、Swift の
-アサーション）で落ちた:
+ガードがないと、macOS 26 でサイドバーのフォルダーをフォルダーの間に落としたときに、トラップ（`EXC_BREAKPOINT`、
+Swift のアサーション）で落ちる（v0.27.0、macOS 26.7.1 で観察）:
 `-[NSOutlineView performDragOperation:]` → `OutlineListCoordinator.outlineView(_:acceptDrop:item:childIndex:)` →
 `outlineView(_:performDropInsertion:with:at:)` → `ListOutlineItem.subscript` → `HeterogeneousViewIDs.subscript` →
 `HeterogeneousCollection.element(at:)`。スタックに Keryx のフレームはない。フォルダーをすべて折りたたんだ状態を含め、
-このドロップのたびに再現した。
+このドロップのたびに起きる。
 
 ### 原因
 
@@ -1010,10 +1010,10 @@ macOS の SwiftUI の `List` の不具合。同じ構造の単体アプリで再
 
 ### 回避策
 
-SwiftUI のドロップ処理は、クラッシュ以外にも当てにならないことが分かった。一部の位置（フォルダーの中のフィード行の
-上のフォルダー、フォルダー行の中央）を断り、存在しない位置（フィード行の子。これも落ちた）を受け付け、断りながら
-ドロップ先を動かし、「コピー」と答えてカーソルに「+」を付けた。そこで `SidebarDropGuard` は、フィードとフォルダーの
-ドロップから SwiftUI を完全に外す。`List` には `.onInsert`/`.onDrop` を付けない。
+SwiftUI のドロップ処理は、クラッシュ以外にも、一部の位置（フォルダーの中のフィード行の上のフォルダー、フォルダー行の
+中央）を断り、存在しない位置（フィード行の子。これも落ちる）を受け付け、断りながらドロップ先を動かし、「コピー」と
+答えてカーソルに「+」を付ける。そこで `SidebarDropGuard` は、フィードとフォルダーのドロップから SwiftUI を完全に
+外す。`List` には `.onInsert`/`.onDrop` を付けない。
 
 - `List` の背後にある `NSOutlineView` のクラスと、そのデータソース（SwiftUI の `OutlineListCoordinator`）のクラスに
   メソッドを足す。クラスがメソッドを継承しているだけなら `class_addMethod`、自分で実装しているなら
@@ -1021,9 +1021,12 @@ SwiftUI のドロップ処理は、クラッシュ以外にも当てにならな
   フィードかフォルダーの型を運ぶドラッグのときだけ働く。それ以外は元の実装に渡す（差し替えていない場合は、`super` と
   同じく呼び出しのたびに親クラスのメソッドを引く）。
 - データソースの `outlineView(_:validateDrop:proposedItem:proposedChildIndex:)` が行き先を決めて `setDropItem` で
-  設定し、アウトラインの `performDragOperation:` がそれを適用する。これらのドラッグでは、SwiftUI の
-  `validateDrop`/`acceptDrop` は呼ばれない。フォルダーのドラッグ中は、アウトラインの `expandItem:expandChildren:` を
-  飛ばし、フォルダーが開かないようにする。
+  設定し、アウトラインの `performDragOperation:` が、その行き先がまだ同じアクションに解決されるときだけ適用する。
+  これらのドラッグでは、SwiftUI の `validateDrop`/`acceptDrop` は呼ばれない。
+- アウトラインの `expandItem:` は、フィードのドラッグ中のフォルダー以外を開かないよう断る。SwiftUI のアウトラインは
+  `expandItem:` を上書きして、開く前に行を開いたと記録するので、そこで断れば（その次に呼ばれる
+  `expandItem:expandChildren:` ではなく）記録は変わらない。SwiftUI が自分の開閉状態を反映する別の経路には
+  手を付けない。
 - SwiftUI のドロップ修飾子がもうないので、ガードが 2 つのドラッグの型を自分で登録する（`registerForDraggedTypes`）。
 - タグの下のフィードのコピーには専用の ID を付ける。フィードの ID のままだと、アウトラインがコピーを本体と取り違えた。
 

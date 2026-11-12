@@ -1,5 +1,6 @@
 #if os(macOS)
 import AppKit
+import KeryxShared
 import ObjectiveC
 import SwiftUI
 import Testing
@@ -20,11 +21,12 @@ struct SidebarDropGuardTests {
         @State private var selection: String?
 
         var body: some View {
+            let expanded = recorder.expanded
             List(selection: $selection) {
                 Section { Text("All") }
                 Section("Folders", isExpanded: .constant(true)) {
                     ForEach(["d1", "d2"], id: \.self) { folder in
-                        DisclosureGroup(isExpanded: .constant(true)) {
+                        DisclosureGroup(isExpanded: isExpanded(folder, in: expanded)) {
                             ForEach(["\(folder)-f"], id: \.self) { Text($0) }
                         } label: {
                             Text(folder)
@@ -38,7 +40,7 @@ struct SidebarDropGuardTests {
                 }
                 Section("Tags", isExpanded: .constant(true)) {
                     ForEach(["t1"], id: \.self) { tag in
-                        DisclosureGroup(isExpanded: .constant(true)) {
+                        DisclosureGroup(isExpanded: isExpanded(tag, in: expanded)) {
                             ForEach(["\(tag)/loose"], id: \.self) { Text($0) }
                         } label: {
                             Text(tag)
@@ -50,16 +52,27 @@ struct SidebarDropGuardTests {
             .background(SidebarDropGuard(
                 folderCount: 2,
                 tagCount: 1,
-                canDrop: { recorder.allowed.contains($0) },
-                drop: { recorder.dropped.append($0) }
+                resolve: { recorder.actions[$0] },
+                apply: { recorder.applied.append($0) }
             ))
+        }
+
+        private func isExpanded(_ row: String, in expanded: Set<String>) -> Binding<Bool> {
+            Binding(
+                get: { expanded.contains(row) },
+                set: { if $0 { recorder.expanded.insert(row) } else { recorder.expanded.remove(row) } }
+            )
         }
     }
 
     @MainActor
-    private final class DropRecorder {
-        var allowed: [SidebarDropDestination] = []
-        var dropped: [SidebarDropDestination] = []
+    @Observable
+    final class DropRecorder {
+        /// What each destination resolves to; a destination missing here resolves to nothing.
+        @ObservationIgnored var actions: [SidebarDropDestination: FeedListDropAction] = [:]
+        @ObservationIgnored var applied: [FeedListDropAction] = []
+        /// The folders and tags the sidebar's own state shows expanded.
+        var expanded: Set<String> = ["d1", "d2", "t1"]
     }
 
     private let recorder = DropRecorder()
@@ -117,7 +130,7 @@ struct SidebarDropGuardTests {
     @Test
     func theListsSectionsAreTheOutlinesRootItems() throws {
         let outline = try guardedOutline()
-        #expect(outline.numberOfChildren(ofItem: nil) == 4)
+        #expect(outline.numberOfChildren(ofItem: nil) == SidebarRootSection.roots(folderCount: 2, tagCount: 1).count)
         let reader = SidebarDropOutline(outline, folderCount: 2, tagCount: 1)
         #expect(reader.foldersSection != nil)
         #expect(reader.noFolderSection != nil)
@@ -142,7 +155,7 @@ struct SidebarDropGuardTests {
         #expect(reader.classify(outline.child(0, ofItem: tag)) == .feedInTag(tagIndex: 0))
     }
 
-    // MARK: - The guard
+    // MARK: - Drops
 
     @Test
     func theGuardWorksWhileKVOObservesTheOutline() throws {
@@ -151,12 +164,13 @@ struct SidebarDropGuardTests {
         outline.addObserver(observer, forKeyPath: "toolTip", context: nil)
         defer { outline.removeObserver(observer, forKeyPath: "toolTip") }
         let folders = try #require(SidebarDropOutline(outline, folderCount: 2, tagCount: 1).foldersSection)
-        recorder.allowed = [.folderSlot(index: 2)]
+        let reorder = FeedListDropActionReorderFolder(draggedFolderId: "d1", targetFolderId: nil)
+        recorder.actions = [.folderSlot(index: 2): reorder]
         let info = StandInDraggingInfo(carrying: feedListFolderDragType, over: outline)
 
         #expect(validate(outline, info, proposing: outline.child(1, ofItem: folders), at: 0) == .move)
         #expect(outline.performDragOperation(info))
-        #expect(recorder.dropped == [.folderSlot(index: 2)])
+        #expect(applied([reorder]))
     }
 
     @Test
@@ -170,54 +184,183 @@ struct SidebarDropGuardTests {
     func aFolderDropIsDecidedAndAppliedByTheGuard() throws {
         let outline = try guardedOutline()
         let folders = try #require(SidebarDropOutline(outline, folderCount: 2, tagCount: 1).foldersSection)
-        recorder.allowed = [.folderSlot(index: 1)]
+        let reorder = FeedListDropActionReorderFolder(draggedFolderId: "d2", targetFolderId: "d2")
+        recorder.actions = [.folderSlot(index: 1): reorder]
         let info = StandInDraggingInfo(carrying: feedListFolderDragType, over: outline)
 
         // Onto the first folder: the slot just after it.
         let operation = validate(outline, info, proposing: outline.child(0, ofItem: folders), at: sidebarDropOntoRowIndex)
         #expect(operation == .move)
         #expect(outline.performDragOperation(info))
-        #expect(recorder.dropped == [.folderSlot(index: 1)])
+        #expect(applied([reorder]))
     }
 
     @Test
     func aFeedProposedIntoAFeedRowIsRefused() throws {
         let outline = try guardedOutline()
         let noFolder = try #require(SidebarDropOutline(outline, folderCount: 2, tagCount: 1).noFolderSection)
-        recorder.allowed = [.intoNoFolder(offset: 0), .ontoNoFolder]
+        let move = FeedListDropActionMoveFeed(feedId: "f", folderId: nil, targetFeedId: nil)
+        recorder.actions = [.intoNoFolder(offset: 0): move, .ontoNoFolder: move]
         let info = StandInDraggingInfo(carrying: feedListFeedDragType, over: outline)
 
         let operation = validate(outline, info, proposing: outline.child(0, ofItem: noFolder), at: 0)
         #expect(operation == [])
         #expect(!outline.performDragOperation(info))
-        #expect(recorder.dropped.isEmpty)
+        #expect(recorder.applied.isEmpty)
     }
 
     @Test
     func aFeedOverACopyUnderATagGoesToThatTag() throws {
         let outline = try guardedOutline()
         let tags = try #require(SidebarDropOutline(outline, folderCount: 2, tagCount: 1).tagsSection)
-        recorder.allowed = [.ontoTag(index: 0)]
+        let attach = FeedListDropActionAttachTag(feedId: "f", tagId: "t1")
+        recorder.actions = [.ontoFeedInTag(tagIndex: 0): attach]
         let info = StandInDraggingInfo(carrying: feedListFeedDragType, over: outline)
 
-        let copy = outline.child(0, ofItem: outline.child(0, ofItem: tags))
-        #expect(validate(outline, info, proposing: copy, at: sidebarDropOntoRowIndex) == .move)
+        let tag = outline.child(0, ofItem: tags)
+        #expect(validate(outline, info, proposing: outline.child(0, ofItem: tag), at: sidebarDropOntoRowIndex) == .move)
         #expect(outline.performDragOperation(info))
-        #expect(recorder.dropped == [.ontoTag(index: 0)])
+        #expect(applied([attach]))
     }
 
     @Test
     func aDropTheSharedRulesRefuseIsRefused() throws {
         let outline = try guardedOutline()
         let folders = try #require(SidebarDropOutline(outline, folderCount: 2, tagCount: 1).foldersSection)
-        recorder.allowed = []
+        recorder.actions = [:]
         let info = StandInDraggingInfo(carrying: feedListFeedDragType, over: outline)
 
         #expect(validate(outline, info, proposing: outline.child(0, ofItem: folders), at: sidebarDropOntoRowIndex) == [])
     }
 
+    @Test
+    func aDropWhoseDestinationChangedUnderTheDragIsRefused() throws {
+        let outline = try guardedOutline()
+        let folders = try #require(SidebarDropOutline(outline, folderCount: 2, tagCount: 1).foldersSection)
+        recorder.actions = [.ontoFolder(index: 0): FeedListDropActionMoveFeed(feedId: "f", folderId: "d1", targetFeedId: nil)]
+        let info = StandInDraggingInfo(carrying: feedListFeedDragType, over: outline)
+        #expect(validate(outline, info, proposing: outline.child(0, ofItem: folders), at: sidebarDropOntoRowIndex) == .move)
+
+        // A sync reorders the folders before the drop lands: the first folder is now another one.
+        recorder.actions = [.ontoFolder(index: 0): FeedListDropActionMoveFeed(feedId: "f", folderId: "d2", targetFeedId: nil)]
+        #expect(!outline.performDragOperation(info))
+        #expect(recorder.applied.isEmpty)
+    }
+
+    // MARK: - The drag's own state
+
+    @Test
+    func theDragEndsWhenItLeavesTheOutlineOrDrops() throws {
+        let outline = try guardedOutline()
+        let handler = try #require(SidebarDropGuardInstaller.handler(of: outline))
+        let folders = try #require(SidebarDropOutline(outline, folderCount: 2, tagCount: 1).foldersSection)
+        recorder.actions = [.folderSlot(index: 1): FeedListDropActionReorderFolder(draggedFolderId: "d2", targetFolderId: "d2")]
+        let info = StandInDraggingInfo(carrying: feedListFolderDragType, over: outline)
+
+        _ = validate(outline, info, proposing: outline.child(0, ofItem: folders), at: sidebarDropOntoRowIndex)
+        #expect(handler.draggedKind == .folder)
+        outline.draggingExited(info)
+        #expect(handler.draggedKind == nil)
+        #expect(handler.pending == nil)
+
+        _ = validate(outline, info, proposing: outline.child(0, ofItem: folders), at: sidebarDropOntoRowIndex)
+        _ = outline.performDragOperation(info)
+        #expect(handler.draggedKind == nil)
+        #expect(handler.pending == nil)
+    }
+
+    // MARK: - Spring-loading
+
+    @Test
+    func aDraggedFolderSpringsNothingOpen() throws {
+        let outline = try guardedOutline()
+        let (folder, tag) = try collapsedFolderAndTag(in: outline)
+        let info = StandInDraggingInfo(carrying: feedListFolderDragType, over: outline)
+        _ = validate(outline, info, proposing: outline.child(1, ofItem: nil), at: 0)
+
+        outline.expandItem(folder)
+        outline.expandItem(tag)
+        #expect(!outline.isItemExpanded(folder))
+        #expect(!outline.isItemExpanded(tag))
+        outline.draggingExited(info)
+    }
+
+    @Test
+    func aDraggedFeedSpringsOnlyAFolderOpen() throws {
+        let outline = try guardedOutline()
+        let (folder, tag) = try collapsedFolderAndTag(in: outline)
+        let info = StandInDraggingInfo(carrying: feedListFeedDragType, over: outline)
+        _ = validate(outline, info, proposing: folder, at: sidebarDropOntoRowIndex)
+
+        outline.expandItem(folder)
+        outline.expandItem(tag)
+        spinUntil { outline.isItemExpanded(folder) }
+        #expect(outline.isItemExpanded(folder))
+        #expect(!outline.isItemExpanded(tag))
+        outline.draggingExited(info)
+    }
+
+    @Test
+    func aRefusedSpringLeavesTheSidebarsStateAsItWas() throws {
+        let outline = try guardedOutline()
+        let (_, tag) = try collapsedFolderAndTag(in: outline)
+        let info = StandInDraggingInfo(carrying: feedListFeedDragType, over: outline)
+        _ = validate(outline, info, proposing: tag, at: sidebarDropOntoRowIndex)
+
+        outline.expandItem(tag)
+        #expect(!recorder.expanded.contains("t1"))
+        outline.draggingExited(info)
+    }
+
+    @Test
+    func anExpansionTheSidebarsStateAsksForDuringADragStillHappens() throws {
+        let outline = try guardedOutline()
+        let (folder, _) = try collapsedFolderAndTag(in: outline)
+        let info = StandInDraggingInfo(carrying: feedListFolderDragType, over: outline)
+        _ = validate(outline, info, proposing: outline.child(1, ofItem: nil), at: 0)
+
+        // A sync opens the folder in the sidebar's state while a folder is being dragged.
+        recorder.expanded.insert("d1")
+        spinUntil { outline.isItemExpanded(folder) }
+        #expect(outline.isItemExpanded(folder))
+        outline.draggingExited(info)
+    }
+
+    /// The first folder and the tag, both collapsed in the outline.
+    private func collapsedFolderAndTag(in outline: NSOutlineView) throws -> (folder: Any, tag: Any) {
+        // Read the rows afresh after collapsing them: SwiftUI may hand the outline new items for them.
+        func rows() -> (folder: Any?, tag: Any?) {
+            let reader = SidebarDropOutline(outline, folderCount: 2, tagCount: 1)
+            return (reader.foldersSection.map { outline.child(0, ofItem: $0) } ?? nil,
+                    reader.tagsSection.map { outline.child(0, ofItem: $0) } ?? nil)
+        }
+        func collapsed() -> Bool {
+            let (folder, tag) = rows()
+            return folder.map { !outline.isItemExpanded($0) } == true && tag.map { !outline.isItemExpanded($0) } == true
+        }
+        recorder.expanded.subtract(["d1", "t1"])
+        spinUntil(collapsed)
+        try #require(collapsed())
+        let (folder, tag) = rows()
+        return (try #require(folder), try #require(tag))
+    }
+
+    /// Runs the main run loop until `done` holds, for half a second at most.
+    private func spinUntil(_ done: () -> Bool) {
+        let deadline = Date().addingTimeInterval(0.5)
+        while !done(), Date() < deadline {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+        }
+    }
+
     private func validate(_ outline: NSOutlineView, _ info: NSDraggingInfo, proposing item: Any?, at childIndex: Int) -> NSDragOperation {
         outline.dataSource?.outlineView?(outline, validateDrop: info, proposedItem: item, proposedChildIndex: childIndex) ?? []
+    }
+
+    /// Whether exactly `expected` was applied, in order (Kotlin values compare with `isEqual`).
+    private func applied(_ expected: [FeedListDropAction]) -> Bool {
+        recorder.applied.count == expected.count
+            && zip(recorder.applied, expected).allSatisfy { ($0 as AnyObject).isEqual($1 as AnyObject) }
     }
 }
 

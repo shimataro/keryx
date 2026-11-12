@@ -986,11 +986,11 @@ decided and applied without SwiftUI's drop handling (`Home/Sidebar/SidebarDropGu
 
 ### Symptom
 
-v0.27.0 on macOS 26.7.1 trapped (`EXC_BREAKPOINT`, a Swift assertion) when a folder was dropped
-between folders in the sidebar:
+Without the guard, dropping a folder between folders in the sidebar traps on macOS 26
+(`EXC_BREAKPOINT`, a Swift assertion; observed with v0.27.0 on macOS 26.7.1):
 `-[NSOutlineView performDragOperation:]` → `OutlineListCoordinator.outlineView(_:acceptDrop:item:childIndex:)` →
 `outlineView(_:performDropInsertion:with:at:)` → `ListOutlineItem.subscript` → `HeterogeneousViewIDs.subscript` →
-`HeterogeneousCollection.element(at:)`. No Keryx frame is on the stack. It reproduced on every such drop,
+`HeterogeneousCollection.element(at:)`. No Keryx frame is on the stack. It happens on every such drop,
 including with all folders collapsed.
 
 ### Cause
@@ -1017,11 +1017,11 @@ A Swift assertion is a trap, not an exception, so it cannot be caught.
 
 ### The workaround
 
-SwiftUI's drop handling turned out to be unreliable beyond the crash: it refused some positions (a
-folder over a feed row inside a folder, the middle of a folder row), accepted positions that do not
-exist (children of a feed row, which crashed too), moved the drop target while refusing it, and
-answered "copy", which puts "+" on the cursor. So `SidebarDropGuard` keeps SwiftUI out of feed and
-folder drops altogether, and the `List` carries no `.onInsert`/`.onDrop`:
+Beyond the crash, SwiftUI's drop handling refuses some positions (a folder over a feed row inside a
+folder, the middle of a folder row), accepts positions that do not exist (children of a feed row,
+which crash too), moves the drop target while refusing it, and answers "copy", which puts "+" on the
+cursor. So `SidebarDropGuard` keeps SwiftUI out of feed and folder drops altogether, and the `List`
+carries no `.onInsert`/`.onDrop`:
 
 - It adds methods to the class of the `NSOutlineView` behind the `List` and to the class of its data
   source (SwiftUI's `OutlineListCoordinator`) — `class_addMethod` where the class only inherits the
@@ -1030,10 +1030,13 @@ folder drops altogether, and the `List` carries no `.onInsert`/`.onDrop`:
   or folder type; everything else goes on to the original implementation (looked up from the
   superclass on every call where none was replaced, as `super` would).
 - The data source's `outlineView(_:validateDrop:proposedItem:proposedChildIndex:)` decides the
-  destination and sets it with `setDropItem`; the outline's `performDragOperation:` applies it.
-  SwiftUI's `validateDrop`/`acceptDrop` are never called for these drags. The outline's
-  `expandItem:expandChildren:` is skipped during a folder drag, so folders do not spring open
-  under it.
+  destination and sets it with `setDropItem`; the outline's `performDragOperation:` applies it, if
+  the destination still resolves to the same action. SwiftUI's `validateDrop`/`acceptDrop` are
+  never called for these drags.
+- The outline's `expandItem:` refuses to spring open anything but a folder under a dragged feed.
+  SwiftUI's outline overrides `expandItem:` to record the row as expanded before expanding it, so
+  refusing there — not in `expandItem:expandChildren:`, which it calls next — keeps that record
+  unchanged; SwiftUI applies its own expansion state another way, which is left alone.
 - The guard registers the two drag types itself (`registerForDraggedTypes`), since no SwiftUI drop
   modifier does any more.
 - A feed's copy under a tag gets an id of its own; with the feed's id, the outline mistook the copy

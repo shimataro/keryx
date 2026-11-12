@@ -204,7 +204,7 @@ struct FeedListDropPresentationTests {
 
     @Test
     func aFeedOverACopyUnderATagGoesToThatTag() {
-        #expect(sidebarDropDestination(dragging: .feed, proposed: .feedInTag(tagIndex: 1), childIndex: onto, childCount: 0) == .ontoTag(index: 1))
+        #expect(sidebarDropDestination(dragging: .feed, proposed: .feedInTag(tagIndex: 1), childIndex: onto, childCount: 0) == .ontoFeedInTag(tagIndex: 1))
     }
 
     @Test

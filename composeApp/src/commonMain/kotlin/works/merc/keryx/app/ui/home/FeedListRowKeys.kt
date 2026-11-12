@@ -74,6 +74,8 @@ internal sealed interface FeedListRowKey {
     data class Folder(val folderId: String) : FeedListRowKey
     data class Feed(val feedId: String) : FeedListRowKey
     data class Tag(val tagId: String) : FeedListRowKey
+    /** A feed's copy listed under the expanded tag [tagId]. */
+    data class TagFeed(val tagId: String, val feedId: String) : FeedListRowKey
     data object NoFolderHeader : FeedListRowKey
     data object Other : FeedListRowKey
 }
@@ -108,7 +110,8 @@ internal fun tagFeedRowKey(tagId: String, feedId: String): String = "$TAG_KEY_PR
 /**
  * Identifies the feed-list row represented by a `LazyColumn` item key.
  *
- * Tag-attached feed keys are classified as feed rows rather than tag rows.
+ * A tag-attached feed key is its own kind ([FeedListRowKey.TagFeed]), never its tag's row nor a
+ * feed row.
  *
  * @param key The item key assigned to the feed-list row.
  * @return The parsed row identity, or `FeedListRowKey.Other` for unrecognized keys.
@@ -119,8 +122,12 @@ internal fun parseFeedListRowKey(key: Any?): FeedListRowKey {
         stringKey == NO_FOLDER_HEADER_KEY -> FeedListRowKey.NoFolderHeader
         stringKey.startsWith(FOLDER_KEY_PREFIX) -> FeedListRowKey.Folder(stringKey.removePrefix(FOLDER_KEY_PREFIX))
         stringKey.startsWith(FEED_KEY_PREFIX) -> FeedListRowKey.Feed(stringKey.removePrefix(FEED_KEY_PREFIX))
-        stringKey.startsWith(TAG_KEY_PREFIX) && TAG_FEED_INFIX !in stringKey ->
-            FeedListRowKey.Tag(stringKey.removePrefix(TAG_KEY_PREFIX))
+        stringKey.startsWith(TAG_KEY_PREFIX) && TAG_FEED_INFIX in stringKey ->
+            FeedListRowKey.TagFeed(
+                tagId = stringKey.removePrefix(TAG_KEY_PREFIX).substringBefore(TAG_FEED_INFIX),
+                feedId = stringKey.substringAfter(TAG_FEED_INFIX),
+            )
+        stringKey.startsWith(TAG_KEY_PREFIX) -> FeedListRowKey.Tag(stringKey.removePrefix(TAG_KEY_PREFIX))
         else -> FeedListRowKey.Other
     }
 }
@@ -137,8 +144,8 @@ internal sealed interface FeedListDragSourceKey {
  *
  * Deliberately separate from [parseFeedListRowKey], which answers the *drop target* question: a
  * feed listed under an expanded tag (`"tag-$tagId-feed-$feedId"`) is a perfectly good drag source
- * — it drags the feed itself — while remaining a non-target ([FeedListRowKey.Other]) there, since
- * dropping onto it means nothing. The two must not be collapsed into one parser.
+ * — it drags the feed itself — while as a drop target it stands for its tag
+ * ([FeedListRowKey.TagFeed]). The two must not be collapsed into one parser.
  */
 internal fun parseFeedListDragSourceKey(key: Any?): FeedListDragSourceKey? {
     val stringKey = key as? String ?: return null

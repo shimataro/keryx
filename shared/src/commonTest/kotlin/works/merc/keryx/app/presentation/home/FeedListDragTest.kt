@@ -82,6 +82,30 @@ class FeedListDragTest {
     }
 
     @Test
+    fun draggingAFeedOverAFeedsCopyUnderATagHighlightsThatTag() {
+        val (boundary, tag) = resolveFeedListDropHighlight(
+            FeedListDraggedItem.Feed("f1"),
+            FeedListDropTarget.FeedInTag("t1"),
+            FeedListRowHalf.BOTTOM,
+            index,
+        )
+        assertNull(boundary)
+        assertEquals("t1", tag)
+    }
+
+    @Test
+    fun draggingAFolderOverAFeedsCopyUnderATagHighlightsNothing() {
+        val (boundary, tag) = resolveFeedListDropHighlight(
+            FeedListDraggedItem.Folder("d1"),
+            FeedListDropTarget.FeedInTag("t1"),
+            FeedListRowHalf.TOP,
+            index,
+        )
+        assertNull(boundary)
+        assertNull(tag)
+    }
+
+    @Test
     fun draggingAFeedOverAnythingElseHighlightsNothing() {
         val (boundary, tag) = resolveFeedListDropHighlight(
             FeedListDraggedItem.Feed("f1"),
@@ -214,6 +238,28 @@ class FeedListDragTest {
             index,
         )
         assertEquals(FeedListDropAction.AttachTag("f1", "t1"), action)
+    }
+
+    @Test
+    fun droppingAFeedOnAFeedsCopyUnderATagAttachesThatTag() {
+        val action = resolveFeedListDropAction(
+            FeedListDraggedItem.Feed("f1"),
+            FeedListDropTarget.FeedInTag("t1"),
+            FeedListRowHalf.BOTTOM,
+            index,
+        )
+        assertEquals(FeedListDropAction.AttachTag("f1", "t1"), action)
+    }
+
+    @Test
+    fun droppingAFolderOnAFeedsCopyUnderATagDoesNothing() {
+        val action = resolveFeedListDropAction(
+            FeedListDraggedItem.Folder("d1"),
+            FeedListDropTarget.FeedInTag("t1"),
+            FeedListRowHalf.TOP,
+            index,
+        )
+        assertNull(action)
     }
 
     @Test

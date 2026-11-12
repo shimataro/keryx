@@ -80,6 +80,11 @@
   `DropBoundary` comparison and keying functions this way. Run via
   `xcodebuild -scheme Keryx -destination 'platform=macOS' test` (see
   [build.md](build.md)'s "Building the SwiftUI app").
+  One macOS-only suite hosts real AppKit views without the app: `SidebarDropGuardTests` puts a `List`
+  shaped like the sidebar in an offscreen window and sends it drops through a stand-in
+  `NSDraggingInfo`. It checks what the sidebar's drop guard assumes about SwiftUI's internals, so a
+  new SDK or macOS that changes them fails CI — see "macOS: dropping a folder between folders crashed
+  inside SwiftUI" in [known-issues.md](known-issues.md).
 
 New tests are placed at the same relative path as the code under test.
 
@@ -367,8 +372,9 @@ level, but only this manual pass catches wording that reads oddly in context.
   while hovered — distinct at a glance, including in dark mode, from both the folder "move" highlight
   and the drag ghost's own neutral chip. Dropping attaches the tag without moving the feed out of its
   folder. Re-dropping an already-attached feed on the same tag changes nothing. Dragging over a feed
-  listed under an expanded tag, or over blank space, shows no highlight anywhere and the pointer stays
-  the ordinary arrow — there is no special "can't drop here" cursor now that the drag isn't OS-level.
+  listed under an expanded tag highlights that tag's row the same way, and dropping there attaches
+  the tag. Over blank space nothing is highlighted and the pointer stays the ordinary arrow — there is
+  no special "can't drop here" cursor now that the drag isn't OS-level.
 - Expand a tag with its chevron: its attached feeds are listed beneath it (a feed with several tags
   appears once per expanded tag, plus once under its folder — expected, not a duplicate bug). The
   expanded/collapsed state persists after restart, tags default to collapsed, and deleting a tag

@@ -25,14 +25,15 @@ enum SidebarDropResolver {
 
     /// The row a drag of `payload` over `item` drops onto, or `nil` when it drops between rows
     /// instead. A feed goes into a folder (below the folder row's top quarter), into the "No folder"
-    /// header or onto a tag (anywhere on the row); a folder only ever goes between folders.
+    /// header, or onto a tag or a feed's copy under a tag, which stands for that tag (anywhere on the
+    /// row); a folder only ever goes between folders.
     ///
     /// - Parameter fraction: How far down the row the drag is, from 0 (top) to 1 (bottom).
     static func intoTarget(over item: SidebarItemID, fraction: Double, dragging payload: FeedListDragPayload) -> SidebarItemID? {
         guard payload.kind == .feed else { return nil }
         switch item {
         case .folder: return fraction >= folderGapBandFraction ? item : nil
-        case .noFolderHeader, .tag: return item
+        case .noFolderHeader, .tag, .feedInTag: return item
         default: return nil
         }
     }
@@ -61,7 +62,7 @@ enum SidebarDropResolver {
     }
 
     /// The shared drop target and half `position` stands for, or `nil` where dropping `dragged`
-    /// means nothing — anywhere in All/Starred or the tags, above a section's header, between the
+    /// means nothing — anywhere in All/Starred, between rows of the tags, above a section's header, between the
     /// Folders header and the first folder for a feed, or just below a collapsed folder (whose
     /// feeds are hidden, so the gap would silently append to it).
     static func target(
@@ -77,6 +78,7 @@ enum SidebarDropResolver {
             case .folder(let id): return (FeedListDropTargetFolderHeader(folderId: id), .top)
             case .noFolderHeader: return (FeedListDropTargetNoFolderHeader.shared, .top)
             case .tag(let id): return (FeedListDropTargetTagHeader(tagId: id), .top)
+            case .feedInTag(_, let tagId): return (FeedListDropTargetFeedInTag(tagId: tagId), .top)
             default: return nil
             }
         case .gap(let sectionID, let index):
