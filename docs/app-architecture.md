@@ -1865,13 +1865,12 @@ On macOS, `SidebarDropGuard` decides where a drop lands and applies it (the posi
     refused, and the outline proposes the next position instead.
   - Drags of any other type go on to SwiftUI's implementation untouched.
 - Feedback is the outline's own: the insertion line, the full-row highlight of a drop target, and
-  spring-loading (a collapsed folder opens under a hovering feed). Only a folder under a dragged
-  feed springs open — a folder drag opens nothing, and a tag never opens. The guard refuses the
-  rest in the outline's `expandItem:`, which SwiftUI's outline overrides to record the row as
-  expanded, so a refused one leaves the sidebar's state as it was; SwiftUI applies its own
-  expansion state another way, so an expansion it asks for mid-drag still happens. The cursor stays
-  the system's: a drop that resolves to nothing is refused and the item slides back, with no
-  forbidden cursor.
+  spring-loading (a collapsed folder or tag opens under a hovering feed). A folder drag springs
+  nothing open: the guard refuses it in the outline's `expandItem:`, which SwiftUI's outline
+  overrides to record the row as expanded, so a refused one leaves the sidebar's state as it was;
+  SwiftUI applies its own expansion state another way, so an expansion it asks for mid-drag still
+  happens. The cursor stays the system's: a drop that resolves to nothing is refused and the item
+  slides back, with no forbidden cursor.
 - A feed's copy under a tag gets an id of its own (`TagFeedRowID`: tag id + feed id). With the
   feed's id, the outline would take the copy and the original for one item, highlighting the wrong
   row and proposing positions that do not exist.

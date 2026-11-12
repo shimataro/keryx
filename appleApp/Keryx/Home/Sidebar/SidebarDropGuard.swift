@@ -24,8 +24,9 @@ import SwiftUI
 /// - The outline's `performDragOperation:` applies that action (`apply`) — only if the destination
 ///   still resolves to it, so a sidebar that changed under the drag (a sync) never sends the item
 ///   somewhere other than what was highlighted.
-/// - The outline's `expandItem(_:)` lets a drag spring open only what it can drop into: a dragged
-///   feed opens a folder, a dragged folder opens nothing. Spring-loading goes through
+/// - The outline's `expandItem(_:)` keeps a dragged folder from springing anything open — folders
+///   are only ordered, never dropped into; a dragged feed springs a folder or a tag open as usual.
+///   Spring-loading goes through
 ///   `expandItem(_:)`, which SwiftUI's outline overrides to record the row as expanded before
 ///   expanding it; refusing it there keeps that record unchanged. SwiftUI applies its own expansion
 ///   state another way, so an expansion it asks for during a drag (a sync) still happens.
@@ -127,14 +128,8 @@ final class SidebarDropHandler: NSObject {
         draggedKind = nil
     }
 
-    /// Whether the drag in progress keeps `item` from springing open — anything but a folder under a
-    /// dragged feed, the only row a drag can drop into.
-    func refusesExpansion(of item: AnyObject?, in outline: NSOutlineView) -> Bool {
-        guard let draggedKind else { return false }
-        guard draggedKind == .feed else { return true }
-        if case .folder = SidebarDropOutline(outline, folderCount: folderCount, tagCount: tagCount).classify(item) { return false }
-        return true
-    }
+    /// Whether the drag in progress keeps rows from springing open: a dragged folder opens nothing.
+    var refusesExpansion: Bool { draggedKind == .folder }
 }
 
 /// The `List`'s root items, in order: every section is one — All/Starred, Folders (only while there

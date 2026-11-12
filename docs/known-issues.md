@@ -1033,7 +1033,7 @@ carries no `.onInsert`/`.onDrop`:
   destination and sets it with `setDropItem`; the outline's `performDragOperation:` applies it, if
   the destination still resolves to the same action. SwiftUI's `validateDrop`/`acceptDrop` are
   never called for these drags.
-- The outline's `expandItem:` refuses to spring open anything but a folder under a dragged feed.
+- The outline's `expandItem:` refuses to spring anything open during a folder drag.
   SwiftUI's outline overrides `expandItem:` to record the row as expanded before expanding it, so
   refusing there — not in `expandItem:expandChildren:`, which it calls next — keeps that record
   unchanged; SwiftUI applies its own expansion state another way, which is left alone.

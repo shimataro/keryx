@@ -298,7 +298,7 @@ struct SidebarDropGuardTests {
     }
 
     @Test
-    func aDraggedFeedSpringsOnlyAFolderOpen() throws {
+    func aDraggedFeedSpringsFoldersAndTagsOpen() throws {
         let outline = try guardedOutline()
         let (folder, tag) = try collapsedFolderAndTag(in: outline)
         let info = StandInDraggingInfo(carrying: feedListFeedDragType, over: outline)
@@ -306,9 +306,9 @@ struct SidebarDropGuardTests {
 
         outline.expandItem(folder)
         outline.expandItem(tag)
-        spinUntil { outline.isItemExpanded(folder) }
+        spinUntil { outline.isItemExpanded(folder) && outline.isItemExpanded(tag) }
         #expect(outline.isItemExpanded(folder))
-        #expect(!outline.isItemExpanded(tag))
+        #expect(outline.isItemExpanded(tag))
         outline.draggingExited(info)
     }
 
@@ -316,8 +316,8 @@ struct SidebarDropGuardTests {
     func aRefusedSpringLeavesTheSidebarsStateAsItWas() throws {
         let outline = try guardedOutline()
         let (_, tag) = try collapsedFolderAndTag(in: outline)
-        let info = StandInDraggingInfo(carrying: feedListFeedDragType, over: outline)
-        _ = validate(outline, info, proposing: tag, at: sidebarDropOntoRowIndex)
+        let info = StandInDraggingInfo(carrying: feedListFolderDragType, over: outline)
+        _ = validate(outline, info, proposing: outline.child(1, ofItem: nil), at: 0)
 
         outline.expandItem(tag)
         #expect(!recorder.expanded.contains("t1"))

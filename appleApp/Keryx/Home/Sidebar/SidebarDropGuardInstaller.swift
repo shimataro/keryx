@@ -78,10 +78,7 @@ enum SidebarDropGuardInstaller {
         typealias Expand = @convention(c) (AnyObject, Selector, AnyObject?) -> Void
         let expandOriginal = Original(expand, of: cls)
         let expandBlock: @convention(block) (AnyObject, AnyObject?) -> Void = { receiver, item in
-            let refused = MainActor.assumeIsolated {
-                guard let outline = receiver as? NSOutlineView, let handler = handler(of: outline) else { return false }
-                return handler.refusesExpansion(of: item, in: outline)
-            }
+            let refused = MainActor.assumeIsolated { handler(of: receiver)?.refusesExpansion ?? false }
             if refused { return }
             expandOriginal.imp(as: Expand.self)?(receiver, expand, item)
         }

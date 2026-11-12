@@ -1023,7 +1023,7 @@ SwiftUI のドロップ処理は、クラッシュ以外にも、一部の位置
 - データソースの `outlineView(_:validateDrop:proposedItem:proposedChildIndex:)` が行き先を決めて `setDropItem` で
   設定し、アウトラインの `performDragOperation:` が、その行き先がまだ同じアクションに解決されるときだけ適用する。
   これらのドラッグでは、SwiftUI の `validateDrop`/`acceptDrop` は呼ばれない。
-- アウトラインの `expandItem:` は、フィードのドラッグ中のフォルダー以外を開かないよう断る。SwiftUI のアウトラインは
+- アウトラインの `expandItem:` は、フォルダーのドラッグ中は何も開かないよう断る。SwiftUI のアウトラインは
   `expandItem:` を上書きして、開く前に行を開いたと記録するので、そこで断れば（その次に呼ばれる
   `expandItem:expandChildren:` ではなく）記録は変わらない。SwiftUI が自分の開閉状態を反映する別の経路には
   手を付けない。
