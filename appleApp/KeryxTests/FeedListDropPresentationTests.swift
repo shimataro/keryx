@@ -2,19 +2,11 @@ import Foundation
 import KeryxShared
 import Testing
 
-/// Covers the pure drop-feedback rules in `FeedListDropPresentation.swift` that the sidebar's
-/// `DropDelegate` builds its macOS drag feedback from. Which action a drop applies is the shared
+/// Covers the pure drop rules in `FeedListDropPresentation.swift` that `SidebarDropGuard` decides the
+/// macOS sidebar's drops with. Which action a drop applies is the shared
 /// `resolveFeedListDropAction`'s job and is tested on the Kotlin side, not here.
 @Suite
 struct FeedListDropPresentationTests {
-    // MARK: - feedListDropFeedback
-
-    @Test
-    func onlyAFeedIsDroppedOntoARow() {
-        #expect(feedListDropFeedback(for: .feed) == .dropOn)
-        #expect(feedListDropFeedback(for: .folder) == .invalid)
-    }
-
     // MARK: - FeedListInsertGroup.accepts
 
     @Test
@@ -118,43 +110,127 @@ struct FeedListDropPresentationTests {
         #expect(reorder != nil && reorder?.targetFolderId == nil)
     }
 
-    // MARK: - feedListFolderGuardOffset
+    // MARK: - feedListInsertAction
 
     @Test
-    func belowTheFoldersHeaderIsTheFirstSlot() {
-        #expect(feedListFolderGuardOffset(row: .foldersHeader, bottomHalf: false, folderCount: 3) == 0)
-        #expect(feedListFolderGuardOffset(row: .foldersHeader, bottomHalf: true, folderCount: 3) == 0)
+    func anInsertionOfTheWrongKindResolvesToNothing() {
+        let folder = FeedListDragPayload(kind: .folder, id: "d1")
+        #expect(feedListInsertAction(into: .feeds(folderId: "d1", feedIds: ["f1"]), at: 0, dragging: folder, index: dropIndex) == nil)
+        let feed = FeedListDragPayload(kind: .feed, id: "f3")
+        #expect(feedListInsertAction(into: .folders(folderIds: ["d1", "d2"]), at: 0, dragging: feed, index: dropIndex) == nil)
     }
 
     @Test
-    func aFolderRowsTopHalfIsBeforeItAndItsBottomHalfAfterIt() {
-        #expect(feedListFolderGuardOffset(row: .folder(index: 0), bottomHalf: false, folderCount: 3) == 0)
-        #expect(feedListFolderGuardOffset(row: .folder(index: 0), bottomHalf: true, folderCount: 3) == 1)
-        #expect(feedListFolderGuardOffset(row: .folder(index: 1), bottomHalf: false, folderCount: 3) == 1)
-        #expect(feedListFolderGuardOffset(row: .folder(index: 1), bottomHalf: true, folderCount: 3) == 2)
-        #expect(feedListFolderGuardOffset(row: .folder(index: 2), bottomHalf: true, folderCount: 3) == 3)
+    func anInsertionResolvesThroughTheSharedRules() {
+        let feed = FeedListDragPayload(kind: .feed, id: "f3")
+        let move = feedListInsertAction(
+            into: .feeds(folderId: "d1", feedIds: ["f1", "f2"]), at: 1, dragging: feed, index: dropIndex
+        ) as? FeedListDropActionMoveFeed
+        #expect(move?.folderId == "d1")
+        #expect(move?.targetFeedId == "f2")
+    }
+
+    private func folderReorder(_ folderId: String, in folderIds: [String], at offset: Int) -> FeedListDropActionReorderFolder? {
+        feedListInsertAction(
+            into: .folders(folderIds: folderIds), at: offset,
+            dragging: FeedListDragPayload(kind: .folder, id: folderId), index: dropIndex
+        ) as? FeedListDropActionReorderFolder
     }
 
     @Test
-    func aFeedRowUnderAFolderIsAfterThatFolder() {
-        #expect(feedListFolderGuardOffset(row: .feedInFolder(folderIndex: 1), bottomHalf: false, folderCount: 3) == 2)
-        #expect(feedListFolderGuardOffset(row: .feedInFolder(folderIndex: 2), bottomHalf: true, folderCount: 3) == 3)
+    func theSlotJustBeforeADraggedFolderLeavesTheOrderAsItIs() {
+        let reorder = folderReorder("d2", in: ["d1", "d2"], at: 1)
+        #expect(reorder?.draggedFolderId == "d2")
+        #expect(reorder?.targetFolderId == "d2")
     }
 
     @Test
-    func theTopHalfOfTheRowBelowTheSectionIsTheEnd() {
-        #expect(feedListFolderGuardOffset(row: .afterFolders, bottomHalf: false, folderCount: 3) == 3)
-        #expect(feedListFolderGuardOffset(row: .afterFolders, bottomHalf: true, folderCount: 3) == nil)
+    func theSlotJustAfterTheLastFolderWhenItIsDraggedLeavesTheOrderAsItIs() {
+        let reorder = folderReorder("d2", in: ["d1", "d2"], at: 2)
+        #expect(reorder?.draggedFolderId == "d2")
+        #expect(reorder?.targetFolderId == "d2")
     }
 
     @Test
-    func anythingElseOrOutOfRangePlacesNothing() {
-        #expect(feedListFolderGuardOffset(row: .other, bottomHalf: false, folderCount: 3) == nil)
-        #expect(feedListFolderGuardOffset(row: .folder(index: 3), bottomHalf: false, folderCount: 3) == nil)
-        #expect(feedListFolderGuardOffset(row: .folder(index: -1), bottomHalf: true, folderCount: 3) == nil)
-        #expect(feedListFolderGuardOffset(row: .feedInFolder(folderIndex: 5), bottomHalf: false, folderCount: 3) == nil)
-        #expect(feedListFolderGuardOffset(row: .foldersHeader, bottomHalf: false, folderCount: 0) == nil)
-        #expect(feedListFolderGuardOffset(row: .afterFolders, bottomHalf: false, folderCount: 0) == nil)
+    func theSlotJustBeforeTheFirstFolderWhenItIsDraggedLeavesTheOrderAsItIs() {
+        let reorder = folderReorder("d1", in: ["d1", "d2"], at: 0)
+        #expect(reorder?.draggedFolderId == "d1")
+        #expect(reorder?.targetFolderId == "d2")
+    }
+
+    @Test
+    func theOnlyFolderHasNowhereToGo() {
+        #expect(folderReorder("d1", in: ["d1"], at: 0) == nil)
+        #expect(folderReorder("d1", in: ["d1"], at: 1) == nil)
+    }
+
+    // MARK: - sidebarDropDestination
+
+    private let onto = sidebarDropOntoRowIndex
+
+    @Test
+    func aFolderGoesToTheSlotProposedAmongTheFolders() {
+        #expect(sidebarDropDestination(dragging: .folder, proposed: .foldersSection, childIndex: 0, childCount: 3) == .folderSlot(index: 0))
+        #expect(sidebarDropDestination(dragging: .folder, proposed: .foldersSection, childIndex: 3, childCount: 3) == .folderSlot(index: 3))
+    }
+
+    @Test
+    func aFolderOverTheFoldersHeaderGoesFirst() {
+        #expect(sidebarDropDestination(dragging: .folder, proposed: .foldersSection, childIndex: onto, childCount: 3) == .folderSlot(index: 0))
+    }
+
+    @Test
+    func aFolderOnOrInAFolderGoesJustAfterIt() {
+        #expect(sidebarDropDestination(dragging: .folder, proposed: .folder(index: 1), childIndex: onto, childCount: 2) == .folderSlot(index: 2))
+        #expect(sidebarDropDestination(dragging: .folder, proposed: .folder(index: 1), childIndex: 0, childCount: 2) == .folderSlot(index: 2))
+        #expect(sidebarDropDestination(dragging: .folder, proposed: .folder(index: 1), childIndex: 2, childCount: 2) == .folderSlot(index: 2))
+        #expect(sidebarDropDestination(dragging: .folder, proposed: .feedInFolder(folderIndex: 1), childIndex: onto, childCount: 0) == .folderSlot(index: 2))
+    }
+
+    @Test
+    func aFolderGoesNowhereOutsideTheFolders() {
+        for row: SidebarOutlineRow in [.noFolderSection, .unfolderedFeed, .tag(index: 0), .feedInTag(tagIndex: 0), .other] {
+            #expect(sidebarDropDestination(dragging: .folder, proposed: row, childIndex: onto, childCount: 0) == nil)
+            #expect(sidebarDropDestination(dragging: .folder, proposed: row, childIndex: 0, childCount: 0) == nil)
+        }
+    }
+
+    @Test
+    func aFeedDroppedOntoARowGoesIntoIt() {
+        #expect(sidebarDropDestination(dragging: .feed, proposed: .folder(index: 2), childIndex: onto, childCount: 1) == .ontoFolder(index: 2))
+        #expect(sidebarDropDestination(dragging: .feed, proposed: .noFolderSection, childIndex: onto, childCount: 1) == .ontoNoFolder)
+        #expect(sidebarDropDestination(dragging: .feed, proposed: .tag(index: 1), childIndex: onto, childCount: 0) == .ontoTag(index: 1))
+    }
+
+    @Test
+    func aFeedOverACopyUnderATagGoesToThatTag() {
+        #expect(sidebarDropDestination(dragging: .feed, proposed: .feedInTag(tagIndex: 1), childIndex: onto, childCount: 0) == .ontoTag(index: 1))
+    }
+
+    @Test
+    func aFeedBetweenFeedsGoesToThatSlot() {
+        #expect(sidebarDropDestination(dragging: .feed, proposed: .folder(index: 0), childIndex: 0, childCount: 2) == .intoFolder(index: 0, offset: 0))
+        #expect(sidebarDropDestination(dragging: .feed, proposed: .folder(index: 0), childIndex: 2, childCount: 2) == .intoFolder(index: 0, offset: 2))
+        #expect(sidebarDropDestination(dragging: .feed, proposed: .noFolderSection, childIndex: 1, childCount: 3) == .intoNoFolder(offset: 1))
+        #expect(sidebarDropDestination(dragging: .feed, proposed: .noFolderSection, childIndex: 0, childCount: 0) == .intoNoFolder(offset: 0))
+    }
+
+    @Test
+    func aFeedGoesNowhereThatHoldsNoSuchSlot() {
+        // A slot past the end, and the inside of a feed row — what SwiftUI crashed applying.
+        #expect(sidebarDropDestination(dragging: .feed, proposed: .folder(index: 0), childIndex: 3, childCount: 2) == nil)
+        #expect(sidebarDropDestination(dragging: .feed, proposed: .unfolderedFeed, childIndex: 0, childCount: 0) == nil)
+        #expect(sidebarDropDestination(dragging: .feed, proposed: .feedInFolder(folderIndex: 0), childIndex: 0, childCount: 0) == nil)
+        #expect(sidebarDropDestination(dragging: .feed, proposed: .tag(index: 0), childIndex: 0, childCount: 1) == nil)
+        #expect(sidebarDropDestination(dragging: .feed, proposed: .feedInTag(tagIndex: 0), childIndex: 0, childCount: 0) == nil)
+    }
+
+    @Test
+    func aFeedGoesNowhereOnARowThatTakesNone() {
+        for row: SidebarOutlineRow in [.foldersSection, .unfolderedFeed, .feedInFolder(folderIndex: 0), .other] {
+            #expect(sidebarDropDestination(dragging: .feed, proposed: row, childIndex: onto, childCount: 0) == nil)
+        }
+        #expect(sidebarDropDestination(dragging: .feed, proposed: .foldersSection, childIndex: 0, childCount: 2) == nil)
     }
 
     // MARK: - springLoadingDelay

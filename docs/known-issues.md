@@ -981,8 +981,8 @@ over the rows, swipe actions and pull-to-refresh, so it is a task of its own.
 
 ## macOS: dropping a folder between folders crashed inside SwiftUI
 
-**Status**: worked around, not fixed — external (SwiftUI) defect. The drop is taken before SwiftUI
-applies it (`Home/Sidebar/SidebarFolderDropGuard.swift`).
+**Status**: worked around, not fixed — external (SwiftUI) defect. Every feed and folder drop is
+decided and applied without SwiftUI's drop handling (`Home/Sidebar/SidebarDropGuard.swift`).
 
 ### Symptom
 
@@ -1017,37 +1017,59 @@ A Swift assertion is a trap, not an exception, so it cannot be caught.
 
 ### The workaround
 
-`SidebarFolderDropGuard` finds the `NSOutlineView` behind the sidebar's `List` and gives that one
-instance a runtime subclass (as KVO does) overriding only `performDragOperation:`. A drop carrying a
-folder is applied there — where the row under the pointer says, through the same `insert(into:at:)` the
-`.onInsert` would have used — and never reaches SwiftUI's `acceptDrop`; every other drop goes on to
-SwiftUI. SwiftUI still validates the drop and draws the insertion line. Where the guard cannot read
-the outline as expected, it refuses the drop rather than passing it to SwiftUI.
+SwiftUI's drop handling turned out to be unreliable beyond the crash: it refused some positions (a
+folder over a feed row inside a folder, the middle of a folder row), accepted positions that do not
+exist (children of a feed row, which crashed too), moved the drop target while refusing it, and
+answered "copy", which puts "+" on the cursor. So `SidebarDropGuard` keeps SwiftUI out of feed and
+folder drops altogether, and the `List` carries no `.onInsert`/`.onDrop`:
 
-When the guard does not work as intended, the result should be no worse than v0.27.0. How each case
-turns out:
+- It adds methods to the class of the `NSOutlineView` behind the `List` and to the class of its data
+  source (SwiftUI's `OutlineListCoordinator`) — `class_addMethod` where the class only inherits the
+  method, `method_setImplementation` (keeping the old implementation) where it has its own. Each
+  method acts only for an outline that has the guard's handler attached and a drag carrying a feed
+  or folder type; everything else goes on to the original implementation (looked up from the
+  superclass on every call where none was replaced, as `super` would).
+- The data source's `outlineView(_:validateDrop:proposedItem:proposedChildIndex:)` decides the
+  destination and sets it with `setDropItem`; the outline's `performDragOperation:` applies it.
+  SwiftUI's `validateDrop`/`acceptDrop` are never called for these drags. The outline's
+  `expandItem:expandChildren:` is skipped during a folder drag, so folders do not spring open
+  under it.
+- The guard registers the two drag types itself (`registerForDraggedTypes`), since no SwiftUI drop
+  modifier does any more.
+- A feed's copy under a tag gets an id of its own; with the feed's id, the outline mistook the copy
+  for the original.
+
+The rules for where an item lands are in "Sidebar (macOS)" in [app-architecture.md](app-architecture.md).
+
+The class, not the instance, is changed because something else may already have swizzled the
+instance: in the test host, KVO had replaced the outline's class before the guard's first chance to
+install, and subclassing KVO's class would break KVO's undoing it. Swift's `type(of:)` skips KVO's
+class, so the methods land on SwiftUI's own classes either way.
+
+How it turns out when something does not go as intended:
 
 | Case | Result |
 | --- | --- |
-| The outline is not found, or SwiftUI replaces it before the guard is installed again | No guard: the drop crashes, as in v0.27.0 |
+| The outline or its data source is not found, or not shaped as expected | The guard is not installed: sidebar drag and drop does nothing (no crash). A fault is logged once (`SidebarDropGuard` category); moving and tagging remain available from the context menu |
 | The sections are not laid out as expected | The drop is refused; nothing moves |
-| The insertion line and the slot read from the pointer disagree at a boundary | The folder lands one slot off. Nothing is lost, and dragging it again fixes it — accepted |
-| Something compares the outline's class exactly | The subclass reports the original class from `-class`, as KVO does, so `-class`, `isMemberOfClass:` and `className` see no change; Swift's `type(of:)` was also seen to report the original class |
-| The outline was already swizzled by someone else (KVO) | The guard is not installed (its real class differs from its `-class`), since subclassing theirs would break their undoing it: the drop crashes, as in v0.27.0 |
-| KVO observes the outline after the guard and stops | KVO stacks its class on the guard's and restores it afterwards; checked in the standalone app |
-| The base class's `performDragOperation:` changes later | Drops the guard passes on look up the base class's method on every call, as `super` would |
+| KVO observes the outline, before or after the guard is installed | No effect: the methods are on SwiftUI's classes, which KVO's class inherits from. Covered by a test |
+| Another `List` in the app shares the classes | Its outline has no handler attached, so every method goes on to the original implementation |
+| SwiftUI's own implementation of a replaced method changes later | Other drags get the kept original, or the superclass's method looked up per call |
 
-What it cannot rule out is SwiftUI or AppKit identifying the outline by its real class through some
-other route.
-
-It relies on SwiftUI's internals: that the `List` is an `NSOutlineView`, and that its root items are
-the `List`'s sections in order (the headerless All/Starred section first, then Folders). Re-check it on
-each new macOS: drop a folder between folders, at the top, at the end and below an expanded folder,
-and confirm it lands where the insertion line showed.
+`KeryxTests/SidebarDropGuardTests.swift` hosts a `List` shaped like the sidebar in an offscreen
+window and checks what the guard relies on: that the `List` is an `NSOutlineView` whose data source
+answers `validateDrop`, that its root items are the `List`'s sections in order (the headerless
+All/Starred section first, then Folders, "No folder" and Tags), that each row is read as the row it
+is, and that drops sent through a stand-in `NSDraggingInfo` are decided and applied by the guard. CI
+runs it on `macos-latest`, so a new SDK or macOS that changes these fails there. It cannot cover the
+older macOS releases users run (14 and later) or a real mouse drag; re-check those by hand on each
+new macOS: drop a folder at the top, the middle and the bottom of a folder row, over a feed inside a
+folder, at the top and at the end, and drop a feed onto a folder, "No folder", a tag and a feed's
+copy under a tag.
 
 ### What a real fix would need
 
-A fix in SwiftUI. Once a macOS release no longer crashes without the guard, the guard can be removed
-for the systems that have the fix. Driving the outline directly instead (an `NSOutlineView` wrapped in
-`NSViewRepresentable`, as the iOS sidebar does with a `UICollectionView`) also avoids it, at the cost of
-drawing the rows, selection and metrics the `List` now provides.
+A fix in SwiftUI. Even then, the guard stays as long as SwiftUI's drop handling misplaces or refuses
+drops as described above. Driving the outline directly instead (an `NSOutlineView` wrapped in
+`NSViewRepresentable`, as the iOS sidebar does with a `UICollectionView`) would remove the reliance on
+SwiftUI's internals, at the cost of drawing the rows, selection and metrics the `List` now provides.

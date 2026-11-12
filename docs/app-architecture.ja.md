@@ -1768,16 +1768,33 @@ UI ごとに異なるのはフィードバックだけで、macOS では `NSOutl
 - プロバイダーのクロージャはドラッグ開始時に実行され、すべてのドロップ先はそのドラッグ中の項目を基に検証する。
   ペイロードは専用のエクスポート型（`works.merc.keryx.app.feedlistitem`、`project.yml` の
   `UTExportedTypeDeclarations` で宣言）を使うため、他アプリからのテキストのドラッグが並べ替えと誤認されることはない。
-- フィードバック：行間には挿入線（インデントはアウトライン自身が付ける）、フィードを落とすフォルダー・「フォルダーなし」・
-  タグの行にはアクセントカラーのハイライト、共有ルールで何も起きない位置では `.forbidden`、そしてシステムの
-  スプリングロード設定に従うスプリングロードフォルダー（Mac App Store ビルドは常にシステム既定の 0.5 秒を使う。
-  その設定の読み取りはプライバシーマニフェストの対象外のため）。
-- **フォルダーをフォルダーの間に落としたときは、SwiftUI ではなく `SidebarFolderDropGuard` が適用する。**
-  SwiftUI はこのドロップの適用で落ちる（[known-issues.ja.md](known-issues.ja.md) の「macOS: フォルダーをフォルダーの間に
-  落とすと SwiftUI の中でクラッシュした」を参照）。そこで `List` の `NSOutlineView` に実行時サブクラスを与え、その
-  `performDragOperation:` がフォルダーを運ぶドロップを自分で受ける。フォルダーはポインターの下の行が示す位置
-  （`feedListFolderGuardOffset`）に入り、フォルダーの `.onInsert` と同じ `insert(into:at:)` を通って移動する。
-  その `.onInsert` は残す。SwiftUI はそれを使ってドロップを検証し、挿入線を描くため。ほかのドロップはすべて SwiftUI のまま。
+- **フィードとフォルダーのドロップは、すべて SwiftUI ではなく `SidebarDropGuard`
+  （`Home/Sidebar/SidebarDropGuard.swift`）が決めて適用する。** SwiftUI 自身のドロップ処理は、フォルダーの
+  ドロップの適用で落ち、ほかのドロップも断ったり違う位置にしたりし、カーソルに「+」を付けた
+  （[known-issues.ja.md](known-issues.ja.md) の「macOS: フォルダーをフォルダーの間に落とすと SwiftUI の中で
+  クラッシュした」を参照）。そのため `List` には `.onInsert`/`.onDrop` を付けない。ガードは、`List` の背後にある
+  `NSOutlineView` とそのデータソースにメソッドを足す。
+  - データソースの `outlineView(_:validateDrop:proposedItem:proposedChildIndex:)` は、提案された行を読み
+    （`SidebarDropOutline`）、項目の行き先を決め（`sidebarDropDestination`）、共通の規則でそこにアクションが
+    作れるとき（`feedListInsertAction` / `resolveFeedListDropAction`）だけ受け付ける。そして `setDropItem` で
+    その行き先を設定し、「移動」を返す。アウトラインの `performDragOperation:` は、同じ行き先を
+    `applyFeedListDropAction` で適用する。そのため、表示と結果が食い違わない。
+  - フォルダーはフォルダーの間にだけ入る。フォルダーの上や中（その行、その中のフィード）はそのフォルダーの
+    すぐ後ろ、Folders の見出しは先頭になる。ドラッグ中のフォルダーのすぐ前と後ろにも線が出て、落としても
+    順序は変わらない。
+  - フィードは、フォルダー・「フォルダーなし」・タグの行の上か、フォルダーや「フォルダーなし」のフィードの間に
+    入る。タグの下のフィードのコピーは、そのタグとして扱う。それ以外（フィード行の中）は拒否し、アウトラインが
+    次の候補の位置を提案し直す。
+  - ほかの型のドラッグは、そのまま SwiftUI の実装に渡す。
+- フィードバックはアウトライン自身のものを使う。挿入線、ドロップ先の行全体の強調、スプリングロード（フィードを
+  重ねた閉じたフォルダーが開く）。フォルダーのドラッグでは、フォルダーを開かない（`expandItem:expandChildren:` を
+  飛ばす）。カーソルはシステムのまま。何も起きないドロップは拒否され、項目は元の位置に戻る。禁止カーソルは出さない。
+- タグの下のフィードのコピーには、専用の ID（`TagFeedRowID`：タグの ID + フィードの ID）を付ける。フィードの ID の
+  ままだと、アウトラインがコピーと本体を 1 つの項目と取り違え、別の行を強調したり、存在しない位置を提案したりする。
+- SwiftUI の内部が変わってガードを取り付けられないときは、サイドバーのドラッグ＆ドロップが何も起きなくなる
+  （落ちない）。fault のログ（`SidebarDropGuard` カテゴリー）を残し、移動とタグ付けはコンテキストメニューで行える。
+  `KeryxTests/SidebarDropGuardTests.swift` がサイドバーと同じ形の `List` を載せてガードの前提を確かめるので、
+  そうした変化は CI で分かる。
 
 ### サイドバー（iOS）
 

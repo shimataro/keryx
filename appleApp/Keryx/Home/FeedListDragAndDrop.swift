@@ -42,31 +42,6 @@ func applyFeedListDropAction(_ action: FeedListDropAction, home: HomeObservable)
 
 #if os(macOS)
 extension View {
-    /// Makes this folder row, tag row or "No folder" header a target a dragged feed is dropped
-    /// *onto* (moved into that folder or the unfoldered group, or tagged), sharing the pane-wide
-    /// `dropOnKey`/`hoveredKey` state so exactly one row is highlighted at a time. Dropping
-    /// *between* rows is the outline's own `.onInsert` instead (`performFeedListInsert`), which also
-    /// draws the insertion line.
-    func feedListDropTarget(
-        _ target: FeedListDropTarget,
-        hoverKey: FeedListHoverKey,
-        home: HomeObservable,
-        index: FeedListDropIndex,
-        draggingItem: Binding<FeedListDragPayload?>,
-        dropOnKey: Binding<FeedListHoverKey?>,
-        hoveredKey: Binding<FeedListHoverKey?>,
-    ) -> some View {
-        onDrop(of: [feedListFeedDragType], delegate: FeedListDropOnDelegate(
-            target: target,
-            hoverKey: hoverKey,
-            home: home,
-            index: index,
-            draggingItem: draggingItem,
-            dropOnKey: dropOnKey,
-            hoveredKey: hoveredKey
-        ))
-    }
-
     /// Marks this sidebar row as draggable, carrying `item`, through `.itemProvider` — the
     /// `List`'s own row-drag hook, so the source list (`NSTableView`) itself decides what a click
     /// and what a drag is, anywhere in the row, exactly as Notes and Finder do. The drag image is
@@ -78,7 +53,7 @@ extension View {
     /// `Button` row swallows the drag altogether.
     ///
     /// The provider closure runs when the drag begins, which is this pane's only "drag started"
-    /// signal — every drop target reads `draggingItem` to validate and act, so it must be set
+    /// signal — `SidebarDropGuard` reads `draggingItem` to validate and act, so it must be set
     /// before the first hover. The payload is registered under its kind's own type
     /// (`FeedListDragPayload.contentType`), visible to this process only.
     ///
@@ -104,88 +79,6 @@ extension View {
             }
             return provider
         } : nil)
-    }
-}
-
-/// Applies a drop *between* rows, from `.onInsert`: `offset` is where in `group` the outline put
-/// the insertion line. It is translated into the shared drop target and half
-/// (`feedListInsertTarget`) and resolved through the same `resolveFeedListDropAction` the Compose
-/// app uses, so both apps apply the same rules. The item comes from `draggingItem` rather than the
-/// providers — every drag this pane accepts starts in this pane.
-@MainActor
-func performFeedListInsert(
-    into group: FeedListInsertGroup,
-    at offset: Int,
-    draggingItem: Binding<FeedListDragPayload?>,
-    index: FeedListDropIndex,
-    home: HomeObservable
-) {
-    guard let dragging = draggingItem.wrappedValue else { return }
-    draggingItem.wrappedValue = nil
-    guard group.accepts(dragging.kind),
-          let insert = feedListInsertTarget(in: group, at: offset),
-          let action = FeedListDragKt.resolveFeedListDropAction(
-              item: dragging.toShared(), target: insert.target, half: insert.half, index: index
-          ) else { return }
-    applyFeedListDropAction(action, home: home)
-}
-
-/// Tracks a dragged feed hovering a row it would be dropped onto, for that row's highlight
-/// (`dropOnKey`) and the spring-loaded folder (`hoveredKey`). The drop itself is applied from the
-/// already-tracked `draggingItem` (set at drag start by `feedListDraggable`) rather than decoded from
-/// `info.itemProviders`.
-private struct FeedListDropOnDelegate: DropDelegate {
-    let target: FeedListDropTarget
-    let hoverKey: FeedListHoverKey
-    let home: HomeObservable
-    let index: FeedListDropIndex
-    @Binding var draggingItem: FeedListDragPayload?
-    @Binding var dropOnKey: FeedListHoverKey?
-    @Binding var hoveredKey: FeedListHoverKey?
-
-    func validateDrop(info: DropInfo) -> Bool {
-        draggingItem != nil && info.hasItemsConforming(to: [feedListFeedDragType])
-    }
-
-    func dropEntered(info: DropInfo) {
-        _ = updateHighlight()
-    }
-
-    /// `.forbidden` wherever the drop would do nothing, so the cursor carries no move badge and a
-    /// release there slides the item back to where it came from.
-    func dropUpdated(info: DropInfo) -> DropProposal? {
-        DropProposal(operation: updateHighlight() == .invalid ? .forbidden : .move)
-    }
-
-    func dropExited(info: DropInfo) {
-        guard hoveredKey == hoverKey else { return }
-        clearHover()
-    }
-
-    func performDrop(info: DropInfo) -> Bool {
-        guard let dragging = draggingItem else { return false }
-        draggingItem = nil
-        clearHover()
-        // A header's own action doesn't depend on which half of it the item is over.
-        guard feedListDropFeedback(for: dragging.kind) == .dropOn,
-              let action = FeedListDragKt.resolveFeedListDropAction(
-                  item: dragging.toShared(), target: target, half: .top, index: index
-              ) else { return false }
-        applyFeedListDropAction(action, home: home)
-        return true
-    }
-
-    private func clearHover() {
-        hoveredKey = nil
-        dropOnKey = nil
-    }
-
-    private func updateHighlight() -> FeedListDropFeedback {
-        guard let dragging = draggingItem else { return .invalid }
-        hoveredKey = hoverKey
-        let feedback = feedListDropFeedback(for: dragging.kind)
-        dropOnKey = feedback == .dropOn ? hoverKey : nil
-        return feedback
     }
 }
 #endif

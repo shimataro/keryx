@@ -26,12 +26,6 @@ extension FeedListView {
                     ForEach(sortedFolders, id: \.id) { folder in
                         folderGroup(folder)
                     }
-                    // SwiftUI validates the drop and draws the insertion line through this
-                    // `.onInsert`, but would crash applying it; the drop itself is taken first by
-                    // `SidebarFolderDropGuard` (below), which calls the same `insert(into:at:)`.
-                    .onInsert(of: [feedListFolderDragType]) { offset, _ in
-                        insertFolder(at: offset)
-                    }
                 }
             }
             // Always present — even with no unassigned feeds — so a feed can still be dragged out
@@ -41,9 +35,6 @@ extension FeedListView {
             Section {
                 ForEach(unassignedFeeds, id: \.id) { feed in
                     feedRow(feed, item: .feed(feed.id))
-                }
-                .onInsert(of: [feedListFeedDragType]) { offset, _ in
-                    insert(into: .feeds(folderId: nil, feedIds: unassignedFeeds.map(\.id)), at: offset)
                 }
             } header: {
                 noFolderHeader
@@ -56,7 +47,14 @@ extension FeedListView {
                 }
             }
         }
-        .background(SidebarFolderDropGuard(folderCount: sortedFolders.count, insertFolder: insertFolder(at:)))
+        // Every feed and folder drop is decided and applied by the guard, never by SwiftUI's own drop
+        // handling — see `SidebarDropGuard`. So the `List` carries no `.onInsert`/`.onDrop`.
+        .background(SidebarDropGuard(
+            folderCount: sortedFolders.count,
+            tagCount: sortedTags.count,
+            canDrop: { dropAction(for: $0) != nil },
+            drop: applyDrop(at:)
+        ))
         // ←/→ move between panes (`external-spec.md` §9), so they are taken here before the
         // outline's own expand/collapse handling sees them; the disclosure triangles still expand
         // and collapse.
@@ -88,16 +86,45 @@ extension FeedListView {
         )
     }
 
-    /// A folder dropped among the folders, from the guard or the folders' `.onInsert`.
-    private func insertFolder(at offset: Int) {
-        insert(into: .folders(folderIds: sortedFolders.map(\.id)), at: offset)
+    /// The shared action the dragged item takes when dropped at `destination` — a position in the
+    /// outline, resolved to ids here and then through `resolveFeedListDropAction`, the same rules the
+    /// Compose app applies — or `nil` where the drop would do nothing. `SidebarDropGuard` asks it
+    /// both to decide whether a drop is allowed and to apply it, so the two never disagree.
+    private func dropAction(for destination: SidebarDropDestination) -> FeedListDropAction? {
+        guard let dragging = draggingItem else { return nil }
+        func ontoRow(_ target: FeedListDropTarget) -> FeedListDropAction? {
+            // A row's own action doesn't depend on which half of it the item is over.
+            FeedListDragKt.resolveFeedListDropAction(item: dragging.toShared(), target: target, half: .top, index: dropIndex)
+        }
+        func insert(into group: FeedListInsertGroup, at offset: Int) -> FeedListDropAction? {
+            feedListInsertAction(into: group, at: offset, dragging: dragging, index: dropIndex)
+        }
+        let folders = sortedFolders
+        switch destination {
+        case .folderSlot(let index):
+            return insert(into: .folders(folderIds: folders.map(\.id)), at: index)
+        case .ontoFolder(let index):
+            guard folders.indices.contains(index) else { return nil }
+            return ontoRow(FeedListDropTargetFolderHeader(folderId: folders[index].id))
+        case .ontoNoFolder:
+            return ontoRow(FeedListDropTargetNoFolderHeader.shared)
+        case .ontoTag(let index):
+            let tags = sortedTags
+            guard tags.indices.contains(index) else { return nil }
+            return ontoRow(FeedListDropTargetTagHeader(tagId: tags[index].id))
+        case .intoFolder(let index, let offset):
+            guard folders.indices.contains(index) else { return nil }
+            let folder = folders[index]
+            return insert(into: .feeds(folderId: folder.id, feedIds: feedsIn(folder: folder).map(\.id)), at: offset)
+        case .intoNoFolder(let offset):
+            return insert(into: .feeds(folderId: nil, feedIds: unassignedFeeds.map(\.id)), at: offset)
+        }
     }
 
-    /// A drop between rows, from a `ForEach`'s `.onInsert` — see `performFeedListInsert`.
-    private func insert(into group: FeedListInsertGroup, at offset: Int) {
-        dropOnKey = nil
-        hoveredKey = nil
-        performFeedListInsert(into: group, at: offset, draggingItem: $draggingItem, index: dropIndex, home: home)
+    private func applyDrop(at destination: SidebarDropDestination) {
+        guard let action = dropAction(for: destination) else { return }
+        draggingItem = nil
+        applyFeedListDropAction(action, home: home)
     }
 
     // MARK: - All / Starred
@@ -114,20 +141,12 @@ extension FeedListView {
 
     /// The "No folder" section header — not itself a selectable filter (there is no
     /// `ArticleFilter` for "every unfoldered feed"), only a drop target for moving a feed out of
-    /// every folder, matching Compose's own header (`FeedListPane.kt`).
+    /// every folder, matching Compose's own header (`FeedListPane.kt`). The outline highlights it
+    /// while a feed is over it (`SidebarDropGuard`).
     private var noFolderHeader: some View {
         Text(L("home_no_folder"))
-            .feedListDropHighlight(dropOnKey == .noFolder)
+            .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .feedListDropTarget(
-                FeedListDropTargetNoFolderHeader.shared,
-                hoverKey: .noFolder,
-                home: home,
-                index: dropIndex,
-                draggingItem: $draggingItem,
-                dropOnKey: $dropOnKey,
-                hoveredKey: $hoveredKey
-            )
     }
 
     /// `toggleFolderCollapsed` flips the state, so it only runs when the requested state differs —
@@ -149,15 +168,12 @@ extension FeedListView {
             ForEach(feedsIn(folder: folder), id: \.id) { feed in
                 feedRow(feed, item: .feed(feed.id))
             }
-            .onInsert(of: [feedListFeedDragType]) { offset, _ in
-                insert(into: .feeds(folderId: folder.id, feedIds: feedsIn(folder: folder).map(\.id)), at: offset)
-            }
         } label: {
             SidebarSourceListRow(
                 home: home,
                 content: sidebar.folderContents[folder.id] ?? SidebarRowStaticContent(title: folder.name, icon: .symbol("folder")),
                 unread: .folder(folder.id),
-                highlight: dropOnKey == .folder(folder.id) ? .drop : highlight(for: instance),
+                highlight: highlight(for: instance),
                 editor: folderRenameEditor(folder)
             )
                 .equatable()
@@ -175,15 +191,6 @@ extension FeedListView {
                     FeedListDragPayload(kind: .folder, id: folder.id),
                     draggingItem: $draggingItem,
                     enabled: dialogs.renamingRowKey != selection.key
-                )
-                .feedListDropTarget(
-                    FeedListDropTargetFolderHeader(folderId: folder.id),
-                    hoverKey: .folder(folder.id),
-                    home: home,
-                    index: dropIndex,
-                    draggingItem: $draggingItem,
-                    dropOnKey: $dropOnKey,
-                    hoveredKey: $hoveredKey
                 )
                 .tag(selection.key)
                 .trackAppearance(selection.key, in: $appearedRowKeys)
@@ -206,8 +213,11 @@ extension FeedListView {
     private func tagGroup(_ tag: Tags) -> some View {
         let selection = rowSelection(.tag(tag.id), FeedListRowSelectionTag(tagId: tag.id))
         return DisclosureGroup(isExpanded: tagExpandedBinding(tag.id)) {
-            ForEach(feeds(taggedWith: tag), id: \.id) { feed in
-                feedRow(feed, item: .feedInTag(feedId: feed.id, tagId: tag.id))
+            // Identified by tag and feed, not by the feed alone: the same feed's row elsewhere in the
+            // `List` must not share its identity, or the outline behind it takes one row for the
+            // other — highlighting the wrong row mid-drag, and proposing a drop into a feed row.
+            ForEach(feeds(taggedWith: tag).map { TagFeedRowID(tagId: tag.id, feed: $0) }) { row in
+                feedRow(row.feed, item: .feedInTag(feedId: row.feed.id, tagId: tag.id))
             }
         } label: {
             TagRowLabel(
@@ -218,21 +228,17 @@ extension FeedListView {
                 selection: selection,
                 editor: tagRenameEditor(tag),
                 appearedRowKeys: $appearedRowKeys,
-                highlight: dropOnKey == .tag(tag.id) ? .drop : highlight(for: selection.instance),
-                dropIndex: dropIndex,
-                draggingItem: $draggingItem,
-                dropOnKey: $dropOnKey,
-                hoveredKey: $hoveredKey
+                highlight: highlight(for: selection.instance)
             )
         }
     }
 
     // MARK: - Rows
 
-    /// A feed row is only ever a drag *source*: a feed is dropped between feed rows (the
-    /// enclosing `ForEach`'s `.onInsert`), never onto one. A copy nested under an expanded tag is
-    /// draggable too, but its tag's `ForEach` takes no insertions — matching Compose's own
-    /// `FeedListRowKey.Other` classification for it (`FeedListRowKeys.kt`'s own
+    /// A feed row is only ever a drag *source*: a feed is dropped between feed rows, never onto one
+    /// (`sidebarDropDestination`). A copy nested under an expanded tag is draggable too, but nothing
+    /// is inserted among a tag's copies — a feed dropped there goes to the tag itself, matching
+    /// Compose's own `FeedListRowKey.Other` classification for it (`FeedListRowKeys.kt`'s own
     /// `parseFeedListRowKey`).
     ///
     /// `item` is `.feed` for a feed in its folder group or among the unfoldered feeds, `.feedInTag`
@@ -329,17 +335,14 @@ extension FeedListView {
     }
 }
 
-private extension View {
-    /// The drop highlight alone, for the "No folder" section header — a header has no selection
-    /// shape to match, so the highlight hugs its title.
-    func feedListDropHighlight(_ isOn: Bool) -> some View {
-        foregroundStyle(isOn ? AnyShapeStyle(Color.white) : AnyShapeStyle(.secondary))
-            .padding(.horizontal, isOn ? 4 : 0)
-            .background {
-                RoundedRectangle(cornerRadius: 4).fill(isOn ? Color.accentColor : .clear)
-            }
-    }
+/// A feed's copy under a tag, identified by both — see `tagGroup`.
+private struct TagFeedRowID: Identifiable {
+    let tagId: String
+    let feed: Feeds
+    var id: String { "\(tagId)/\(feed.id)" }
+}
 
+private extension View {
     /// Tags a sidebar row with `key` for `ScrollViewProxy.scrollTo` and records whether it is
     /// currently on screen in `appearedKeys`, so the scroll-to-selection effect in
     /// `FeedListView.body` only ever scrolls a row that actually needs it.
@@ -361,18 +364,14 @@ private struct TagRowLabel: View {
     let selection: SidebarRowSelection
     let editor: InlineRenameField?
     @Binding var appearedRowKeys: Set<String>
-    /// The row's echo or drop highlight, resolved by `FeedListView`.
+    /// The row's echo highlight, resolved by `FeedListView`.
     let highlight: SidebarRowHighlight
-    let dropIndex: FeedListDropIndex
-    @Binding var draggingItem: FeedListDragPayload?
-    @Binding var dropOnKey: FeedListHoverKey?
-    @Binding var hoveredKey: FeedListHoverKey?
 
     @State private var showingColorPicker = false
 
     var body: some View {
-        // The highlight is `.drop` while a feed hovers for attachment — matches Compose's own
-        // `dropTargetBackground` (`FeedListTagRow.kt`'s tag row).
+        // A feed hovering the row for attachment is highlighted by the outline itself
+        // (`SidebarDropGuard`) — the role of Compose's own `dropTargetBackground` (`FeedListTagRow.kt`).
         SidebarSourceListRow(
             home: home,
             content: content,
@@ -398,15 +397,6 @@ private struct TagRowLabel: View {
             Button(L("home_change_tag_color_menu")) { showingColorPicker = true }
             Button(L("home_delete_tag_menu"), role: .destructive) { dialogs.deletingTag = tag }
         }
-        .feedListDropTarget(
-            FeedListDropTargetTagHeader(tagId: tag.id),
-            hoverKey: .tag(tag.id),
-            home: home,
-            index: dropIndex,
-            draggingItem: $draggingItem,
-            dropOnKey: $dropOnKey,
-            hoveredKey: $hoveredKey
-        )
         .tag(selection.key)
         .trackAppearance(selection.key, in: $appearedRowKeys)
     }

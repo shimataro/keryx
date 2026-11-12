@@ -1842,18 +1842,36 @@ only the feedback is per UI, and on macOS it follows the source-list conventions
   in-progress item. The payload uses its own exported type (`works.merc.keryx.app.feedlistitem`,
   declared under `UTExportedTypeDeclarations` in `project.yml`), so a text drag from another app is
   never taken for a reorder.
-- Feedback: an insertion line between rows (indented by the outline itself), an accent highlight on
-  a folder, "No folder" or tag row a feed is dropped onto, `.forbidden` wherever the shared rules
-  resolve no action, and spring-loaded folders that follow the system's spring-loading setting (the
-  Mac App Store build always uses the system default, 0.5 s — reading that setting is not covered by
-  its privacy manifest).
-- **A folder dropped between folders is applied by `SidebarFolderDropGuard`, not by SwiftUI.**
-  SwiftUI crashes applying that drop (see "macOS: dropping a folder between folders crashed inside
-  SwiftUI" in [known-issues.md](known-issues.md)), so the `List`'s `NSOutlineView` is given a runtime
-  subclass whose `performDragOperation:` takes a drop carrying a folder itself: the folder lands where
-  the row under the pointer says (`feedListFolderGuardOffset`) and moves through the same
-  `insert(into:at:)` as the folders' `.onInsert`. That `.onInsert` stays, since SwiftUI validates the
-  drop and draws the insertion line through it; every other drop is still SwiftUI's.
+- **Every feed and folder drop is decided and applied by `SidebarDropGuard`
+  (`Home/Sidebar/SidebarDropGuard.swift`), never by SwiftUI.** SwiftUI's own drop handling crashed
+  applying a folder drop, refused or misplaced others, and marked the cursor with "+" (see "macOS:
+  dropping a folder between folders crashed inside SwiftUI" in [known-issues.md](known-issues.md)),
+  so the `List` carries no `.onInsert`/`.onDrop`. The guard adds methods to the `NSOutlineView`
+  behind the `List` and to its data source:
+  - The data source's `outlineView(_:validateDrop:proposedItem:proposedChildIndex:)` reads the
+    proposed row (`SidebarDropOutline`), picks where the item lands
+    (`sidebarDropDestination`), and accepts it only when the shared rules resolve an action there
+    (`feedListInsertAction` / `resolveFeedListDropAction`). It then sets that destination with
+    `setDropItem` and returns "move". The outline's `performDragOperation:` applies that same
+    destination through `applyFeedListDropAction`, so what is shown and what happens never disagree.
+  - A folder only goes between folders: anywhere on or inside a folder (its row, its feeds) is the
+    slot just after it, and the Folders header is the first slot. The slots just before and after
+    the dragged folder show a line too, and dropping there leaves the order as it is.
+  - A feed goes onto a folder, "No folder" or a tag row, or between the feeds of a folder or of "No
+    folder". A feed's copy under a tag stands for that tag. Anything else (inside a feed row) is
+    refused, and the outline proposes the next position instead.
+  - Drags of any other type go on to SwiftUI's implementation untouched.
+- Feedback is the outline's own: the insertion line, the full-row highlight of a drop target, and
+  spring-loading (a collapsed folder opens under a hovering feed). A folder drag does not spring
+  folders open (`expandItem:expandChildren:` is skipped). The cursor stays the system's: a drop
+  that resolves to nothing is refused and the item slides back, with no forbidden cursor.
+- A feed's copy under a tag gets an id of its own (`TagFeedRowID`: tag id + feed id). With the
+  feed's id, the outline would take the copy and the original for one item, highlighting the wrong
+  row and proposing positions that do not exist.
+- If SwiftUI's internals change so that the guard cannot be installed, sidebar drag and drop does
+  nothing (it does not crash), a fault is logged (`SidebarDropGuard` category), and moving and
+  tagging remain available from the context menu. `KeryxTests/SidebarDropGuardTests.swift` hosts a
+  `List` shaped like the sidebar and checks the guard's assumptions, so CI catches such a change.
 
 ### Sidebar (iOS)
 

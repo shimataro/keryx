@@ -264,6 +264,7 @@ targets:
       - path: Keryx/Home/Sidebar/SidebarReorder.swift
       - path: Keryx/Home/Sidebar/SidebarDropResolver.swift
       - path: Keryx/Home/Sidebar/SidebarDropPreview.swift
+      - path: Keryx/Home/Sidebar/SidebarDropGuard.swift
       - path: Keryx/Home/ArticleTableLayout.swift
       - path: Keryx/Home/ArticleTableReload.swift
       - path: Keryx/Home/FaviconFailureCache.swift
