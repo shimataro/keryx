@@ -184,6 +184,15 @@ palette on older versions. Light / dark / system support. The layout is a 3-pane
 (feed list / article list / article detail) with keyboard navigation, adapting to fewer panes on
 narrower widths (see below).
 
+**Standard components first.** Each UI uses its platform's standard components and lets them draw
+themselves — selection, highlights, drop indicators, focus rings, cursors, colors, spacing and
+materials — rather than drawing a look-alike. A standard component follows the OS when its
+appearance changes (a new macOS or iOS design, a Material update) and when the user changes system
+settings (contrast, transparency, text size), with no work in the app. Where a standard component
+misbehaves, fix its behavior (what it is told), not its drawing. The exceptions are listed in the
+`ui-guidelines` skill ("Standard components over custom drawing"). Windows and Linux are the
+standing exception: Compose has no native components there (see above).
+
 ### Least surprise
 
 **The app does what the user expects, and nothing the user did not ask for.**

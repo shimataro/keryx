@@ -44,8 +44,9 @@ doing that kind of work; don't work from memory:
 - `docs/known-issues.md` — known defects deliberately left unfixed, with the evidence, so
   investigations aren't repeated. Read before investigating a bug in an area it covers.
 - UI/Compose style guidelines → the **`ui-guidelines` skill** (invoke it when
-  adding/modifying Compose under `ui/`: pane tones, divider policy, article
-  card style, flat native-feel components, dialog/popup conventions)
+  adding/modifying Compose under `ui/` or SwiftUI under `appleApp/`: standard
+  components over custom drawing, pane tones, divider policy, article card
+  style, flat native-feel components, dialog/popup conventions)
 - **`README.md` is user-facing only.** It must not mention frameworks,
   languages, libraries, or directory structure — that architecture/implementation
   detail belongs in the `docs/*.md` files above. If a technical detail seems
