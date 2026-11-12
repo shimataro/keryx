@@ -39,7 +39,7 @@ and lose more than the access itself is worth. The accesses that are, today:
   (`ReaderContent.Header`) without its body, so the article list, the toolbar and the reader all stay
   on the selection, and choosing it again retries the lookup. Propagating it would end the app on
   Android and Apple, and on desktop leave the previous article in the reader under the new selection.
-- The launch-time restore of the previously selected article (`HomeViewModel`'s `init`). A failure
+- The launch-time restore of the previously selected article (`HomeViewModel`'s construction). A failure
   restores no article, as if none had been saved. A selection whose body lookup failed is saved for the
   next launch too, so a lookup that fails every time (a row too large for Android's `CursorWindow`, say)
   would otherwise throw out of the ViewModel's construction on every launch, and Home would never open.
