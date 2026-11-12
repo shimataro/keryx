@@ -106,6 +106,46 @@ func feedListInsertTarget(
     }
 }
 
+/// Which sidebar row a dragged folder is released over, as `SidebarFolderDropGuard` reads it from
+/// the outline behind the `List`.
+enum FeedListFolderDropRow: Equatable {
+    /// The Folders section header.
+    case foldersHeader
+    /// The folder at `index` in the Folders section.
+    case folder(index: Int)
+    /// A feed shown under the folder at `folderIndex`.
+    case feedInFolder(folderIndex: Int)
+    /// The row just below the Folders section (the "No folder" header).
+    case afterFolders
+    /// Anywhere else.
+    case other
+}
+
+/// Where among the folders a dragged folder lands when released over `row` — the position the
+/// `List`'s own insertion line shows there: below the Folders header is the first slot, a folder
+/// row's top half is before it and its bottom half after it, a feed row under a folder is after that
+/// folder, and the top half of the row just below the section is the end. `nil` where no folder slot
+/// fits, so the drop does nothing.
+///
+/// - Parameter folderCount: How many folders the section holds.
+func feedListFolderGuardOffset(row: FeedListFolderDropRow, bottomHalf: Bool, folderCount: Int) -> Int? {
+    let folders = 0..<folderCount
+    switch row {
+    case .foldersHeader:
+        return folderCount > 0 ? 0 : nil
+    case .folder(let index):
+        guard folders.contains(index) else { return nil }
+        return bottomHalf ? index + 1 : index
+    case .feedInFolder(let folderIndex):
+        guard folders.contains(folderIndex) else { return nil }
+        return folderIndex + 1
+    case .afterFolders:
+        return bottomHalf || folderCount == 0 ? nil : folderCount
+    case .other:
+        return nil
+    }
+}
+
 /// The system's spring-loading preference (System Settings > Accessibility > Pointer Control),
 /// read from the global defaults domain: `nil` when spring-loading is turned off, otherwise the
 /// configured hover delay before a collapsed folder opens mid-drag. Neither key is written until

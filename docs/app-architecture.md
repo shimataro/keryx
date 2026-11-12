@@ -1847,6 +1847,13 @@ only the feedback is per UI, and on macOS it follows the source-list conventions
   resolve no action, and spring-loaded folders that follow the system's spring-loading setting (the
   Mac App Store build always uses the system default, 0.5 s — reading that setting is not covered by
   its privacy manifest).
+- **A folder dropped between folders is applied by `SidebarFolderDropGuard`, not by SwiftUI.**
+  SwiftUI crashes applying that drop (see "macOS: dropping a folder between folders crashed inside
+  SwiftUI" in [known-issues.md](known-issues.md)), so the `List`'s `NSOutlineView` is given a runtime
+  subclass whose `performDragOperation:` takes a drop carrying a folder itself: the folder lands where
+  the row under the pointer says (`feedListFolderGuardOffset`) and moves through the same
+  `insert(into:at:)` as the folders' `.onInsert`. That `.onInsert` stays, since SwiftUI validates the
+  drop and draws the insertion line through it; every other drop is still SwiftUI's.
 
 ### Sidebar (iOS)
 

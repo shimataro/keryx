@@ -118,6 +118,45 @@ struct FeedListDropPresentationTests {
         #expect(reorder != nil && reorder?.targetFolderId == nil)
     }
 
+    // MARK: - feedListFolderGuardOffset
+
+    @Test
+    func belowTheFoldersHeaderIsTheFirstSlot() {
+        #expect(feedListFolderGuardOffset(row: .foldersHeader, bottomHalf: false, folderCount: 3) == 0)
+        #expect(feedListFolderGuardOffset(row: .foldersHeader, bottomHalf: true, folderCount: 3) == 0)
+    }
+
+    @Test
+    func aFolderRowsTopHalfIsBeforeItAndItsBottomHalfAfterIt() {
+        #expect(feedListFolderGuardOffset(row: .folder(index: 0), bottomHalf: false, folderCount: 3) == 0)
+        #expect(feedListFolderGuardOffset(row: .folder(index: 0), bottomHalf: true, folderCount: 3) == 1)
+        #expect(feedListFolderGuardOffset(row: .folder(index: 1), bottomHalf: false, folderCount: 3) == 1)
+        #expect(feedListFolderGuardOffset(row: .folder(index: 1), bottomHalf: true, folderCount: 3) == 2)
+        #expect(feedListFolderGuardOffset(row: .folder(index: 2), bottomHalf: true, folderCount: 3) == 3)
+    }
+
+    @Test
+    func aFeedRowUnderAFolderIsAfterThatFolder() {
+        #expect(feedListFolderGuardOffset(row: .feedInFolder(folderIndex: 1), bottomHalf: false, folderCount: 3) == 2)
+        #expect(feedListFolderGuardOffset(row: .feedInFolder(folderIndex: 2), bottomHalf: true, folderCount: 3) == 3)
+    }
+
+    @Test
+    func theTopHalfOfTheRowBelowTheSectionIsTheEnd() {
+        #expect(feedListFolderGuardOffset(row: .afterFolders, bottomHalf: false, folderCount: 3) == 3)
+        #expect(feedListFolderGuardOffset(row: .afterFolders, bottomHalf: true, folderCount: 3) == nil)
+    }
+
+    @Test
+    func anythingElseOrOutOfRangePlacesNothing() {
+        #expect(feedListFolderGuardOffset(row: .other, bottomHalf: false, folderCount: 3) == nil)
+        #expect(feedListFolderGuardOffset(row: .folder(index: 3), bottomHalf: false, folderCount: 3) == nil)
+        #expect(feedListFolderGuardOffset(row: .folder(index: -1), bottomHalf: true, folderCount: 3) == nil)
+        #expect(feedListFolderGuardOffset(row: .feedInFolder(folderIndex: 5), bottomHalf: false, folderCount: 3) == nil)
+        #expect(feedListFolderGuardOffset(row: .foldersHeader, bottomHalf: false, folderCount: 0) == nil)
+        #expect(feedListFolderGuardOffset(row: .afterFolders, bottomHalf: false, folderCount: 0) == nil)
+    }
+
     // MARK: - springLoadingDelay
 
     @Test

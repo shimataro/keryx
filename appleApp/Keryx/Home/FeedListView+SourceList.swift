@@ -26,8 +26,11 @@ extension FeedListView {
                     ForEach(sortedFolders, id: \.id) { folder in
                         folderGroup(folder)
                     }
+                    // SwiftUI validates the drop and draws the insertion line through this
+                    // `.onInsert`, but would crash applying it; the drop itself is taken first by
+                    // `SidebarFolderDropGuard` (below), which calls the same `insert(into:at:)`.
                     .onInsert(of: [feedListFolderDragType]) { offset, _ in
-                        insert(into: .folders(folderIds: sortedFolders.map(\.id)), at: offset)
+                        insertFolder(at: offset)
                     }
                 }
             }
@@ -53,6 +56,7 @@ extension FeedListView {
                 }
             }
         }
+        .background(SidebarFolderDropGuard(folderCount: sortedFolders.count, insertFolder: insertFolder(at:)))
         // ←/→ move between panes (`external-spec.md` §9), so they are taken here before the
         // outline's own expand/collapse handling sees them; the disclosure triangles still expand
         // and collapse.
@@ -82,6 +86,11 @@ extension FeedListView {
                 if tap.navigates { onOpenArticleList() }
             }
         )
+    }
+
+    /// A folder dropped among the folders, from the guard or the folders' `.onInsert`.
+    private func insertFolder(at offset: Int) {
+        insert(into: .folders(folderIds: sortedFolders.map(\.id)), at: offset)
     }
 
     /// A drop between rows, from a `ForEach`'s `.onInsert` — see `performFeedListInsert`.

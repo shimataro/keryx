@@ -1772,6 +1772,12 @@ UI ごとに異なるのはフィードバックだけで、macOS では `NSOutl
   タグの行にはアクセントカラーのハイライト、共有ルールで何も起きない位置では `.forbidden`、そしてシステムの
   スプリングロード設定に従うスプリングロードフォルダー（Mac App Store ビルドは常にシステム既定の 0.5 秒を使う。
   その設定の読み取りはプライバシーマニフェストの対象外のため）。
+- **フォルダーをフォルダーの間に落としたときは、SwiftUI ではなく `SidebarFolderDropGuard` が適用する。**
+  SwiftUI はこのドロップの適用で落ちる（[known-issues.ja.md](known-issues.ja.md) の「macOS: フォルダーをフォルダーの間に
+  落とすと SwiftUI の中でクラッシュした」を参照）。そこで `List` の `NSOutlineView` に実行時サブクラスを与え、その
+  `performDragOperation:` がフォルダーを運ぶドロップを自分で受ける。フォルダーはポインターの下の行が示す位置
+  （`feedListFolderGuardOffset`）に入り、フォルダーの `.onInsert` と同じ `insert(into:at:)` を通って移動する。
+  その `.onInsert` は残す。SwiftUI はそれを使ってドロップを検証し、挿入線を描くため。ほかのドロップはすべて SwiftUI のまま。
 
 ### サイドバー（iOS）
 

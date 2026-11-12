@@ -978,3 +978,76 @@ its return flash mostly over, so it is left to the real fix below.
 Moving the article list from a SwiftUI `List` to a `UICollectionView`, as the sidebar already is:
 `scrollToItem` then runs synchronously against rows the app knows, with nothing left pending. It has to carry
 over the rows, swipe actions and pull-to-refresh, so it is a task of its own.
+
+## macOS: dropping a folder between folders crashed inside SwiftUI
+
+**Status**: worked around, not fixed — external (SwiftUI) defect. The drop is taken before SwiftUI
+applies it (`Home/Sidebar/SidebarFolderDropGuard.swift`).
+
+### Symptom
+
+v0.27.0 on macOS 26.7.1 trapped (`EXC_BREAKPOINT`, a Swift assertion) when a folder was dropped
+between folders in the sidebar:
+`-[NSOutlineView performDragOperation:]` → `OutlineListCoordinator.outlineView(_:acceptDrop:item:childIndex:)` →
+`outlineView(_:performDropInsertion:with:at:)` → `ListOutlineItem.subscript` → `HeterogeneousViewIDs.subscript` →
+`HeterogeneousCollection.element(at:)`. No Keryx frame is on the stack. It reproduced on every such drop,
+including with all folders collapsed.
+
+### Cause
+
+A bug in SwiftUI's `List` on macOS, reproduced in a standalone app with the same structure: a
+`ForEach` of folder rows with `.onInsert`, inside a `List` in sidebar style. Dropping a folder between
+folders crashed whenever the folder rows had any one of a `DisclosureGroup`, a `.badge`, a context menu
+or an `.onDrop`; with rows carrying only `.itemProvider` and `.tag` (like the unfoldered feed rows) it did
+not. Feeds inserted between other feeds — in another folder or the same one — never crashed.
+
+### What was ruled out
+
+| Change | Result |
+| --- | --- |
+| Folders `Section` without `isExpanded`, or with a `header:` view | Crashes |
+| No `.onInsert` on the feeds inside each folder | Crashes |
+| No `.tag`, no `.badge`, or no `.onDrop`/context menu on the folder row | Crashes |
+| Folder rows without `DisclosureGroup` (but with the row's other modifiers) | Crashes |
+| `.onMove` instead of `.onInsert` on the folders | No crash, but a feed can no longer be inserted between another folder's feeds |
+| Wrapping SwiftUI's outline data source in a forwarding proxy | Breaks SwiftUI's own drop handling (no insertion line, no drop onto a folder row) |
+
+Every row element the sidebar needs is enough to trigger it, so no change to the view structure avoids it.
+A Swift assertion is a trap, not an exception, so it cannot be caught.
+
+### The workaround
+
+`SidebarFolderDropGuard` finds the `NSOutlineView` behind the sidebar's `List` and gives that one
+instance a runtime subclass (as KVO does) overriding only `performDragOperation:`. A drop carrying a
+folder is applied there — where the row under the pointer says, through the same `insert(into:at:)` the
+`.onInsert` would have used — and never reaches SwiftUI's `acceptDrop`; every other drop goes on to
+SwiftUI. SwiftUI still validates the drop and draws the insertion line. Where the guard cannot read
+the outline as expected, it refuses the drop rather than passing it to SwiftUI.
+
+When the guard does not work as intended, the result should be no worse than v0.27.0. How each case
+turns out:
+
+| Case | Result |
+| --- | --- |
+| The outline is not found, or SwiftUI replaces it before the guard is installed again | No guard: the drop crashes, as in v0.27.0 |
+| The sections are not laid out as expected | The drop is refused; nothing moves |
+| The insertion line and the slot read from the pointer disagree at a boundary | The folder lands one slot off. Nothing is lost, and dragging it again fixes it — accepted |
+| Something compares the outline's class exactly | The subclass reports the original class from `-class`, as KVO does, so `-class`, `isMemberOfClass:` and `className` see no change; Swift's `type(of:)` was also seen to report the original class |
+| The outline was already swizzled by someone else (KVO) | The guard is not installed (its real class differs from its `-class`), since subclassing theirs would break their undoing it: the drop crashes, as in v0.27.0 |
+| KVO observes the outline after the guard and stops | KVO stacks its class on the guard's and restores it afterwards; checked in the standalone app |
+| The base class's `performDragOperation:` changes later | Drops the guard passes on look up the base class's method on every call, as `super` would |
+
+What it cannot rule out is SwiftUI or AppKit identifying the outline by its real class through some
+other route.
+
+It relies on SwiftUI's internals: that the `List` is an `NSOutlineView`, and that its root items are
+the `List`'s sections in order (the headerless All/Starred section first, then Folders). Re-check it on
+each new macOS: drop a folder between folders, at the top, at the end and below an expanded folder,
+and confirm it lands where the insertion line showed.
+
+### What a real fix would need
+
+A fix in SwiftUI. Once a macOS release no longer crashes without the guard, the guard can be removed
+for the systems that have the fix. Driving the outline directly instead (an `NSOutlineView` wrapped in
+`NSViewRepresentable`, as the iOS sidebar does with a `UICollectionView`) also avoids it, at the cost of
+drawing the rows, selection and metrics the `List` now provides.
