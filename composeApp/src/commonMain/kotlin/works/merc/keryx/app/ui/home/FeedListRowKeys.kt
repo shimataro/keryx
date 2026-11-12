@@ -86,8 +86,13 @@ private const val FEED_KEY_PREFIX = "feed-"
 
 private const val TAG_KEY_PREFIX = "tag-"
 
-/** Separator between a tag-attached feed row's tag id and its feed id (`"tag-$tagId-feed-$feedId"`). */
-private const val TAG_FEED_INFIX = "-feed-"
+/**
+ * Separator between a tag-attached feed row's tag id and its feed id (`"tag-$tagId/feed-$feedId"`).
+ * It starts with `/`, which no id can contain (tag and feed ids are UUIDs, `[0-9a-f-]`): a
+ * hyphenated separator could also appear inside a UUID (`12345678-feed-…`, "feed" being hex),
+ * cutting the tag id short and taking a tag's own row for one of its feeds.
+ */
+private const val TAG_FEED_INFIX = "/feed-"
 
 /** `LazyColumn` key of the feed list's "no folder" group header. */
 internal const val NO_FOLDER_HEADER_KEY = "no-folder-header"
