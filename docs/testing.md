@@ -4,7 +4,7 @@
 
 ## Structure
 
-- `commonTest/` — Pure logic and Ktor `MockEngine` tests (parsers, fetchers, URL resolvers, OPML, Dropbox storage/auth, local settings). Runs on the desktop target, so `expect` declarations resolve to desktop `actual`s (`AppDirs` available with temp directories; `FileIO` is plain kotlinx-io).
+- `commonTest/` — Pure logic and Ktor `MockEngine` tests (parsers, fetchers, URL resolvers, OPML, Dropbox storage/auth, local settings). Runs on the desktop target, where `expect` declarations resolve to desktop `actual`s (`AppDirs` available with temp directories; `FileIO` is plain kotlinx-io), and on a Mac also natively — see the Apple targets item below.
 - `desktopTest/` — Tests requiring the actual SQLDelight driver (`JdbcSqliteDriver`) (schema, article upsert, ATTACH merge). Helpers are in `DbTestSupport.kt` (`inMemoryDb()`, `fileDb()`, `insertFeed()`), in the `:testing` module so both `:shared`'s and `:composeApp`'s tests can use them. The same module also holds `HoldingDispatcher.kt`, a coroutine dispatcher that can hold dispatched blocks and release them on demand, used by controller and ViewModel cancellation tests (`OpmlTransferControllerTest`, `CloudSyncControllerTest`, `SettingsViewModelTest`) to keep a cancelled coroutine from making progress while they observe who waits for it, and `AwaitCondition.kt` (`awaitCondition` / `awaitConditionBlocking`, timing out after `AWAIT_CONDITION_TIMEOUT_MS`), which polls a condition in real time on a thread of its own (not the shared `Dispatchers.Default`, so work an earlier test left running there cannot stall it) — so it can wait for work on a real dispatcher (an HTTP engine's threads, `Dispatchers.Default`) that `runTest`'s virtual-time scheduler cannot advance; use it instead of an ad-hoc `delay`/`Thread.sleep` loop. `TestThreadDispatcher.kt` (`testThreadDispatcher(name)`) gives code under test a thread of its own, for when it needs a real thread while the test blocks waiting on it; use it (closing it after the test) rather than `Dispatchers.Default`, which the whole test JVM shares, so work an earlier test left running cannot delay it. Where the test is itself a coroutine (`runBlocking`), start the concurrent work with a plain `launch`/`async` on the test's own thread instead. This directory also contains Compose UI tests that render actual Composables (`androidx.compose.ui.test.runDesktopComposeUiTest`, no JUnit4 rule needed) (e.g. `ArticleListPaneTest.kt`). Requires the actual Skia/AWT renderer, so placed in `desktopTest` rather than `commonTest`.
 - **Apple targets (`:shared` only).** `commonTest` also runs natively as `:shared:macosArm64Test` and
   `:shared:iosSimulatorArm64Test` (both part of `./gradlew build` on a Mac with Xcode; skipped on
@@ -21,25 +21,30 @@
   driver with `DatabaseDriverFactory().createDriver(dir)`.
 - `androidDeviceTest/` — Instrumented tests that need Android's real, bundled SQLite or platform APIs and
   therefore cannot run as a plain JVM unit test — see `.claude/rules/android-sqlite-bundling.md`. Needs a
-  connected device or running emulator; there is no `androidUnitTest`/`androidHostTest` source set in this
-  module, since none of `composeApp`'s Android-specific logic is JVM-testable without either a device or
-  Robolectric (not currently a dependency). Helpers are in `AndroidDbTestSupport.kt` (`createSchemaDbFile()`,
-  mirroring `DbTestSupport.kt`'s `fileDb()` but driven through a real `AndroidSqliteDriver` so the schema is
-  installed the same way production creates it). Seven files, each scoped narrowly to what is genuinely
-  Android-specific:
-  - `DatabaseMergerDeviceTest.kt` / `DatabaseSnapshotDeviceTest.kt` — the schema-version guard, the migration
-    path, and merge/snapshot behavior against the bundled `requery` SQLite (a native library); not a full port
-    of `desktopTest`'s suites, since the merge SQL itself (`MergeSql`) is pure and already covered there.
-  - `MergeFailureClassificationDeviceTest.kt` — exception-*class*-based failure classification (Android's
-    `SQLiteException` carries no numeric result code, unlike the JDBC driver desktop's `DatabaseMerger` reads
-    `resultCode` from), and the `NoOpDatabaseErrorHandler` regression (the bundled SQLite's default error
-    handler deletes a database file it judges corrupt, confirmed by disassembling the AAR).
-  - `KeystoreTokenStorageDeviceTest.kt` — `KeystoreTokenStorage.save()`'s fallback path against the real
-    Android Keystore.
-  - `FilePickerDeviceTest.kt` — the Storage Access Framework file picker's write-failure path
-    (`ContentUriPickedFile.writeText` when no provider can open the stream).
-  - `AndroidAuthorizationHostDeviceTest.kt` — the lifetime of the consent-screen request slot
-    `AndroidAuthorizationHost` hands to the Activity.
+  connected device or running emulator. The source set exists in two modules, each with its own helper (a
+  device-test source set cannot be shared across modules). There is no `androidUnitTest`/`androidHostTest`
+  source set in either, since none of their Android-specific logic is JVM-testable without either a device or
+  Robolectric (not currently a dependency). Each test is scoped narrowly to what is genuinely Android-specific:
+  - `shared/src/androidDeviceTest/` — the database instrumented tests. New DB instrumented tests go here.
+    Helpers are in `AndroidDbTestSupport.kt` (`createSchemaDbFile()`, mirroring `DbTestSupport.kt`'s
+    `fileDb()` but driven through a real `AndroidSqliteDriver` so the schema is installed the same way
+    production creates it).
+    - `DatabaseMergerDeviceTest.kt` / `DatabaseSnapshotDeviceTest.kt` — the schema-version guard, the
+      migration path, and merge/snapshot behavior against the bundled `requery` SQLite (a native library);
+      not a full port of `desktopTest`'s suites, since the merge SQL itself (`MergeSql`) is pure and already
+      covered there.
+    - `MergeFailureClassificationDeviceTest.kt` — exception-*class*-based failure classification (Android's
+      `SQLiteException` carries no numeric result code, unlike the JDBC driver desktop's `DatabaseMerger`
+      reads `resultCode` from), and the `NoOpDatabaseErrorHandler` regression (the bundled SQLite's default
+      error handler deletes a database file it judges corrupt, confirmed by disassembling the AAR).
+  - `composeApp/src/androidDeviceTest/` — the `androidMain`-only logic that has nowhere else to live. Helpers
+    are in `AndroidTestSupport.kt` (`testContext()`).
+    - `data/cloud/KeystoreTokenStorageDeviceTest.kt` — `KeystoreTokenStorage.save()`'s fallback path against
+      the real Android Keystore.
+    - `platform/FilePickerDeviceTest.kt` — the Storage Access Framework file picker's write-failure path
+      (`ContentUriPickedFile.writeText` when no provider can open the stream).
+    - `platform/AndroidAuthorizationHostDeviceTest.kt` — the lifetime of the consent-screen request slot
+      `AndroidAuthorizationHost` hands to the Activity.
 
 - `androidGms/src/test/` — plain JVM unit tests (`:androidGms:testDebugUnitTest`, part of
   `./gradlew build`): `PlayServicesGoogleDriveAuthTest.kt` — Play services' Google Drive
@@ -59,8 +64,8 @@
   covering `ui/common/KeryxSettingRow.kt`'s Android `actual`'s toggle semantics — a `Role.Switch`/checked-state
   regression a plain visual check would not catch). `composeApp`
   itself is an Android *library* module (`com.android.kotlin.multiplatform.library`), not an
-  application — its own instrumented tests (`androidDeviceTest` above) are scoped to native-driver
-  concerns that don't need a Compose UI tree, so a Compose-rendering test lives here instead, in
+  application — its own instrumented tests (`androidDeviceTest` above) are scoped to `androidMain`-only
+  logic that doesn't need a Compose UI tree, so a Compose-rendering test lives here instead, in
   the one module that is an actual Android application.
 
 - `appleApp/KeryxTests/` — Swift Testing (`import Testing`, `@Suite`/`@Test`/`#expect`) for the
@@ -71,9 +76,11 @@
   layout even when building for macOS, whose bundle actually nests the executable under
   `Keryx.app/Contents/MacOS/Keryx` (see [app-architecture.md](app-architecture.md)'s "The
   `appleApp/` Xcode project"). Being host-less means these tests cannot drive `AppModel`/`HomeView`
-  directly — they cover the `Bridge/` `StateFlow`-to-`@Observable` adapters and the
-  `Localization/` `NotificationText`/`ErrorKind`-to-string-catalog-key mapping in isolation, feeding
-  them fakes/known enum cases rather than a running `KeryxSdk`. It does statically link
+  directly. Instead, the logic-only Swift files a test needs are listed in the test target's own
+  `sources:` in `appleApp/project.yml` and tested without hosting the app — for example `Bridge/` files
+  such as `OpmlTransferObservable.swift` and `SidebarModel.swift`, and
+  `Home/FeedListSelectionEquality.swift` — fed fakes/known values rather
+  than a running `KeryxSdk`. It does statically link
   `KeryxShared.xcframework` (`project.yml`'s own `dependencies:` for this target), so a test can also
   build and compare real Kotlin sealed-type values directly — see `FeedListSelectionEqualityTests`,
   which exercises `FeedListSelectionEquality.swift`'s own `ArticleFilter`/`FeedListRowSelection`/
@@ -125,7 +132,8 @@ New tests are placed at the same relative path as the code under test.
 - New Android Compose UI instrumented tests go in `androidApp/src/androidTest/` (`composeApp` is a
   library module, so its own instrumented tests live in the application module instead — see
   Structure above). A DB test that depends on the bundled `requery` SQLite goes in
-  `composeApp/src/androidDeviceTest/`. **There is no `androidUnitTest`/`androidHostTest` source
+  `shared/src/androidDeviceTest/`; any other test of `composeApp`'s `androidMain`-only logic that
+  needs a device goes in `composeApp/src/androidDeviceTest/`. **There is no `androidUnitTest`/`androidHostTest` source
   set** (Robolectric isn't set up) — pure logic that happens to live in an Android-specific class
   should be extracted into `commonMain` and tested from `commonTest` instead, the way
   `domain/BackgroundRefreshSchedule.kt` (tested by `BackgroundRefreshScheduleTest.kt`) already is.
@@ -154,8 +162,8 @@ into CI:
 | `composeApp/src/androidDeviceTest/` | `:composeApp:connectedAndroidDeviceTest` | The `androidMain`-only logic that has nowhere else to live (SAF writes, Keystore token storage, the consent-screen request slot) | ✗ local only |
 | `androidApp/src/androidTest/` | `:androidApp:connectedGithubDebugAndroidTest` | Compose UI (long-press gesture, search bar) | ✓ every branch push |
 
-Both need a connected device or a running emulator — see [setup.md](setup.md) for how to create an
-AVD (`<name>` below):
+The two `androidDeviceTest` suites need a connected device or a running emulator — see
+[setup.md](setup.md) for how to create an AVD (`<name>` below):
 
 ```bash
 $ANDROID_HOME/emulator/emulator -avd <name> -no-snapshot -no-boot-anim &
@@ -164,13 +172,13 @@ $ANDROID_HOME/emulator/emulator -avd <name> -no-snapshot -no-boot-anim &
 
 (the task name comes from AGP 9's `com.android.kotlin.multiplatform.library` plugin's own
 `withDeviceTestBuilder` DSL — run `./gradlew :composeApp:tasks --all | grep -i device` if it's
-renamed in a future AGP release). It is not wired into `ci.yml` — the desktop UI tests already run
-under `xvfb` there, but an Android emulator is a separate CI concern this project hasn't taken on
-yet — so it only runs locally today.
+renamed in a future AGP release). Of the two, only `:shared:connectedAndroidDeviceTest` is wired
+into `ci.yml` (the `android-instrumented-test` job); `:composeApp:connectedAndroidDeviceTest` is not,
+so it only runs locally.
 
 `androidApp`'s own instrumented suite (Compose UI gesture tests, see `androidApp/src/androidTest/`
-above) uses the regular `com.android.application` task naming instead — flavor-qualified now that
-`androidApp` splits into `github`/`play`/`fdroid` product flavors (see `build.md`'s "Android (APK / AAB)"):
+above) uses the regular `com.android.application` task naming instead — flavor-qualified, since
+`androidApp` has `github`/`play`/`fdroid` product flavors (see `build.md`'s "Android (APK / AAB)"):
 
 ```bash
 $ANDROID_HOME/emulator/emulator -avd <name> -no-snapshot -no-boot-anim &
@@ -209,7 +217,7 @@ application module only runs `lintAnalyzeDebugAndroidTest` (static analysis) on 
 source set, not `compileDebugAndroidTestKotlin`/`assembleDebugAndroidTest`. A dedicated
 `android-instrumented-test` job in `.github/workflows/ci.yml` runs this suite on every branch push.
 
-Project-wide, this is on top of the two Android suites above:
+Project-wide, this is on top of the three Android instrumented suites above:
 
 - `commonTest`/`desktopTest` (run via `./gradlew :shared:desktopTest :composeApp:desktopTest` above) covers parser, fetcher redirect/304/404/410/timeout/discovery, OPML, Dropbox storage/auth, PKCE, OAuth loopback server, merge (last-write-wins / OR merge / collision guard / FK guard), schema, local settings, article upsert, URL resolver, datetime parser, Result, Repository layer (Article/Feed/Tag/Settings), CloudSession, NotificationCenter, IdGenerator, SyncRepository, the shared `presentation/` state holders every UI (including the SwiftUI app) can reuse — `HomeViewModel`, `SetupController`, `CloudSyncController`, `PreferencesController`, `OpmlTransfer`, `OpmlTransferController`, `NotificationAlerts`, `FeedListExpansion`, `SelectionReadIntents`, `DerivedStateFlow`, `computeMenuUiState`, `isDuplicateFolderName`/`isDuplicateTagName` — each tested directly in `:shared`'s own `commonTest`/`desktopTest`, right next to the production code (e.g. `CloudSyncControllerTest.kt` beside `presentation/settings/CloudSyncController.kt`), plus each UI's own thin wrapper where one exists (composeApp's `SettingsViewModel`/`NotificationCenterViewModel` delegate to the shared controllers and are tested only for that delegation plus what stays Compose-only — the in-app updater and OPML's file-picking/busy-state, e.g. `SettingsViewModel`'s OPML import/export paths: the built document/read file round-tripping through the picked path, the localized request fields reaching a `FakeFileSelector`, cancellation, and the document build/write/import work actually running on the injected dispatcher rather than the EDT)
 - the Linux/macOS/Windows file-dialog backend split (`FilePickerTest` for `defaultFilePickerBackend`'s OS selection, the extension predicate agreeing with `FileNameExtensionFilter` including accepting directories, the overwrite-confirmation resolution, and dialog-owner selection)
@@ -317,7 +325,7 @@ Known uncovered areas:
 
 ## Manual Confirmation (UI)
 
-Launch with `./gradlew :composeApp:run` and visually verify 3-pane UI, theme switching, feed addition, and search. `FeedListDragTest.kt` now covers the drag mechanics end to end (reorder, threshold gating, folder/tag drop, right-click guard, ghost lifecycle, Escape), but the actual pixel rendering — colors, animation smoothness, the ghost's appearance over real content — is inherently visual, so confirm the following by hand too:
+Launch with `./gradlew :composeApp:run` and visually verify 3-pane UI, theme switching, feed addition, and search. `FeedListDragTest.kt` covers the drag mechanics end to end (reorder, threshold gating, folder/tag drop, right-click guard, ghost lifecycle, Escape), but the actual pixel rendering — colors, animation smoothness, the ghost's appearance over real content — is inherently visual, so confirm the following by hand too:
 
 Also relaunch once with the English locale forced —
 `JAVA_TOOL_OPTIONS="-Duser.language=en -Duser.country=US" ./gradlew :composeApp:run`
@@ -332,16 +340,14 @@ level, but only this manual pass catches wording that reads oddly in context.
   `FeedListDragGestures.kt`) does not start a drag — the row still
   registers a plain click (selection) normally, with no visible drag ghost or
   drop-target highlight anywhere in the list. Moving past the threshold starts
-  the drag exactly as before.
-- A drag now shows an in-app, Compose-drawn chip ghost (icon + title) that follows the pointer,
-  identical on macOS/Windows/Linux — **Linux gets a ghost for the first time** (X11 AWT never
-  supported one at all, even before Wayland's own cursor limitation, both now moot since the drag no
-  longer touches OS-level DnD at all).
+  the drag.
+- A drag shows an in-app, Compose-drawn chip ghost (icon + title) that follows the pointer,
+  identical on macOS/Windows/Linux — Linux included, since the drag does not use OS-level DnD at all.
   Confirm the chip is legible over both light and dark content, and that it never shows the OS's own
   forbidden/no-drop cursor — the pointer just stays the ordinary arrow throughout, on every platform.
 - The chip is semi-transparent (`DRAG_GHOST_ALPHA` in `FeedListDragController.kt`) so the row/highlight
   underneath it stays visible rather than being fully covered. Over a position that would actually
-  accept the drop it tints neutral (the same look as before); over blank space, a section header, or
+  accept the drop it tints neutral; over blank space, a section header, or
   (dragging a folder) the folder hovering itself, it tints toward `error`/`errorContainer` instead —
   confirm this switch is visually obvious in both light and dark theme, and that it tracks the pointer
   immediately as it crosses in and out of valid rows (no lag or stale tinting).
@@ -356,7 +362,7 @@ level, but only this manual pass catches wording that reads oddly in context.
 - Dragging the feed pane's vertical scrollbar thumb scrolls the list as usual and never starts a
   feed/folder drag, even after moving past the drag threshold.
 - Pressing Escape mid-drag cancels it with no reorder applied and the ghost disappears immediately;
-  pressing Escape with no drag in progress behaves as before (not swallowed by the drag handling).
+  pressing Escape with no drag in progress is not swallowed by the drag handling.
 - Alt-Tabbing (or otherwise losing window focus) mid-drag cancels it the same way.
 - Drag folders to reorder; order persists after app restart.
 - Drag feeds inside a folder to reorder; order persists after restart.
@@ -374,12 +380,12 @@ level, but only this manual pass catches wording that reads oddly in context.
   folder. Re-dropping an already-attached feed on the same tag changes nothing. Dragging over a feed
   listed under an expanded tag highlights that tag's row the same way, and dropping there attaches
   the tag. Over blank space nothing is highlighted and the pointer stays the ordinary arrow — there is
-  no special "can't drop here" cursor now that the drag isn't OS-level.
+  no special "can't drop here" cursor, since the drag isn't OS-level.
 - Expand a tag with its chevron: its attached feeds are listed beneath it (a feed with several tags
   appears once per expanded tag, plus once under its folder — expected, not a duplicate bug). The
   expanded/collapsed state persists after restart, tags default to collapsed, and deleting a tag
   leaves no stale expansion behind.
-- Right-click a feed listed under an expanded tag → its "タグを設定" (Assign Tags) submenu → unchecking
+- Right-click a feed listed under an expanded tag → its "Assign tags" submenu → unchecking
   that tag detaches it from that tag only (its folder placement and other tags are untouched);
   dragging it out of the tag list onto a folder or another tag still works.
 - With a subscription list long enough to scroll, hold a dragged feed (and separately, a dragged
@@ -392,7 +398,7 @@ level, but only this manual pass catches wording that reads oddly in context.
   Specifically confirm the scroll stays smooth (no stutter or stop-start) while crossing the
   "Folders"/"Tags" section headers, the divider above "Tags", and the top sidebar rows — not just
   while scrolling through folder/feed rows.
-- With the "Folders"/"Tags" section headers now pinned while scrolling (VSCode-Explorer-style),
+- With the "Folders"/"Tags" section headers pinned while scrolling (VSCode-Explorer-style),
   confirm each header visually covers the rows scrolling underneath it with no flicker/see-through,
   and that dragging a feed or folder so the pointer sits over a *pinned* header resolves the
   hover/drop target to the header's own row, not any row hidden behind it — then confirm the pinned
@@ -400,21 +406,18 @@ level, but only this manual pass catches wording that reads oddly in context.
 - **Drop onto a row revealed only by auto-scroll, without leaving the window**: start dragging a feed
   from well above the tags section, hold near the bottom edge until a tag scrolls into view, then drop
   directly on it — the tag highlights and the drop succeeds on the first try. Repeat dropping into a
-  folder that was off-screen at drag-start. (This is the scenario the pane's single centralized drop
-  target exists for — earlier per-row targets could only accept a drop from a row that already existed
-  when the drag began, so anything auto-scroll revealed afterward silently rejected drops until the
-  drag left and re-entered the window.)
+  folder that was off-screen at drag-start. (This is what the pane's single centralized drop target is
+  for: a row that auto-scroll revealed after the drag began accepts the drop like any other.)
 - Hold a dragged feed over a *collapsed* folder's header for about a second: the folder expands by
   itself (Finder/Explorer-style spring loading), its feeds become drop targets, and the folder
   **stays** expanded after the drop — the same persisted state as a click on its chevron. Merely
   passing over the header on the way elsewhere does not expand it, and dragging a *folder* over
   another collapsed folder's header (a reorder gesture) never expands it either.
-- **(Linux, X11 and Wayland)** The drag ghost and drop behavior should now be indistinguishable
-  between the two session types — repeat the reorder/folder-drop/tag-drop checks above on both a
-  Plasma X11 session and a Plasma Wayland (XWayland) session and confirm they behave identically
-  (the hand-rolled Compose-native drag means no XDnD/XWayland cursor negotiation happens at all on
-  either session type, unlike the OS's forbidden "no-drop" cursor that used to show throughout a
-  drag on Wayland despite the drop completing successfully).
+- **(Linux, X11 and Wayland)** The drag ghost and drop behavior are indistinguishable between the
+  two session types — repeat the reorder/folder-drop/tag-drop checks above on both a Plasma X11
+  session and a Plasma Wayland (XWayland) session and confirm they behave identically (the
+  hand-rolled Compose-native drag means no XDnD/XWayland cursor negotiation happens at all on either
+  session type, so the OS's forbidden "no-drop" cursor never appears during a drag on Wayland).
 
 The parallel feed refresh's core concurrency (overlapping fetches + complete per-feed writes) is covered automatically by `refreshAllFetchesFeedsConcurrentlyAndAppliesEveryWrite`, and the no-revert guarantee by `refreshAllDoesNotRevertConcurrentUnsubscribe` / `refreshAllDoesNotRevertConcurrentReorder`. The genuinely visual / end-to-end parts still need eyeballs, so with a multi-feed subscription visually confirm:
 
@@ -432,9 +435,9 @@ The unchanged-transfer skip (see "Skipping Unchanged Transfers" in [sync-archite
 
 Cloud-data corruption recovery needs a real cloud connection end to end, so confirm by hand, once per connected provider (Dropbox / OneDrive / Google Drive):
 
-- Replace the cloud `keryx.db.gz` with an arbitrary non-gzip file, then sync: the notification center's entry offers "同期データをリセット" (`ResetCloudData`). Running it leaves a `keryx-YYYYMMDD-HHMMSS.db.gz.bak` archive in the provider's app folder alongside a freshly re-created `keryx.db.gz` — the old file is not simply deleted.
+- Replace the cloud `keryx.db.gz` with an arbitrary non-gzip file, then sync: the notification center's entry offers "Reset sync data" (`ResetCloudData`). Running it leaves a `keryx-YYYYMMDD-HHMMSS.db.gz.bak` archive in the provider's app folder alongside a freshly re-created `keryx.db.gz` — the old file is not simply deleted.
 - Download `keryx.db.gz`, decompress it, then relax its `feeds` table's `UNIQUE(url)` constraint (SQLite has no `ALTER TABLE ... DROP CONSTRAINT`; recreate the table without it and copy the existing rows across) so a duplicate `url` can actually be inserted, then add a `feeds` row whose `url` duplicates an existing one (only reachable this way — the app's own schema, and the app itself, never produce this), re-compress, re-upload, then sync: the same `ResetCloudData` notification appears — confirms constraint-violating cloud data is treated the same as outright corruption.
-- **Legacy fallback** (see "Compressed Upload / Legacy Fallback" in [sync-architecture.md](sync-architecture.md)): with a provider connected, manually delete `keryx.db.gz` from the app folder if present and upload a plain (uncompressed) `keryx.db` in its place (e.g. one downloaded from a fresh `createFresh` before this feature, or by decompressing a `.gz` by hand) — this simulates a cloud this device has never synced to since compression was added. Sync: the app must download and merge the plain file, then create a fresh `keryx.db.gz` (visible in the provider's activity log as a create, not an update) — while the plain `keryx.db` is left in the folder completely untouched. Sync again with nothing else changed: only the one metadata check for `keryx.db.gz` happens (no payload download or upload), confirming the plain file is never read again.
+- **Legacy fallback** (see "Compressed Upload / Legacy Fallback" in [sync-architecture.md](sync-architecture.md)): with a provider connected, manually delete `keryx.db.gz` from the app folder if present and upload a plain (uncompressed) `keryx.db` in its place (e.g. made by decompressing a `.gz` by hand) — this simulates a cloud last written only in the legacy uncompressed form. Sync: the app must download and merge the plain file, then create a fresh `keryx.db.gz` (visible in the provider's activity log as a create, not an update) — while the plain `keryx.db` is left in the folder completely untouched. Sync again with nothing else changed: only the one metadata check for `keryx.db.gz` happens (no payload download or upload), confirming the plain file is never read again.
 - With the cloud DB still unusable, trigger several automatic syncs (toggle read/star repeatedly, or wait for the background interval) and confirm no further download happens (no network activity, no repeated/duplicate notification) until the data is reset — then confirm a manual "sync now" *does* still attempt a real sync (and fails again) even while automatic syncs are suppressed.
 - After a successful reset, confirm automatic syncing resumes (a read/star toggle triggers a real sync again).
 
@@ -530,7 +533,7 @@ enabled-state checks `ArticleDetailPaneTest` covers — needs manual confirmatio
 - (Windows) On startup, the reader renders in its correct pane position (no stray blank/misplaced
   rectangle) and clicking anywhere in the window never freezes the app — the regression check for
   WebView2's `dataDirectory` Access Denied failure when left at its default (an uncaught exception
-  from the failed creation used to leave the library's own creation-retry timer running forever,
+  from the failed creation would leave the library's own creation-retry timer running forever,
   freezing the app on the next click; see "Article Reader (native WebView)" in
   [app-architecture.md](app-architecture.md)). Running with
   `WRYWEBVIEW_LOG=1` set should show no `WebViewException` in the console.
@@ -768,8 +771,7 @@ Linux SNI), so confirm by hand:
 - Clicking outside the open tray menu dismisses it, leaving no stray window behind and no entry in
   the taskbar or Alt+Tab.
 - (Windows) A double click on the tray icon, and a click on a new-article notification, both still
-  reach `onTrayAction` — i.e. they show or hide the window per `shouldHideOnTrayAction`, exactly as
-  before `WindowsTray` replaced Compose's `Tray()`.
+  reach `onTrayAction` — i.e. they show or hide the window per `shouldHideOnTrayAction`.
 - (Windows) New-article notifications still appear, with the unread badge on the icon updating.
 
 The OPML file dialogs are real OS windows (an `NSSavePanel` on macOS, `GetOpenFileName` on Windows, a
@@ -781,19 +783,21 @@ session, and on GNOME:
 - **Select an article first** so the reader's WebKitGTK WebView is live in-process (the condition
   under which the old AWT `GtkFileDialogPeer` crashed the JVM with a SIGSEGV — see "Native file
   dialogs (platform branch)" in [app-architecture.md](app-architecture.md)), then Settings ▸
-  データ管理 ▸ OPML をインポート. A Swing chooser opens — not a GTK one — the app does not crash, and
-  the chosen file imports. Repeat for エクスポート. Nothing in `<appDataDir>/logs/keryx.0.log` and no
+  Data Management ▸ Import OPML. A Swing chooser opens — not a GTK one — the app does not crash, and
+  the chosen file imports. Repeat for Export OPML. Nothing in `<appDataDir>/logs/keryx.0.log` and no
   `hs_err_pid*.log` next to the launcher.
 - The chooser renders **above** the article reader's WebView, never behind it.
-- Import: only `.opml`/`.xml` files are listed with the "OPML ファイル" filter selected; switching to
-  "すべてのファイル" lists everything; double-clicking a folder navigates into it (a filter that
+- Import: only `.opml`/`.xml` files are listed with the "OPML files" filter selected; switching to
+  the chooser's own "All Files" filter lists everything; double-clicking a folder navigates into it (a filter that
   rejects directories would freeze navigation there).
-- Export: the name is prefilled `keryx.opml`. Picking an **existing** file shows a 置き換える／
-  キャンセル confirmation in Japanese; キャンセル returns to the chooser rather than aborting the
-  export; 置き換える overwrites. A new file name saves with no prompt.
-- All chooser chrome ("開く"/"キャンセル"/"ファイル名"/…) renders in **Japanese** on a packaged build —
-  this is what the `jdk.localedata` module addition in `composeApp/build.gradle.kts` is for; if it
-  reads in English, that module list is the first thing to check.
+- Export: the name is prefilled `keryx.opml`. Picking an **existing** file shows a "Confirm
+  Overwrite" prompt with "Replace" / "Cancel"; "Cancel" returns to the chooser rather than aborting
+  the export; "Replace" overwrites. A new file name saves with no prompt.
+- With the locale set to Japanese (`JAVA_TOOL_OPTIONS="-Duser.language=ja -Duser.country=JP"`, or the
+  OS display language), all chooser chrome (the open/cancel buttons, the file-name label, …) renders
+  in **Japanese** on a packaged build — this is what the `jdk.localedata` module in
+  `composeApp/build.gradle.kts`'s module list is for; if it reads in English, that module list is the
+  first thing to check.
 - Invoke import/export from all three places — (1) the Settings dialog's buttons; (2) the in-window
   menu bar File ▸; (3) the KDE Global Menu File ▸ with the in-window bar hidden. (2) and (3) first
   open Settings ▸ Data (`OpmlTransferController`'s pending request); in every case the chooser
@@ -805,11 +809,11 @@ session, and on GNOME:
 - Switch the in-app theme light ↔ dark without restarting, then reopen the chooser: it renders in the
   new FlatLaf theme.
 - While a large OPML import runs, the app stays responsive — the import button's spinner keeps
-  animating and the feed/article panes still scroll (the regression check for moving the OPML
-  build/write/import work off the EDT).
+  animating and the feed/article panes still scroll (the check that the OPML build/write/import work
+  runs off the EDT).
 
-macOS and Windows keep `java.awt.FileDialog`, but its owner and the thread it's shown from both
-changed (previously an unowned dialog shown off the EDT), so re-confirm there too:
+macOS and Windows use `java.awt.FileDialog`, owned by the window that opened it and shown from the
+EDT, so confirm there too:
 
 - The panel/dialog appears **centred over the window that opened it** (over the Settings dialog when
   opened from its buttons), and the Compose window behind it **keeps repainting** while the dialog is
@@ -817,15 +821,15 @@ changed (previously an unowned dialog shown off the EDT), so re-confirm there to
   thread).
 - macOS: the extension filter still hides non-OPML files on import, and saving over an existing file
   still raises the system's own replace prompt.
-- Windows: import/export still complete (the `FilenameFilter` being inert on import is pre-existing,
-  not a regression from this change).
+- Windows: import/export complete. The extension filter does not hide non-OPML files on import —
+  AWT's `FilenameFilter` has no effect in the Windows native dialog — which is expected, not a failure.
 
 Dialog auto-sizing (`DialogWindow` OS window behavior) cannot be auto-tested, so visually confirm:
 
 - Open Settings, About, add feed and rename feed **ten times in a row each**; every open shows its
   full content at the correct size **and at its final position, from the very first visible frame**.
   Content must never appear in one place and then warp to another (typically upward, by half the
-  difference between the 240pt placeholder and the fitted height) — the window is now held invisible
+  difference between the 240pt placeholder and the fitted height) — the window is held invisible
   until its fit has landed. Never a short ~240pt-tall window, never a tiny ~80x28 one, never a narrow
   one with the trailing tabs clipped. The repetition is the point — the races these guard against
   reproduced on roughly 7 of 10 opens.
@@ -836,16 +840,16 @@ Dialog auto-sizing (`DialogWindow` OS window behavior) cannot be auto-tested, so
 - Repeat those opens in **dark mode**: not a single frame may show a light rectangle or a
   lighter-toned band — not around the card's edges, and not around the native button row at the
   bottom (the native window background and the full-bleed fill are both painted with the dialog's own
-  container color now, so nothing should differ in tone from the card).
+  container color, so nothing should differ in tone from the card).
 - The invisible-until-fitted gate must not be **perceptible**: each dialog still appears immediately
   on click, with no dead time where nothing is on screen. If one ever takes visibly long, suspect the
   500ms `DIALOG_PRESENT_FALLBACK_MS` safety net having been what released it, and check the log for
   the `Dialog stayed at …` warning below.
 - **Autofocus still works**: in a text-prompt dialog (rename feed/folder/tag, add feed) the caret is
-  in the text field the moment it appears, and typing straight away goes into it. This is the most
-  likely thing for the delayed-visibility change to have broken — check it every time.
+  in the text field the moment it appears, and typing straight away goes into it. The delayed visibility
+  is the most likely thing to break it — check it every time.
 - Type continuously in a rename dialog so its supporting text appears and disappears: no judder, and
-  the native button row does not flicker or re-lay-out per keystroke (it now revalidates only when a
+  the native button row does not flicker or re-lay-out per keystroke (it revalidates only when a
   button *label* changes, not when the confirm button's enabled state does).
 - Settings: switch tabs repeatedly, including between the tallest (general) and the shortest
   (notifications) tab. **The window must not resize at all** — same height on every tab, no movement
@@ -857,8 +861,8 @@ Dialog auto-sizing (`DialogWindow` OS window behavior) cannot be auto-tested, so
   transient flicker into a permanent Δ-tall offset (`KeryxTabDialog`'s fixed-height tab-content
   area, `KERYX_TAB_DIALOG_CONTENT_HEIGHT` in `ui/common/KeryxDialogs.desktop.kt`, is the actual fix).
 - Settings, tallest tab: the general tab's content must fit **without scrolling** at font size
-  "中"（1.0）. If it scrolls, `KERYX_TAB_DIALOG_CONTENT_HEIGHT` needs bumping — cosmetic, not a
-  correctness bug. At "大"/"特大" the taller tabs are expected to scroll.
+  "Medium" (1.0). If it scrolls, `KERYX_TAB_DIALOG_CONTENT_HEIGHT` needs bumping — cosmetic, not a
+  correctness bug. At "Large"/"XL" the taller tabs are expected to scroll.
 - Switch the in-app theme light ↔ dark while running, then reopen each dialog: the *native* window
   background follows too — visible as the tone behind and around the native button row, and in any
   surplus area — not just the Compose-drawn card.
@@ -872,7 +876,7 @@ Dialog auto-sizing (`DialogWindow` OS window behavior) cannot be auto-tested, so
   across the boundary. Correctly sized on both — the fit converts the measured content with the
   *dialog's* own density, not the owner window's.
 - Minimize the app to the tray (or fully occlude the main window) immediately after opening
-  Settings, then restore: the dialog is still correctly sized. The fit no longer depends on the
+  Settings, then restore: the dialog is still correctly sized. The fit does not depend on the
   dialog's frame clock, which stops delivering frames while nothing is rendered.
 - Through all of the above: no visible size oscillation, no CPU spin, and no
   `Dialog stayed at … after … attempts to fit …` warning in `<appDataDir>/logs/keryx.0.log`
@@ -930,7 +934,7 @@ workspace), plus:
   alongside the above).
 - If no notification daemon is present, or the daemon doesn't honor the `"default"` action key,
   notifications should still display (best-effort) with no crash — clicking them just does
-  nothing, same as before this change.
+  nothing.
 
 (Windows, and Linux without an SNI host — the Compose `Tray()` fallback) Since this path funnels
 both a tray-icon click and a notification-balloon click through the same `onAction` hook
@@ -941,7 +945,7 @@ while the window happens to already be visible and focused still activates inste
 see the KDoc on `shouldHideOnTrayAction` and the wiring in `main.kt`), confirm by hand:
 
 - With the window visible and focused, click the tray icon **more than 5s after any new-article
-  notification** → the window hides, same as before this change.
+  notification** → the window hides.
 - Trigger a new-article notification while the window is already visible and focused, then click
   the tray icon (or the balloon, if the daemon fires `onAction` for it) **within 5s** → the window
   stays visible and gets focus, rather than being hidden. Click the icon again after waiting out
@@ -999,7 +1003,7 @@ likely each is to be wrong):
   that signal arrives while the menu is closed, applying it waits until the menu reopens and the
   client re-reads every item via `GetGroupProperties`. Toggle the window several times in a row and
   confirm the label keeps up every
-  time (a regression here previously left it stuck on its very first value forever). Do the same for
+  time (the failure mode is the label staying stuck on its very first value). Do the same for
   the in-app update entry: start a download from Settings and confirm the tray item's label/enabled
   actually progress through "Download update…" → "Downloading… N%" → "Restart to update…" instead of
   staying frozen. **A brief flash of the previous label as the menu opens is expected here and is
@@ -1033,17 +1037,16 @@ in order of how likely each is to be wrong):
   selected, a feed *or* a folder *or* a tag, so their label follows the selected item's type). The Feed menu's
   Copy Feed URL / Copy Site URL / Open Site items (no shortcut) sit between Move to Folder and Rename.
 - Select a **folder**, then a **tag**, and confirm the Feed menu's rename/delete pair is enabled with the
-  matching wording ("フォルダー名を変更"/"フォルダーを削除", "タグ名を変更"/"タグを削除") and that **F2 and
-  Delete still fire through the Global Menu path** with the in-window bar hidden — previously both items were
-  greyed out (and the shortcuts therefore dead) unless a feed was selected. The feed-specific items above them
+  matching wording ("Rename folder"/"Delete folder", "Rename tag"/"Delete tag") and that **F2 and
+  Delete fire through the Global Menu path** with the in-window bar hidden. The feed-specific items above them
   (Refresh Feed, Assign Tags, Move to Folder, Copy Feed URL, Copy Site URL, Open Site) stay disabled for a
-  folder/tag selection, as before.
+  folder/tag selection.
 - Select a feed with no discovered site URL: Copy Feed URL stays enabled, but Copy Site URL and Open Site are
   greyed out; selecting a feed that does have one enables all three.
 - Enable the titlebar "Application Menu" button instead: same check.
 - Dynamic state (enabled/disabled items, the "Unread only" checkbox check state) and every click action match the
   in-window menu exactly.
-- Clicking a **greyed-out** item (e.g. "同期" while no cloud account is connected, or a Feed-menu item with
+- Clicking a **greyed-out** item (e.g. "Sync Now" while no cloud account is connected, or a Feed-menu item with
   nothing selected) never runs its action — confirms the D-Bus click handler's `isEnabled()` guard
   (`AppMenuBarHost.kt`) actually blocks a `clicked` event the host still delivers for a disabled item, mirroring
   what `MenuShortcutDispatcher` already enforced for the keyboard-shortcut path.
@@ -1059,7 +1062,7 @@ in order of how likely each is to be wrong):
   the `NameOwnerChanged` reregistration).
 - Repeat the key checks on a **Plasma Wayland** session (Keryx is an XWayland client there).
 - **No regression** on GNOME/XFCE/other DEs (registrar absent → `AppMenuConnection.tryCreate()` returns `null` →
-  the in-window menu bar shows exactly as before, all shortcuts work natively, no errors in `journalctl --user -f`)
+  the in-window menu bar shows, all shortcuts work natively, no errors in `journalctl --user -f`)
   and on Windows/macOS (the whole path is `isLinux`-gated; macOS keeps its screen-menu-bar behavior unchanged).
 - Quit Keryx: the Global Menu entry disappears immediately (no stale/frozen last-known menu for a dead process).
 
@@ -1179,8 +1182,8 @@ something an instrumented assertion can check either). Confirm by hand, on a dev
 running API 29+ (below that, this code path is a no-op by design):
 
 - With the app theme set to dark, open an article with enough content to scroll — the scrollbar
-  thumb is clearly visible against the dark reader background (unlike before this fix, where it
-  stayed a light-theme grey and was nearly invisible there).
+  thumb is clearly visible against the dark reader background, not a light-theme grey that is
+  nearly invisible there.
 - Switch the app theme between light/dark/system without restarting, with an article already open —
   the thumb color follows immediately, matching the article list's own scroll indicator color.
 - Open an article whose content is wider than the screen (a `<table>` or a `<pre>` block) and scroll
@@ -1195,7 +1198,7 @@ running API 29+ (below that, this code path is a no-op by design):
 ### (Android) The article reader's swipe pager
 
 `ArticleSwipeNavTest.kt` / `ArticleSwipeGestureTest.kt` cover the gesture's own thresholds and
-`ArticlePagerSyncTest.kt` the page↔selection synchronization, but none of them hosts a real
+`ArticleReaderPagerSyncTest.kt` the page↔selection synchronization, but none of them hosts a real
 `WebView`: whether a reading position actually survives a page staying composed, and how three live
 `WebView`s behave on real hardware, can only be seen on a device. Confirm on a phone-sized
 device/emulator unless a step says otherwise:
@@ -1268,16 +1271,17 @@ device/emulator:
 - Rotate to landscape (two panes) and try a tablet-width device (three panes): exactly one
   notification row — in the drawer at two panes, in the sidebar at three — or, with the drawer
   closed, the drawer button's badge, showing the right count.
-- With cloud sync connected, the feed list toolbar's five icons fit without wrapping, including at
-  the OS's largest display size.
+- With cloud sync connected, the feed list toolbar's icons — add feed, refresh and sync (sync is
+  shown only while connected) — fit without wrapping, including at the OS's largest display size.
 - At a phone width, in Settings ▸ Cloud sync with a provider connected: the provider name fits on
   one line and the two trailing icon buttons sit beside it on the same row (including at the OS's
   largest display size combined with the app's largest font size).
   - On an unconnected row, verify that the connect button reads as a `primary` fill.
   - On a connected row, verify that reset uses an `errorContainer` fill and disconnect uses an outline;
-    both remain distinguishable against the connected row's teal background. Long-press each icon to check its
-  tooltip. While a reset is running, the spinner is visible against its container and the row's
-  height doesn't change. Check in both light and dark themes.
+    both remain distinguishable against the connected row's teal background.
+  - On both rows, long-press each icon to check its tooltip. While a reset is running, the spinner is
+    visible against its container and the row's height doesn't change. Check in both light and dark
+    themes.
 
 ### (Android) The URL-copied Snackbar
 
@@ -1345,8 +1349,8 @@ animations"), 14, 15 and 16:
 - Complete the swipe: the reader slides out, the article list stays (no jump or re-scroll), and the row
   you were reading flashes once.
 - With 3-button navigation, and on Android 13 without the developer option, Back returns to the list at
-  once with the flash, as before.
-- Unchanged elsewhere: Back closes the open drawer (with its own predictive animation), closes the
+  once with the flash.
+- Elsewhere, Back closes the open drawer (with its own predictive animation), closes the
   expanded search bar, dismisses dialogs and bottom sheets, steps through Settings (category screen →
   list → closed), and on the article list itself leaves the app (with the system's back-to-home preview).
 
@@ -1375,7 +1379,7 @@ device. On an iPhone and an iPad (both orientations), with folders, unfoldered f
 
 - Long-press a feed row and drag it onto a collapsed folder's row: the row highlights, the folder opens
   after about half a second without becoming selected, and releasing moves the feed into it.
-- Drag a feed onto the "フォルダーなし" header: it leaves its folder. Drag it onto a tag row: the tag is
+- Drag a feed onto the "No Folder" header: it leaves its folder. Drag it onto a tag row: the tag is
   attached (expand the tag to see it listed).
 - Drag a feed between rows — within its folder, into another folder, to the end of a folder, below an empty
   folder, among the unfoldered feeds: a gap opens there and the feed lands in it, with no flicker while the
@@ -1430,6 +1434,19 @@ feed of a few dozen articles:
 - Going back still flashes the row just read.
 - On an iPad, selecting an article off screen with a hardware keyboard and switching the filter still scroll
   the list, in the three-pane layout and in portrait.
+
+### (iOS) The article list title
+
+On iOS 17 or 18 and on iOS 26 or later, each on an iPhone and an iPad:
+
+- The list's name is in the bar from the start and stays there however far the list scrolls; choosing
+  another feed names it there at once.
+- On a narrow iPhone (iPhone SE) with a long feed name, the name is truncated in the bar and the mode
+  menu and Mark All as Read stay toolbar buttons.
+- An empty list, a Starred mode with nothing in it and a search with no results show their message with
+  no heading above it.
+- The search field: in the bottom bar on an iPhone from iOS 26, under the bar otherwise; on an iPad from
+  iOS 26 it appears when the list is pulled down, and ⌘F opens it.
 
 ### (iOS) Restoring Home after termination
 
@@ -1527,9 +1544,10 @@ Delete and reinstall the app to bring first-run Setup back, then confirm:
   provider button can be reached by scrolling, and the scroll indicator flashes briefly as the
   screen appears.
 - (iOS) On a large iPhone and an iPad, where everything fits: the content is vertically centered and
-  does not bounce when dragged, as before.
+  does not bounce when dragged.
 - (macOS) Shrink the window to its minimum: both option cards are still shown in full, with nothing
-  truncated or cut off. At the default window size the screen looks as before.
+  truncated or cut off. At the default window size nothing scrolls until a connection is in progress
+  or an error is shown below the cards.
 
 ### In-App Update
 

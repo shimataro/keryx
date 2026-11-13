@@ -51,8 +51,6 @@ struct ArticleListView: View {
     /// Whether this list is on screen rather than under the reader.
     @State private var listVisible = false
     #endif
-    /// `noArticlesView`'s header height, so the empty state below it fills exactly the rest.
-    @State private var emptyListHeaderHeight: CGFloat = 0
     /// Whether this list has been put into a window yet, which rebuilds `content` once more (its
     /// `.id`). The list a phone-width split view pushes for the first time has its refresh control
     /// hung under the navigation bar, and after its first pull that control leaves the list resting
@@ -122,7 +120,7 @@ struct ArticleListView: View {
                 // lighter way to detach and re-attach the action. The rebuilt list starts at the top,
                 // as NetNewsWire's does on the same route: scrolling it back right after the rebuild
                 // made a row touched next jump for a moment.
-                withNewArticlesPill(content.id(ListIdentity(remountGeneration: remountGeneration, attachedToWindow: attachedToWindow))) {
+                withNewArticlesPill(content.id(listIdentity)) {
                     scrollToFreshEnd(proxy)
                 }
                     // Resets to the top on every filter switch, whatever the sort order — unlike
@@ -179,6 +177,9 @@ struct ArticleListView: View {
         #endif
         .toolbar { toolbarContent }
         #if os(iOS)
+        // Inline on every iOS version, as the sidebar's: the name stays in the bar however far the
+        // list scrolls, so a large title before the first scroll would only take room from the rows
+        // (and, from iOS 26, stayed collapsed after a filter switch — no scroll API expands it).
         .navigationTitle(home.articleListTitle)
         .navigationBarTitleDisplayMode(.inline)
         // The system search field. iOS keeps it here, on the column whose contents it narrows (the
@@ -286,42 +287,59 @@ struct ArticleListView: View {
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
         #if os(iOS)
-        // The title feeds the next column's back button and its long-press menu; the heading is
-        // `ArticleListHeader`, so the bar's own centered title is replaced by nothing.
-        ToolbarItem(placement: .principal) { Color.clear }
         // The same status as the sidebar's, for the column an iPhone mostly shows.
         RefreshStatusToolbarItem(home: home)
+        iOSActionItems
+        #else
+        macToolbarItems
         #endif
-        #if os(iOS) && compiler(>=6.4)
+    }
+
+    #if os(iOS)
+    /// iOS: the mode menu leads the trailing cluster on every version, ahead of Mark All as Read.
+    /// It is a view option, not navigation (the HIG puts those at the trailing edge, and an
+    /// iPhone's leading edge holds the back button). Not a `.navigation` item: that placement
+    /// leaves the side to the system, which put it leading on iOS 26 and trailing on iOS 27.
+    @ToolbarContentBuilder
+    private var iOSActionItems: some ToolbarContent {
+        #if compiler(>=6.4)
         // `#available` is a runtime check, so `visibilityPriority` also needs the iOS 27 SDK at
-        // compile time; Swift 6.4 ships with it (Xcode 27), while an older Xcode keeps the groups.
+        // compile time; Swift 6.4 ships with it (Xcode 27), while an older Xcode keeps the group.
         if #available(iOS 27.0, *) {
             // A vertical bar (iPhone Duo's outer display, and landscape on its inner one) overflows
             // from the bottom up, which hid Mark All as Read first and squeezed the search button
             // out of shape. The HIG asks to keep frequent actions visible longest, so Mark All as
             // Read outranks the list mode menu. A horizontal bar ignores these.
-            ToolbarItem(placement: .navigation) { listModeMenu }
+            ToolbarItem(placement: .primaryAction) { listModeMenu }
                 .visibilityPriority(.low)
-
-            FlexibleToolbarSpacer()
-
             ToolbarItem(placement: .primaryAction) { markAllReadButton }
                 .visibilityPriority(.high)
         } else {
-            groupedToolbarItems
+            groupedActionItems
         }
         #else
-        groupedToolbarItems
+        groupedActionItems
         #endif
     }
 
-    /// The toolbar's items in their two groups — what every platform shows where per-item
-    /// visibility priorities are unavailable.
+    /// Both items in one group — wherever per-item visibility priorities are unavailable.
     @ToolbarContentBuilder
-    private var groupedToolbarItems: some ToolbarContent {
+    private var groupedActionItems: some ToolbarContent {
         // Every item's label is a `Label`, not a bare icon: the toolbar still renders icon-only, but
         // the overflow menu it collapses into at a narrow width takes each row's title from it.
         // Separate items of one group (not an `HStack` in one item) so each gets its own row there.
+        ToolbarItemGroup(placement: .primaryAction) {
+            listModeMenu
+            markAllReadButton
+        }
+    }
+    #endif
+
+    #if os(macOS)
+    /// macOS: the whole toolbar — the mode menu, with its name, at the column's leading edge, and
+    /// the actions pushed to the trailing edge.
+    @ToolbarContentBuilder
+    private var macToolbarItems: some ToolbarContent {
         ToolbarItem(placement: .navigation) { listModeMenu }
 
         // `.primaryAction` still flows from the column's leading edge; a flexible spacer is what
@@ -332,6 +350,7 @@ struct ArticleListView: View {
             markAllReadButton
         }
     }
+    #endif
 
     private var listModeMenu: some View {
         // The view options menu: the list mode, then the sort order in a section of its own (as
@@ -388,57 +407,75 @@ struct ArticleListView: View {
     // MARK: - Content / empty states
 
     #if os(iOS)
-    /// Names the selection being shown (and, during a search, the one being narrowed). Not a
-    /// navigation title: see `ArticleListHeader`. Each state of `content` places it itself: a
-    /// scrolling list (`articleList`, `noArticlesView`) carries it inside itself, since SwiftUI hangs
-    /// a `.refreshable` list's refresh control from the navigation bar, and a header between the two
-    /// leaves the control overlapping the header and flickering in and out as the list is pulled
-    /// (iOS 26); every other state goes through `headed`.
-    private var listHeader: some View {
-        ArticleListHeader(title: home.articleListTitle, icon: home.articleListIcon)
+    /// The identity `body` gives `content`: a change rebuilds the list (see `body`).
+    private var listIdentity: ListIdentity {
+        ListIdentity(remountGeneration: remountGeneration, attachedToWindow: attachedToWindow)
     }
     #endif
 
-    /// A state of `content` that does not scroll, with `listHeader` above it on iOS.
-    @ViewBuilder
-    private func headed(_ state: some View) -> some View {
-        #if os(iOS)
-        VStack(spacing: 0) {
-            listHeader
-            state
+    /// What `content` shows, decided in one place.
+    private enum ContentState {
+        /// Nothing yet: the lists, the rows or a search are still on their way.
+        case blank
+        case noFeeds
+        case searchTooShort
+        case noSearchResults
+        case noArticles
+        case searchResults
+        case articles
+    }
+
+    private var contentState: ContentState {
+        // Nothing until the lists have loaded, rather than flashing "no feeds" / "no articles"
+        // before the first emission (`ArticleListBody.pending`).
+        if home.listBody == .pending { return .blank }
+        if home.listBody == .noFeeds { return .noFeeds }
+        if home.searchActive {
+            // A query with no 2+-character word (`searchTerms`, shared with the trigram/`LIKE` split
+            // `FtsSearch` makes — resolved once per query change as `searchQueryHasTerms`) is "too
+            // short"; an in-flight search with nothing yet shows nothing at all, rather than flashing
+            // "no results" between keystrokes; only a *settled* empty result set is "no results".
+            // Mirrors Compose's own `emptyContent` `when` in `ArticleListPane.kt`.
+            if !home.searchQueryHasTerms { return .searchTooShort }
+            if home.searching && !home.hasSearchResults { return .blank }
+            return home.hasSearchResults ? .searchResults : .noSearchResults
         }
-        #else
-        state
-        #endif
+        if displayedRows.isEmpty {
+            // Nothing while the rows are still on their way: being built, or held by the view model
+            // but not yet received here (`articleListCatchingUp`; `listHasRows` is observed, so the
+            // view is woken whichever way it settles).
+            let catchingUp = home.articleRowsBuilding
+                || ArticleListModelKt.articleListCatchingUp(
+                    displayedRows: Int32(displayedRows.count), viewModelHasRows: home.listHasRows
+                )
+            return catchingUp ? .blank : .noArticles
+        }
+        return .articles
     }
 
     @ViewBuilder
     private var content: some View {
-        // Nothing until the lists have loaded, rather than flashing "no feeds" / "no articles"
-        // before the first emission (`ArticleListBody.pending`).
-        if home.listBody == .pending {
-            headed(Color.clear)
-        } else if home.listBody == .noFeeds {
-            headed(ContentUnavailableView {
+        switch contentState {
+        case .blank:
+            Color.clear
+        case .noFeeds:
+            ContentUnavailableView {
                 Label(L("home_no_feeds"), systemImage: "tray")
             } actions: {
                 Button(L("home_add_feed")) { dialogs.isAddingFeed = true }
-            })
-        } else if home.searchActive {
-            searchContent
-        } else if displayedRows.isEmpty {
-            // Nothing while the rows are still on their way: being built, or held by the view model
-            // but not yet received here (`articleListCatchingUp`; `listHasRows` is observed, so the
-            // view is woken whichever way it settles).
-            if home.articleRowsBuilding
-                || ArticleListModelKt.articleListCatchingUp(
-                    displayedRows: Int32(displayedRows.count), viewModelHasRows: home.listHasRows
-                ) {
-                headed(Color.clear)
-            } else {
-                noArticlesView
             }
-        } else {
+        case .searchTooShort:
+            ContentUnavailableView(
+                L("home_search_too_short"),
+                systemImage: "magnifyingglass"
+            )
+        case .noSearchResults:
+            noSearchResultsView
+        case .noArticles:
+            noArticlesView
+        case .searchResults:
+            articleList
+        case .articles:
             articleList
                 .modifier(PullToRefreshModifier(home: home))
         }
@@ -492,41 +529,13 @@ struct ArticleListView: View {
         #if os(iOS)
         GeometryReader { geometry in
             ScrollView {
-                VStack(spacing: 0) {
-                    listHeader
-                        .onSizeChanged { emptyListHeaderHeight = $0.height }
-                    emptyState.frame(
-                        width: geometry.size.width,
-                        height: max(0, geometry.size.height - emptyListHeaderHeight)
-                    )
-                }
+                emptyState.frame(width: geometry.size.width, height: geometry.size.height)
             }
             .modifier(PullToRefreshModifier(home: home))
         }
         #else
         emptyState
         #endif
-    }
-
-    /// Mirrors Compose's own `emptyContent` `when` in `ArticleListPane.kt`: a query with no
-    /// 2+-character word (`searchTerms`, shared with the trigram/`LIKE` split `FtsSearch` makes —
-    /// resolved once per query change as `searchQueryHasTerms`) is "too short"; an in-flight search
-    /// with nothing yet shows nothing at all, rather than flashing "no results" between keystrokes;
-    /// only a *settled* empty result set is "no results".
-    @ViewBuilder
-    private var searchContent: some View {
-        if !home.searchQueryHasTerms {
-            headed(ContentUnavailableView(
-                L("home_search_too_short"),
-                systemImage: "magnifyingglass"
-            ))
-        } else if home.searching && !home.hasSearchResults {
-            headed(Color.clear)
-        } else if !home.hasSearchResults {
-            headed(noSearchResultsView)
-        } else {
-            articleList
-        }
     }
 
     /// A secondary line pointing at "All Feeds" only when the search is actually narrowed to
@@ -602,22 +611,11 @@ struct ArticleListView: View {
         let selectedId = displayedSelectedId
         let paneFocused = focusedPane.wrappedValue == .articleList && windowIsKey
         return List {
-            Section {
-                ForEach(displayedRows) { article in
-                    articleRow(article, selectedId: selectedId, paneFocused: paneFocused)
-                }
-            } header: {
-                // Pinned while the rows scroll, so it needs the list's own opaque background.
-                listHeader
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color(uiColor: .systemBackground))
-                    .listRowInsets(EdgeInsets())
-                    .foregroundStyle(.primary)
+            ForEach(displayedRows) { article in
+                articleRow(article, selectedId: selectedId, paneFocused: paneFocused)
             }
         }
         .listStyle(.plain)
-        // No extra gap above the header, so it sits where it does over an empty list.
-        .contentMargins(.top, 0, for: .scrollContent)
     }
 
     private func articleRow(_ article: ArticleRowModel, selectedId: String?, paneFocused: Bool) -> some View {

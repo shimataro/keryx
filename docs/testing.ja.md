@@ -5,8 +5,9 @@
 ## 構成
 
 - `commonTest/` — 純粋ロジックと Ktor `MockEngine` を使うテスト（パーサ、フェッチャ、URL リゾルバ、
-  OPML、Dropbox ストレージ/認証、ローカル設定）。デスクトップターゲット上で動くため、`expect` 宣言は
+  OPML、Dropbox ストレージ/認証、ローカル設定）。デスクトップターゲット上で動き、そこでは `expect` 宣言は
   desktop の `actual` に解決される（`AppDirs` を一時ディレクトリで利用可能。`FileIO` は kotlinx-io による共通実装）。
+  Mac ではネイティブでも動く——下記の Apple ターゲットの項を参照。
 - `desktopTest/` — 実際の SQLDelight ドライバ（`JdbcSqliteDriver`）が必要なテスト（スキーマ、記事 upsert、
   ATTACH マージ）。ヘルパーは `DbTestSupport.kt`（`inMemoryDb()`, `fileDb()`, `insertFeed()`）。`:shared` と `:composeApp` の両方のテストから使えるよう `:testing` モジュールに置いている。同じモジュールには `HoldingDispatcher.kt` もある。ディスパッチされた処理を止めておき、任意の時点で流せるコルーチンディスパッチャーで、コントローラや ViewModel のキャンセルのテスト（`OpmlTransferControllerTest`、`CloudSyncControllerTest`、`SettingsViewModelTest`）が、キャンセル済みのコルーチンを進ませずに、誰がそれを待つかを確かめるのに使う。さらに `AwaitCondition.kt`（`awaitCondition` / `awaitConditionBlocking`。`AWAIT_CONDITION_TIMEOUT_MS` でタイムアウト）もある。条件を専用のスレッド上で実時間でポーリングする（共有の `Dispatchers.Default` ではないので、先行テストがそこに残した処理に止められない）ので、`runTest` の仮想時間スケジューラでは進められない、実ディスパッチャー上の処理（HTTP エンジンのスレッドや `Dispatchers.Default`）を待てる。その場しのぎの `delay` / `Thread.sleep` のループの代わりに使う。`TestThreadDispatcher.kt`（`testThreadDispatcher(name)`）は、テスト側が完了をブロッキングで待つ間、テスト対象のコードに専用のスレッドを 1 本与える。テスト JVM 全体で共有される `Dispatchers.Default` ではなくこちらを使い（テスト後に閉じる）、先行テストが残した処理に遅らされないようにする。テスト自体がコルーチン（`runBlocking`）なら、並行させる処理は、テストのスレッド上で素の `launch` / `async` によって起動する。
   同ディレクトリには、実際に Composable をレンダリングして検証する Compose UI テスト
@@ -26,26 +27,30 @@
   `DatabaseDriverFactory().createDriver(dir)` でドライバを作ること。
 - `androidDeviceTest/` — Android 実機の SQLite やプラットフォーム API を必要とし、プレーンな JVM
   ユニットテストとしては実行できない計装テスト（`.claude/rules/android-sqlite-bundling.md` 参照）。
-  実機または起動中のエミュレータが必要。`composeApp` には `androidUnitTest`/`androidHostTest`
-  ソースセットは存在しない — デバイスか Robolectric（現状未導入の依存）のどちらか無しには JVM 上で
-  テストできない Android 固有ロジックが無いため。ヘルパーは `AndroidDbTestSupport.kt`
-  （`createSchemaDbFile()`。`DbTestSupport.kt` の `fileDb()` に相当するが、本番と同じスキーマ導入経路
-  である実際の `AndroidSqliteDriver` 経由で作成する）。7ファイルあり、それぞれ Android 固有の差異が
-  出うる箇所に絞る:
-  - `DatabaseMergerDeviceTest.kt` / `DatabaseSnapshotDeviceTest.kt` — スキーマバージョンガード、
-    マイグレーション経路、バンドルされた `requery` SQLite（ネイティブライブラリ）に対するマージ/
-    スナップショット動作。`desktopTest` のスイート全体を移植するものではない——マージ SQL 自体
-    （`MergeSql`）は純粋ロジックであり、既に `desktopTest` 側でカバーされているため。
-  - `MergeFailureClassificationDeviceTest.kt` — 例外**クラス**ベースの失敗分類（Android の
-    `SQLiteException` は数値エラーコードを持たない。デスクトップの `DatabaseMerger` は JDBC ドライバの
-    `resultCode` を読む点と対照的）、および `NoOpDatabaseErrorHandler` の回帰確認（バンドル SQLite の
-    既定エラーハンドラは破損と判定した DB ファイルを削除する。AAR の逆アセンブルで確認済み）。
-  - `KeystoreTokenStorageDeviceTest.kt` — `KeystoreTokenStorage.save()` のフォールバック経路を実際の
-    Android Keystore に対して検証。
-  - `FilePickerDeviceTest.kt` — Storage Access Framework のファイルピッカーの書き込み失敗経路
-    （どのプロバイダーもストリームを開けない場合の `ContentUriPickedFile.writeText`）。
-  - `AndroidAuthorizationHostDeviceTest.kt` — `AndroidAuthorizationHost` が Activity へ渡す
-    同意画面リクエストのスロットの寿命。
+  実機または起動中のエミュレータが必要。このソースセットは 2 つのモジュールにあり、それぞれ自前の
+  ヘルパーを持つ（デバイステストのソースセットはモジュールをまたいで共有できない）。どちらにも
+  `androidUnitTest`/`androidHostTest` ソースセットは存在しない — デバイスか Robolectric（現状未導入の依存）
+  のどちらか無しには JVM 上でテストできない Android 固有ロジックしか無いため。各テストは Android 固有の
+  差異が出うる箇所に絞る:
+  - `shared/src/androidDeviceTest/` — DB の計装テスト。新しい DB の計装テストはここに置く。ヘルパーは
+    `AndroidDbTestSupport.kt`（`createSchemaDbFile()`。`DbTestSupport.kt` の `fileDb()` に相当するが、
+    本番と同じスキーマ導入経路である実際の `AndroidSqliteDriver` 経由で作成する）。
+    - `DatabaseMergerDeviceTest.kt` / `DatabaseSnapshotDeviceTest.kt` — スキーマバージョンガード、
+      マイグレーション経路、バンドルされた `requery` SQLite（ネイティブライブラリ）に対するマージ/
+      スナップショット動作。`desktopTest` のスイート全体を移植するものではない——マージ SQL 自体
+      （`MergeSql`）は純粋ロジックであり、既に `desktopTest` 側でカバーされているため。
+    - `MergeFailureClassificationDeviceTest.kt` — 例外**クラス**ベースの失敗分類（Android の
+      `SQLiteException` は数値エラーコードを持たない。デスクトップの `DatabaseMerger` は JDBC ドライバの
+      `resultCode` を読む点と対照的）、および `NoOpDatabaseErrorHandler` の回帰確認（バンドル SQLite の
+      既定エラーハンドラは破損と判定した DB ファイルを削除する。AAR の逆アセンブルで確認済み）。
+  - `composeApp/src/androidDeviceTest/` — 他に置き場のない `androidMain` 専用ロジック。ヘルパーは
+    `AndroidTestSupport.kt`（`testContext()`）。
+    - `data/cloud/KeystoreTokenStorageDeviceTest.kt` — `KeystoreTokenStorage.save()` のフォールバック
+      経路を実際の Android Keystore に対して検証。
+    - `platform/FilePickerDeviceTest.kt` — Storage Access Framework のファイルピッカーの書き込み失敗経路
+      （どのプロバイダーもストリームを開けない場合の `ContentUriPickedFile.writeText`）。
+    - `platform/AndroidAuthorizationHostDeviceTest.kt` — `AndroidAuthorizationHost` が Activity へ渡す
+      同意画面リクエストのスロットの寿命。
 
 - `androidGms/src/test/` — 通常の JVM ユニットテスト（`:androidGms:testDebugUnitTest`、
   `./gradlew build` に含まれる）: `PlayServicesGoogleDriveAuthTest.kt` — Play 開発者サービスによる
@@ -65,7 +70,7 @@
   確認では捕まえられない `Role.Switch`／チェック状態の回帰）。`composeApp` 自体は
   Android **ライブラリ**モジュール
   （`com.android.kotlin.multiplatform.library`）でありアプリケーションではない——その計装テスト
-  （上記の `androidDeviceTest`）は Compose UI ツリーを必要としないネイティブドライバ寄りの範囲に
+  （上記の `androidDeviceTest`）は Compose UI ツリーを必要としない `androidMain` 専用ロジックに
   絞っているため、Compose を実際にレンダリングするテストは、実際に Android アプリケーションである
   唯一のモジュールであるこちらに置く。
 
@@ -78,9 +83,10 @@
   使ってしまい、macOS の実際のバンドルは実行ファイルを `Keryx.app/Contents/MacOS/Keryx` の下に
   ネストするため（[app-architecture.ja.md](app-architecture.ja.md) の「`appleApp/` の Xcode
   プロジェクト」参照）。アプリに寄生しないということは、これらのテストが `AppModel`/`HomeView` を
-  直接動かせないということでもある——代わりに `Bridge/` の `StateFlow` → `@Observable` アダプタと、
-  `Localization/` の `NotificationText`/`ErrorKind` → String Catalog キーの対応づけを、フェイクや
-  既知の enum ケースを与えて単体で検証する。`KeryxShared.xcframework` は静的リンクしている
+  直接動かせないということでもある——代わりに、テストに必要なロジックだけの Swift ファイルを
+  `appleApp/project.yml` のテストターゲット自身の `sources:` に列挙し、アプリをホストせずに検証する。
+  例えば `OpmlTransferObservable.swift` や `SidebarModel.swift` といった `Bridge/` のファイルや、
+  `Home/FeedListSelectionEquality.swift` で、実行中の `KeryxSdk` ではなくフェイクや既知の値を与える。`KeryxShared.xcframework` は静的リンクしている
   （`project.yml` のこのターゲット自身の `dependencies:`）ため、Kotlin の sealed 型の値を
   実際に組み立てて比較するテストも書ける——`FeedListSelectionEquality.swift` の
   `ArticleFilter`/`FeedListRowSelection`/`DropBoundary` の比較・キー生成関数をこの方法で検証する
@@ -149,7 +155,8 @@
 - 新規の Android Compose UI 計装テストは `androidApp/src/androidTest/` に置く（`composeApp` は
   ライブラリモジュールなので、その計装テストはアプリケーションモジュール側に置く — 上記「構成」
   参照）。バンドルされた `requery` SQLite に依存する DB テストは
-  `composeApp/src/androidDeviceTest/` に置く。**`androidUnitTest`/`androidHostTest` ソースセットは
+  `shared/src/androidDeviceTest/` に置き、デバイスを必要とするそれ以外の `composeApp` の `androidMain`
+  専用ロジックのテストは `composeApp/src/androidDeviceTest/` に置く。**`androidUnitTest`/`androidHostTest` ソースセットは
   存在しない**（Robolectric 未導入）— たまたま Android 固有クラスに実装されている純粋なロジックは、
   `domain/BackgroundRefreshSchedule.kt`（`BackgroundRefreshScheduleTest.kt` で検証済み）のように
   `commonMain` へ切り出し、`commonTest` から検証する。
@@ -179,8 +186,8 @@ Android には計装テストスイートが 3 つある。CI に組み込まれ
 | `composeApp/src/androidDeviceTest/` | `:composeApp:connectedAndroidDeviceTest` | 他に置き場のない `androidMain` 専用ロジック（SAF の書き込み、Keystore のトークン保存、同意画面リクエストのスロット） | ✗ ローカルのみ |
 | `androidApp/src/androidTest/` | `:androidApp:connectedGithubDebugAndroidTest` | Compose UI（長押しジェスチャ、検索バー） | ✓ ブランチへの push ごと |
 
-どちらも実機または起動中のエミュレータが必要 — AVD（`<name>`）の作り方は
-[setup.ja.md](setup.ja.md) を参照:
+2 つの `androidDeviceTest` スイートは実機または起動中のエミュレータが必要 — AVD（`<name>`）の
+作り方は [setup.ja.md](setup.ja.md) を参照:
 
 ```bash
 $ANDROID_HOME/emulator/emulator -avd <name> -no-snapshot -no-boot-anim &
@@ -189,13 +196,13 @@ $ANDROID_HOME/emulator/emulator -avd <name> -no-snapshot -no-boot-anim &
 
 （タスク名は AGP 9 の `com.android.kotlin.multiplatform.library` プラグイン自身の
 `withDeviceTestBuilder` DSL に由来する — 将来の AGP リリースで名称が変わった場合は
-`./gradlew :composeApp:tasks --all | grep -i device` で確認する）。`ci.yml` には組み込んでいない
-— デスクトップの UI テストは `xvfb` 上で既に CI で動いているが、Android エミュレータはこのプロジェクト
-がまだ導入していない別種の CI 課題のため、現状はローカル実行のみ。
+`./gradlew :composeApp:tasks --all | grep -i device` で確認する）。2 つのうち `ci.yml` に組み込んで
+いるのは `:shared:connectedAndroidDeviceTest`（`android-instrumented-test` ジョブ）だけで、
+`:composeApp:connectedAndroidDeviceTest` は組み込んでいないため、ローカル実行のみ。
 
 `androidApp` 自身の計装テストスイート（Compose UI のジェスチャテスト。上記の
 `androidApp/src/androidTest/` を参照）は、通常の `com.android.application` のタスク命名を使う——
-`androidApp` が `github`/`play`/`fdroid` の product flavor に分かれた分だけタスク名も flavor 修飾される
+`androidApp` には `github`/`play`/`fdroid` の product flavor があるため、タスク名も flavor 修飾される
 （`build.ja.md` の「Android (APK / AAB)」を参照）:
 
 ```bash
@@ -240,7 +247,7 @@ AGP の `build` ライフサイクルは `androidTest` ソースセットに対�
 
 プロジェクト全体で見ると——
 
-- 上記の Android の2スイートに加えて、`commonTest`/`desktopTest`（上記の `./gradlew :shared:desktopTest :composeApp:desktopTest` で実行）がパーサ、フェッチャのリダイレクト/304/404/410/タイムアウト/ディスカバリ、OPML、Dropbox ストレージ/認証、PKCE、OAuth ループバックサーバ、マージ（後勝ち・OR マージ・衝突ガード・FK ガード）、スキーマ、ローカル設定、記事 upsert、URL リゾルバ、日時パーサ、Result、Repository 層（Article/Feed/Tag/Settings）、CloudSession、NotificationCenter、IdGenerator、SyncRepository、どの UI（SwiftUI 版を含む）からも再利用できる共有の `presentation/` state holder——`HomeViewModel`、`SetupController`、`CloudSyncController`、`PreferencesController`、`OpmlTransfer`、`OpmlTransferController`、`NotificationAlerts`、`FeedListExpansion`、`SelectionReadIntents`、`DerivedStateFlow`、`computeMenuUiState`、`isDuplicateFolderName`/`isDuplicateTagName`——を、それぞれ本体のすぐ隣（例：`CloudSyncControllerTest.kt` は `presentation/settings/CloudSyncController.kt` の隣）で `:shared` 自身の `commonTest`/`desktopTest` として直接テストしていること、加えて存在する場合は各 UI 自身の薄いラッパー（composeApp の `SettingsViewModel`/`NotificationCenterViewModel` は共有コントローラへ委譲し、その委譲部分と、Compose 側だけに残るもの——アプリ内アップデータと OPML のファイル選択/ビジー状態——だけをテストする。例えば `SettingsViewModel` の OPML インポート/エクスポート経路——構築したドキュメント/読み込んだファイルがピックしたパスと往復すること、ローカライズ済みのリクエスト内容が `FakeFileSelector` に渡ること、キャンセル、そしてドキュメントの構築/書き込み/取り込み処理が EDT ではなく注入したディスパッチャ上で実行されることを含む）
+- 上記の Android の 3 つの計装テストスイートに加えて、`commonTest`/`desktopTest`（上記の `./gradlew :shared:desktopTest :composeApp:desktopTest` で実行）がパーサ、フェッチャのリダイレクト/304/404/410/タイムアウト/ディスカバリ、OPML、Dropbox ストレージ/認証、PKCE、OAuth ループバックサーバ、マージ（後勝ち・OR マージ・衝突ガード・FK ガード）、スキーマ、ローカル設定、記事 upsert、URL リゾルバ、日時パーサ、Result、Repository 層（Article/Feed/Tag/Settings）、CloudSession、NotificationCenter、IdGenerator、SyncRepository、どの UI（SwiftUI 版を含む）からも再利用できる共有の `presentation/` state holder——`HomeViewModel`、`SetupController`、`CloudSyncController`、`PreferencesController`、`OpmlTransfer`、`OpmlTransferController`、`NotificationAlerts`、`FeedListExpansion`、`SelectionReadIntents`、`DerivedStateFlow`、`computeMenuUiState`、`isDuplicateFolderName`/`isDuplicateTagName`——を、それぞれ本体のすぐ隣（例：`CloudSyncControllerTest.kt` は `presentation/settings/CloudSyncController.kt` の隣）で `:shared` 自身の `commonTest`/`desktopTest` として直接テストしていること、加えて存在する場合は各 UI 自身の薄いラッパー（composeApp の `SettingsViewModel`/`NotificationCenterViewModel` は共有コントローラへ委譲し、その委譲部分と、Compose 側だけに残るもの——アプリ内アップデータと OPML のファイル選択/ビジー状態——だけをテストする。例えば `SettingsViewModel` の OPML インポート/エクスポート経路——構築したドキュメント/読み込んだファイルがピックしたパスと往復すること、ローカライズ済みのリクエスト内容が `FakeFileSelector` に渡ること、キャンセル、そしてドキュメントの構築/書き込み/取り込み処理が EDT ではなく注入したディスパッチャ上で実行されることを含む）
 - Linux/macOS/Windows のファイルダイアログのバックエンド分岐（`FilePickerTest`：`defaultFilePickerBackend` の OS 判定、`FileNameExtensionFilter` と一致する拡張子述語——ディレクトリを accept することを含む——、上書き確認の解決、ダイアログの親ウインドウ選択）
 - フィード一覧のドラッグ&ドロップの書き直し（`HomeCommonTest.kt` の `parseFeedListDragSourceKey` で純粋なキー解析ロジックを、`FeedListDragTest.kt` で実際にレンダリングしたコンポーザブルに対して `performMouseInput`/`performKeyInput` を使う実際のエンドツーエンドのジェスチャーをカバー——フィードを別のフィードの上にドラッグして永続化された順序を検証、しきい値未満の移動でも選択は効くケース、フォルダーヘッダー/タグ行へのドロップ、ドラッグ中に右クリックが来てもコンテキストメニューが開かずドラッグも中断されないこと、ゴーストオーバーレイの表示/非表示のライフサイクル、Escape によるキャンセル、フォルダー同士の並べ替え、ペインの水平方向の範囲を越えて押し出されたドラッグが行の高さと一致していても有効なドロップ先と判定されずドロップも適用されないこと）
 - フィード一覧の行内リネーム編集（`commonTest` の `InlineRenameValidationTest` で「空欄はエラーではないが確定もできない」という共有バリデーション規則を、`HomeCommonTest.kt` で `toInlineEditTarget` を、`FeedListInlineRenameTest.kt` で実際にレンダリングしたコンポーザブルに対するエンドツーエンドの挙動をカバー——F2 で編集を開始し Enter で確定、Escape と「×」アイコンでのキャンセル、blur による確定、フォルダー名の重複が Enter をブロックし blur では静かに元へ戻ること、フォルダー名の空欄が単に確定不可であること、フィード名を空欄で確定すると `custom_title` がリセットされフィード自身のタイトルが `placeholder` に出ること、タグのリネームが色に触れないこと、タグの色ドットのポップオーバーがリネーム中かどうかに関わらず即座に色を反映すること、Feed メニューの `RenameFeed` コマンドが現在の選択に対して編集を開始すること）
@@ -349,7 +356,7 @@ AGP の `build` ライフサイクルは `androidTest` ソースセットに対�
 
 `./gradlew :composeApp:run` で起動して 3 ペイン UI・テーマ切替・フィード追加・検索を目視確認する。
 `FeedListDragTest.kt` がドラッグの機構自体（並べ替え・しきい値判定・フォルダー/タグへのドロップ・
-右クリックガード・ゴーストのライフサイクル・Escape）をエンドツーエンドでカバーするようになったが、
+右クリックガード・ゴーストのライフサイクル・Escape）をエンドツーエンドでカバーしているが、
 実際の画素レンダリング（色・アニメーションの滑らかさ・実コンテンツ上でのゴーストの見え方）は本質的に
 目視確認になるため、以下も併せて確認する:
 
@@ -361,38 +368,17 @@ AGP の `build` ライフサイクルは `androidTest` ソースセットに対�
 開くことを確認する。`StringsXmlParityTest` は翻訳漏れをリソースレベルで検出するが、文脈上の
 不自然な言い回しはこの目視確認でしか検出できない。
 
-- フォルダーをドラッグして順序を入れ替え、アプリを再起動しても順序が保持されること。
-- フォルダー内のフィードをドラッグして順序を入れ替え、再起動後も順序が保持されること。
-- 「フォルダーなし」グループ内でのフィード並び替え。
-- フィードを別フォルダーの任意の位置（横線の位置）にドロップし、フォルダー移動と位置決めが同時に
-  反映されること。
-- 「フォルダーへ移動」ダイアログでの移動が、移動先グループの末尾に追加されること。
-- フィードをタグ行にドラッグしたとき、フォルダーのドロップ先とは**異なる**色
-  （`tertiaryContainer` / フォルダーは `secondaryContainer`）でハイライトされ、ホバー中はタグの
-  色ドットが「+」アイコンに入れ替わること。ドロップするとフォルダーから移動させずにタグが付与され、
-  既に付いているタグに再ドロップしても何も変わらないこと。展開したタグの下のフィードの上にドラッグしても、そのタグの
-  行が同じようにハイライトされ、ドロップするとタグが付与されること。空白の上では何もハイライトされず、ポインターは
-  通常の矢印のままであること。
-- タグのシェブロンで展開すると、そのタグが付いたフィードが直下に一覧表示されること
-  （複数タグを持つフィードは展開中のタグごと＋所属フォルダーの分だけ重複表示されるが、これは仕様）。
-  展開/折りたたみ状態が再起動後も保持され、タグの初期状態は折りたたみで、タグを削除しても展開状態が
-  残らないこと。
-- 展開したタグ配下のフィードを右クリック →「タグを設定」サブメニューでそのタグのチェックを外すと、
-  そのタグからのみ外れること（フォルダー所属や他のタグは変わらない）。そのフィードをタグ一覧から
-  フォルダーや別のタグへドラッグして移動/付与できること。
 - フィードの行やフォルダーヘッダーを押し下げてから、ドラッグ開始しきい値
   （`FeedListDragGestures.kt` の `Modifier.feedListReorderDrag`）未満しか動かさない場合はドラッグが
   始まらないこと——その行は通常どおり単純なクリック（選択）として扱われ、リストのどこにも
-  ドラッグゴーストやドロップ先のハイライトが表示されないこと。しきい値を超えて動かすと、これまでどおり
-  ドラッグが始まること。
+  ドラッグゴーストやドロップ先のハイライトが表示されないこと。しきい値を超えて動かすとドラッグが
+  始まること。
 - ドラッグ中は Compose 側で描画したチップ状のゴースト（アイコン＋タイトル）がポインターに追従して
-  表示され、macOS/Windows/Linux で同じ見た目になること — **Linux では初めてゴーストが表示される**
-  （X11 の AWT は Wayland のカーソル制限以前からそもそもゴースト自体に非対応だったが、ドラッグが
-  OS レベルの DnD に一切触れなくなったことでどちらの制限も無関係になった）。チップが明るい背景・暗い背景のどちらでも視認でき、
-  どのプラットフォームでも OS の禁止（no-drop）カーソルが一切表示されず、通常の矢印カーソルの
-  ままであること。
+  表示され、macOS/Windows/Linux で同じ見た目になること — ドラッグが OS レベルの DnD を一切使わない
+  ため、Linux も含む。チップが明るい背景・暗い背景のどちらでも視認でき、どのプラットフォームでも
+  OS の禁止（no-drop）カーソルが一切表示されず、通常の矢印カーソルのままであること。
 - チップは半透明になっており（`FeedListDragController.kt` の `DRAG_GHOST_ALPHA`）、下に隠れている
-  行やハイライトが完全には隠れず透けて見えること。実際にドロップを受け付ける位置の上ではこれまでどおり
+  行やハイライトが完全には隠れず透けて見えること。実際にドロップを受け付ける位置の上では
   ニュートラルな色味だが、空白・セクションヘッダー・（フォルダーをドラッグしている場合の）そのフォルダー
   自身の上など、ドロップできない位置に来ると `error`/`errorContainer` 系の色味に変わること — この
   切り替えがライト/ダーク両テーマで見た目にはっきり分かること、また有効な行に出入りした瞬間に
@@ -408,8 +394,31 @@ AGP の `build` ライフサイクルは `androidTest` ソースセットに対�
 - フィードペインの縦スクロールバーのつまみをドラッグすると通常どおりリストがスクロールし、
   ドラッグしきい値を超えて動かしてもフィード/フォルダーのドラッグが始まらないこと。
 - ドラッグ中に Escape を押すと、並べ替えを適用せずに即座にキャンセルされゴーストが消えること。
-  ドラッグ中でない場合の Escape の挙動は従来どおり（ドラッグ処理に飲み込まれない）こと。
+  ドラッグ中でない場合の Escape はドラッグ処理に飲み込まれないこと。
 - ドラッグ中に Alt-Tab などでウィンドウのフォーカスを失っても同様にキャンセルされること。
+- フォルダーをドラッグして順序を入れ替え、アプリを再起動しても順序が保持されること。
+- フォルダー内のフィードをドラッグして順序を入れ替え、再起動後も順序が保持されること。
+- 「フォルダーなし」グループ内でのフィード並び替え。
+- フィードを別フォルダー（および「フォルダーなし」グループ）の任意の位置（横線の位置）にドロップする:
+  ホバー中はヘッダーが `secondaryContainer` で塗られ `secondary` 色（緑）の枠線が付くこと、フォルダー
+  移動と位置決めが同時に反映されること、「+」バッジは表示されないこと（移動には「追加」の意味がない）。
+- 「フォルダーへ移動」ダイアログでの移動が、移動先グループの末尾に追加されること。
+- フィードをタグ行にドラッグしたとき、フォルダーのドロップ先とは**異なる**色
+  （`tertiaryContainer` / フォルダーは `secondaryContainer`）でハイライトされ、`tertiary` 色（青）の
+  枠線が付き（フォルダーは `secondary` 色（緑）の枠線）、ホバー中はタグの色ドットが塗りつぶしの「+」
+  バッジに入れ替わること——ダークモードを含め、フォルダーの「移動」ハイライトともドラッグゴースト自身の
+  ニュートラルなチップとも一目で区別できること。ドロップするとフォルダーから移動させずにタグが付与され、
+  既に付いているタグに再ドロップしても何も変わらないこと。展開したタグの下のフィードの上にドラッグしても、
+  そのタグの行が同じようにハイライトされ、ドロップするとタグが付与されること。空白の上では何も
+  ハイライトされず、ポインターは通常の矢印のままであること——ドラッグが OS レベルではないため、
+  特別な「ここにはドロップできない」カーソルは無い。
+- タグのシェブロンで展開すると、そのタグが付いたフィードが直下に一覧表示されること
+  （複数タグを持つフィードは展開中のタグごと＋所属フォルダーの分だけ重複表示されるが、これは仕様）。
+  展開/折りたたみ状態が再起動後も保持され、タグの初期状態は折りたたみで、タグを削除しても展開状態が
+  残らないこと。
+- 展開したタグ配下のフィードを右クリック →「タグを設定」サブメニューでそのタグのチェックを外すと、
+  そのタグからのみ外れること（フォルダー所属や他のタグは変わらない）。そのフィードをタグ一覧から
+  フォルダーや別のタグへドラッグして移動/付与できること。
 - スクロールが必要なほど長い購読リストで、ドラッグ中のフィード（および別途フォルダー）をフィード
   一覧の上端・下端付近で保持する: その方向にリストがオートスクロールし、ポインターが端に近いほど
   速くなり、中央のデッドゾーンで止まり、リストのどちらの端でもエラーなく止まること。ドロップは
@@ -419,8 +428,8 @@ AGP の `build` ライフサイクルは `androidTest` ソースセットに対�
   特に、「フォルダー」/「タグ」のセクションヘッダー、「タグ」の上の区切り線、上部のサイドバー行を
   横切る間もスクロールが滑らか（カクつきや途切れが無い）であることを確認する——フォルダー/フィード行を
   スクロールしている間だけでなく。
-- 「フォルダー」/「タグ」のセクションヘッダーがスクロール中に固定表示される（VSCode のエクスプローラー
-  のような挙動）ようになったので、各ヘッダーが下をスクロールしていく行をちらつきや透けなく視覚的に
+- 「フォルダー」/「タグ」のセクションヘッダーはスクロール中に固定表示される（VSCode のエクスプローラー
+  のような挙動）ので、各ヘッダーが下をスクロールしていく行をちらつきや透けなく視覚的に
   覆っていること、そしてフィードやフォルダーをドラッグしてポインターが*固定表示中の*ヘッダー上に
   乗ったとき、ホバー/ドロップ先がそのヘッダーの背後に隠れているどの行でもなくヘッダー自身の行に
   解決されることを確認する——さらに、次のセクションのヘッダーが上端に到達した瞬間に固定表示が
@@ -429,21 +438,19 @@ AGP の `build` ライフサイクルは `androidTest` ソースセットに対�
   セクションよりずっと上からフィードのドラッグを開始し、下端付近で保持してタグがスクロールして
   見えるようになったところで直接その上にドロップする——タグがハイライトされ、1回目の試行でドロップが
   成功すること。ドラッグ開始時には画面外にあったフォルダーへのドロップでも同様に繰り返す。
-  （これはペインが単一の集約されたドロップターゲットを持つことで対応しているシナリオである——
-  以前の行単位のドロップターゲットは、ドラッグ開始時に既に存在していた行からのドロップしか
-  受け付けられなかったため、その後オートスクロールで現れたものへのドロップは、一旦ウィンドウの外に
-  出て再度入り直すまで黙って拒否されていた。）
+  （ペインが単一の集約されたドロップターゲットを持つのはこのためである: ドラッグ開始後に
+  オートスクロールで現れた行も、他の行と同じようにドロップを受け付ける。）
 - ドラッグ中のフィードを**折りたたまれた**フォルダーのヘッダー上で約1秒ホールドする: フォルダーが
   自動的に展開し（Finder/エクスプローラー風のスプリングロード）、その配下のフィードがドロップ先になり、
   ドロップ後もフォルダーは**展開されたまま**であること——シェブロンをクリックした場合と同じ永続状態に
   なる。単にヘッダーを通過するだけ（他へ向かう途中）では展開されないこと、また*フォルダー*を別の
   折りたたまれたフォルダーのヘッダー上にドラッグした場合（並べ替えジェスチャー）も展開されないこと。
 - **(Linux, X11 / Wayland)** ドラッグゴーストとドロップの挙動が、この 2 つのセッション種別間で
-  区別できなくなっていること — 上記の並べ替え/フォルダーへのドロップ/タグへのドロップの確認を
+  区別できないこと — 上記の並べ替え/フォルダーへのドロップ/タグへのドロップの確認を
   Plasma X11 セッションと Plasma Wayland（XWayland）セッションの両方で行い、同じ挙動になることを
   確認する（この手作りの Compose ネイティブドラッグにより、どちらのセッション種別でも
-  XDnD/XWayland のカーソル調停が一切発生しない——以前は Wayland 上でドロップ自体は成功するのに、
-  ドラッグ中ずっと OS の禁止マーク「no-drop」カーソルが表示され続けていた）。
+  XDnD/XWayland のカーソル調停が一切発生しないため、Wayland 上でもドラッグ中に OS の禁止マーク
+  「no-drop」カーソルは表示されない）。
 
 並行フィード更新（並行取得＋直列書き込み、`FeedRepository.refreshAll`）の中核となる並行動作
 （取得のオーバーラップとフィードごとの書き込み完全性）は `refreshAllFetchesFeedsConcurrentlyAndAppliesEveryWrite` が、
@@ -490,9 +497,8 @@ AGP の `build` ライフサイクルは `androidTest` ソースセットに対�
   クラウドデータも、正真正銘の破損と同様に扱われることの確認。
 - **レガシーフォールバック**（[sync-architecture.ja.md](sync-architecture.ja.md) の「圧縮アップロード /
   レガシーフォールバック」参照）: プロバイダ接続済みの状態で、アプリフォルダの `keryx.db.gz`（存在すれば）
-  を手動削除し、代わりに非圧縮の `keryx.db` をアップロードする（この機能導入前に `createFresh` で作られた
-  ものをダウンロードするか、`.gz` を手動で展開したもの）——これは「このデバイスが圧縮機能追加後まだ一度も
-  同期していないクラウド」を模擬する。同期する: アプリはその非圧縮ファイルをダウンロード・マージした後、
+  を手動削除し、代わりに非圧縮の `keryx.db` をアップロードする（例えば `.gz` を手動で展開したもの）
+  ——これは「レガシーな非圧縮形式でしか書かれていないクラウド」を模擬する。同期する: アプリはその非圧縮ファイルをダウンロード・マージした後、
   新しい `keryx.db.gz` を作成する（プロバイダの操作履歴では更新ではなく作成として見えるはず）こと——非圧縮
   の `keryx.db` はフォルダ内にそのまま一切変更されずに残ること。他に何も変えず再度同期する: `keryx.db.gz`
   へのメタデータ確認だけが発生し（ペイロードのダウンロード・アップロードは発生しない）、非圧縮ファイルが
@@ -596,7 +602,7 @@ Delete）は 1 つの規則 `feedListItemKeysActive`（`ui/home/HomePaneLayout.k
   残らないこと）、ウインドウのどこをクリックしてもアプリがフリーズしないこと —— WebView2 の
   `dataDirectory` をデフォルトのままにした場合の Access Denied 失敗に対する回帰確認である
   （生成失敗の例外が uncaught のまま伝播し、ライブラリ自身の生成リトライタイマが止まらなくなる
-  ことがクリック時のフリーズの原因だった。[app-architecture.ja.md](app-architecture.ja.md) の
+  ことが、クリック時のフリーズの原因となる。[app-architecture.ja.md](app-architecture.ja.md) の
   「記事リーダー（ネイティブ WebView）」参照）。
   `WRYWEBVIEW_LOG=1` を付けて起動し、コンソールに `WebViewException` が出ないことを確認する。
 
@@ -829,10 +835,10 @@ AWT に読み直させるためアプリを再起動すること。各メニュ�
   反映していること。両方の項目が意図どおりに動作すること。
 - 開いているトレイメニューの外側をクリックすると閉じること。ウィンドウが残らず、タスクバーや Alt+Tab
   にも項目が現れないこと。
-- （Windows）トレイアイコンのダブルクリックと、新着記事通知のクリックが、いずれも従来どおり
+- （Windows）トレイアイコンのダブルクリックと、新着記事通知のクリックが、いずれも
   `onTrayAction` に届くこと。すなわち `shouldHideOnTrayAction` に従ってウィンドウを表示／非表示に
-  すること（Compose の `Tray()` を `WindowsTray` に置き換える前と同一の挙動）。
-- （Windows）新着記事通知が従来どおり表示され、アイコンの未読バッジも更新されること。
+  すること。
+- （Windows）新着記事通知が引き続き表示され、アイコンの未読バッジも更新されること。
 
 OPML のファイルダイアログは実際の OS ウインドウ（macOS は `NSSavePanel`、Windows は
 `GetOpenFileName`、Linux は `JFileChooser` の `JDialog`）であり Compose UI テストでは駆動できないため、
@@ -844,18 +850,19 @@ OPML のファイルダイアログは実際の OS ウインドウ（macOS は `
   （旧 AWT の `GtkFileDialogPeer` が SIGSEGV を起こした条件——[app-architecture.ja.md](app-architecture.ja.md)
   の「ネイティブファイルダイアログ（プラットフォーム分岐）」参照）Settings ▸ データ管理 ▸
   OPML をインポート。GTK ではなく Swing のチューザが開き、アプリはクラッシュせず、選んだファイルが
-  取り込まれる。エクスポートも同様。`<appDataDir>/logs/keryx.0.log` に何も出ず、ランチャーの隣に
+  取り込まれる。OPML をエクスポートも同様。`<appDataDir>/logs/keryx.0.log` に何も出ず、ランチャーの隣に
   `hs_err_pid*.log` が生成されない。
 - チューザが記事リーダーの WebView の**手前**に描画され、背後に隠れないこと。
-- インポート: 「OPML ファイル」フィルタ選択時は `.opml`/`.xml` のみが一覧に出る。「すべてのファイル」
-  に切り替えると全件表示される。フォルダーをダブルクリックして中に入れる（ディレクトリを弾く
+- インポート: 「OPML ファイル」フィルタ選択時は `.opml`/`.xml` のみが一覧に出る。チューザ自身の
+  「すべてのファイル」フィルタに切り替えると全件表示される。フォルダーをダブルクリックして中に入れる（ディレクトリを弾く
   フィルタだと操作不能になる）。
-- エクスポート: 初期名は `keryx.opml`。既存のファイルを選ぶと日本語の 置き換える／キャンセル 確認が
-  出て、キャンセルするとチューザに戻る（エクスポート自体は中断しない）。置き換えると上書きされる。
-  新規のファイル名なら確認なしで保存される。
-- チューザの文言（「開く」「キャンセル」「ファイル名」…）がパッケージ版で**日本語**になっていること
-  ——これが `composeApp/build.gradle.kts` に `jdk.localedata` モジュールを追加した理由であり、英語で
-  表示される場合はまずそのモジュール一覧を確認する。
+- エクスポート: 初期名は `keryx.opml`。既存のファイルを選ぶと「置き換える」／「キャンセル」の
+  「上書きの確認」が出て、「キャンセル」でチューザに戻る（エクスポート自体は中断しない）。「置き換える」で
+  上書きされる。新規のファイル名なら確認なしで保存される。
+- ロケールを日本語にした状態（`JAVA_TOOL_OPTIONS="-Duser.language=ja -Duser.country=JP"`、または
+  OS の表示言語）で、チューザの文言（「開く」「キャンセル」「ファイル名」…）がパッケージ版で**日本語**に
+  なっていること——これが `composeApp/build.gradle.kts` のモジュール一覧にある `jdk.localedata` の
+  役割であり、英語で表示される場合はまずそのモジュール一覧を確認する。
 - インポート/エクスポートを 3 つの経路すべてから起動する——(1) Settings のボタン、(2) ウインドウ内
   メニューバーの File ▸、(3) 内蔵バーを隠した状態の KDE Global Menu の File ▸。(2) と (3) はまず
   設定 ▸ データを開く（`OpmlTransferController` の保留中の要求）。どの場合もチューザが Settings の
@@ -866,19 +873,20 @@ OPML のファイルダイアログは実際の OS ウインドウ（macOS は `
 - 再起動せずにアプリ内テーマをライト⇔ダークで切り替えてからチューザを開き直すと、新しい FlatLaf
   テーマで描画される。
 - 大きな OPML のインポート中もアプリが応答し続ける——インポートボタンのスピナーが回り続け、
-  フィード/記事ペインもスクロールできる（OPML のドキュメント構築/書き込み/取り込み処理を EDT から
-  外した効果の回帰確認）。
+  フィード/記事ペインもスクロールできる（OPML のドキュメント構築/書き込み/取り込み処理が EDT の外で
+  動いていることの確認）。
 
-macOS と Windows は引き続き `java.awt.FileDialog` を使うが、親ウインドウと表示元のスレッドが
-どちらも変わった（従来は親なしダイアログを EDT 外から表示していた）ため、こちらも再確認する:
+macOS と Windows は `java.awt.FileDialog` を使い、開いた元のウインドウを親として EDT から表示する
+ため、こちらも確認する:
 
 - パネル/ダイアログが**開いた元のウインドウの中央**に出る（Settings のボタンから開いた場合は
   Settings の上）こと、かつ表示中も背後の Compose ウインドウが**再描画され続ける**こと
   （バックグラウンドスレッドではなく EDT 自身のセカンダリイベントループから表示していることの確認）。
-- macOS: インポートで拡張子フィルタが引き続き効くこと、既存ファイルへの保存でシステム純正の
-  置換確認が引き続き出ること。
-- Windows: インポート/エクスポートが引き続き完了すること（インポートで `FilenameFilter` が効かない
-  のは既存の挙動であり、今回の変更による退行ではない）。
+- macOS: インポートで拡張子フィルタが OPML 以外のファイルを隠すこと、既存ファイルへの保存でシステム
+  純正の置換確認が出ること。
+- Windows: インポート/エクスポートが完了すること。インポートで拡張子フィルタが OPML 以外のファイルを
+  隠さないのは想定どおりで、不具合ではない（Windows のネイティブダイアログでは AWT の `FilenameFilter`
+  が効かない）。
 
 ダイアログのサイズ自動調整（`DialogWindow` の OS ウィンドウ挙動）は自動テストできないため、以下を
 目視確認する:
@@ -886,7 +894,7 @@ macOS と Windows は引き続き `java.awt.FileDialog` を使うが、親ウイ
 - 設定 / About / フィード追加 / フィード名変更 を**それぞれ 10 回連続で開いて**、毎回内容全体が
   **最初に見えるフレームの時点で**正しいサイズかつ最終位置で表示されること。内容が一度どこかに出てから
   別の位置へ飛ばないこと（典型的には、240pt のプレースホルダーと実サイズ高さの差の半分だけ上へ飛ぶ）
-  —— フィットが確定するまでウィンドウは不可視のまま保持されるようになっている。
+  —— フィットが確定するまでウィンドウは不可視のまま保持される。
   240pt 相当の低いウィンドウ・~80x28 の極小ウィンドウ・末尾のタブが切れる狭いウィンドウが
   一度も出ないこと。ここで守っているレースは約 7/10 の確率で再現していたので、反復することが要点。
 - 同じ 10 回で、ダイアログが**最初から中央に**出ること。一瞬でも画面左上に出てから中央へ飛ばないこと。
@@ -894,18 +902,18 @@ macOS と Windows は引き続き `java.awt.FileDialog` を使うが、親ウイ
   ネイティブウィンドウへ届くと見える。
 - 同じ 10 回を**ダークモード**でも行い、明るい矩形や明るいトーンの帯が 1 フレームも出ないこと ——
   カードの縁まわりにも、下部のネイティブボタン行のまわりにも出ないこと（ネイティブウィンドウ背景と
-  全面塗りの両方がダイアログ自身のコンテナ色で塗られるようになったので、カードとトーンが違う箇所は
+  全面塗りの両方がダイアログ自身のコンテナ色で塗られるので、カードとトーンが違う箇所は
   無いはず）。
 - 「フィット完了まで不可視」のゲートが**体感できてはいけない**: クリックしてから何も表示されない
-  空白時間なく、従来どおり即座にダイアログが出ること。目に見えて遅い場合は、500ms の
+  空白時間なく、即座にダイアログが出ること。目に見えて遅い場合は、500ms の
   `DIALOG_PRESENT_FALLBACK_MS` 安全網で表示された可能性を疑い、後述の `Dialog stayed at …`
   警告をログで確認する。
 - **オートフォーカスが維持されていること**: テキスト入力系ダイアログ（フィード / フォルダー / タグの
   名前変更、フィード追加）で、表示された瞬間にカーソルがテキストフィールドにあり、直後の打鍵が
-  そこに入ること。可視化を遅らせた変更で最も壊れやすい箇所なので、毎回確認する。
+  そこに入ること。可視化の遅延で最も壊れやすい箇所なので、毎回確認する。
 - 名前変更ダイアログで連続入力して supporting text を出入りさせても、ガタつかず、ネイティブボタン行が
   打鍵ごとにちらついたり再レイアウトされたりしないこと（ボタンの*ラベル*が変わったときだけ
-  `revalidate()` するようになり、確定ボタンの有効/無効の切り替えでは呼ばれない）。
+  `revalidate()` し、確定ボタンの有効/無効の切り替えでは呼ばれない）。
 - 設定でタブを何度も往復すること（最も高い「一般」と最も低い「通知」の間も含めて）。
   **ウインドウが一切リサイズされない**こと —— どのタブでも高さが同じで、どの辺も動かず、タブの
   ラベルやカードがウインドウ内でずれたフレームが出てから戻る、という見え方もしないこと。
@@ -914,14 +922,14 @@ macOS と Windows は引き続き `java.awt.FileDialog` を使うが、親ウイ
   （`window.validate()`/`renderImmediately()`）という「素直な修正」で直そうとしないこと: Metal では
   それが transient だったちらつきを恒久的な Δ 分のオフセットに変える（実際の修正は
   `ui/common/KeryxDialogs.desktop.kt` の固定高 `KERYX_TAB_DIALOG_CONTENT_HEIGHT`）。
-- 設定の最も高いタブ: 文字サイズ「中」（1.0）で「一般」タブの内容が**スクロールなしで収まる**こと。
+- 設定の最も高いタブ: 文字サイズ「標準」（1.0）で「一般」タブの内容が**スクロールなしで収まる**こと。
   スクロールする場合は `KERYX_TAB_DIALOG_CONTENT_HEIGHT` の引き上げが必要（見た目の問題であり
   正しさの不具合ではない）。「大」「特大」では高いタブがスクロールするのは想定どおり。
 - 実行中にテーマをライト↔ダーク切り替えてから各ダイアログを開き直すと、Compose 側のカードだけでなく
   **ネイティブ**ウィンドウ背景も追従していること（ネイティブボタン行の背後・周囲や余剰領域のトーンで
   確認できる）。
 - ダイアログを中央から動かした後に内容を変える（フィード追加の URL → 候補一覧）と、アラート系は
-  内容変更にあわせて再センタリングされ（従来どおり）、設定ダイアログは動かした位置に留まること。
+  内容変更にあわせて再センタリングされ（想定どおり）、設定ダイアログは動かした位置に留まること。
   この拡大は**表示済み**ダイアログのリサイズなので、リサイズが見えること自体は仕様どおり。
   してはいけないのは、新たに露出した領域やネイティブボタン行まわりの帯が整定中に明るく光ることで、
   特にダークモードで確認する。
@@ -931,7 +939,7 @@ macOS と Windows は引き続き `java.awt.FileDialog` を使うが、親ウイ
   density で変換しており、オーナーウィンドウの density ではない。
 - 設定を開いた直後にトレイへ最小化（またはメインウィンドウを完全に隠す）してから復帰しても、
   ダイアログが正しいサイズのままであること。フィットはダイアログのフレームクロック（何も描画されない
-  間はフレームを配らない）に依存しなくなっている。
+  間はフレームを配らない）に依存しない。
 - 上記を通して、サイズの振動や CPU の張り付きが無く、`<appDataDir>/logs/keryx.0.log`
   （macOS: `~/Library/Application Support/Keryx/logs/`）に
   `Dialog stayed at … after … attempts to fit …` の警告が出ていないこと。
@@ -995,8 +1003,8 @@ macOS では通知バナーのクリックはアプリ側でテストされる�
   `Activate`／`SecondaryActivate` 経路は `ActionInvoked` とは無関係だが、上記と合わせて再確認する
   価値がある）。
 - 通知デーモンが存在しない場合、またはデーモンが `"default"` アクションキーを尊重しない場合でも、
-  通知はクラッシュせず（ベストエフォートで）表示され続けること——クリックしても何も起きないだけで、
-  この変更前と同じであること。
+  通知はクラッシュせず（ベストエフォートで）表示され続けること——クリックしても何も起きないだけである
+  こと。
 
 （Windows、および SNI ホストの無い Linux——Compose の `Tray()` フォールバック）この経路はトレイ
 アイコンのクリックと通知バルーンのクリックの両方を同じ `onAction` フック（`KeryxTray` の
@@ -1007,7 +1015,7 @@ macOS では通知バナーのクリックはアプリ側でテストされる�
 `shouldHideOnTrayAction` の KDoc と `main.kt` の配線を参照）に流し込むため、手動で確認する:
 
 - ウィンドウが表示・フォーカスされている状態で、**新着記事通知から5秒以上経過後**にトレイアイコンを
-  クリック → この変更前と同じくウィンドウが隠れること。
+  クリック → ウィンドウが隠れること。
 - ウィンドウが既に表示・フォーカスされている状態で新着記事通知を発生させ、**5秒以内**にトレイアイコン
   （またはデーモンがバルーンに対して `onAction` を発火するならバルーン自体）をクリック → 隠れるのでは
   なくウィンドウが表示されたままフォーカスを得ること。5秒経過を待ってから再度アイコンをクリック →
@@ -1065,7 +1073,7 @@ Linux の SNI トレイは自動テスト不可のため、KDE Plasma セッシ�
   `label`／`enabled` を `GetLayout` で自発的に再取得しない。変化には `ItemsPropertiesUpdated` でしか
   気づかず、メニューが閉じている間に届いた通知は退避され、メニューを開き直した際に
   `GetGroupProperties` で全項目を読み直して初めて反映される。ウィンドウのトグルを連続で何度も行い、
-  毎回ラベルが追随することを確認する（過去にここが壊れた際は、最初の値のまま恒久的に固まっていた）。
+  毎回ラベルが追随することを確認する（壊れている場合、ラベルは最初の値のまま固まる）。
   アプリ内アップデート項目についても同様に、設定からダウンロードを開始し、トレイの項目の
   ラベル／enabled が「アップデートをダウンロード…」→「ダウンロード中… N%」→「再起動してアップデート…」
   と実際に遷移し、固まったままにならないことを確認する。**メニューを開いた瞬間に直前のラベルが
@@ -1080,20 +1088,6 @@ Linux の SNI トレイは自動テスト不可のため、KDE Plasma セッシ�
 - `GetGroupProperties`/`AboutToShowGroup`/`EventGroup` が正しく動くこと（`ai` / `a(isvu)` 入力の
   デシリアライズは dbus-java 任せで、`DBusSignatureTest` は宣言シグネチャしか保証しない）。おかしい場合は
   引数を `IntArray` / `Array<DBusMenuEventEntry>` に変える。
-
-`keryx://` のスキーム登録はユーザーのホーム配下に実ファイルを書き、デスクトップ環境に依存するため、
-エンドツーエンドの確認は Linux 実機でしかできない（ユニットテストが担保するのはファイル内容とマージであって、
-OS 側のルーティングではない）。パッケージ版をインストールし
-（`./gradlew :composeApp:packageDeb` → `sudo dpkg -i`）、一度起動してスキーム登録を
-走らせたうえで、以下を確認する:
-
-- `xdg-mime query default x-scheme-handler/keryx` が `keryx-url-handler.desktop` を返すこと。
-- Keryx 起動中に `xdg-open 'keryx://oauth2/callback?code=test&state=test'` でウィンドウが前面に来ること。
-- Dropbox / OneDrive 連携がどちらもブラウザー往復で完走すること。
-- `./gradlew :composeApp:run` では `$XDG_DATA_HOME/applications/keryx-url-handler.desktop`
-  （既定 `~/.local/share/applications/keryx-url-handler.desktop`）が**作られない**こと。
-- `$XDG_CONFIG_HOME/mimeapps.list`（既定 `~/.config/mimeapps.list`）の無関係なエントリが登録後も
-  そのまま残っていること。
 
 KDE Global Menu（AppMenu）も同様に自動テストできない（実 X サーバー、`com.canonical.AppMenu.Registrar`
 kded モジュール、パネル側のコンシューマが必要なため）ので、KDE Plasma セッションで以下を確認する
@@ -1118,10 +1112,9 @@ kded モジュール、パネル側のコンシューマが必要なため）の
   フォルダーに移動とリネームの間に位置する。
 - **フォルダー**を選択し、次に**タグ**を選択して、フィードメニューのリネーム/削除ペアが対応する文言
   （「フォルダー名を変更」/「フォルダーを削除」、「タグ名を変更」/「タグを削除」）で有効になっており、
-  アプリ内バーが隠れた状態でも**F2 と Delete が Global Menu 経由で引き続き発火する**ことを確認する
-  ——以前はフィードが選択されていない限りこの2項目はグレーアウトしており（ショートカットも同様に
-  無効だった）。それらより上にあるフィード固有の項目（フィードを更新、タグを設定、フォルダーに移動、
-  フィード URL をコピー、サイト URL をコピー、サイトを開く）は、フォルダー/タグ選択時には以前と同様に
+  アプリ内バーが隠れた状態でも**F2 と Delete が Global Menu 経由で発火する**ことを確認する。
+  それらより上にあるフィード固有の項目（フィードを更新、タグを設定、フォルダーに移動、
+  フィード URL をコピー、サイト URL をコピー、サイトを開く）は、フォルダー/タグ選択時には
   無効のままであること。
 - サイト URL が見つかっていないフィードを選択: フィード URL をコピーは有効のままだが、サイト URL を
   コピーとサイトを開くはグレーアウトすること。サイト URL があるフィードを選択すると3つとも有効になる
@@ -1147,7 +1140,7 @@ kded モジュール、パネル側のコンシューマが必要なため）の
 - 主要な確認を **Plasma Wayland** セッションでも繰り返す（そこでは Keryx は XWayland クライアントに
   なる）。
 - GNOME/XFCE/その他の DE で**退行が無い**こと（レジストラが存在しない → `AppMenuConnection.tryCreate()`
-  が `null` を返す → アプリ内メニューバーが以前と全く同じように表示され、すべてのショートカットが
+  が `null` を返す → アプリ内メニューバーが表示され、すべてのショートカットが
   ネイティブに動作し、`journalctl --user -f` にエラーが出ない）、および Windows/macOS でも同様
   （経路全体が `isLinux` でゲートされており、macOS は画面上部のメニューバー挙動を変えない）。
 - Keryx を終了する: Global Menu のエントリが即座に消えること（死んだプロセスの最後に知っていたメニューが
@@ -1173,6 +1166,20 @@ XWayland の無い純粋な Wayland セッションではここでもアプリ�
   状態で出荷していることに注意（既知のパッケージング上の問題。例:
   [Debian #930572](https://bugs.debian.org/930572)）。これはレジストラ側の環境の問題であって、
   Keryx のクライアント側コードが検出・回避できるものではない。
+
+`keryx://` のスキーム登録はユーザーのホーム配下に実ファイルを書き、デスクトップ環境に依存するため、
+エンドツーエンドの確認は Linux 実機でしかできない（ユニットテストが担保するのはファイル内容とマージであって、
+OS 側のルーティングではない）。パッケージ版をインストールし
+（`./gradlew :composeApp:packageDeb` → `sudo dpkg -i`）、一度起動してスキーム登録を
+走らせたうえで、以下を確認する:
+
+- `xdg-mime query default x-scheme-handler/keryx` が `keryx-url-handler.desktop` を返すこと。
+- Keryx 起動中に `xdg-open 'keryx://oauth2/callback?code=test&state=test'` でウィンドウが前面に来ること。
+- Dropbox / OneDrive 連携がどちらもブラウザー往復で完走すること。
+- `./gradlew :composeApp:run` では `$XDG_DATA_HOME/applications/keryx-url-handler.desktop`
+  （既定 `~/.local/share/applications/keryx-url-handler.desktop`）が**作られない**こと。
+- `$XDG_CONFIG_HOME/mimeapps.list`（既定 `~/.config/mimeapps.list`）の無関係なエントリが登録後も
+  そのまま残っていること。
 
 `keryx://` と同様、`.opml` ファイル関連付けも OS 統合の挙動であり、同じ手動確認が必要——デスクトップ
 3 プラットフォームすべてで（`createDistributable`/`packageDeb` 等でビルドする——`keryx://` スキームと
@@ -1264,8 +1271,8 @@ thumb の比率計算そのものは `ScrollIndicatorGeometryTest.kt` が単体�
 動かす実機かエミュレーターで手動確認する（それより前の OS ではこの経路は仕様上 no-op のまま）:
 
 - アプリのテーマをダークにし、スクロールできる長さの記事を開く——スクロールバーのつまみが
-  ダークなリーダー背景の上で明確に視認できること（この修正前は常にライトテーマのグレーの
-  ままで、ほとんど見えなかった）。
+  ダークなリーダー背景の上で明確に視認できること（そこではほとんど見えないライトテーマのグレーの
+  ままではないこと）。
 - 記事を開いたままアプリを再起動せずにテーマをライト/ダーク/システムで切り替える——つまみの色が
   即座に追従し、記事一覧自身のスクロールインジケーターと同じ色になること。
 - 画面幅より広いコンテンツ（`<table>` や `<pre>` ブロック）を含む記事を開いて水平にスクロール
@@ -1279,7 +1286,7 @@ thumb の比率計算そのものは `ScrollIndicatorGeometryTest.kt` が単体�
 ### （Android）記事リーダーのスワイプページャ
 
 ジェスチャー自体の閾値は `ArticleSwipeNavTest.kt` / `ArticleSwipeGestureTest.kt` が、ページと選択の
-同期は `ArticlePagerSyncTest.kt` がカバーしているが、いずれも実際の `WebView` をホストしていない。
+同期は `ArticleReaderPagerSyncTest.kt` がカバーしているが、いずれも実際の `WebView` をホストしていない。
 ページが composition に残ることで読み位置が本当に保たれるか、実機で 3 枚の `WebView` がどう振る舞うか
 は、端末でしか確認できない。特記なき限りスマホサイズの実機/エミュレータで確認する:
 
@@ -1344,15 +1351,15 @@ thumb の比率計算そのものは `ScrollIndicatorGeometryTest.kt` が単体�
   false にならないということなので、gate を外すのではなく既知の制限として記録する。
 - 横向き（2 ペイン）とタブレット幅（3 ペイン）で、通知の行がちょうど 1 つであること（2 ペインではドロワーの中、
   3 ペインではサイドバー）。ドロワーを閉じているときは、ドロワーボタンのバッジが正しい件数を示すこと。
-- クラウド同期接続時に、フィード一覧ツールバーの 5 アイコンが折り返さず収まること
-  （OS の表示サイズを最大にした状態でも）。
+- クラウド同期接続時に、フィード一覧ツールバーのアイコン——フィード追加・更新・同期（同期は接続中のみ
+  表示）——が折り返さず収まること（OS の表示サイズを最大にした状態でも）。
 - 電話幅の 設定 ▸ クラウド同期（プロバイダー接続済み）で、プロバイダー名が 1 行に収まり、末尾の
   アイコンボタン 2 つが横に並ぶこと（OS の表示サイズ最大＋アプリの文字サイズ最大でも）。
   - 未接続行では、連携ボタンが primary 塗りであることを確認する。
   - 接続済み行では、リセットが errorContainer 塗り、連携解除が枠線であり、いずれも接続済み行の
-    ティール地の上で判別できることを確認する。各アイコンを長押ししてツールチップを確認。
-  リセット実行中はスピナーが器の上で見えること・行の高さが変わらないこと。ライト／ダーク両テーマで
-  確認する。
+    ティール地の上で判別できることを確認する。
+  - どちらの行でも、各アイコンを長押ししてツールチップを確認。リセット実行中はスピナーが器の上で
+    見えること・行の高さが変わらないこと。ライト／ダーク両テーマで確認する。
 
 ### （Android）URL コピーの Snackbar
 
@@ -1416,9 +1423,9 @@ thumb の比率計算そのものは `ScrollIndicatorGeometryTest.kt` が単体�
   戻ること。あとで一覧に戻ったとき、背面の一覧が動いたり選択が変わったりしていないこと。
 - スワイプを完了すると、リーダーが出ていき、記事一覧はそのまま（跳んだり再スクロールしたりせず）で、
   読んでいた行が 1 回フラッシュすること。
-- 3 ボタンナビゲーション、および開発者オプション無しの Android 13 では、従来どおり戻るで即座に一覧へ戻り、
+- 3 ボタンナビゲーション、および開発者オプション無しの Android 13 では、戻るで即座に一覧へ戻り、
   フラッシュすること。
-- 他は従来どおり: 開いたドロワーは戻るで閉じ（ドロワー自身の予測型アニメーション付き）、展開した検索バーが
+- ほかの場面では、開いたドロワーは戻るで閉じ（ドロワー自身の予測型アニメーション付き）、展開した検索バーが
   閉じ、ダイアログとボトムシートが閉じ、設定は段階的に戻り（カテゴリの画面 → 一覧 → 閉じる）、記事一覧
   自体ではアプリを離れる（システムのホームへ戻るプレビュー付き）こと。
 
@@ -1494,6 +1501,18 @@ iOS のリーダーのスワイプページャーは `UIPageViewController` で�
 - 戻ったときに、読んでいた行のフラッシュが出る。
 - iPad の 3 ペイン表示と縦向きで、ハードウェアキーボードによる画面外の記事の選択とフィルタ切替で一覧が
   スクロールする。
+
+### （iOS）記事一覧のタイトル
+
+iOS 17 または 18 と、iOS 26 以降のそれぞれで、iPhone と iPad について確認する。
+
+- 一覧の名前は最初からバーに出ていて、どこまでスクロールしても残る。別のフィードを選ぶと、すぐにその名前に
+  変わる。
+- 狭い iPhone（iPhone SE）で長いフィード名を表示すると、名前はバーで省略され、表示モードのメニューと全既読は
+  ツールバーのボタンのまま残る。
+- 空の一覧、記事のないスター付きモード、結果のない検索では、見出しなしでメッセージが出る。
+- 検索フィールド: iOS 26 以降の iPhone では下のバー、それ以外はバーの下に出る。iOS 26 以降の iPad では、一覧を
+  下に引くと出てきて、⌘F でも開ける。
 
 ### （iOS）終了後のホーム画面の復元
 
@@ -1580,10 +1599,10 @@ SwiftUI のファイルメニューのインポート／エクスポートは要
 - （iOS）iPhone SE（第 3 世代）の縦・横で、Dynamic Type を最大にし、英語と日本語で: 文言が「…」で
   省略されず折り返す。すべてのクラウドプロバイダーのボタンにスクロールで届く。画面の表示時にスクロール
   インジケーターが一瞬出る。
-- （iOS）すべてが収まる大きな iPhone と iPad で: 従来どおり内容が縦中央に置かれ、ドラッグしてもバウンス
+- （iOS）すべてが収まる大きな iPhone と iPad で: 内容が縦中央に置かれ、ドラッグしてもバウンス
   しない。
 - （macOS）ウィンドウを最小まで縮める: 2 つの選択肢のカードが省略も切れもなく全体表示される。既定の
-  ウィンドウサイズでは従来と同じ見た目になる。
+  ウィンドウサイズでは、接続中の表示かエラーがカードの下に出るまではスクロールしない。
 
 ### アプリ内アップデート
 

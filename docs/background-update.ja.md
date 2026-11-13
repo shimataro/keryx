@@ -309,7 +309,8 @@ Compose 版から SwiftUI アプリへの一度きりの移行（SwiftUI アプ�
 - **まだアセットが無いリリースは `OpenReleasePage` ではなく「ここではまだリリースされていない」
   として扱う。** リリースワークフロー（`.github/workflows/release.yml`）は `release: published`
   で起動し、各プラットフォームのパッケージはそのあとで添付される: GitHub のリリースは
-  `assets[]` が空のまま一瞬公開され（本リポジトリでの実測では数分間）、その後すべてのパッケージが
+  `assets[]` が空のまま一瞬公開され（その長さを確かめ直すには、GitHub Releases API で最近の
+  リリースの `published_at` とそのアセットの `created_at` を比べる）、その後すべてのパッケージが
   揃う。`UpdateChecker` 自身はこれを特別扱いしない——`selectUpdateAsset` が見つけた結果
   （その窓の間は `null`）をそのまま報告するだけ——なので、`domain/UpdateInstallPolicy.kt` の
   `awaitsReleaseAsset(location, asset)` が「ここでこのインストール形態が `OpenReleasePage` に
@@ -318,7 +319,7 @@ Compose 版から SwiftUI アプリへの一度きりの移行（SwiftUI アプ�
   持たねばならない）。自己置換／インストーラー駆動の形態で、他に問題が何もない場合
   （translocated でない、書き込み可能、……）にのみ真になる。恒久的な理由でアセットが無い場合
   （Linux の deb/rpm、Linux の Snap、アセットはあるがプラットフォームが拒否している——Android の
-  「提供元不明のアプリ」同意など）は偽のままで、この機能が入る前と変わらず即座に通知する。
+  「提供元不明のアプリ」同意など）は偽のままで、即座に通知する。
 
   `domain/UpdateState.kt` の `nextStateAfterCheck` は、真と判定された場合を `UpdateStatus.UpToDate`
   と同じ分岐に畳み込む——`Available(installable = false)` は一切作られないので、`check()` 自身の
@@ -367,8 +368,7 @@ Compose 版から SwiftUI アプリへの一度きりの移行（SwiftUI アプ�
   — アップデートアセットは 100MB 超になりうるため。リクエストは素の `client.get()` ではなく必ず
   `prepareGet(…).execute { … }` を通す。これは書き方の好みではなく必須で、Ktor は既定で
   `SaveBody` プラグインを入れており、素の `get()` が返る前に**本文全体をメモリに読み切って
-  しまう**——実際にこれが原因で、進捗バーが転送中ずっと 0% のまま固まり、終わった瞬間に完了へ
-  飛んでいた（おまけに 100MB 超を RAM に載せていた）。Ktor 3.5 の `skipSavingBody()` は
+  しまう**——そのため転送が終わるまで進捗を報告できず、100MB 超が RAM に載ることになる。Ktor 3.5 の `skipSavingBody()` は
   deprecated な no-op なので、streaming 構文以外に回避手段は無い。進捗は整数パーセントが
   変わるたびにのみ発火するよう間引かれる（`shouldEmitProgress`——固定バイト幅ではなくパーセント
   自体をゲートにしているのは、どの消費側もそれより細かい解像度は表示できず、かつアセットサイズに
@@ -526,8 +526,7 @@ Compose 版から SwiftUI アプリへの一度きりの移行（SwiftUI アプ�
   有用というよりうるさいだけになる。
 
 **完全性検証**は、GitHub Releases API 自身が返す `assets[].digest`（`"sha256:…"`）とダウンロード
-したファイル自身の SHA-256 が一致することだけに全面的に依拠している——API が既にこの値を返すため、
-この機能のために `release.yml` を変更する必要は無かった。これは転送経路の破損や改竄されたダウンロード
+したファイル自身の SHA-256 が一致することだけに全面的に依拠している。これは転送経路の破損や改竄されたダウンロード
 は検出するが、**発行者の侵害は検出しない**: リリースを作成する GitHub アカウント／トークン自体が
 侵害されれば、攻撃者がすり替えたアセットとその digest は互いに一致してしまう。この限界と、より
 強い保証（例えば minisign/cosign の detached 署名）に何が必要かについては
@@ -551,9 +550,7 @@ Compose 版から SwiftUI アプリへの一度きりの移行（SwiftUI アプ�
 新着なしとして空を返す。更新後の ETag / Last-Modified は `feeds` テーブルに保存する。
 
 304 応答は `FetchedFeed.notModified` で区別され、`FeedRepository` は保存済みの検証子を書き換えない。
-このフラグがないと、304 の空の結果は「検証子を送らなくなったフィード」と区別できず、そのまま書き戻すと
-`etag` / `last_modified` が NULL になる。すると次回は条件付きヘッダを送れずサーバが全文を返すため、
-1回おきに仕組みが無効化されていた。
+そのため次回も同じ条件付きヘッダを送れる。
 
 更新経路の `feeds` への書き込みはすべて「実際に値が変わったとき」だけに絞ってある。記事一覧クエリは
 `feeds` を結合しているので、SQLDelight は `feeds` への書き込みのたびにこれを再実行する。何も変わらない

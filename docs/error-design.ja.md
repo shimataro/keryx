@@ -59,7 +59,7 @@ sealed class KeryxException(message: String) : Exception(message) {
 }
 ```
 
-主なサブクラス。多くは先頭に `message: String` を取る（以下では省略）: `FeedFetchException(statusCode)`,
+主なサブクラス。多くは先頭に `message: String` を取る（以下では省略）: `FeedFetchException(statusCode, noResponse)`,
 `FeedParseException`, `FeedNotFoundException(isGone)`, `CloudAuthException`, `CloudStorageException`,
 `CloudDataIncompatibleException`。一部は `message` を一切取らず固定メッセージを持つ:
 `FeedDiscoveryException(candidates)`（"Feed links found on page"）、`FeedTimeoutException`

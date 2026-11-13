@@ -14,7 +14,7 @@
 
 ## ディレクトリー構成
 
-コードは 4 つの Gradle モジュールに分かれている。いずれもパッケージルート `works.merc.keryx.app` と同じソースセット名を共有するので、
+コードは次の Gradle モジュールに分かれている。いずれもパッケージルート `works.merc.keryx.app` と同じソースセット名を共有するので、
 以下のツリーはそれらの `src/` を合わせたものである：
 
 | モジュール | 内容 |
@@ -25,14 +25,16 @@
 | `:androidGms` | Google Play 開発者サービスに依存するものすべて —— Android の Google Drive（`PlayServicesGoogleDriveAuth.kt`、`PlayServicesGoogleDriveBackend`）。`fdroid` flavor がこれを外せるよう独立したモジュールにしてある。依存するのは `:androidApp` の `github` と `play` flavor だけ —— 下記参照。 |
 | `:testing` | 両モジュールのテストが使うテスト専用ヘルパー（`DbTestSupport`、`CloudTestSupport`、`FakeNotificationMessages`、トークンストレージの fake）。main のソースからは決して依存しない。 |
 
-テストはテスト対象のコードと同じモジュールに置く：`shared/src/{commonTest,desktopTest,androidDeviceTest}` と
-`composeApp/src/{commonTest,desktopTest,androidDeviceTest}`。
+テストはテスト対象のコードと同じモジュールに置く：`shared/src/{commonTest,desktopTest,appleTest,macosTest,androidDeviceTest}`
+と `composeApp/src/{commonTest,desktopTest,androidDeviceTest}`。`appleTest`/`macosTest` は Apple の actual を
+検証する——下記「`:shared` の Apple ターゲット」参照。
 
 ```text
 {shared,composeApp}/src/
   commonMain/kotlin/works/merc/keryx/app/
     core/      Constants, Result, KeryxException, ArticleFilter, AppNotification, Clock, DateTimeParser, CloudStorageAvailability(expect),
-               AppInfo, CloudBackupPath, HtmlText, Log, SearchQuery, SemVer, SqliteFile, UntrustedText, UpdateDistribution
+               AppInfo, Cancellation, CloudBackupPath, DbFlag, HtmlText, Log, NetworkCondition, NotificationText, SearchQuery, SemVer,
+               SqliteFile, UntrustedText, UpdateDistribution
     data/local/   DatabaseDriverFactory(expect), FtsManager, FtsSearch, LocalSettings(Store)
     data/remote/  FeedFetcher, FeedParser, FeedDiscovery, FaviconResolver, UrlResolver, FeedModels, UpdateDownloader, ReleaseFeedSource（アプリ内アップデート——後述の「アプリ内アップデート」参照）
     data/cloud/   CloudStorage, CloudAuthManager, DropboxStorage, DropboxAuthManager, GoogleDriveStorage, GoogleDriveAuthManager, OneDriveStorage, OneDriveAuthManager, Pkce, TokenStorage, OAuthTokens,
@@ -108,7 +110,7 @@
     ZipExtractor（アプリ内アップデート——下記「アプリ内アップデート」参照）,
     di/CloudPlatformModule.kt（両プラットフォームの platformModule が呼ぶ共有クラウドプロバイダー DI 配線
     ——cloudSessionSingles, dropboxProvider, oneDriveProvider）
-  desktopMain/kotlin/…/  main.kt + StartupTasks.kt（runStartupTasks/handleOpenedOpmlFile というデスクトップ固有のオーケストレーションのみ。実際のメンテナンス処理と定期ループはどちらも commonMain の StartupMaintenanceTasks/BackgroundRefreshLoop にある）+ jvmCommonMain がカバーしない `platform/` expect の actual（例: AppDirs, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, PlatformModule, InstallLocation, PlatformScrollbar, BackHandler, ClipboardEntries, CursorIcons, NotificationPermission, NativeMenu, SelfUpdateCheck, WindowChrome、および WebView をホストする一群 NativeWebViewSupport/NativeWebViewScrollbar/NativeWebViewAccessibility/NativeWebViewVisibility/NativeWebViewScroll/ReaderWebViewFactory。最後の 2 つはデスクトップでは何もしない／ライブラリ既定の factory を使う。下記「Article Reader」を参照）+ LoopbackRedirectTransport, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage 実装（KeyringTokenStorage/SecurityCliTokenStorage/LibSecretTokenStorage——3つとも commonMain の SecretStoreTokenStorage の outcome 合成ロジックを使う。SecurityCliTokenStorage は、そのバックエンド SecurityKeychainStore をメモリ内キャッシュで包む形で使う）, DesktopOs（isMacOs/isWindows/isLinux/isSnap/isTouchPrimary=false/hasNativeAppMenu=true/hasSystemTray=true）, DesktopLookAndFeel（Swing L&F: Linux は FlatLaf。テキストアンチエイリアスヒントの正規化も担う——hint が存在しない場合、DEFAULT、OFF のいずれでもグレースケールアンチエイリアスに解決され、Swing 面のテキストが Compose 描画部と並んだ際にジャギーにならない）。さらに、`expect` を持たないパッケージルート直下のデスクトップ専用クラスとして: IconBadge（Dock/タスクバー/ウインドウアイコンの未読件数バッジ——external-spec.ja.md §7 参照）、MacActivationPolicy（生の `objc_msgSend` 呼び出し——known-issues.md の「macOS: clicking a notification banner does not restore a tray-hidden window」内「What a real fix would need」参照）、WindowStatePersistence、UpdateMenuActions（onUpdateMenuItemClicked——トレイとメニューバーの更新項目に共通のクリックハンドラ）、DesktopShell（main.kt が使うウインドウの前面化・フォーカス、Dock アイコン、`java.awt.Desktop` ハンドラの補助関数）
+  desktopMain/kotlin/…/  main.kt + StartupTasks.kt（runStartupTasks/handleOpenedOpmlFile というデスクトップ固有のオーケストレーションのみ。実際のメンテナンス処理と定期ループはどちらも commonMain の StartupMaintenanceTasks/BackgroundRefreshLoop にある）+ jvmCommonMain がカバーしない `platform/` expect の actual（例: AppDirs, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, PlatformModule, InstallLocation, PlatformScrollbar, BackHandler, ClipboardEntries, CursorIcons, NotificationPermission, NativeMenu, SelfUpdateCheck, WindowChrome、および WebView をホストする一群 NativeWebViewSupport/NativeWebViewScrollbar/NativeWebViewAccessibility/NativeWebViewVisibility/NativeWebViewScroll/ReaderWebViewFactory。最後の 2 つはデスクトップでは何もしない／ライブラリ既定の factory を使う。下記「Article Reader」を参照）+ LoopbackRedirectTransport, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage 実装（KeyringTokenStorage/SecurityCliTokenStorage/LibSecretTokenStorage——3つとも commonMain の SecretStoreTokenStorage の outcome 合成ロジックを使う。SecurityCliTokenStorage は、そのバックエンド SecurityKeychainStore をメモリ内キャッシュで包む形で使う）, DesktopOs（isMacOs/isWindows/isLinux/isSnap/isTouchPrimary=false/hasNativeAppMenu=true/hasSystemTray=true）, DesktopLookAndFeel（Swing L&F: Linux は FlatLaf。テキストアンチエイリアスヒントの正規化も担う——hint が存在しない場合、DEFAULT、OFF のいずれでもグレースケールアンチエイリアスに解決され、Swing 面のテキストが Compose 描画部と並んだ際にジャギーにならない）。さらに、`expect` を持たないパッケージルート直下のデスクトップ専用クラスとして: IconBadge（Dock/タスクバー/ウインドウアイコンの未読件数バッジ——external-spec.ja.md §7 参照）、MacActivationPolicy（生の `objc_msgSend` 呼び出し——known-issues.ja.md の「macOS: 通知バナーをクリックしてもトレイに収納中のウインドウが復元されない」内「本当の修正に必要なこと」参照）、WindowStatePersistence、UpdateMenuActions（onUpdateMenuItemClicked——トレイとメニューバーの更新項目に共通のクリックハンドラ）、DesktopShell（main.kt が使うウインドウの前面化・フォーカス、Dock アイコン、`java.awt.Desktop` ハンドラの補助関数）
     tray/      KeryxTray（プラットフォーム分岐）, MacTray, LinuxTray, WindowsTray +
                StatusNotifierItem/dbusmenu の D-Bus オブジェクト、TrayActionPolicy（トレイのアイコン/
                メニューのクリックと更新項目が何をするかの純粋な判定）、TrayMenuModel（トレイメニューの
@@ -118,7 +120,7 @@
                AppMenuDBusMenu, AppMenuRegistrar）— external-spec.ja.md §9 参照
     platform/update/  DesktopUpdateInstaller, UpdateScriptWriter（純粋な自己置換／msiexec スクリプトのテンプレート）, ProcessLauncher/RealProcessLauncher（テストがフェイクに差し替える detached 起動のシーム）, ArchiveExtractor（macOS は DittoArchiveExtractor——署名済みバンドルが自身の symlink を封印しているため。それ以外はインプロセスの InProcessArchiveExtractor）, CodeSigningVerifier/RealCodeSigningVerifier（`codesign --verify` のシーム）
   androidMain/composeResources/drawable/  Android の `KeryxIcons` actual 自身のアイコンセット
-    — Material Symbols Outlined（Apache-2.0）、ベクター drawable 43 個 — 下記「アイコンセット」参照
+    — Material Symbols Outlined（Apache-2.0）のベクター drawable — 下記「アイコンセット」参照
   androidMain/kotlin/…/  jvmCommonMain がカバーしない expect の actual: DatabaseDriverFactory（バンドル
     SQLite、後述）, DatabaseFile（`databaseFilePath()` — `Context.getDatabasePath` で、
     AppDirs.appDataDir()/`Context.filesDir` とは別ディレクトリになる。db-schema.ja.md 参照）,
@@ -241,7 +243,7 @@
 ルート直下の別モジュール `androidApp`（`com.android.application`。上記の Kotlin Multiplatform
 ソースセット構成には含まれない）は `AndroidManifest.xml`、`KeryxApplication`（プロセス全体の初期化:
 `AndroidAppContext.init`、`startKoin`、`configureImageLoader`、FTS バックフィルの
-`ensureIndexedIfTableAbsent()`（プロセス起動のたびに呼ばれる軽量版——db-schema.md の `articles_fts` 節参照）、
+`ensureIndexedIfTableAbsent()`（プロセス起動のたびに呼ばれる軽量版——db-schema.ja.md の `articles_fts` 節参照）、
 `startBackgroundRefresh`）、`MainActivity`（`setContent { App() }`、続けて
 `runAndroidStartupTasks`）に加え、自身の `res/`（ランチャーアイコン、`values/strings.xml`、
 `backup_rules.xml`、`data_extraction_rules.xml`）、サイドロード可能な GitHub ビルドと Play ストア版を
@@ -283,7 +285,7 @@ Play 開発者サービスの無い端末とまったく同じ状態で、UI は
 複数の経路（ツールバーのボタン・メニューバー・コンテキストメニュー・キーボードショートカット・ジェスチャー・
 アクセシビリティ操作・トレイ）や複数の UI（Compose・SwiftUI）から実行できる操作は、効果・有効/無効の条件・
 フィードバックを、全経路が呼ぶ共通のコード 1 か所から得る。経路は入力（どの項目に対してか）を集めてそれを呼ぶ
-だけで、効果・有効条件・フィードバックを自前で再実装しない。これにより、`external-spec.md` §9（「複数の経路から
+だけで、効果・有効条件・フィードバックを自前で再実装しない。これにより、`external-spec.ja.md` §9（「複数の経路から
 実行できる操作」）が求めるとおり、どの経路も同じように振る舞う。
 
 役割は 2 つに分かれる。
@@ -355,7 +357,7 @@ Android の `actual` は `AndroidSqliteDriver` を生成する。こちらは `o
   増分投入では古いままの内容を再索引する。
 - **起動時。** desktop の起動時は `FtsManager.ensureIndexed()` がテーブルを初回作成し未索引行を
   バックフィルする。Android は軽量版 `ensureIndexedIfTableAbsent()` をプロセス起動のたびに呼ぶ
-  （理由は db-schema.md の `articles_fts` 節参照）。Apple の SDK は `KeryxSdk.start` でテーブルを作り、
+  （理由は db-schema.ja.md の `articles_fts` 節参照）。Apple の SDK は `KeryxSdk.start` でテーブルを作り、
   欠けている行は `prepareSearchIndex()` が補完するので、テーブルの有無はシーンが active になるかどうかに
   左右されない。
 - **並行性。** `DatabaseDriverFactory` で設定する `busy_timeout` により、検索は増分投入や rebuild の
@@ -903,7 +905,7 @@ SNI ならパネルへ生の ARGB ピクセルを渡せる。
   `AboutToShow` は引き続き現在のラベルと `GetLayout` が最後に返した内容を比較するため、
   シグナルが落ちても復旧する。なお GNOME はメニューが開くまでシグナルを退避し、開いた後も初回
   描画をブロックせずに貼り替えるため、変化したラベルは一瞬だけ直前の値が見える。これは既知の
-  アーティファクトであり（`known-issues.md` 参照）、こちら側では解消できない。再び
+  アーティファクトであり（`known-issues.ja.md` 参照）、こちら側では解消できない。再び
   `LayoutUpdated` に手を出す理由にはならない。
 
 アイコンのアセットも同じ分岐に従う。透過が効いて 22px 以上で合成される 2 経路は outlined
@@ -1007,9 +1009,9 @@ Android 側の `actual` は Material Symbols Outlined（Apache-2.0）を使用�
 （`androidMain/composeResources/drawable/` にバンドル）、Android 自身のネイティブな
 視覚言語に合わせている。`KeryxIcon(...)`（`Icon` のラッパー composable）は引き続き単一の
 `commonMain` 定義のままで、`KeryxIcons` オブジェクトが選ぶアイコンだけがプラットフォームごとに
-異なる。iOS/iPadOS/macOS がいずれネイティブ SwiftUI 化された場合（`external-spec.md` §2 の
-想定どおり）、そちらは Kotlin の `KeryxIcons` とは無関係の別コードベースになるため、SF Symbols を
-`Image(systemName:)` で直接使えばよく、Kotlin 側に追加の差し替え機構は不要である。
+異なる。macOS と iOS/iPadOS の SwiftUI アプリ（`appleApp/`）は Kotlin の `KeryxIcons` とは無関係で、
+SF Symbols を直接使う（`Image(systemName:)`、`Label(_:systemImage:)`）。そのため Kotlin 側にそのための
+差し替え機構はない。
 
 ## ドメインモデルの方針
 
@@ -1205,7 +1207,7 @@ depth)`（「1段戻っても実際には画面が変わらない」場合に常
 アンマウントするため、そちらは `rememberSaveableStateHolder` が各ペインの `rememberSaveable`
 由来の state（実質は `LazyListState`。`rememberLazyListState` がその形で保持している）を保存し、
 リスト state の**初期** index/offset として復元する。よってスクロールは一切走らず、
-`known-issues.md` が未修正の上流 Compose クラッシュの要因として挙げている `scrollToIndexIfNeeded`
+`known-issues.ja.md` が未修正の上流 Compose クラッシュの要因として挙げている `scrollToIndexIfNeeded`
 の経路に新たな呼び出しが増えることもない。リーダー → 記事一覧の予測型バック（前述）は一覧を
 より早く——ジェスチャー開始時にリーダーの背面に——マウントし、キャンセルで再びアンマウントする。
 マウントのたびに同じ復元が行われ、加えて `ArticleListPane` の既存の「選択行を表示範囲に入れる」効果が
@@ -1226,9 +1228,9 @@ WebView をホストするペインを含む3ペインすべてがアプリの�
 インターロップの懸念が無いため）問題ない。
 
 狭いレイアウトでは、`initialPaneFor(layout, saved)` は `saved` の値に関わらず常に `ArticleList`
-に解決される——ドロワーが登場する前のバージョンが保存した `HomePane.FeedList` も、もはや
-復元先として成立しないため（そもそも復元できるペインが存在しない）——一方 `Triple` では `saved`
-をそのまま返す（これまでどおり、最後に読んでいた記事）。一覧も無く、どうやってそこへたどり着いたか
+に解決される——保存された値が `HomePane.FeedList` でも同じで、狭いレイアウトにはフィード一覧のペインが
+無い（フィード一覧はドロワーになる）ため復元先にならない——一方 `Triple` では `saved` をそのまま返す
+（最後に読んでいた記事）。一覧も無く、どうやってそこへたどり着いたか
 という文脈も無いまま記事詳細にいきなり着地するのは、スマートフォンのセッションでは使い勝手が
 悪いためである。このクランプは、レイアウト後の実際の幅が判明した最初のフレームで一度だけ適用され、
 以後は二度と適用されない — 後からのリサイズや回転で、読んでいる最中のユーザーを弾き出しては
@@ -1247,33 +1249,26 @@ WebView をホストするペインを含む3ペインすべてがアプリの�
 されている——下記 `FtsSearch.articleScopeSql` 参照）かフィルタ自身の一覧（`HomeViewModel.articles`）
 かを示す唯一の派生フラグであり、`ArticleListPane` はこれを読んで、どちらを1つの
 `ArticleListPaneContent` 呼び出しに渡すかを選ぶ。フィルタが決して置き換えられないため、検索が
-終わるときにスナップショットを取ることも復元することも一切不要になる——以前の設計がまさにそれの
-ために必要としていた `SearchScopeEntry`/`enterSearchScope`/`exitSearchScope` の仕組みはもはや
-存在しない。
+終わるときにスナップショットを取ることも復元することも一切不要である。`FeedListPane` の常設欄
+（あるいは狭いレイアウトでバーが開いた後の展開欄）へ入力することが唯一の入口である——
+入力欄が開いていれば（`PaneLayout.Triple` では常に開いている）`searchActive` はクエリから導かれるため、
+タップ・入力欄に乗ったキーボードカーソル・矢印キーによるナビゲーションのどれでも、検索は同じように始まる。
 
-**`_searchBarVisible` は検索にまだ残っている唯一の実体的な状態**であり、狭いレイアウトのためだけに
-存在する: `PaneLayout.Triple` では `FeedListPane` 自身のクエリ欄が常設なので、`HomeScreen` 自身の
-`LaunchedEffect(layout)` がそこでは常に `true` に保つ。狭いレイアウトでは `false` から始まり、
-`ArticleListTopBar` の検索アイコン（`onSearchClick` → `setSearchBarVisible(true)`）と、展開された
-バー自身の戻る矢印（`onExitSearch` → `homeBackAction` の `CloseSearchBar` ケース →
-`setSearchBarVisible(false)`）で切り替わる。その存在理由は「クエリにまだ文字が残っている」ことと
-「バーが今開いている」ことの間のまさにその隙間である: 狭いレイアウトでバーを閉じるときは、クエリを
-消さずにフィルタ自身の一覧を再び表示しなければならず、それにより後で検索アイコンを再度タップした
-ときに同じ結果が再び表示される——`searchActive` が両方を要求することがそれを実現している。
-`HomeViewModel.pendingSearchFocus` は、依然として一発イベントではなく latch された
-`StateFlow<Boolean>` である。理由も変わらない: 入力欄へフォーカスを要求する操作は、バーを開くのと
-同じクリックの中で発生するため、実際に入力欄を持つことになるコンポーザブルはまだコンポーズされて
-おらず、購読者のいない `SharedFlow` では要求が黙って失われてしまう。`setSearchBarVisible(false)` は、
-以前フィルタを離れることでクリアしていたのと同じように、消費されなかった要求を落とす。
-
-**サイドバーにはもう「検索」クイックフィルター行が存在しない。** `FeedListPane` の常設欄
-（あるいは狭いレイアウトでバーが開いた後の展開欄）へ直接入力することが唯一の入口である——
-`searchActive` はクエリだけから導かれるため、タップ・入力欄に乗ったキーボードカーソル・矢印キー
-によるナビゲーションはすべて同じに振る舞う。選択的にトリガーする別個の「検索に入る」アクションは
-存在せず、したがってタップとキー入力とで検索の始まり方が非対称になることもない。これはまた、
-`buildOrderedFeedListRows` が `includeSearchRow` パラメータを必要とせず、`feedListRowIndex` も
-もはや「検索」行を特別扱いしないことを意味する——その行はどのレイアウトであれ、そもそも
-存在しないからである。
+**`_searchBarVisible` は検索欄が開いているかどうかを表し**、意味を持つのは狭いレイアウトだけである:
+`PaneLayout.Triple` では `FeedListPane` 自身のクエリ欄が常設なので、`HomeScreen` 自身の
+`LaunchedEffect(layout)` がそこでは常に `true` に保つ。狭いレイアウトに切り替わったときは、同じ effect が
+クエリに文字があるときだけ開いたままにし、それ以外は `ArticleListTopBar` の検索アイコン
+（`onSearchClick` → `setSearchBarVisible(true)`）と、展開されたバー自身の戻る矢印（`onExitSearch` →
+`homeBackAction` の `CloseSearchBar` ケース → `setSearchBarVisible(false)`）で切り替わる。その存在理由は
+「クエリにまだ文字が残っている」ことと「バーが今開いている」ことの間のまさにその隙間である: 狭いレイアウトで
+バーを閉じるときは、クエリを消さずにフィルタ自身の一覧を再び表示しなければならず、それにより後で検索アイコンを
+再度タップしたときに同じ結果が再び表示される——`searchActive` が両方を要求することがそれを実現している。
+`HomeViewModel.pendingSearchFocus` は、一発イベントではなく latch された `StateFlow<Boolean>` である:
+入力欄へフォーカスを要求する操作は、バーを開くのと同じクリックの中で発生するため、実際に入力欄を持つことに
+なるコンポーザブルはまだコンポーズされておらず、購読者のいない `SharedFlow` では要求が黙って失われてしまう。
+latch は、フォーカスを得た入力欄が消費する（`consumeSearchFocusRequest()`）まで立ったままで、
+`setSearchBarVisible(false)` は消費されなかった要求を落とす。そのため、古い要求が後で無関係な入力欄の
+フォーカスを奪うことはない。
 
 **検索自体のスコープは常に「すべてのフィード」ではなく、現在選択中のフィルタである。** クエリが
 有効な間に別のフィード/フォルダ/タグを選択すると、即座に**同じ**検索がその範囲に再スコープされる
@@ -1283,8 +1278,8 @@ WebView をホストするペインを含む3ペインすべてがアプリの�
 `watchByFeed`/`watchByTag`/`watchByFolder` クエリと一行単位で一致するように構築する——それらの
 既存の非対称性（`Starred` と `Feed` は `feeds` に一切 JOIN しないため、購読解除済みフィードの
 スター付き記事・自身の記事もそのスコープでは表示される。`All`/`Tag`/`Folder` は JOIN する）も
-含めて。このクエリ機構と組み合わさる部分については `sync-architecture.md` の「FTS5 handling」と
-`db-schema.md` 自身の `articles_fts` 節を参照。
+含めて。このクエリ機構と組み合わさる部分については `sync-architecture.ja.md` の「FTS5 の扱い」と
+`db-schema.ja.md` 自身の `articles_fts` 節を参照。
 
 **検索を終えても何も復元されない。** クエリを消す（あるいは狭いレイアウトではバーを閉じる）ことは、
 単に `ArticleListPane` の表示内容をフィルタ自身の一覧に戻すだけである——`selectFilter` と
@@ -1297,8 +1292,8 @@ WebView をホストするペインを含む3ペインすべてがアプリの�
 ——早期 `return` はなく、`PaneLayout.Single` の `NarrowPaneRow` の各ペインのような分岐ごとの
 （アン）マウントも無い。`baseListState`/`searchListState`（独立した2つの `LazyListState`）と
 `lastFilter` はすべて最上部で無条件に宣言されており、検索の内外を切り替えてもどちらの一覧の
-スクロール位置も破棄されない——検索を経て戻ってきたときにフィルタ自身の一覧が元の位置のままである
-ために、スナップショット・復元の手順は一切不要である。
+スクロール位置も破棄されない——検索を経て戻ってきたとき、フィルタ自身の一覧はスナップショット・復元の
+手順なしで元の位置のままである。
 
 **記事からスワイプで離れてすぐ戻ると、先頭ではなく読んでいた位置に戻る**——リーダーは両隣の記事を
 そのまま保持しているので、離れた記事はそのままの状態で残っている。この記憶は前後 1 記事ずつが対象で、
@@ -1402,7 +1397,7 @@ reconcile は、スナップショット後に追加・差し替えられたピ�
 
 **記事一覧のモード。** `HomeViewModel.mode` は `ArticleListMode`（`All` / `Unread` / `Starred`、
 `presentation/home/ArticleListMode.kt`）で、2 つの独立したトグルではなく 3 つから 1 つを選ぶ形である——理由は
-`external-spec.md` §7 を参照。これは 3 つの状態から導かれる：保存される `_unreadOnly`（`lastUnreadOnly`）と
+`external-spec.ja.md` §7 を参照。これは 3 つの状態から導かれる：保存される `_unreadOnly`（`lastUnreadOnly`）と
 `_unreadOnlyStarred`（`lastUnreadOnlyStarred`、Starred フィルタの下でだけ読む）、そしてセッション中のみで
 保存されない `_starredMode`。`selectFilter` は、`ArticleFilter.Starred` を含むすべてのフィルタの切り替えで
 `_starredMode` を維持する。Starred フィルタの間は `starredModeEnabled` が false で `articleListModeFor` が
@@ -1420,12 +1415,16 @@ reconcile は、スナップショット後に追加・差し替えられたピ�
 （そこではチェック付きで無効——後述）。メニューバーは `MenuUiState.starredModeChecked`
 としてこれを読み、両 UI のツールバーのメニューは直接呼ぶ。
 
-`external-spec.md` §7 の要約以外に、ユーザーから見えるモードの挙動:
+`external-spec.ja.md` §7 の要約以外に、ユーザーから見えるモードの挙動:
 
 - 現在のモードをもう一度選んでも何も変わらない。ポップアップボタンは、一覧を絞り込んでいるモードのときは
   塗りつぶす。Windows・Linux と Compose 版の macOS ビルドでは、ポップアップボタンのメニューにも同じ
-  ⌘/Ctrl+1〜3 のキーを表示する。iOS / iPadOS ではツールバーにモード名を出す余地がないため、ボタンはモードの
-  アイコンにポップアップボタンの上下シェブロンを添える。押すとすぐ何かが起きるボタンと区別するためである。
+  ⌘/Ctrl+1〜3 のキーを表示する。iOS / iPadOS ではツールバーにモード名を出す余地がないため、ボタンは
+  フィルタアイコンだけを表示する（モードで絞り込んでいる間は塗りつぶす）。フィルタアイコンはそれだけでメニューと
+  分かる。iOS ではどのバージョンでも、このボタンを末尾側のまとまりの先頭（全既読の前）に置く。表示の
+  オプションであり、iPhone では先頭側に戻るボタンがあるためである。`.navigation` の項目にはしない。この配置は
+  左右をシステムが決め、iOS 26 では先頭側、iOS 27 では末尾側に置かれた。macOS はモード名を表示し、ボタンを
+  列の先頭側に置く。
 - 購読一覧の「スター付き」項目を選んでいる間はスター付きモードを選べない。その項目はもともとスター付き記事
   だけを表示し、購読を解除したフィードのスター付き記事が残る唯一の場所だからである。その項目を選んでも
   スター付きモードは解除されず、フィード・フォルダー・タグ・すべてのフィードに戻ると、スター付きのまま
@@ -1440,7 +1439,7 @@ reconcile は、スナップショット後に追加・差し替えられたピ�
 
 ### 更新の表示と引っ張って更新
 
-要約は `external-spec.md` §9 にあり、更新の種類ごとにどのフィードバックを出すかは同節の「更新のフィードバック」で
+要約は `external-spec.ja.md` §9 にあり、更新の種類ごとにどのフィードバックを出すかは同節の「更新のフィードバック」で
 決めている。
 
 **引っ張って更新** は、Android では**すべての**幅（大型タブレットが到達する 3 ペインレイアウトも含む）で、
@@ -1502,8 +1501,9 @@ Material 3 の Pull to refresh、iOS はシステム標準の更新コントロ�
 
 ## Apple ネイティブアプリ（SwiftUI）
 
-`external-spec.md` §2 では、macOS 向け（のちに iOS/iPadOS 向け）のネイティブ SwiftUI アプリを計画している。この節は、共有
-Kotlin コードとこれらのドキュメントを準備するうえで前提とする決定事項をまとめたもの。
+macOS 版と iOS/iPadOS 版は、ロジックを `:shared` で共有するネイティブ SwiftUI アプリである
+（`external-spec.ja.md` §2）。この節は、共有 Kotlin コードとこれらのドキュメントが前提とする決定事項を
+まとめたもの。
 
 ### 配布と共存
 
@@ -1581,7 +1581,7 @@ SwiftUI アプリは、共有 Kotlin コードを Kotlin/Native の framework �
 
 - **共有するもの**（Kotlin、UI フレームワーク非依存）：core・data・domain・SQLDelight スキーマ、そして画面の背後にある
   *state holder*（フィルタ、選択、記事リスト、未読のみ、既読を隠す、並び順、検索クエリと結果、新着件数、未読数、それらに対する
-  すべての操作）。これらは `external-spec.md` の挙動そのものなので、2 回書くと 2 つのアプリの挙動がずれる。
+  すべての操作）。これらは `external-spec.ja.md` の挙動そのものなので、2 回書くと 2 つのアプリの挙動がずれる。
 - **UI ごとに持つもの**：ペイン構成とフォーカス（`HomePane`、フォーカス中のペイン、ペイン幅）、キーボードイベントの処理（各 UI は
   自分のキーイベントを共有のショートカット対応表 `presentation/home/HomeShortcuts.kt` に対応付ける）、ウィンドウの復元、すべての描画。
   検索バーの表示状態は、UI が共有状態に設定する入力（クエリの結果を表示するかどうかを決める）であり、UI が所有する状態ではない。SwiftUI では `NavigationSplitView`・`@FocusState`・`@SceneStorage`・標準のウィンドウ復元が
@@ -1736,7 +1736,9 @@ App Store ビルドへ渡ってはならない設定は、テンプレートに�
   であっても `TEST_HOST` のパス計算は iOS 流のフラットな `Keryx.app/Keryx` レイアウトを使ってしまい、
   macOS の実際のバンドルは実行ファイルを `Keryx.app/Contents/MacOS/Keryx` の下にネストするため、テスト
   バンドルがホストを見つけられない。アプリに寄生しないということは、`KeryxTests` が `AppModel`/`HomeView`
-  を直接検証できないということでもある——代わりに `Bridge/`/`Localization/` のアダプタを単体で検証する。
+  を直接検証できないということでもある。代わりに、ロジックだけの Swift ファイルを `appleApp/project.yml` の
+  テストターゲット自身の `sources:` に列挙し、アプリに寄生せずに検証する——たとえば `Bridge/` や `Home/` 配下の
+  ファイル（`Home/FeedListSelectionEquality.swift` など）。
 - iOS シミュレータは arm64 スライスのみを出荷する（`project.yml` の
   `EXCLUDED_ARCHS[sdk=iphonesimulator*]: x86_64`）。リポジトリの他の部分と同じ Apple Silicon 専用の
   方針に合わせている。
@@ -1747,7 +1749,7 @@ App Store ビルドへ渡ってはならない設定は、テンプレートに�
 `DisclosureGroup`、行は未読数を `.badge` で出す `Label` にしている。そのため、行の高さ、フォント、アイコンサイズ
 （システムの「サイドバーのアイコンサイズ」設定）、選択の形、開閉三角、インデントは、メモアプリや Finder と同じく
 すべて `NSOutlineView` が描く（`Home/FeedListView+SourceList.swift`）。標準の選択は、行のキーを介して共有の選択に接続する
-（`feedListRowSelection(forKey:in:)`）。←/→ はペイン移動のまま保つため（`external-spec.md` §9）、アウトライン
+（`feedListRowSelection(forKey:in:)`）。←/→ はペイン移動のまま保つため（`external-spec.ja.md` §9）、アウトライン
 標準の開閉より先に横取りしている。
 
 グループの区別は、Compose のような区切り線ではなく、Finder やメールと同じくセクションヘッダーで行う。
@@ -1959,7 +1961,7 @@ regular 幅（iPad、横向きの大きい iPhone）では、サイドバーと�
 塗って文字を白にする。この色アセットは Keryx のティールで、ライトでは Compose 版の選択と同じ `#00897B`、ダーク
 では `#00796B` にしている。ダークの `AccentColor`（`#4DB6AC`）の上では白文字が読めない（2.4:1）ため、それより
 暗くした。macOS と違い、別のペインにフォーカスがあっても薄くしない。タッチ操作ではフォーカスが副次的に移るだけで、
-同じくタッチ主体の Android も薄くしない（`external-spec.md` §9）。
+同じくタッチ主体の Android も薄くしない（`external-spec.ja.md` §9）。
 
 ### 記事一覧のスクロール（iOS）
 
@@ -1973,13 +1975,16 @@ iOS の記事一覧は SwiftUI の `List` で、`ScrollViewProxy.scrollTo` で�
 ものかを `HomeObservable.articleRowsMatchFilter` / `searchRowsMatchFilter` が示す。切り替えへの対応は
 一度きりで、後から届いたリフレッシュで一覧がスクロールすることはない。
 
-画面にない一覧にスクロールを頼むこともしない（`Home/ArticleListScrollGate.swift`、`KeryxTests` でテスト）。
-`scrollTo` は一覧の次のレイアウトで実行され、Reader の下にある一覧はレイアウトされない。
-Reader のスワイプで選択が動いたときや、復元した選択が届いたときは一覧が隠れているので、そのスクロールは戻る操作の
-最初のレイアウトまで待つことになる。gate はこれらを保持し、一覧が画面に戻ったら最新の 1 件だけを、その行がまだ
-あれば実行する。サイドバーから戻る途中で再構築された一覧は先頭から始まるので、保持分を捨てる。「画面に戻った」とは
-pop の終わりではなく始まりを指す。ピルのジャンプは画面上でしかタップできないので対象外。これは再現できていないクラッシュへの防御的な変更である。
-[known-issues.ja.md](known-issues.ja.md) の「iOS: 記事一覧に戻ると `UICollectionView` でクラッシュした」を参照。
+### 記事一覧のタイトル（iOS）
+
+記事一覧の名前は、サイドバーと同じく、どの iOS でも標準の小さいナビゲーションタイトル（inline）で示す
+（`ArticleListView` の `navigationBarTitleDisplayMode(.inline)`）。こうすると名前は一覧をどこまでスクロール
+してもバーに出ている——大きいタイトルは、最初のスクロール前だけ行の上の領域を取るうえ、iOS 26 以降では
+フィルタを切り替えたあとに広げ直せない。フィルタを切り替えたときは最初の行まで戻す（`ArticleListTopReset`）。
+
+システムの検索フィールド（`.searchable(placement: .automatic)`）は、小さいタイトルのときの標準の位置に置かれる。
+iOS 26 以降の iPhone では下のバー、それ以外はバーの下の引き出しで、iOS 26 以降の iPad ではこの引き出しは一覧を
+下に引くまで隠れている（⌘F でも開ける）。
 
 ### iPhone Duo（iOS）
 
@@ -1993,12 +1998,16 @@ iOS 27.1 シミュレーターで計測した結果と、そこから決めた�
   項目には `visibilityPriority` を付けている。全既読（よく使う操作）は `.high`、一覧モードのメニュー
   （表示順もここに含む）は `.low` で、HIG が求める順序に従っている。横のバーはこの
   優先度を無視する（並び替えボタンがあった頃の計測では、横向きの内側ディスプレイで幅 360pt の記事一覧の列で
-  並び替えと全既読が「…」に入っていた）ので、効くのは縦のバーだけである。iOS 26 以前では、項目は従来どおり 2 つのグループのまま。
+  並び替えと全既読が「…」に入っていた）ので、効くのは縦のバーだけである。iOS 26 以前では、2 つの項目は
+  末尾側の 1 つのグループ（`.primaryAction`）のまま。
   `visibilityPriority` は iOS 27 SDK にしかないため、この分岐は `#if compiler(>=6.4)`（Xcode 27）でだけ
-  コンパイルされる。Xcode 26.6 に固定したリリースのビルドでは、iOS 27 上でも 2 つのグループのままになる。
-- **外側ディスプレイの一覧の上にある空白の帯**（82pt。ナビゲーションタイトルを持たない記事詳細の上は 24pt）は、
-  ナビゲーションタイトル用の領域そのものである。記事一覧の空の `.principal` 項目を外すと、そこにインラインの
-  タイトルが表示される。システムの設定アプリも、一覧の上に同じ帯を空けたまま残している。そのままにする。
+  コンパイルされる。Xcode 26.6 に固定したリリースのビルドでは、iOS 27 上でも 1 つのグループのままになる。
+  どちらでも、項目は同じ末尾側に並ぶ。
+- **外側ディスプレイの一覧の上にある帯**（82pt。ナビゲーションタイトルを持たない記事詳細の上は 24pt）は、
+  ナビゲーションタイトル用の領域そのものである。システムの設定アプリも、一覧の上に同じ帯を残している。
+  そのままにし、ここに記事一覧の小さいタイトルが出る（「記事一覧のタイトル（iOS）」を参照）。82pt は、一覧が
+  この領域を空にしていたときに iOS 27.1 で計測した値である。計測し直すには、iPhone Duo シミュレーターの外側
+  ディスプレイで、記事一覧の上の帯と記事詳細の上の帯を比べる。
 - **縦向きの内側ディスプレイ**（669pt、regular 幅）では、記事詳細だけを表示し、記事一覧は必要なときにその上に
   重ねて出す。これは分割ビュー自身の判断である。`.balanced` に `.doubleColumn` の表示を組み合わせても、一覧の
   理想幅を 300pt にしても、2 つの列は並ばなかった。HIG は独自のコンテナよりシステムのコンテナを使うよう

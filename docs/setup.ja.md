@@ -26,7 +26,7 @@
   の両方を1つの無料 IDE でカバーできるため、本プロジェクトでは第一候補。SDK Manager が同梱
   されているため、後述の Android SDK もここから導入できる。
 - **[IntelliJ IDEA Community Edition](https://www.jetbrains.com/idea/download/)**: Gradle ベースの Kotlin
-  Multiplatform プロジェクトとして問題なく開閲・ビルド・実行でき、デスクトップターゲットの
+  Multiplatform プロジェクトとして問題なく開き・ビルド・実行でき、デスクトップターゲットの
   開発には十分。JetBrains の
   [「Kotlin Multiplatform」プラグイン](https://plugins.jetbrains.com/plugin/14936-kotlin-multiplatform)
   は Community Edition でも導入できるが、その主眼は iOS 向けのプレビュー/実行/デバッグ支援
@@ -35,9 +35,8 @@
   など Android 特化のツールは Android Studio に比べて弱いので、Android 側の作業が中心なら
   Android Studio を使う方がよい。
 - **[Visual Studio Code](https://code.visualstudio.com/)**: JetBrains 公式の "Kotlin by JetBrains" 拡張は、
-  これまで確認した限り常に Kotlin Multiplatform プロジェクトを非対応と明言している——この状況は
-  変わりうるため、頼る前に現在の KMP 対応状況を確認すること。状況が変わっていない限り本プロジェクトの
-  開発には推奨できない。
+  本プロジェクトの開発には推奨しない。使う場合は、事前にその拡張の現在の Kotlin Multiplatform
+  対応状況を確認すること。
 
 ### ビルドに必要なソフトウェア
 
@@ -150,7 +149,9 @@
 
 `:shared` の Apple ターゲットと SwiftUI アプリ（`appleApp/`）のビルドには、Apple Silicon の Mac が必要。
 
-- **Xcode**（App Store か [developer.apple.com](https://developer.apple.com/xcode/) からインストール）。
+- **Xcode 26 以降**（App Store か [developer.apple.com](https://developer.apple.com/xcode/) からインストール）。
+  アプリアイコンのビルドに Xcode 26 以降が必要なため。CI とリリースで使う正確なバージョンは
+  `.github/workflows/` 配下のワークフローで指定している `DEVELOPER_DIR` を参照。
 - **XcodeGen**（`brew install xcodegen`）——`appleApp/project.yml` から `appleApp/Keryx.xcodeproj` を
   生成する。Git で管理するのは `project.yml` の方で、生成される `.xcodeproj` は管理しない。
 - **チーム付きの Apple ID**（無料の「Personal Team」でよい）。ローカルで実行可能な `appleApp/`
@@ -220,7 +221,7 @@
     互換性のある WiX Toolset のバージョンがプリインストール済み（同梱バージョンはランナー
     イメージの更新で変わりうるため、現在のバージョンは `actions/runner-images` の Windows
     イメージ README で確認すること）のため、`ci.yml` と `release.yml` のどちらも
-    追加のインストール手順なしでビルドできる。詳細は `build.md` 参照
+    追加のインストール手順なしでビルドできる。詳細は [build.ja.md](build.ja.md) 参照
 
 `fakeroot`/`rpm` は `ubuntu-latest` に既定で入っていない。`ci.yml`・`release.yml` の
 どちらもパッケージング直前に `apt-get` で `fakeroot rpm` をインストールしている。
@@ -355,7 +356,7 @@ CI は仮想 X サーバー（`sudo apt-get install -y xvfb` の上で
 
 ### Dropbox 連携が表示されない
 
-`DROPBOX_APP_KEY` が未設定（仕様どおり非表示）。`build.md` を参照。
+`DROPBOX_APP_KEY` が未設定（仕様どおり非表示）。[build.ja.md](build.ja.md) を参照。
 
 ### （Android エミュレータ）Dropbox / OneDrive 連携で画面は開くがタップに反応しない
 

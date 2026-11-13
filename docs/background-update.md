@@ -313,7 +313,8 @@ app (whose `.zip` passes those same checks) and internal builds.
 - **A release with no asset yet is treated as not released here, not as `OpenReleasePage`.** The
   release workflow (`.github/workflows/release.yml`) triggers on `release: published` and attaches
   each platform's package only after that: a GitHub release is briefly visible with an empty
-  `assets[]` (observed: a few minutes on this repo) before every package lands. `UpdateChecker`
+  `assets[]` (to re-check how long, compare a recent release's `published_at` with its assets'
+  `created_at` in the GitHub Releases API) before every package lands. `UpdateChecker`
   itself doesn't special-case this — it just reports whatever `selectUpdateAsset` found (`null` in
   that window) — so `domain/UpdateInstallPolicy.kt`'s `awaitsReleaseAsset(location, asset)` is the
   one place that asks "is a missing asset here *the only reason* this install form would fall back
@@ -321,8 +322,7 @@ app (whose `.zip` passes those same checks) and internal builds.
   has to answer both). Only true for a self-replaceable/installer-driven form with nothing else
   wrong (not translocated, parent writable, …); an asset that's genuinely absent for a *durable*
   reason (Linux deb/rpm, Linux Snap, an asset present but the platform refusing it — Android's
-  install-unknown-apps consent) is `false` and notifies immediately, unchanged from before this
-  existed.
+  install-unknown-apps consent) is `false` and notifies immediately.
 
   `domain/UpdateState.kt`'s `nextStateAfterCheck` folds a `true` verdict into the same branch as
   `UpdateStatus.UpToDate` — no `Available(installable = false)` is produced for it, so `check()`'s
@@ -369,9 +369,9 @@ app (whose `.zip` passes those same checks) and internal builds.
   update asset can be 100MB+. Every request goes through `prepareGet(…).execute { … }` rather than
   a plain `client.get()`, and that is load-bearing rather than stylistic: Ktor installs its
   `SaveBody` plugin by default, which reads the *whole* response body into memory before a plain
-  `get()` even returns — which froze the real progress bar at 0% for the entire transfer and then
-  jumped it straight to done, besides holding 100MB+ in RAM (`skipSavingBody()` is a deprecated
-  no-op in Ktor 3.5; the streaming form is the only way out). Progress is throttled to once per
+  `get()` even returns, so no progress could be reported until the transfer ended and 100MB+ would
+  sit in RAM (`skipSavingBody()` is a deprecated no-op in Ktor 3.5; the streaming form is the only
+  way out). Progress is throttled to once per
   whole-percent change (`shouldEmitProgress` — gated on the percentage itself, not a fixed byte
   delta, since that's the finest resolution any consumer can show and scales correctly regardless
   of asset size — a separate, coarser 5% rounding happens downstream in the tray menu label, see
@@ -529,8 +529,7 @@ app (whose `.zip` passes those same checks) and internal builds.
   transient network hiccup would be noisier than useful.
 
 **Integrity verification** relies entirely on the GitHub Releases API's own `assets[].digest`
-(`"sha256:…"`) matching the downloaded file's own SHA-256 — no `release.yml` change was needed for
-this, since the API already returns it. This detects transport corruption and a tampered download,
+(`"sha256:…"`) matching the downloaded file's own SHA-256. This detects transport corruption and a tampered download,
 but **not** publisher compromise: if the GitHub account/token that produces a release were itself
 compromised, the attacker-substituted asset and its digest would still match each other. See
 [SECURITY.md](../SECURITY.md) for this limitation and what a stronger guarantee (e.g. a
@@ -553,14 +552,11 @@ between two checks.
 `FeedFetcher` sends `If-None-Match` (ETag) / `If-Modified-Since` (Last-Modified), and returns empty on 304 (no new articles). Updated ETag / Last-Modified values are saved in the `feeds` table.
 
 A 304 answer is flagged as `FetchedFeed.notModified`, and `FeedRepository` then leaves the stored
-validators alone. Without that flag a 304's empty result is indistinguishable from a feed that
-stopped sending validators, and writing it back NULLed `etag` / `last_modified` — so the next poll
-sent no conditional headers and the server had to return the whole feed, defeating the mechanism on
-every other refresh.
+validators alone, so the next poll sends the same conditional headers again.
 
 Every `feeds` write on the refresh path is also guarded on the value actually changing. The
 article-list query joins `feeds`, so SQLDelight re-runs it on any `feeds` write; a refresh where
-nothing changed now writes nothing and triggers no re-query.
+nothing changed writes nothing and triggers no re-query.
 
 `FeedRepository.refreshAll` fetches feeds' network data **concurrently** (bounded to `REFRESH_FETCH_CONCURRENCY` simultaneous fetches), and applies each feed's DB writes **serially**, as soon as that feed's own fetch completes — so a slow feed never holds back the articles of the feeds that have already arrived. A large subscription list therefore refreshes in roughly the time of its slowest fetches rather than the sum of every fetch. DB writes stay single-threaded — one coroutine applies them all, since the JVM SQLite driver opens a fresh connection per statement and concurrent writes could contend — and each feed's articles are committed one feed at a time, so they appear incrementally in the list as the refresh progresses. The CPU-heavy part of preparing a feed's articles — stripping each article's HTML into its search text — runs on that feed's own fetch coroutine, concurrently with the other feeds, so the single writer only reads what it needs from the DB and writes. At most `REFRESH_PENDING_APPLY_LIMIT` (twice the fetch concurrency) feeds may sit between starting their fetch and being committed — a bound separate from `REFRESH_FETCH_CONCURRENCY`. A fetched feed holds its parsed articles (and their prepared search text) in memory until the writer commits it, so a writer held back (waiting out a sync merge's write lock, say) pauses further fetches rather than letting a large subscription list fetch its whole contents into memory at once. A writer that keeps up never reaches the bound, so the fetch concurrency is unchanged. The search index is brought up to date once, after every feed has been applied. A feed that still has no favicon gets its lookup only after its own articles are written (under a fetch slot of its own, so it never delays them); a lookup that finds none is not repeated for that feed for `FAVICON_RETRY_INTERVAL_MS` (24 hours), remembered in the device-local settings (`faviconMissedAt`) rather than in memory, since Android starts a new process for most background refreshes and a miss kept only in memory would not stop the next one probing the site again, and a favicon found is written only while the feed is still subscribed and still has none. The returned per-feed results are still in feed order.
 

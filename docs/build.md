@@ -313,8 +313,9 @@ than `FRAMEWORK_SEARCH_PATHS` or Kotlin/Native's `embedAndSignAppleFrameworkForX
 
 ### Signing
 
-The app's entitlements (`Keryx/Keryx.entitlements`: `app-sandbox`, `keychain-access-groups`, …)
-**require signing with a real Apple Development or Developer ID identity and team** — ad-hoc
+The app's entitlements (`Keryx/Keryx.entitlements` on iOS, `Keryx/Keryx-macOS.entitlements` on macOS —
+the same entries plus the mach-lookup exception Sparkle's sandboxed installer needs; both carry
+`app-sandbox`, `keychain-access-groups`, …) **require signing with a real Apple Development or Developer ID identity and team** — ad-hoc
 signing (`CODE_SIGN_IDENTITY=-`) cannot produce a runnable sandboxed build, even under
 `CODE_SIGN_STYLE=Manual` (fails with "requires a provisioning profile"). To build and run locally:
 
@@ -343,6 +344,18 @@ xcodebuild archive -scheme Keryx -configuration Release -destination 'generic/pl
 xcodebuild archive -scheme KeryxMacAppStore -configuration Release -destination 'generic/platform=macOS' \
   -archivePath "$RUNNER_TEMP/KeryxMacAppStore.xcarchive" CODE_SIGNING_ALLOWED=NO
 ```
+
+The Swift code has `#if compiler(>=6.4)` branches for iOS 27 SDK APIs (`visibilityPriority`), and each
+Xcode compiles only one side of them, so CI builds with two:
+
+- The `build-apple` job pins the Xcode the release workflows use (26.6, through `DEVELOPER_DIR`), so the
+  builds above compile the side releases ship, whatever the runner image's default becomes.
+- The `build-apple-xcode27` job builds the iOS app (the only platform with such a branch) with Xcode 27
+  on the `xcode-27` runner, a preview label, compiling the other side. It fails if that image's Xcode is
+  not 27.
+
+To move to a newer Xcode, update `DEVELOPER_DIR` in `ci.yml`, `release.yml` and `publish-app-store.yml`
+together.
 
 The Debug builds compile only the active architecture and never take the Release-only settings, so
 the unsigned Release archive is what exercises them before a release does: the macOS x86_64
@@ -503,11 +516,11 @@ Token storage inside the snap does **not** go through `java-keyring`/Secret Serv
 deb/rpm builds do, and the snap declares **no `password-manager-service` plug at all**. That
 interface is not auto-connected by snapd policy, and Snapcraft's reviewers decline auto-connect
 requests for it on principle — it would grant a snap access to every secret in the user's
-session, not just its own (see recent forum outcomes such as the
+session, not just its own (requests such as the
 [NordPass](https://forum.snapcraft.io/t/nordpass-auto-connection-request-to-password-manager-service/50469)
-request and others in
-[store-requests › privileged-interfaces](https://forum.snapcraft.io/c/store-requests/privileged-interfaces/27),
-all declined with "use the Secret portal instead") — but declaring the plug anyway, for a user to
+one are declined with "use the Secret portal instead"; check
+[store-requests › privileged-interfaces](https://forum.snapcraft.io/c/store-requests/privileged-interfaces/27)
+for the current stance before relying on this) — but declaring the plug anyway, for a user to
 manually `snap connect`, would be pointless here regardless of that policy: `LibSecretTokenStorage`
 is used for every provider inside the snap (wired in `PlatformModule.desktop.kt`'s
 `providerTokenStorage`, gated on `platform.isSnap`), and it never falls through to raw Secret
@@ -603,7 +616,8 @@ snapcraft's own documentation says not to act on; removing any of them would bre
 `lint.ignore` suppresses these specific paths.
 
 **That suppression also disables the linter's *missing*-dependency detection for the same
-paths** — the check that once caught missing X11/font and HarfBuzz libraries. Whenever
+paths** — the check that catches a runtime library (X11, fonts, HarfBuzz, …) missing from the
+snap. Whenever
 `stage-packages` or the bundled JDK version changes, comment out the `lint:` block in
 `snap/snapcraft.yaml` and re-pack once to confirm no new missing-dependency warnings appear, then
 restore it.
@@ -878,7 +892,8 @@ install one (`selectUpdateAsset` never matches a `.aab`), so the only place it b
 Linux arm64 ships with the same caveat noted in `known-issues.md`: the article reader's web-view
 library ships no `linux-aarch64` binary, so on that architecture the reader falls back to a
 Compose-drawn simplified view instead of using the native web view (never a freeze — the fallback
-covers block structure, inline decorations, and images).
+covers block structure, inline decorations, and images, and embedded content that needs a real
+browser engine becomes a button that opens it externally).
 
 **Workflow lint.** Most of what this section describes (`release.yml`, `publish-play.yml`,
 `publish-app-store.yml`, `.github/scripts/`) only ever runs when a release is cut or a store
@@ -890,8 +905,10 @@ block through shellcheck. It cannot catch a misspelled `steps.<id>.outputs.<name
 outputs are only written at run time through `$GITHUB_OUTPUT`. actionlint is not preinstalled, so
 the workflow downloads a pinned release tarball and verifies it against a hardcoded SHA-256; to
 upgrade, update `ACTIONLINT_VERSION` and `ACTIONLINT_SHA256` together (the digest is listed in that
-release's `actionlint_<version>_checksums.txt`). Run the same checks locally, with no install, via
-Docker (keep the image tag in step with `ACTIONLINT_VERSION`):
+release's `actionlint_<version>_checksums.txt`). A runner label that version does not know yet (now the
+`xcode-27` preview label) is declared in `.github/actionlint.yaml`, which both the workflow and a local
+run read. Run the same checks locally, with no install, via Docker (keep the image tag in step with
+`ACTIONLINT_VERSION`):
 
 ```bash
 docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12
@@ -1228,8 +1245,8 @@ on GitHub. The packaging script runs by hand with the same inputs:
 - The app is really submitted to Apple's notary service, but nothing is published.
 
 **A new Apple account's first notarization can be slow.** The first submission can stay
-`In Progress` far longer than later ones (35 minutes in our case, against a few minutes for the
-second). When running by hand, `NOTARY_TIMEOUT` (default `30m`) extends the wait; on a timeout the
+`In Progress` far longer than later ones, which usually finish in minutes, and can exceed the
+30-minute default below. When running by hand, `NOTARY_TIMEOUT` (default `30m`) extends the wait; on a timeout the
 script prints the submission id, so wait for it with `xcrun notarytool wait <id>` (same
 credentials), then run again. The workflow does not set `NOTARY_TIMEOUT`, so each submission there
 (the app, then the DMG for a stable tag) waits at most 30 minutes, and a slower first submission
@@ -1246,8 +1263,9 @@ fails the job — which is why it is best completed in a rehearsal first.
   for signing.
 - The certificate inside the provisioning profile must be the one in the `.p12` (compare their
   SHA-1).
-- Prefer an ASCII alphanumeric `.p12` password: a 100-character one failed in testing and a
-  32-character one worked (the cause was not pinned down).
+- Prefer a short ASCII alphanumeric `.p12` password (a few dozen characters at most): very long
+  passwords have been seen to fail, for no identified reason. If the certificate will not import or
+  sign, re-export it with a shorter password before suspecting anything else.
 
 **First run on GitHub.** Finally, cut a pre-release tag: the whole workflow runs (including the
 Play internal/alpha upload and the Snap `edge` channel), but no DMG is built for a pre-release and
@@ -1333,7 +1351,7 @@ failed publish without cutting a new GitHub Release (which would also bump the t
 the `versionCode`). It runs the same `publish-play.sh`, taken from the workflow's own ref rather
 than from `tag`, so it also works for a tag cut before the script existed. It rebuilds the AAB from that tag rather than reusing anything already
 published — a tag deterministically reproduces the same `versionCode` and signing output either
-way, and `release.yml` no longer attaches an AAB to the GitHub Release for it to reuse. Neither
+way, and `release.yml` does not attach an AAB to the GitHub Release, so there is nothing to reuse. Neither
 workflow *promotes* a `versionCode` Play has already seen to a different track: both only ever
 upload a freshly built AAB. The Play Developer API itself can do it — `edits.tracks.update` accepts
 an already-uploaded `versionCode` in another track's release — but neither workflow implements
@@ -1558,7 +1576,7 @@ The Compose build's packaged artifacts are **ad-hoc signed** (effectively unsign
 
 > [!CAUTION]
 > **Signing while still on a 0.x version needs care.** jpackage signs the `.app`, so anything that edits
-> `Info.plist` *afterwards* breaks the bundle seal. The custom URI scheme no longer does this — it goes through
+> `Info.plist` *afterwards* breaks the bundle seal. The custom URI scheme is not affected — it goes through
 > `macOS { infoPlist { extraKeysRawXml } }` and is therefore already in the plist jpackage signs. What remains is
 > `restoreMacOsShortVersion`, which only runs when the major version is `0`. Its write-back is already followed by
 > `resealMacOsBundle` (see the version-handling section above), but that re-signs **ad-hoc**, with `-` hardcoded

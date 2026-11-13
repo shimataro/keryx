@@ -337,6 +337,12 @@ jobs:
       # exist. Without this, a framework restored from the cache below (which has no Gradle task
       # history) would be relinked from scratch by the prebuild's own Gradle run.
       KERYX_SKIP_SHARED_BUILD: "1"
+      # The Xcode the release workflows pin, so this job compiles the side of the Swift code's
+      # `#if compiler(>=6.4)` branches that releases ship, whatever the runner image's default
+      # becomes. "Resolve Xcode version" below reads it too, so the framework cache key follows.
+      # build-apple-xcode27 compiles the other side. Update together with release.yml and
+      # publish-app-store.yml.
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -459,6 +465,56 @@ jobs:
             shared/build/reports/tests/
             shared/build/test-results/
           if-no-files-found: warn
+
+  # The `#if compiler(>=6.4)` side of the Swift code (iOS 27 SDK APIs such as `visibilityPriority`)
+  # compiles only with Xcode 27, while build-apple and the release workflows pin Xcode 26.6, which
+  # compiles the other side. The app's only such branch is in iOS-only code
+  # (Home/ArticleListView.swift), so only the iOS Simulator build runs here. `xcode-27` is a preview
+  # runner label; move to the regular macOS label once its image ships Xcode 27. No framework cache:
+  # the preview image's Xcode build changes too often for a key on it to hit.
+  build-apple-xcode27:
+    name: Build (xcode-27 / SwiftUI iOS)
+    runs-on: xcode-27
+    timeout-minutes: 40
+    env:
+      DROPBOX_APP_KEY: ""
+      ONEDRIVE_CLIENT_ID: ""
+      # The framework and String Catalog are assembled below, before xcodebuild's prebuild runs.
+      KERYX_SKIP_SHARED_BUILD: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Check Xcode version
+        shell: bash
+        run: |
+          xcodebuild -version
+          if ! xcodebuild -version | head -1 | grep -q '^Xcode 27'; then
+            echo "::error::This job must build with Xcode 27 to compile the compiler(>=6.4) side; the xcode-27 image's default Xcode is not 27."
+            exit 1
+          fi
+
+      - name: Build Apple framework
+        run: ./gradlew :shared:assembleKeryxSharedReleaseXCFramework :composeApp:generateStringCatalog --no-configuration-cache
+
+      - name: Build SwiftUI app (iOS Simulator)
+        shell: bash
+        run: |
+          brew install xcodegen
+          cd appleApp
+          xcodegen generate
+          xcodebuild -scheme Keryx -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
 
   android-instrumented-test:
     name: Android Instrumented Tests

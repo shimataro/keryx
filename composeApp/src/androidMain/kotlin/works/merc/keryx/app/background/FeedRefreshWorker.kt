@@ -54,9 +54,10 @@ class FeedRefreshWorker(context: Context, params: WorkerParameters) : CoroutineW
             // notification center by SyncRepository itself). A `null` result means no provider is
             // connected, so there is nothing to retry.
             val retrySync = syncResult?.errorOrNull is CloudStorageException
-            // Mirrors desktop's backgroundUpdateLoop (StartupTasks.kt), which only rechecks for an
-            // update once the user's configured interval has elapsed — unlike this worker's own
-            // refresh cadence, which WorkManager floors at 15 minutes regardless of that setting.
+            // Mirrors the shared backgroundUpdateLoop (domain/BackgroundRefreshLoop.kt), which only
+            // rechecks for an update once the user's configured interval has elapsed — unlike this
+            // worker's own refresh cadence, which WorkManager floors at 15 minutes regardless of
+            // that setting.
             val settings = settingsRepository.getLocalSettings()
             if (shouldCheckForUpdate(SystemClock.nowMillis(), settings.lastUpdateCheckAt, settings.updateCheckIntervalHours)) {
                 checkForUpdateAndNotify(koin)

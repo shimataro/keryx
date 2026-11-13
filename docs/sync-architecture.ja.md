@@ -226,8 +226,8 @@
 
 `SyncRepository.sync(trigger: SyncTrigger = MANUAL)` は「誰が呼んでいるか」を受け取る。
 `SyncTrigger.AUTOMATIC`（デバウンス書き込みの消費者、`runStartupMaintenance`（デスクトップの
-`StartupTasks.kt` と Android の起動経路で共有）、デスクトップの `backgroundUpdateLoop`
-（`StartupTasks.kt`）、Android の `FeedRefreshWorker` と `DeferredSyncWorker`）はゲートの対象になる —
+`StartupTasks.kt`、Android の起動経路、Apple SDK の `KeryxSdk` で共有）、`backgroundUpdateLoop`
+（`domain/BackgroundRefreshLoop.kt`。デスクトップの `main.kt` と Apple SDK の `KeryxSdk` が実行する）、Android の `FeedRefreshWorker` と `DeferredSyncWorker`）はゲートの対象になる —
 `autoSyncSuspended`（`StateFlow<Boolean>`）が true の間、`AUTOMATIC` 呼び出しは
 ダウンロード／マージ／アップロードのサイクルを一切実行せず `Result.Ok(Unit)` を返す。同期スピナーも
 動かさず、通知センターにも触れないので、既に利用不能と分かっているクラウド DB が書き込みのたびに
@@ -552,8 +552,8 @@ Android の Dropbox / OneDrive を指す。残る 1 件は後述の「Android �
   client 扱いされず、省略すると Google のトークンエンドポイントが `invalid_request: client_secret is missing`
   で拒否する（詳細は [build.ja.md](build.ja.md)）。スコープは `drive.appdata` のみ（ユーザーの Drive 内のアプリ専用隠しフォルダ）。
 
-OS へのスキーム登録方法はプラットフォームごとに異なる。macOS はパッケージング時に Info.plist
-（`CFBundleURLTypes`）で宣言する。Windows / Linux は起動時に `registerFileAssociations()` が登録し、
+OS へのスキーム登録方法はプラットフォームごとに異なる。Compose 版 macOS ビルド（内部検証専用）はパッケージング時に Info.plist
+（`CFBundleURLTypes`）で宣言する。出荷版の SwiftUI アプリはスキームを登録しない（後述の「Apple 版での Google Drive」を参照）。Windows / Linux は起動時に `registerFileAssociations()` が登録し、
 Windows は `HKEY_CURRENT_USER\Software\Classes\keryx`（ユーザー単位のハイブなので管理者権限は不要）を、Linux は `LinuxUriSchemeRegistrar` がユーザーレベルの
 `.desktop`（`$XDG_DATA_HOME/applications/keryx-url-handler.desktop`、既定
 `~/.local/share/applications/keryx-url-handler.desktop`）と `$XDG_CONFIG_HOME/mimeapps.list`
@@ -582,7 +582,7 @@ single-instance 経由で実行中インスタンスへ転送する。
 
 > [!NOTE]
 > **カスタム URI プロバイダーは全デスクトップ OS 共通**: `./gradlew :composeApp:run` では
-> Dropbox / OneDrive 連携を完了できない。macOS では `keryx://` を LaunchServices がパッケージ版
+> Dropbox / OneDrive 連携を完了できない。macOS（Compose 版ビルド、内部検証専用）では `keryx://` を LaunchServices がパッケージ版
 > `Keryx.app` にルーティングするため、`gradlew run` のインスタンスにはリダイレクトが届かない。
 > Windows / Linux では、起動時の登録がパッケージ版ランチャーからの起動でない限り意図的に何もしない
 > （`packagedLauncherPath()`）——JDK の `java` バイナリを `keryx://` のハンドラーとして登録すると
@@ -640,7 +640,7 @@ Google Drive も提供しない。
   記録する — Dropbox のリフレッシュトークンが失効したときとまったく同じ扱いである。
   ここからの回復は「連携」を押し直すだけでは済まない。付与が取り消されても保存済みトークンは
   そのまま残るため `connectedType()` は接続済みと報告し続け、そもそも行に「連携」ボタンが出ないからである。
-  直すのは切断 — Play 開発者サービスのキャッシュを落とすのはこちらの処理（前述の **切断** を参照）—
+  直すのは切断 — Play 開発者サービスのキャッシュを落とすのはこちらの処理（後述の **切断** を参照）—
   とそれに続く接続である。`CloudSyncTab` はこれを 1 つの操作として提供する:
   `SyncRepository.lastSyncAuthFailed` が立っている間、接続済み行の 1 番目のアクションが
   *同期データをリセット* に代わって **連携し直す**（`SettingsViewModel.reconnect`。解除してから
@@ -648,7 +648,7 @@ Google Drive も提供しない。
   状態によって行の子要素数が変わり、デスクトップのラベル付きボタンがプロバイダ名と分け合う幅も
   超えてしまうためであり、そもそもこの 2 つは排他的でもある: リセットには自前の有効な認可が必要で、
   認可こそが壊れている状況で提示すべき回復手段ではない。*連携を解除* はどちらの場合も隣に残るので、
-  やめるために先に直す必要は無い。実機で一連の流れを確認済み。
+  やめるために先に直す必要は無い。
 
   `PlayServicesConnectFlow` が認可要求の前にキャッシュを落とすのも同じ理由による。こちらが
   カバーするのは、**接続済みではないのに** Play 開発者サービスのキャッシュだけが付与より長生き
@@ -656,7 +656,7 @@ Google Drive も提供しない。
   アプリのデータを消したがキャッシュは残っていた、といったケースである。これが無いと、
   その状態での接続が死んだトークンで黙って成功してしまう。コストは明示的なユーザー操作 1 回につき
   Play 開発者サービスへの往復が 1 回増えるだけで、付与が健全なら新しいトークンが黙って発行され、
-  同意画面は出ない（こちらも実機で確認済み）。
+  同意画面は出ない。
 - **切断。** `PlayServicesGoogleDriveAuthManager.revoke` は保存済みのアクセストークンを無視し
   （その時点では 1 時間以上経っており、Google の revoke エンドポイントに拒否される）、
   ユーザー操作なしで新しいものを取得して、デスクトップと同じ `GOOGLE_REVOKE_ENDPOINT` へ POST する。
@@ -666,7 +666,7 @@ Google Drive も提供しない。
   上記の取り消しは Play 開発者サービスの外側の素の HTTPS 通信なので、Play 開発者サービスは自分が
   キャッシュしている認可が死んだことを知らない。そのまま `authorize()` にキャッシュから成功を返し続け、
   `hasResolution()` も立てない。結果、再接続は同意画面なしで完了し、以後すべての Drive リクエストが
-  401 で失敗して、アプリ側に回復手段が無くなる。`clearToken` が無かった時点で実機で再現済み。
+  401 で失敗して、アプリ側に回復手段が無くなる。
   なお `AuthorizationClient.revokeAccess` は HTTPS の取り消しを丸ごと置き換えられそうに見えるが、
   このフローが別途持っていない `Account` を必須とし、指定しないと Play 開発者サービス内部で
   `NullPointerException: ... Account.name on a null object reference` になる。
@@ -678,13 +678,13 @@ Google Drive も提供しない。
 
 `appDataFolder` は **OAuth クライアント単位ではなく Cloud プロジェクト単位**でスコープされるため、
 既存のデスクトップ用クライアントに Android クライアントを追加しても、両方の端末が同じ隠しフォルダを
-読み書きする — 同一プロジェクト内の 2 つ目の OAuth クライアントから `appDataFolder` を一覧し、
-デスクトップ版が作成したファイルが見えることで確認済み。この性質が無ければ、デスクトップと Android は
+読み書きする。確かめ直すには、同一プロジェクト内の別の OAuth クライアントから `appDataFolder` を一覧する。
+もう一方のクライアントが作ったファイルが見えるはずである。この性質が無ければ、デスクトップと Android は
 別々のファイルへ黙って同期してしまう。
 
 ### Apple 版での Google Drive（secret 不要な「iOS」タイプの OAuth クライアント）
 
-Apple 版（`:shared` の appleMain。macOS と、将来は iOS も対象）は、Android のように Play 開発者
+Apple 版（`:shared` の appleMain。macOS と iOS が対象）は、Android のように Play 開発者
 サービスや端末側の認可 API を必要とせず、通常の `OAuthConnectFlow` + `CustomUriRedirectTransport`
 の経路をそのまま使う — ただし desktop 版とは別のクライアントを使う。
 
@@ -761,8 +761,8 @@ Keychain のアカウント名とフォールバックファイル名は `CloudS
 
 - Windows/Linux: OS セキュアストレージ（java-keyring — Credential Manager / Secret Service,
   `KeyringTokenStorage`）。
-- macOS: Apple 署名の `/usr/bin/security` CLI に委譲（`SecurityCliTokenStorage`）。java-keyring は共有 JVM
-  から Keychain 書き込みに失敗するため、macOS のみ `security` 経由にしている。項目は通常のログイン
+- macOS（Compose 版ビルド、内部検証専用）: Apple 署名の `/usr/bin/security` CLI に委譲（`SecurityCliTokenStorage`）。java-keyring は共有 JVM
+  から Keychain 書き込みに失敗するため、Compose 版 macOS ビルドのみ `security` 経由にしている。項目は通常のログイン
   Keychain に入る——下のネイティブ Apple アプリはサービス名こそ同じだが、入れ物が別。
 - ネイティブ Apple アプリ（macOS/iOS、`:shared` の appleMain）：`KeychainTokenStorage` が Security フレームワーク経由で
   Keychain に直接書き込む——サービスは `works.merc.keryx`、アカウントはどのプロバイダーも同じ。ただし
@@ -816,7 +816,7 @@ Keychain のアカウント名とフォールバックファイル名は `CloudS
     この合成ロジックを共通の `SecretStoreTokenStorage` から継承し、`SecurityCliTokenStorage` も
     そのバックエンド `SecurityKeychainStore` が継承したうえで、メモリ内キャッシュを重ねるだけである。削除の確認が取れなかったフォールバッククリアは、
     `SECURE` と偽って報告するのではなく `PLAINTEXT_FILE` へと結果を降格する。
-- macOS は書き込み後に **read-back 検証**（login keychain を明示指定して読み戻し）を行い、永続化を確認できない
+- Compose 版 macOS ビルド（内部検証専用）は書き込み後に **read-back 検証**（login keychain を明示指定して読み戻し）を行い、永続化を確認できない
   場合は file フォールバックへ回す。**書き込みの永続性は起動セッション依存**: パッケージ版（GUI ログイン
   セッション）では login keychain に永続化されるが、`gradlew run`（launchd 直下の Gradle daemon 配下の
   切り離しセッション）では `security add` が成功を返しても永続化しないため file に保存される。**読み取りは
