@@ -57,7 +57,7 @@ Debouncing: Because every sync re-uploads the whole database, how often a local 
 - On Android and iOS the flush goes through `flushOnLeavingForeground()`, which skips an exit the app caused itself: `BrowserOpener` marks its launch (`ExternalAppLaunch`) and the next exit consumes the mark, so reading an article in the browser does not upload the database once per article. The mark is cleared whenever the app is back in front. The changes stay pending for the long window, the next sync, or the next real exit.
 - Any sync that runs first — a refresh cycle's, a manual one — picks the pending changes up too: an "unsynced changes" flag is cleared as a sync starts (its snapshot includes them) and restored on every exit but success — an error result, an exception or a cancellation (iOS cancels the refresh cycle's sync on backgrounding) — and a debounce window that expires with the flag already cleared does nothing.
 - The refresh itself (`FeedRepository.refreshFeeds`, only ever run inside a `RefreshCycleRunner` cycle) schedules no sync. A refresh-then-sync cycle syncs right after it; the startup sync-then-refresh cycle has nothing after its refresh, so it schedules one short-window sync (`scheduleSync()`) for what the refresh wrote.
-- A read/unread or star call that changes nothing (re-opening an already-read article) writes nothing and schedules nothing: the single-row updates are guarded on the state changing, so `read_at` / `starred_at` are stamped only by a real change. Last-write-wins therefore no longer lets merely re-opening an article beat another device's later "mark unread" — the unread state stays.
+- A read/unread or star call that changes nothing (re-opening an already-read article) writes nothing and schedules nothing: the single-row updates are guarded on the state changing, so `read_at` / `starred_at` are stamped only by a real change. Last-write-wins therefore never lets merely re-opening an article beat another device's later "mark unread" — the unread state stays.
 
 Deferring a change never loses it, even when the sync that would have sent it fails or is cancelled: the next sync of any kind finds it in the snapshot (see "Skipping Unchanged Transfers" below). Only how soon other devices see it changes.
 
@@ -132,8 +132,9 @@ rather than looking stuck — which is the correct ordering anyway.
 ### Automatic-Sync Suspension
 
 `SyncRepository.sync(trigger: SyncTrigger = MANUAL)` takes who is asking. `SyncTrigger.AUTOMATIC` — the
-debounced-write consumer, `runStartupMaintenance` (shared by desktop's `StartupTasks.kt` and Android's startup
-path), desktop's `backgroundUpdateLoop` (`StartupTasks.kt`), and Android's `FeedRefreshWorker` and
+debounced-write consumer, `runStartupMaintenance` (shared by desktop's `StartupTasks.kt`, Android's startup
+path, and the Apple SDK's `KeryxSdk`), `backgroundUpdateLoop` (`domain/BackgroundRefreshLoop.kt`, run by
+desktop's `main.kt` and the Apple SDK's `KeryxSdk`), and Android's `FeedRefreshWorker` and
 `DeferredSyncWorker` — is subject to
 a gate: while `autoSyncSuspended` (a `StateFlow<Boolean>`)
 is true, an `AUTOMATIC` call skips the download/merge/upload cycle entirely and returns `Result.Ok(Unit)` without
@@ -363,7 +364,7 @@ Redirect reception method is chosen per provider (see the `.claude/rules/cloud-o
     `create` uses `@microsoft.graph.conflictBehavior=fail` (409 → conflict).
 - **Google Drive (desktop only) — Loopback** (`LoopbackRedirectTransport`): Android does not use this flow at all — see "Google Drive on Android" below. Google's "Desktop app" client does not allow arbitrary custom schemes; only `http://127.0.0.1:<port>` loopback is accepted. A temporary HTTP server (`com.sun.net.httpserver`; `jdk.httpserver` module is bundled) is started to receive the redirect and stopped after reception. No OS scheme registration is required (`keryx://` registration remains for Dropbox / OneDrive). **Unlike Dropbox, the client secret (`GOOGLE_DRIVE_CLIENT_SECRET`) is also sent for both token exchange and refresh** — despite using PKCE, Google's "Desktop app" OAuth client is not treated as a full public client like iOS/Android, and Google's token endpoint rejects token exchange / refresh without `client_secret` with `invalid_request: client_secret is missing` (regardless of PKCE). Scope is `drive.appdata` only (app-specific hidden folder in the user's Drive). During development, set the OAuth consent screen to "Testing" and register test users.
 
-How the scheme is registered with the OS differs per platform. macOS declares it in Info.plist (`CFBundleURLTypes`) at packaging time. Windows and Linux register it at startup, from `registerFileAssociations()`: the Windows path writes `HKEY_CURRENT_USER\Software\Classes\keryx` (the per-user hive, so no admin elevation is needed), the Linux path writes a user-level `.desktop` entry (`$XDG_DATA_HOME/applications/keryx-url-handler.desktop`, default `~/.local/share/applications/keryx-url-handler.desktop`) and a `$XDG_CONFIG_HOME/mimeapps.list` (default `~/.config/mimeapps.list`) association via `LinuxUriSchemeRegistrar`. The Linux entry's `Exec` line must end in `%u` — without it the desktop-entry spec does not hand the URI to the process, and the browser cannot resolve the scheme at all (an "unknown protocol" error). On both platforms the OS then launches the app with the URL as a command-line argument, which `main.kt` forwards to the running instance via single-instance.
+How the scheme is registered with the OS differs per platform. The Compose macOS build (internal verification only) declares it in Info.plist (`CFBundleURLTypes`) at packaging time; the shipped SwiftUI app registers no scheme (see "Google Drive on Apple" below). Windows and Linux register it at startup, from `registerFileAssociations()`: the Windows path writes `HKEY_CURRENT_USER\Software\Classes\keryx` (the per-user hive, so no admin elevation is needed), the Linux path writes a user-level `.desktop` entry (`$XDG_DATA_HOME/applications/keryx-url-handler.desktop`, default `~/.local/share/applications/keryx-url-handler.desktop`) and a `$XDG_CONFIG_HOME/mimeapps.list` (default `~/.config/mimeapps.list`) association via `LinuxUriSchemeRegistrar`. The Linux entry's `Exec` line must end in `%u` — without it the desktop-entry spec does not hand the URI to the process, and the browser cannot resolve the scheme at all (an "unknown protocol" error). On both platforms the OS then launches the app with the URL as a command-line argument, which `main.kt` forwards to the running instance via single-instance.
 
 **Android** registers the same `keryx://oauth2/callback` scheme declaratively:
 
@@ -386,7 +387,7 @@ How the scheme is registered with the OS differs per platform. macOS declares it
   without the matching `code_verifier`.
 
 > [!NOTE]
-> **Custom-URI providers on every desktop OS**: `./gradlew :composeApp:run` cannot complete Dropbox / OneDrive linking. On macOS, LaunchServices routes `keryx://` to the packaged `Keryx.app`, so the `gradlew run` instance never receives the redirect. On Windows and Linux, the startup registration deliberately no-ops unless the process is a packaged launcher (`packagedLauncherPath()`), because registering the JDK's own `java` binary as the `keryx://` handler would outlive the Gradle run. To test/perform linking, build the app with `./gradlew :composeApp:createDistributable` and launch it (see [setup.md](setup.md) for details). Google Drive uses loopback reception, so this restriction does not apply and `gradlew run` can complete linking. Android has no such restriction either way — the manifest-declared `intent-filter` works the same whether the APK was built via `installGithubDebug` or a release pipeline.
+> **Custom-URI providers on every desktop OS**: `./gradlew :composeApp:run` cannot complete Dropbox / OneDrive linking. On macOS (the Compose build, internal verification only), LaunchServices routes `keryx://` to the packaged `Keryx.app`, so the `gradlew run` instance never receives the redirect. On Windows and Linux, the startup registration deliberately no-ops unless the process is a packaged launcher (`packagedLauncherPath()`), because registering the JDK's own `java` binary as the `keryx://` handler would outlive the Gradle run. To test/perform linking, build the app with `./gradlew :composeApp:createDistributable` and launch it (see [setup.md](setup.md) for details). Google Drive uses loopback reception, so this restriction does not apply and `gradlew run` can complete linking. Android has no such restriction either way — the manifest-declared `intent-filter` works the same whether the APK was built via `installGithubDebug` or a release pipeline.
 
 ### Google Drive on Android (Play services `AuthorizationClient`)
 
@@ -438,7 +439,7 @@ Google Drive.
   token gets. Recovering from it needs more than pressing connect again, because a withdrawn grant
   leaves the stored tokens untouched: `connectedType()` still reports the account as connected, so
   the row has no connect button in the first place. What repairs it is a disconnect — that is what
-  clears Play services' cached token (see **Disconnect** above) — followed by a connect.
+  clears Play services' cached token (see **Disconnect** below) — followed by a connect.
   `CloudSyncTab` offers exactly that as one action: while `SyncRepository.lastSyncAuthFailed` holds,
   the connected row's first action becomes **reconnect** (`SettingsViewModel.reconnect`, a teardown
   plus a fresh connect to the same provider) in place of *reset sync data*. The two swap rather than
@@ -446,7 +447,7 @@ Google Drive.
   the width desktop's labelled buttons share with the provider name — and they are mutually
   exclusive anyway: a reset needs a working authorization of its own, so it is precisely the wrong
   recovery to offer while authorization is what broke. *Disconnect* stays beside it either way, so
-  leaving is never gated on repairing first. Verified on-device end to end.
+  leaving is never gated on repairing first.
 
   `PlayServicesConnectFlow` clears the cached token before requesting one for the same reason,
   covering the cases where the app is *not* connected but Play services' cache has outlived the
@@ -454,7 +455,7 @@ Google Drive.
   cleared while the Play services cache survived. Without it, connecting in that state silently
   succeeds with a dead token. It costs one extra Play services round trip on an explicit user
   action and changes nothing when the grant is healthy: a fresh token is minted and no consent
-  screen appears (also verified on-device).
+  screen appears.
 - **Disconnect.** `PlayServicesGoogleDriveAuthManager.revoke` ignores the stored access token (an
   hour old by then, so Google's revoke endpoint would reject it), fetches a fresh one without user
   interaction, and POSTs it to `GOOGLE_REVOKE_ENDPOINT` — the same endpoint desktop uses. If even
@@ -464,8 +465,8 @@ Google Drive.
   rather than tidy-up.** The revoke above travels over plain HTTPS, outside Play services, so Play
   services never learns the authorization it caches has died; it keeps answering `authorize()` from
   that cache, successfully and with `hasResolution()` clear. Reconnecting then completes with no
-  consent screen and every Drive request afterwards fails with 401, with no in-app way back. This
-  was reproduced on-device before the `clearToken` call existed. `AuthorizationClient.revokeAccess`
+  consent screen and every Drive request afterwards fails with 401, with no in-app way back.
+  `AuthorizationClient.revokeAccess`
   looks like it should replace the HTTPS revoke outright, but it requires an `Account` this flow
   does not otherwise track and fails inside Play services without one
   (`NullPointerException: ... Account.name on a null object reference`).
@@ -483,7 +484,7 @@ separate files.
 
 ### Google Drive on Apple (secretless "iOS"-type OAuth client)
 
-The Apple app (`:shared`'s appleMain, covering macOS and, later, iOS) goes through the ordinary
+The Apple app (`:shared`'s appleMain, covering macOS and iOS) goes through the ordinary
 `OAuthConnectFlow` + `CustomUriRedirectTransport` path — unlike Android, it does not need Play
 services or any device-side authorization API — but with its own OAuth client rather than
 desktop's.
@@ -558,7 +559,7 @@ opens a browser directly:
 `KEYCHAIN_SERVICE` (`works.merc.keryx`, `data/cloud/KeychainCoordinates.kt`) is shared by every desktop OS.
 
 - Windows/Linux: OS secure storage (java-keyring — Credential Manager / Secret Service, `KeyringTokenStorage`).
-- macOS: Delegated to Apple-signed `/usr/bin/security` CLI (`SecurityCliTokenStorage`). java-keyring fails to write to Keychain from a shared JVM, so macOS uses `security` instead. Its items live in the ordinary login Keychain — the native Apple app below uses the same service name, but a different store.
+- macOS (the Compose build, internal verification only): Delegated to Apple-signed `/usr/bin/security` CLI (`SecurityCliTokenStorage`). java-keyring fails to write to Keychain from a shared JVM, so the Compose macOS build uses `security` instead. Its items live in the ordinary login Keychain — the native Apple app below uses the same service name, but a different store.
 - Native Apple app (macOS/iOS, `:shared`'s appleMain): `KeychainTokenStorage` writes the Keychain
   directly through the Security framework, service `works.merc.keryx`, same per-provider account for
   every provider — but into the **Data Protection Keychain**
@@ -608,7 +609,7 @@ opens a browser directly:
     whose `SecurityKeychainStore` backend inherits it and which only adds an in-memory cache on top. A fallback clear
     that does not confirm removal downgrades the outcome to `PLAINTEXT_FILE` rather than falsely
     reporting `SECURE`.
-- macOS performs a **read-back verification** after writing (explicitly specifying login keychain), and falls back to file if persistence cannot be confirmed. **Write persistence is session-dependent**: packaged version (GUI login session) persists to login keychain, but `gradlew run` (detached session under Gradle daemon via launchd) may not persist even if `security add` returns success, so file is used. **Read is possible from either session** (once linked via packaged version, `gradlew run` can also reuse the connection).
+- The Compose macOS build (internal verification only) performs a **read-back verification** after writing (explicitly specifying login keychain), and falls back to file if persistence cannot be confirmed. **Write persistence is session-dependent**: packaged version (GUI login session) persists to login keychain, but `gradlew run` (detached session under Gradle daemon via launchd) may not persist even if `security add` returns success, so file is used. **Read is possible from either session** (once linked via packaged version, `gradlew run` can also reuse the connection).
 - **Android**:
   - **Google Drive is the exception to everything in this section.** Its tokens are owned by Play
     services, not by this app (see "Google Drive on Android" above): no refresh token is ever
