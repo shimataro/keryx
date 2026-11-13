@@ -1361,8 +1361,9 @@ Play Console の UI 操作（または自前の API 呼び出し）になる。
 
 ### App Store への公開
 
-iOS アプリと Mac App Store ビルドは、`.github/workflows/publish-app-store.yml` をプラットフォームごとに手動で実行して
-App Store の審査に出す（Actions → "Publish to the App Store" → Run workflow）。`release.yml` は App Store には何もしない。
+iOS アプリと Mac App Store ビルドは、`.github/workflows/publish-app-store.yml` を手動で実行して App Store の審査に出す
+（Actions → "Publish to the App Store" → Run workflow）。1 回の実行で片方だけでも両方でも選べ、選んだプラットフォームごとに
+別のジョブが並列にビルドと提出を行う。`release.yml` は App Store には何もしない。
 
 **GitHub Release が先。** App Store の審査には 1 週間以上かかることがあるので、待つのはそのストアだけにする:
 
@@ -1379,14 +1380,16 @@ App Store の審査に出す（Actions → "Publish to the App Store" → Run wo
 何もビルドしないうちに拒否する。
 
 審査待ち、審査中、または承認済みで未公開のバージョンがある間は、App Store Connect はそのプラットフォームのほかの
-バージョンを受け付けないので、次のバージョンはそのバージョンが公開されるまで待つ。もう一方のプラットフォームは止まらない。
+バージョンを受け付けないので、次のバージョンはそのバージョンが公開されるまで待つ。もう一方のプラットフォームは止まらない: 両方を選んだ実行では、止められた側のジョブだけが何もビルドしないうちに失敗し、
+もう一方はそのまま続く。
 GitHub Release はそのあいだも先に進めてよく、そのプラットフォームは今のバージョンが出てから最新のものに追いつく。
 
 入力:
 
 | 入力 | 意味 |
 | --- | --- |
-| `platform` | `ios`（既定）または `macos`（Mac App Store ビルド） |
+| `ios` | オン（既定）: iOS アプリを公開する |
+| `macos` | オン: Mac App Store ビルドを公開する。既定はオフ。`ios` と `macos` の少なくとも一方をオンにすること。両方オンなら 2 つは並列に動き、一方が失敗してももう一方は止まらない |
 | `ref` | ビルドするブランチ、tag、またはコミット。バージョンブランチ上にあること。空（既定）なら tag `v<version>` をビルドする |
 | `version` | App Store のバージョン（x.y.z）。`ref` が空のときにビルドする tag の名前にもなる |
 | `submit` | オン（既定）: 審査に提出する。オフ: ビルドのアップロードと関連付けだけを行い、提出は App Store Connect で行う |
@@ -1402,7 +1405,7 @@ API 呼び出しを確かめる方法は本番の実行しかない。`submit` �
 
 1. `ref` のコードを一切実行しない最初のジョブが、`ref` がバージョンブランチ上にあること（`ref` が空なら
    tag `v<version>` があること）を確認し、そのコミットに対する GitHub のリリースノートを生成する（後述の
-   「新機能」に使う）。`macos` では `ref` に `KeryxMacAppStore` ターゲットがあることも確認し、Mac App Store 版より
+   「新機能」に使う）。`macos` を選んだときは `ref` に `KeryxMacAppStore` ターゲットがあることも確認し、Mac App Store 版より
    前の tag は何もビルドしないうちに拒否する。ビルドするジョブは、そのコミットをそのままチェックアウトする。
 2. 下記の Secrets がすべて設定されているかを確認し（`check-release-config.sh`）、証明書を使い捨てのキーチェーンに
    取り込み、プロファイルと API キーをランナーの一時ディレクトリに書く（どれも最後に削除する）。
@@ -1413,7 +1416,7 @@ API 呼び出しを確かめる方法は本番の実行しかない。`submit` �
 4. `package-ios-app-store.sh` が手動署名でアプリを archive・export し（Release、`generic/platform=iOS`、
    `MARKETING_VERSION`/`CURRENT_PROJECT_VERSION` は入力から設定）、export したアプリを
    `verify-store-requirements.sh` と署名（Team ID、Apple Distribution）で確認し、`altool --validate-app` を
-   実行してからアップロードする。`macos` では `package-mac-app-store.sh` が `KeryxMacAppStore` スキームと
+   実行してからアップロードする。Mac App Store ビルドでは `package-mac-app-store.sh` が `KeryxMacAppStore` スキームと
    `generic/platform=macOS` で同じことを行う: export するのはインストーラ証明書で署名した `.pkg` なので、その署名を確認し、
    パッケージ内のアプリを `--mac-app-store` 付きで確認し、さらにサンドボックスが有効で temporary-exception の
    エンタイトルメントがないことも確認する。
