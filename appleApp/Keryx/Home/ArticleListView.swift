@@ -47,15 +47,10 @@ struct ArticleListView: View {
     @State private var didShowFirstRows = false
     #if os(iOS)
     @State private var topReset = ArticleListTopReset()
-    /// Whether `articleList`'s heading row is on screen, before iOS 26 only. While it has scrolled
-    /// away, the bar's principal item names the list in its place (`barShowsTitle`).
-    @State private var barTitle = ArticleListBarTitle<ListIdentity>()
     @State private var scrollGate = ArticleListScrollGate()
     /// Whether this list is on screen rather than under the reader.
     @State private var listVisible = false
     #endif
-    /// `noArticlesView`'s header height, so the empty state below it fills exactly the rest.
-    @State private var emptyListHeaderHeight: CGFloat = 0
     /// Whether this list has been put into a window yet, which rebuilds `content` once more (its
     /// `.id`). The list a phone-width split view pushes for the first time has its refresh control
     /// hung under the navigation bar, and after its first pull that control leaves the list resting
@@ -134,8 +129,6 @@ struct ArticleListView: View {
                     // screen, never at the previous filter's (`ArticleListTopReset`). The first
                     // composition — including a restored `lastArticleId` selection — is not a switch
                     // and is not scrolled out from under.
-                    // Before iOS 26 the reset goes to the heading row above the first article, so the
-                    // new filter's name is on screen again (`carryOut`).
                     .onChange(of: topResetInput, initial: true) { _, input in
                         if let first = topReset.update(input) {
                             requestScroll(ArticleListScrollGate.Target(rowId: first), proxy)
@@ -184,8 +177,11 @@ struct ArticleListView: View {
         #endif
         .toolbar { toolbarContent }
         #if os(iOS)
+        // Inline on every iOS version, as the sidebar's: the name stays in the bar however far the
+        // list scrolls, so a large title before the first scroll would only take room from the rows
+        // (and, from iOS 26, stayed collapsed after a filter switch — no scroll API expands it).
         .navigationTitle(home.articleListTitle)
-        .navigationBarTitleDisplayMode(Self.titleDisplayMode)
+        .navigationBarTitleDisplayMode(.inline)
         // The system search field. iOS keeps it here, on the column whose contents it narrows (the
         // HIG's placement for searching the current view, as Mail does), rather than on the sidebar
         // macOS uses — at a compact width the sidebar's results would land in a column not on screen.
@@ -291,22 +287,6 @@ struct ArticleListView: View {
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
         #if os(iOS)
-        // Before iOS 26 the title feeds the next column's back button and its long-press menu; the
-        // heading is `ArticleListHeader`, so the bar's own centered title is replaced by nothing —
-        // until the heading scrolls away with the rows, when the bar names the list in its place.
-        // From iOS 26 the large title names the list itself (`titleDisplayMode`). Keyed on
-        // `showsListHeader`, the one place that decides which of the two this iOS gets.
-        if Self.showsListHeader {
-            ToolbarItem(placement: .principal) {
-                if barShowsTitle {
-                    Text(home.articleListTitle).font(.headline).lineLimit(1)
-                } else {
-                    // Zero-sized: once the title has been shown, a flexible `Color.clear` keeps the
-                    // room it took and leaves Mark All as Read in the overflow menu.
-                    Color.clear.frame(width: 0, height: 0)
-                }
-            }
-        }
         // The same status as the sidebar's, for the column an iPhone mostly shows.
         RefreshStatusToolbarItem(home: home)
         iOSActionItems
@@ -427,67 +407,13 @@ struct ArticleListView: View {
     // MARK: - Content / empty states
 
     #if os(iOS)
-    /// Names the selection being shown (and, during a search, the one being narrowed). Not a
-    /// navigation title: see `ArticleListHeader`. Each state of `content` places it itself: a
-    /// scrolling list (`articleList`, `noArticlesView`) carries it inside itself, since SwiftUI hangs
-    /// a `.refreshable` list's refresh control from the navigation bar, and a header between the two
-    /// leaves the control overlapping the header and flickering in and out as the list is pulled
-    /// (iOS 26); every other state goes through `headed`.
-    private var listHeader: some View {
-        ArticleListHeader(title: home.articleListTitle, icon: home.articleListIcon)
-    }
-
-    /// Large from iOS 26, inline before it. iOS 26's toolbar is translucent, with a scroll-edge
-    /// effect, and `listHeader`'s opaque band stands out under it, so the standard large title names
-    /// the list there instead — collapsing into the bar, or dropped by it when the column is too
-    /// narrow. Before iOS 26 the bar is opaque on scroll and `listHeader` sits under it unremarked,
-    /// while a large title collapses out of sight in a bar too crowded for an inline one.
-    private static var titleDisplayMode: NavigationBarItem.TitleDisplayMode {
-        showsListHeader ? .inline : .large
-    }
-
     /// The identity `body` gives `content`: a change rebuilds the list (see `body`).
     private var listIdentity: ListIdentity {
         ListIdentity(remountGeneration: remountGeneration, attachedToWindow: attachedToWindow)
     }
-
-    /// Whether the bar's principal item names the list: the list is what `content` shows and its
-    /// heading row has scrolled away (`ArticleListBarTitle`). Every other state of `content` shows
-    /// its heading through `headed`, so the bar names nothing there.
-    private var barShowsTitle: Bool {
-        barTitle.showsTitle(listShown: contentState.showsArticleList, current: listIdentity)
-    }
-
-    /// The id of `articleList`'s heading row, for the reset to the top on a filter switch.
-    private static let listHeaderRowId = "articleListHeader"
-
-    /// Whether `listHeader` heads the list — before iOS 26 only. The one place that decides between
-    /// the heading and the standard large title: `titleDisplayMode`, the bar's principal item and
-    /// the scroll reset all follow it.
-    private static var showsListHeader: Bool {
-        if #available(iOS 26, *) { false } else { true }
-    }
     #endif
 
-    /// A state of `content` that does not scroll, with `listHeader` above it on iOS.
-    @ViewBuilder
-    private func headed(_ state: some View) -> some View {
-        #if os(iOS)
-        if Self.showsListHeader {
-            VStack(spacing: 0) {
-                listHeader
-                state
-            }
-        } else {
-            state
-        }
-        #else
-        state
-        #endif
-    }
-
-    /// What `content` shows. One value, so `content` and the bar's title (`barShowsTitle`) cannot
-    /// disagree about whether `articleList` is the one on screen.
+    /// What `content` shows, decided in one place.
     private enum ContentState {
         /// Nothing yet: the lists, the rows or a search are still on their way.
         case blank
@@ -497,9 +423,6 @@ struct ArticleListView: View {
         case noArticles
         case searchResults
         case articles
-
-        /// Whether `articleList` is the state shown.
-        var showsArticleList: Bool { self == .searchResults || self == .articles }
     }
 
     private var contentState: ContentState {
@@ -534,20 +457,20 @@ struct ArticleListView: View {
     private var content: some View {
         switch contentState {
         case .blank:
-            headed(Color.clear)
+            Color.clear
         case .noFeeds:
-            headed(ContentUnavailableView {
+            ContentUnavailableView {
                 Label(L("home_no_feeds"), systemImage: "tray")
             } actions: {
                 Button(L("home_add_feed")) { dialogs.isAddingFeed = true }
-            })
+            }
         case .searchTooShort:
-            headed(ContentUnavailableView(
+            ContentUnavailableView(
                 L("home_search_too_short"),
                 systemImage: "magnifyingglass"
-            ))
+            )
         case .noSearchResults:
-            headed(noSearchResultsView)
+            noSearchResultsView
         case .noArticles:
             noArticlesView
         case .searchResults:
@@ -606,18 +529,7 @@ struct ArticleListView: View {
         #if os(iOS)
         GeometryReader { geometry in
             ScrollView {
-                if Self.showsListHeader {
-                    VStack(spacing: 0) {
-                        listHeader
-                            .onSizeChanged { emptyListHeaderHeight = $0.height }
-                        emptyState.frame(
-                            width: geometry.size.width,
-                            height: max(0, geometry.size.height - emptyListHeaderHeight)
-                        )
-                    }
-                } else {
-                    emptyState.frame(width: geometry.size.width, height: geometry.size.height)
-                }
+                emptyState.frame(width: geometry.size.width, height: geometry.size.height)
             }
             .modifier(PullToRefreshModifier(home: home))
         }
@@ -698,26 +610,12 @@ struct ArticleListView: View {
     private var articleList: some View {
         let selectedId = displayedSelectedId
         let paneFocused = focusedPane.wrappedValue == .articleList && windowIsKey
-        // The `List` these reports belong to: a rebuilt list's (see `body`) is a different one.
-        let owner = listIdentity
         return List {
-            if Self.showsListHeader {
-                // The first row, scrolling away with the rows; `barTitle` tracks it.
-                listHeader
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .listRowInsets(EdgeInsets())
-                    .listRowSeparator(.hidden)
-                    .id(Self.listHeaderRowId)
-                    .onAppear { barTitle.headerAppeared(in: owner, current: listIdentity) }
-                    .onDisappear { barTitle.headerDisappeared(from: owner, current: listIdentity) }
-            }
             ForEach(displayedRows) { article in
                 articleRow(article, selectedId: selectedId, paneFocused: paneFocused)
             }
         }
         .listStyle(.plain)
-        // No extra gap above the header, so it sits where it does over an empty list.
-        .contentMargins(.top, Self.showsListHeader ? 0 : nil, for: .scrollContent)
     }
 
     private func articleRow(_ article: ArticleRowModel, selectedId: String?, paneFocused: Bool) -> some View {
@@ -820,13 +718,7 @@ struct ArticleListView: View {
 
     private func carryOut(_ target: ArticleListScrollGate.Target, _ proxy: ScrollViewProxy) {
         guard !target.onlyIfOffScreen || !visibleRows.appearedIds.contains(target.rowId) else { return }
-        // Before iOS 26 the heading row sits above the first article, so a scroll to the first
-        // article goes to the heading instead — a filter switch's reset then shows the new filter's name.
-        if Self.showsListHeader, target.rowId == displayedRows.first?.id {
-            proxy.scrollTo(Self.listHeaderRowId, anchor: .top)
-        } else {
-            proxy.scrollTo(target.rowId)
-        }
+        proxy.scrollTo(target.rowId)
     }
 
     private func scrollToFreshEnd(_ proxy: ScrollViewProxy) {
