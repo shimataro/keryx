@@ -1246,9 +1246,9 @@ now never unmounts it either (the article detail pane is always one of the two s
 concern there).
 
 At a narrow layout, `initialPaneFor(layout, saved)` always resolves to `ArticleList` regardless of
-`saved` — including a saved `HomePane.FeedList` left over from a version before the drawer existed,
-which can no longer be honored (there's no pane to restore it as any more) — while `Triple` returns
-`saved` unchanged (the article the user was last reading, same as ever): restoring straight into a
+`saved` — a saved `HomePane.FeedList` included, since a narrow layout has no feed-list pane to restore
+into (the feed list is a drawer there) — while `Triple` returns `saved` unchanged (the article the user
+was last reading): restoring straight into a
 detail pane with no list around it and no context for how the user got there would be disorienting
 on a phone-shaped session. This clamp is applied exactly once, on the first frame with a real
 (post-layout) width, and never again — a later resize or rotation must not yank the user off
@@ -1532,9 +1532,9 @@ show none (the toolbar's refresh spinner covers the refresh as a whole).
 
 ## Apple Native Apps (SwiftUI)
 
-`external-spec.md` §2 plans a native SwiftUI app for macOS, and later iOS/iPadOS. This section
-records the decisions that the shared Kotlin code and the rest of these docs are being prepared
-around.
+The macOS and iOS/iPadOS apps are native SwiftUI apps that share their logic through `:shared`
+(`external-spec.md` §2). This section records the decisions the shared Kotlin code and the rest of
+these docs are built around.
 
 ### Distribution and coexistence
 

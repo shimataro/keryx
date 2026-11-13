@@ -477,9 +477,9 @@ Google Drive.
   `null`, which is the correct background outcome.
 
 `appDataFolder` is scoped **per Cloud project, not per OAuth client**, so adding an Android client
-alongside the existing desktop one leaves both devices reading and writing the same hidden folder —
-verified by listing `appDataFolder` from a second OAuth client in the same project and seeing the
-file the desktop app had created. Without that property, desktop and Android would silently sync to
+alongside the existing desktop one leaves both devices reading and writing the same hidden folder. To
+re-check it, list `appDataFolder` from a second OAuth client in the same project: the file another
+client created there is visible. Without that property, desktop and Android would silently sync to
 separate files.
 
 ### Google Drive on Apple (secretless "iOS"-type OAuth client)

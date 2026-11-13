@@ -177,8 +177,8 @@ into `ci.yml` (the `android-instrumented-test` job); `:composeApp:connectedAndro
 so it only runs locally.
 
 `androidApp`'s own instrumented suite (Compose UI gesture tests, see `androidApp/src/androidTest/`
-above) uses the regular `com.android.application` task naming instead — flavor-qualified now that
-`androidApp` splits into `github`/`play`/`fdroid` product flavors (see `build.md`'s "Android (APK / AAB)"):
+above) uses the regular `com.android.application` task naming instead — flavor-qualified, since
+`androidApp` has `github`/`play`/`fdroid` product flavors (see `build.md`'s "Android (APK / AAB)"):
 
 ```bash
 $ANDROID_HOME/emulator/emulator -avd <name> -no-snapshot -no-boot-anim &
@@ -1350,7 +1350,7 @@ animations"), 14, 15 and 16:
   you were reading flashes once.
 - With 3-button navigation, and on Android 13 without the developer option, Back returns to the list at
   once with the flash.
-- Unchanged elsewhere: Back closes the open drawer (with its own predictive animation), closes the
+- Elsewhere, Back closes the open drawer (with its own predictive animation), closes the
   expanded search bar, dismisses dialogs and bottom sheets, steps through Settings (category screen →
   list → closed), and on the article list itself leaves the app (with the system's back-to-home preview).
 
@@ -1546,7 +1546,8 @@ Delete and reinstall the app to bring first-run Setup back, then confirm:
 - (iOS) On a large iPhone and an iPad, where everything fits: the content is vertically centered and
   does not bounce when dragged.
 - (macOS) Shrink the window to its minimum: both option cards are still shown in full, with nothing
-  truncated or cut off. At the default window size the screen looks as before.
+  truncated or cut off. At the default window size nothing scrolls until a connection is in progress
+  or an error is shown below the cards.
 
 ### In-App Update
 

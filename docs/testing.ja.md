@@ -202,7 +202,7 @@ $ANDROID_HOME/emulator/emulator -avd <name> -no-snapshot -no-boot-anim &
 
 `androidApp` 自身の計装テストスイート（Compose UI のジェスチャテスト。上記の
 `androidApp/src/androidTest/` を参照）は、通常の `com.android.application` のタスク命名を使う——
-`androidApp` が `github`/`play`/`fdroid` の product flavor に分かれた分だけタスク名も flavor 修飾される
+`androidApp` には `github`/`play`/`fdroid` の product flavor があるため、タスク名も flavor 修飾される
 （`build.ja.md` の「Android (APK / AAB)」を参照）:
 
 ```bash
@@ -1425,7 +1425,7 @@ thumb の比率計算そのものは `ScrollIndicatorGeometryTest.kt` が単体�
   読んでいた行が 1 回フラッシュすること。
 - 3 ボタンナビゲーション、および開発者オプション無しの Android 13 では、戻るで即座に一覧へ戻り、
   フラッシュすること。
-- 他は従来どおり: 開いたドロワーは戻るで閉じ（ドロワー自身の予測型アニメーション付き）、展開した検索バーが
+- ほかの場面では、開いたドロワーは戻るで閉じ（ドロワー自身の予測型アニメーション付き）、展開した検索バーが
   閉じ、ダイアログとボトムシートが閉じ、設定は段階的に戻り（カテゴリの画面 → 一覧 → 閉じる）、記事一覧
   自体ではアプリを離れる（システムのホームへ戻るプレビュー付き）こと。
 
@@ -1602,7 +1602,7 @@ SwiftUI のファイルメニューのインポート／エクスポートは要
 - （iOS）すべてが収まる大きな iPhone と iPad で: 内容が縦中央に置かれ、ドラッグしてもバウンス
   しない。
 - （macOS）ウィンドウを最小まで縮める: 2 つの選択肢のカードが省略も切れもなく全体表示される。既定の
-  ウィンドウサイズでは従来と同じ見た目になる。
+  ウィンドウサイズでは、接続中の表示かエラーがカードの下に出るまではスクロールしない。
 
 ### アプリ内アップデート
 
