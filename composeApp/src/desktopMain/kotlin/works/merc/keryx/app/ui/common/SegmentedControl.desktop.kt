@@ -22,6 +22,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import org.jetbrains.compose.resources.DrawableResource
 
 @Composable
 actual fun <T> SegmentedControl(options: List<Pair<T, String>>, selected: T, onSelect: (T) -> Unit) {
@@ -58,7 +59,7 @@ actual fun <T> SegmentedControl(options: List<Pair<T, String>>, selected: T, onS
 }
 
 @Composable
-actual fun MenuChip(label: String, accessibilityLabel: String, highlighted: Boolean, onClick: () -> Unit) {
+actual fun MenuChip(icon: DrawableResource, label: String, accessibilityLabel: String, highlighted: Boolean, onClick: () -> Unit) {
     val shape: Shape = MaterialTheme.shapes.extraSmall
     val contentColor = if (highlighted) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
     Row(
@@ -71,9 +72,15 @@ actual fun MenuChip(label: String, accessibilityLabel: String, highlighted: Bool
                 contentDescription = accessibilityLabel
                 stateDescription = label
             }
-            .padding(start = 12.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
+            .padding(start = 8.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        KeryxIcon(
+            icon,
+            contentDescription = null,
+            modifier = Modifier.padding(end = 4.dp).size(16.dp),
+            tint = contentColor,
+        )
         Text(
             label,
             style = MaterialTheme.typography.labelLarge,

@@ -40,7 +40,7 @@ class NotificationAlertsTest {
         advanceUntilIdle()
         assertNull(alerts.alertToSurface.value)
 
-        // INFO is a new-version notice or a finished OPML import — the bell's badge, not a Snackbar.
+        // INFO is a new-version notice or a finished OPML import — the notification center's row, not a Snackbar.
         center.add(alert("i", AppNotificationLevel.INFO))
         advanceUntilIdle()
         assertNull(alerts.alertToSurface.value)
@@ -61,10 +61,47 @@ class NotificationAlertsTest {
         center.add(alert("e", AppNotificationLevel.ERROR))
         advanceUntilIdle()
 
-        alerts.markAlertsSurfaced()
+        alerts.markAlertsSurfaced(alerts.alertToSurface.value!!)
         advanceUntilIdle()
 
         assertNull(alerts.alertToSurface.value)
+    }
+
+    @Test
+    fun anAlertRaisedWhileAnotherIsShownStaysPending() = runTest {
+        // A transient surface shows one alert at a time; one raised while it is on screen has not
+        // been seen, so marking the shown one must leave the newer one to be announced next.
+        val center = NotificationCenter()
+        val alerts = NotificationAlerts(center)
+        center.add(alert("a", AppNotificationLevel.ERROR))
+        advanceUntilIdle()
+        val shown = alerts.alertToSurface.value!!
+        assertEquals("a", shown.id)
+
+        center.add(alert("b", AppNotificationLevel.WARNING))
+        alerts.markAlertsSurfaced(shown)
+        advanceUntilIdle()
+
+        assertEquals("b", alerts.alertToSurface.value?.id)
+        alerts.markAlertsSurfaced(alerts.alertToSurface.value!!)
+        advanceUntilIdle()
+        assertNull(alerts.alertToSurface.value)
+    }
+
+    @Test
+    fun markingADismissedAlertMarksOnlyThatAlert() = runTest {
+        val center = NotificationCenter()
+        val alerts = NotificationAlerts(center)
+        center.add(alert("a", AppNotificationLevel.ERROR))
+        advanceUntilIdle()
+        val shown = alerts.alertToSurface.value!!
+        center.dismiss("a")
+        center.add(alert("b", AppNotificationLevel.ERROR))
+
+        alerts.markAlertsSurfaced(shown)
+        advanceUntilIdle()
+
+        assertEquals("b", alerts.alertToSurface.value?.id)
     }
 
     @Test
@@ -75,7 +112,7 @@ class NotificationAlertsTest {
         val alerts = NotificationAlerts(center)
         center.addCoalescing(alert("first", AppNotificationLevel.ERROR, text = NotificationText.SyncFailed(ErrorKind.GENERIC)))
         advanceUntilIdle()
-        alerts.markAlertsSurfaced()
+        alerts.markAlertsSurfaced(alerts.alertToSurface.value!!)
         advanceUntilIdle()
 
         center.addCoalescing(alert("second", AppNotificationLevel.ERROR, text = NotificationText.SyncFailed(ErrorKind.GENERIC)))

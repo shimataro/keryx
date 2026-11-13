@@ -645,6 +645,19 @@ readers (desktop, Android) keep their own link interception and do not have this
 rating counts in-app browsing of arbitrary pages as "unrestricted web access" (16+), which this keeps
 the SwiftUI app clear of.
 
+A script's top-level navigation can also cost the *next* article its load. WebKit stops a document
+load still in flight as soon as another top-level navigation starts, even one the gate then refuses,
+and often reports nothing about the dropped load — so an article whose script keeps setting
+`location` (measured: one doing so every millisecond lost the next article's load in 12 of 150 quick
+switches) left itself on screen while the list showed the newly selected article. The SwiftUI
+reader therefore tracks its own load until it commits and loads the document again when a
+top-level navigation is refused or its load fails while it is still in flight, up to
+`READER_DOCUMENT_RELOAD_LIMIT` times per document (`:shared`'s
+`presentation/article/ReaderDocumentLoad.kt`; 0 of 150 after the change). The Compose readers, which
+let such a navigation through rather than refusing it, lost loads the same way (4 of 150 on desktop)
+and follow the same rule, checking a tag the document carries — see "A pushed document is pushed as
+soon as the view is ready" in [app-architecture.md](app-architecture.md).
+
 ### What a real fix would need
 
 Treating the body as untrusted markup rather than only containing its effects — stripping
@@ -910,3 +923,157 @@ the probe and the generation in place), build, and on an iPhone simulator check 
 
 If both hold on every supported iOS version, remove the workaround as above and delete this entry.
 If either fails, restore the `.id` and update the version this entry was last seen on.
+
+## iOS: going back to the article list crashed in `UICollectionView`
+
+**Status**: mitigated, cause not confirmed. Scrolls no longer reach a list that is not on screen
+(`Home/ArticleListScrollGate.swift`), but the crash was never reproduced, so whether that stops it is
+unknown.
+
+### Symptom
+
+v0.27.0 on an iPhone SE (3rd generation), iOS 26.5, aborted on an `NSInternalInconsistencyException` from
+`-[UICollectionView _validateScrollingTargetIndexPath:raisingExceptionIfNecessary:]`, 32 seconds after the
+process launched. SwiftUI's `UpdateCoalescingCollectionView.updateContent()` asked for the scroll, in
+`layoutSubviews`, during the layout that starts the navigation pop from the reader. No Keryx frame is on the
+stack but `main`, and the report does not hold the exception's message, so the index path and row count are
+unknown. The Kotlin GC threads were idle.
+
+The reader's swipe pager is a `UIPageViewController`, not a collection view, so the `List` of the article list
+is the only SwiftUI collection view in this layout.
+
+### What was ruled out
+
+Measured on the iOS 26.3 simulator. The first four rows made the pop from code, the last two with an edge swipe
+driven by a UI test:
+
+| Scenario | Result |
+| --- | --- |
+| `scrollTo` asked while the list is under the reader | Happens (selection moves, restored selection) |
+| Pending scroll to row 51, rows shrink from 60 to 9, go back | No crash |
+| Reader restored at launch, go back | No crash |
+| Reader restored at launch, rows shrink from 59 to 34, go back | No crash |
+| Scroll held, edge swipe back to the list | No crash |
+| Scroll held, edge swipe cancelled | No crash |
+
+So a pending scroll made stale by rows shrinking is not enough on its own.
+
+### Not yet tried
+
+iOS 26.5, a device, and rows growing while the list is hidden.
+
+### Remaining risk
+
+On a list that is on screen, a `scrollTo` and a row change can still land in the same update: there is no
+callback for when a `scrollTo` has been carried out, so the two cannot be strictly kept apart.
+
+The gate also opens as the pop starts, not when it ends. On the simulator, a held scroll was carried out about
+half a second before the pop finished, and in a cancelled edge swipe it was carried out and the list then left
+the screen again. So a held scroll can still reach the list during the transition the crash happened in. Waiting
+for the transition to finish would close this, but a row swiped off screen would then jump after the pop, with
+its return flash mostly over, so it is left to the real fix below.
+
+### What a real fix would need
+
+Moving the article list from a SwiftUI `List` to a `UICollectionView`, as the sidebar already is:
+`scrollToItem` then runs synchronously against rows the app knows, with nothing left pending. It has to carry
+over the rows, swipe actions and pull-to-refresh, so it is a task of its own.
+
+## macOS: dropping a folder between folders crashed inside SwiftUI
+
+**Status**: worked around, not fixed — external (SwiftUI) defect. Every feed and folder drop is
+decided and applied without SwiftUI's drop handling (`Home/Sidebar/SidebarDropGuard.swift`).
+
+### Symptom
+
+Without the guard, dropping a folder between folders in the sidebar traps on macOS 26
+(`EXC_BREAKPOINT`, a Swift assertion; observed with v0.27.0 on macOS 26.7.1):
+`-[NSOutlineView performDragOperation:]` → `OutlineListCoordinator.outlineView(_:acceptDrop:item:childIndex:)` →
+`outlineView(_:performDropInsertion:with:at:)` → `ListOutlineItem.subscript` → `HeterogeneousViewIDs.subscript` →
+`HeterogeneousCollection.element(at:)`. No Keryx frame is on the stack. It happens on every such drop,
+including with all folders collapsed.
+
+### Cause
+
+A bug in SwiftUI's `List` on macOS, reproduced in a standalone app with the same structure: a
+`ForEach` of folder rows with `.onInsert`, inside a `List` in sidebar style. Dropping a folder between
+folders crashed whenever the folder rows had any one of a `DisclosureGroup`, a `.badge`, a context menu
+or an `.onDrop`; with rows carrying only `.itemProvider` and `.tag` (like the unfoldered feed rows) it did
+not. Feeds inserted between other feeds — in another folder or the same one — never crashed.
+
+### What was ruled out
+
+| Change | Result |
+| --- | --- |
+| Folders `Section` without `isExpanded`, or with a `header:` view | Crashes |
+| No `.onInsert` on the feeds inside each folder | Crashes |
+| No `.tag`, no `.badge`, or no `.onDrop`/context menu on the folder row | Crashes |
+| Folder rows without `DisclosureGroup` (but with the row's other modifiers) | Crashes |
+| `.onMove` instead of `.onInsert` on the folders | No crash, but a feed can no longer be inserted between another folder's feeds |
+| Wrapping SwiftUI's outline data source in a forwarding proxy | Breaks SwiftUI's own drop handling (no insertion line, no drop onto a folder row) |
+
+Every row element the sidebar needs is enough to trigger it, so no change to the view structure avoids it.
+A Swift assertion is a trap, not an exception, so it cannot be caught.
+
+### The workaround
+
+Beyond the crash, SwiftUI's drop handling refuses some positions (a folder over a feed row inside a
+folder, the middle of a folder row), accepts positions that do not exist (children of a feed row,
+which crash too), moves the drop target while refusing it, and answers "copy", which puts "+" on the
+cursor. So `SidebarDropGuard` keeps SwiftUI out of feed and folder drops altogether, and the `List`
+carries no `.onInsert`/`.onDrop`:
+
+- It adds methods to the class of the `NSOutlineView` behind the `List` and to the class of its data
+  source (SwiftUI's `OutlineListCoordinator`) — `class_addMethod` where the class only inherits the
+  method, `method_setImplementation` (keeping the old implementation) where it has its own. Each
+  method acts only for an outline that has the guard's handler attached and a drag carrying a feed
+  or folder type; everything else goes on to the original implementation (looked up from the
+  superclass on every call where none was replaced, as `super` would).
+- The data source's `outlineView(_:validateDrop:proposedItem:proposedChildIndex:)` decides the
+  destination and sets it with `setDropItem`; the outline's `performDragOperation:` applies it, if
+  the destination still resolves to the same action. SwiftUI's `validateDrop`/`acceptDrop` are
+  never called for these drags.
+- The outline's `expandItem:` refuses to spring anything open during a folder drag.
+  SwiftUI's outline overrides `expandItem:` to record the row as expanded before expanding it, so
+  refusing there — not in `expandItem:expandChildren:`, which it calls next — keeps that record
+  unchanged; SwiftUI applies its own expansion state another way, which is left alone.
+- The guard registers the two drag types itself (`registerForDraggedTypes`), since no SwiftUI drop
+  modifier does any more.
+- A feed's copy under a tag gets an id of its own; with the feed's id, the outline mistook the copy
+  for the original.
+
+The rules for where an item lands are in "Sidebar (macOS)" in [app-architecture.md](app-architecture.md).
+
+The class, not the instance, is changed because something else may already have swizzled the
+instance: in the test host, KVO had replaced the outline's class before the guard's first chance to
+install, and subclassing KVO's class would break KVO's undoing it. Swift's `type(of:)` skips KVO's
+class, so the methods land on SwiftUI's own classes either way.
+
+How it turns out when something does not go as intended:
+
+| Case | Result |
+| --- | --- |
+| No outline is found next to the guard | The guard is not installed: sidebar drag and drop does nothing (no crash), and moving and tagging remain available from the context menu. No fault is logged: the outline is looked for again on every update, and missing it for a moment right after launch is normal. The integration test catches this case |
+| The outline is found, but it has no data source or its classes lack a method the guard overrides | The guard is not installed, with the same result. A fault is logged once (`SidebarDropGuard` category) |
+| The sections are not laid out as expected | The guard is installed, but each affected drop is refused and nothing moves. No fault is logged |
+| KVO observes the outline, before or after the guard is installed | No effect: the methods are on SwiftUI's classes, which KVO's class inherits from. Covered by a test |
+| Another `List` in the app shares the classes | Its outline has no handler attached, so every method goes on to the original implementation |
+| SwiftUI's own implementation of a replaced method changes later | Other drags get the kept original, or the superclass's method looked up per call |
+
+`KeryxTests/SidebarDropGuardTests.swift` hosts a `List` shaped like the sidebar in an offscreen
+window and checks what the guard relies on: that the `List` is an `NSOutlineView` whose data source
+answers `validateDrop`, that its root items are the `List`'s sections in order (the headerless
+All/Starred section first, then Folders, "No folder" and Tags), that each row is read as the row it
+is, and that drops sent through a stand-in `NSDraggingInfo` are decided and applied by the guard. CI
+runs it on `macos-latest`, so a new SDK or macOS that changes these fails there. It cannot cover the
+older macOS releases users run (14 and later) or a real mouse drag; re-check those by hand on each
+new macOS: drop a folder at the top, the middle and the bottom of a folder row, over a feed inside a
+folder, at the top and at the end, and drop a feed onto a folder, "No folder", a tag and a feed's
+copy under a tag.
+
+### What a real fix would need
+
+A fix in SwiftUI. Even then, the guard stays as long as SwiftUI's drop handling misplaces or refuses
+drops as described above. Driving the outline directly instead (an `NSOutlineView` wrapped in
+`NSViewRepresentable`, as the iOS sidebar does with a `UICollectionView`) would remove the reliance on
+SwiftUI's internals, at the cost of drawing the rows, selection and metrics the `List` now provides.

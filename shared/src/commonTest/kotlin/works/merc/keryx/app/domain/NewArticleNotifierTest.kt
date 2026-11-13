@@ -14,8 +14,8 @@ import kotlin.test.assertTrue
 class NewArticleNotifierTest {
     /**
      * A background refresh reaches the OS tray only. It must NOT reach the in-app notification
-     * center (the bell): new articles are already durably visible in the article list and the unread
-     * badges, so a bell entry would be noise. That half is now enforced structurally — the notifier
+     * center: new articles are already durably visible in the article list and the unread
+     * badges, so an entry would be noise. That half is now enforced structurally — the notifier
      * has no [NotificationCenter] dependency to write to at all — so this asserts what remains.
      */
     @Test

@@ -100,7 +100,7 @@ class FileTokenStorageTest {
     /**
      * This class *is* the plaintext fallback, so it never reports a secure save — not even on the
      * happy path. It does have to tell a landed write apart from one that failed outright, though:
-     * `CloudSession` raises a different bell warning for each, and only the second one loses the
+     * `CloudSession` raises a different notification-center warning for each, and only the second one loses the
      * tokens when the app exits.
      */
     @Test

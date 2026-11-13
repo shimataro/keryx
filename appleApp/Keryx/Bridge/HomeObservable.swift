@@ -183,6 +183,9 @@ final class HomeObservable: ObservableAssignment {
     /// and the reader's ✓ is often off screen (a long-pressed row is not selected, and at iPhone width
     /// the reader is not shown) — that is every copy, as Android below API 33 does with its snackbar.
     let copyToast: TransientToastState
+    /// The iOS toast that announces a newly raised warning/error (`AlertToastAnnouncement`), drawn
+    /// by `HomeView` alongside `copyToast` so neither replaces the other.
+    let alertToast = TransientToastState(duration: AlertToastAnnouncement.duration)
     /// The toolbar status area's refresh status — "checking", then the result — for the refreshes the
     /// user started, fed from `manualRefreshStatus` (`HeldRefreshStatus`). iOS only — macOS keeps its
     /// spinning Refresh button.
@@ -227,6 +230,15 @@ final class HomeObservable: ObservableAssignment {
         // column and reader position against it (`HomeRestoration`).
         syncSelectedArticleRow()
         syncReaderContent()
+        // The filter is restored synchronously in that init too. Waiting for the first delivery would
+        // start the list on `All` and then switch it to the restored filter, which `ArticleListTopReset`
+        // takes for the user's switch and answers with a scroll to the top, over the restored selection.
+        assignFilter(viewModel.filter.value)
+        // The sidebar's selected row is restored with it; mirroring only the filter would leave the
+        // two disagreeing (the highlight follows both) until the first delivery.
+        assignSelectedRowInstance(viewModel.selectedRowInstance.value)
+        // The first delivery then finds the filter unchanged and would not set the header from it.
+        updateFeedListSelectionTarget()
     }
 
     /// Selects a filter and mirrors the result into the observed state at once. The `for await`

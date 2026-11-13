@@ -10,7 +10,7 @@ import works.merc.keryx.app.domain.NotificationCenter
 import works.merc.keryx.app.presentation.home.NotificationAlerts
 
 /**
- * The Compose notification-center UI's own ViewModel: the bell's row list plus the "next action
+ * The Compose notification-center UI's own ViewModel: the notification center's row list plus the "next action
  * awaiting a host to resolve it" navigation state. The alert-surfacing logic (Android's foreground
  * Snackbar) is shared — see [NotificationAlerts].
  */
@@ -29,7 +29,7 @@ class NotificationCenterViewModel(
     val alertToSurface: StateFlow<AppNotification?> = alerts.alertToSurface
 
     /** See [NotificationAlerts.markAlertsSurfaced]. */
-    fun markAlertsSurfaced() = alerts.markAlertsSurfaced()
+    fun markAlertsSurfaced(shown: AppNotification) = alerts.markAlertsSurfaced(shown)
 
     /** Requests [notification]'s own action (a no-op for a notification with none). */
     fun requestAction(notification: AppNotification) {

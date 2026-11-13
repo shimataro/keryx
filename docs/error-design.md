@@ -34,6 +34,15 @@ and lose more than the access itself is worth. The accesses that are, today:
 - The Apple SDK's search-index setup (`KeryxSdk.start`'s `createTable()` and `prepareSearchIndex()`). A
   failure leaves search without the missing rows until the next launch or refresh creates and fills the
   table again; propagating it from `start` would be shown as the "database too new" screen.
+- The selected article's body lookup (`HomeViewModel.applyHydratedSelection`). A failure — the
+  lookup's connection waited out the whole `busy_timeout`, say — shows the selection's header
+  (`ReaderContent.Header`) without its body, so the article list, the toolbar and the reader all stay
+  on the selection, and choosing it again retries the lookup. Propagating it would end the app on
+  Android and Apple, and on desktop leave the previous article in the reader under the new selection.
+- The launch-time restore of the previously selected article (`HomeViewModel`'s construction). A failure
+  restores no article, as if none had been saved. A selection whose body lookup failed is saved for the
+  next launch too, so a lookup that fails every time (a row too large for Android's `CursorWindow`, say)
+  would otherwise throw out of the ViewModel's construction on every launch, and Home would never open.
 
 Any other DB access propagates as before; a new best-effort one is added to this list, with its reason. (An
 operation the user started — an OPML import or export — that fails is not an exception to this: it is reported
@@ -166,13 +175,23 @@ Status labels that are not messages (a notification's level, such as "Error") ar
     reader does not show (a context menu opened from the keyboard or VoiceOver does not select its row) is
     announced by VoiceOver instead.
 - History is kept only for the session (not persisted to DB). Only things worth looking back at are recorded: errors and warnings, plus `INFO` for a new app version. **New articles are NOT recorded in the notification center** — `NewArticleNotifier` only feeds the OS notification (tray), because their arrival is already durably visible in the article list and the unread badges. This OS notification fires for a manual refresh ("Refresh All", a pull) always — including one that joined an automatic refresh already running (`RefreshCycleRunner.joinAutomaticCycle`), which then posts that refresh's notification, or the one it held back — and for an automatic one (startup, the periodic loop, Android's `FeedRefreshWorker`, iOS's background refresh) only while the app is not in front (`domain/AppForeground`, checked by `RefreshCycleRunner`) — a user looking at the app already sees the new articles land, so a refresh they did not ask for is not worth interrupting them over (see "Refresh feedback" in [external-spec.md](external-spec.md) §9). Either way it goes through the shared `NewArticleNotifier.notifyIfEnabled` gate (new-article count > 0 and the `notificationEnabled` setting).
-- Bell icon with badge (count). The bell lives in `ArticleListPane`'s header row at every layout width, including the desktop 3-pane steady state (see the `ui-guidelines` skill for the exact rule). `ArticleDetailPane` deliberately has none.
-- Background-update warnings are recorded only in the notification center (because there is no UI context), and produce **no OS notification** — the OS notification channel is reserved for new articles (see above). On Android, `ForegroundAlertSnackbar` (`ui/home/HomeScreen.kt`) therefore also announces every `WARNING`/`ERROR` in a Snackbar the moment it is raised: a badge alone only reaches a user already looking at the pane hosting the bell, and these alerts are raised asynchronously by `runAndroidStartupTasks` and `FeedRefreshWorker`. `INFO` is excluded (a new-version notice is not an alert). Details:
+- **Entry point: a row at the bottom of the feed list, always shown.** It names the notification
+  center and shows the count while there is something in it; when it is empty the row shows no
+  count, and opening it shows "No notifications". Clicking the row opens the list above it — a
+  bottom sheet on Android, a sheet at an iPhone's compact width. The row is
+  `ui/home/NotificationCenterRow.kt` in Compose and `NotificationCenterRow.swift` in SwiftUI. It takes
+  no toolbar slot, since the history is empty most of the time, and it stays in place rather than
+  appearing and disappearing, so the list above it never changes height. Where the feed list is a
+  drawer (Compose's narrower widths), the count rides as a badge on the button that opens the drawer.
+  Neither the article list nor `ArticleDetailPane` has an entry point of its own; the `ui-guidelines`
+  skill has the exact rule.
+- Background-update warnings are recorded only in the notification center (because there is no UI context), and produce **no OS notification** — the OS notification channel is reserved for new articles (see above). On Android, `ForegroundAlertSnackbar` (`ui/home/HomeScreen.kt`) therefore also announces every `WARNING`/`ERROR` in a Snackbar the moment it is raised: the footer row (or the drawer button's badge) only reaches a user already looking at it, and these alerts are raised asynchronously by `runAndroidStartupTasks` and `FeedRefreshWorker`. `INFO` is excluded (a new-version notice is not an alert). Details:
   - Already-announced bookkeeping keys on `core/AppNotification.kt`'s `AlertKey` (level + text + action), not the notification id, which `NotificationCenter.addCoalescing` mints afresh on every recurrence — so a permanently failing sync announces itself once, not once per background attempt. Both go through the same helper so they cannot drift.
   - The collector is gated on the window actually having OS focus (`LocalWindowInfo`). While the app is backgrounded, the notification shade is down, or the settings dialog (a window of its own) is open, the alert simply waits — announcing it into a window nobody is looking at would time the Snackbar out unseen and consume it for good. It is surfaced once focus returns.
-  - The Snackbar's action runs the notification's own next action (see the table below), through the same `notificationRowAction` the bell's rows use. `ResetCloudData` is announced without an action, since it must go through its own confirmation.
+  - The Snackbar's action runs the notification's own next action (see the table below), through the same `notificationRowAction` the notification center's rows use. `ResetCloudData` is announced without an action, since it must go through its own confirmation.
   - Only the newest of a simultaneous batch is announced (Material 3 shows one Snackbar at a time); the badge carries the count.
-- **Every notification kept in the bell carries a next action** (`AppNotificationAction`). Clicking the row runs it; only `ResetCloudData` is excluded from row-clicking (destructive) and keeps its own inline confirm button. A clickable row signals itself the same way the settings screen's `LinkRow` does (primary color + underline on hover).
+- **iOS / iPadOS announce the same alerts in a transient toast.** The sidebar holding the entry point is on screen only at an iPhone's root and can be hidden on an iPad, so a newly raised `WARNING`/`ERROR` is shown in a toast at the bottom of the screen for about four seconds (above the "URL copied" toast when both show) and spoken once by VoiceOver. It is driven by the same shared `presentation/home/NotificationAlerts` as the Android Snackbar, so a recurring alert is announced once either way. Like the Snackbar it waits while it could not be seen — the scene inactive, or the Settings sheet covering Home — and counts as announced only after it has stayed up (`AlertToastAnnouncement.swift`). Unlike the Snackbar, a newer alert does not replace one on screen: it is shown next, since `NotificationAlerts.markAlertsSurfaced(shown)` marks only the alert that was shown and older ones, leaving newer ones pending. When several are raised before the toast gets to them — while it waits, or while another toast is up — only the newest of them is shown, as with the Snackbar: `markAlertsSurfaced(shown)` marks the older ones announced with it, and the notification center's row carries the count. The toast takes no touch; the message itself and the notification center's row carry the next step. macOS shows no toast: its sidebar, with the row, is always on screen.
+- **Every notification kept in the notification center carries a next action** (`AppNotificationAction`). Clicking the row runs it; only `ResetCloudData` is excluded from row-clicking (destructive) and keeps its own inline confirm button. A clickable row signals itself the same way the settings screen's `LinkRow` does (primary color + underline on hover).
 
 | Next action | Source | Behavior |
 | --- | --- | --- |
@@ -202,7 +221,7 @@ plain data classes/enums, `AlertKey` (level + text + action) compares them struc
 | `CloudAuthException` / `SchemaVersionException` | ❌ | ✅ |
 | `CloudDataIncompatibleException` (corrupt / incompatible cloud DB / constraint-violating data) | ❌ (further **automatic** syncs are suspended entirely — `SyncTrigger.AUTOMATIC` gate, see "Automatic-Sync Suspension" in [sync-architecture.md](sync-architecture.md) — until a reset or a successful manual sync) | ✅ |
 | `FeedNotFoundException(isGone=true)` | ❌ | ✅ |
-| `UpdateException` (check/download/verify/install failure) | ❌ (retried only via the user clicking Retry — the Updates settings tab, or the tray/Help menu update item, which opens the Updates tab) | ❌ (surfaced there instead — see "In-App Update" in [background-update.md](background-update.md); only the informational "update available"/"ready to install" notices reach the bell, via `ShowSettingsTab`/`OpenUrl` above) |
+| `UpdateException` (check/download/verify/install failure) | ❌ (retried only via the user clicking Retry — the Updates settings tab, or the tray/Help menu update item, which opens the Updates tab) | ❌ (surfaced there instead — see "In-App Update" in [background-update.md](background-update.md); only the informational "update available"/"ready to install" notices reach the notification center, via `ShowSettingsTab`/`OpenUrl` above) |
 
 \* `FeedFetcher` retries only on an actual timeout, for `FEED_TIMEOUT_RETRY_COUNT` extra attempts — a non-timeout
 `FeedFetchException` (e.g. a 5xx status) is not retried within the same fetch.
@@ -211,7 +230,7 @@ plain data classes/enums, `AlertKey` (level + text + action) compares them struc
 (including `CloudStorageException`) returns immediately. "Auto-retry" here means the next scheduled sync attempt,
 not an in-loop retry.
 
-\*\*\* Not one entry per failed feed — the feed list already flags each failing feed. The bell gets a single
+\*\*\* Not one entry per failed feed — the feed list already flags each failing feed. The notification center gets a single
 coalesced `NotificationText.RefreshFailed` warning only when a refresh reached none of its feeds (see the next-action
 table above); a refresh where some feed answered — successfully or with an error — adds nothing.
 

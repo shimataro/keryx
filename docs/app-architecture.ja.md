@@ -184,10 +184,10 @@
     デスクトップの macOS ツールバー風カプセルの代わりの装飾なし `Row`、M3 自身の `PlainTooltip`）、
     KeryxRaisedSurface（デスクトップのヘアライン枠フラットカードの代わりに、明確に色調の異なる
     `colorScheme.surfaceContainerHigh` トーナルコンテナ）、KeryxBadgedIcon（デスクトップの
-    自作ピルの代わりに M3 自身の `BadgedBox`/`Badge` — `NotificationsBell` が使用）,
+    自作ピルの代わりに M3 自身の `BadgedBox`/`Badge` — ドロワーボタンの通知件数が使用）,
     KeryxSettingRow（行全体がタップ対象になる本物の M3 `ListItem` — `SettingsComponents.kt` の
     `LinkRow`/`ActionLinkRow`/`SwitchRow` を支える）, KeryxAnchoredPanel（本物の M3
-    `ModalBottomSheet` — `NotificationsBell` の通知ポップオーバーと `TagColorPickerPopup` を
+    `ModalBottomSheet` — `NotificationCenterRow` の通知パネルと `TagColorPickerPopup` を
     支える。単なる作法の一致ではなく必須の対応でもある — 素の `Popup` のままだと、デスクトップの
     ヘビーウェイト WebView が素の Compose オーバーレイの手前に来るのと同じ理由で、記事リーダーの
     `WebView` の背後に隠れてしまう。下記「Article Reader」参照）, KeryxPaneTopBar（本物の M3
@@ -439,8 +439,10 @@ drop テーブルとして渡している。
 ### アプリ内アップデート
 
 `domain/UpdateRepository` は上記の `SyncRepository` と同じ種類の、アプリのライフタイムを持つ
-Koin `single` のオーケストレーターであり、`StateFlow<UpdateState>` を UI 側の各面（Updates タブ、
-トレイ、ベル）が読む——設定ダイアログを閉じても進行中のダウンロードはキャンセルされない。これは
+Koin `single` のオーケストレーターであり、`StateFlow<UpdateState>` をアップデートの状態を表示する
+UI 側の各面（Updates タブ、トレイ）が読む——設定ダイアログを閉じても進行中のダウンロードはキャンセルされない。
+通知センターはこの状態を読まない。`UpdateRepository` が選んだ通知だけを `NotificationCenter` に投稿する
+（`background-update.ja.md` の「アプリ内アップデート」参照）。これは
 3 つのシームを組み合わせる: `domain/UpdateChecker`（候補選択とバージョン比較のポリシーのみ——
 GitHub Releases への HTTP リクエストと JSON パースは `data/remote/ReleaseFeedSource` に住み、
 `UpdateChecker` は自分のコンストラクタと同じ引数から内部でそれを組み立てる。依存として
@@ -594,6 +596,18 @@ Android（API 29 以降のみ——`setVerticalScrollbarThumbDrawable`／
 作ろうとし、その場所が書き込み不可の場合は Access Denied で失敗する（この生成失敗の例外が uncaught の
 まま伝播し、ライブラリの生成リトライタイマが止まらなくなることが、クリック時にアプリ全体がフリーズする
 原因でもあった）。
+
+**文書はビューの準備ができしだい読み込ませ、画面に出るまで確かめる。** `shouldLoadArticleHtml` は、
+ビューが `Initializing` を過ぎていれば `Finished` を待たずに新しい文書を読み込ませる。表示中の記事が自分で
+遷移を始め続けている間（スクリプトが `location` を設定する場合）はネイティブビューが読み込み中のままになり、
+`Finished` を待つ判定では次の文書をまったく読み込ませなかったため。こうした遷移は進行中の文書の読み込みも
+止めるが、ライブラリはそれを何も報告しない（読み込み中のフラグは立ったままで、URL はどちらも `about:blank`）。
+そこで `ArticleWebView` は各文書に、その読み込みごとに一意のマーカー（`readerDocumentMarker`。画面上の文書と
+衝突しうる HTML のハッシュではない）を入れた `<meta name="keryx-document">` を付け、
+読み込ませてから 1 秒ごとにページからその値を読み戻す。まだ画面に出ていない文書は、`:shared` の
+`READER_DOCUMENT_RELOAD_LIMIT` 回まで読み込ませ直す（`presentation/article/ReaderDocumentLoad.kt`。SwiftUI の
+リーダーも同じ規則に従う）。1 ミリ秒ごとに `location` を設定するスクリプトを含む記事でデスクトップ版を実測した
+ところ、素早い切り替え 150 回中、新しい選択の下に前の記事が残ったのは修正前 4 回、修正後 0 回だった。
 
 **Android がバックグラウンドでプロセスを終了させても、読んでいた位置は残る。** `ArticleWebView` は
 ネイティブビューの縦スクロール位置をスクロール可能な高さに対する割合として記録し
@@ -1687,6 +1701,10 @@ App Store ビルドへ渡ってはならない設定は、テンプレートに�
   既知の穴（closed な shadow root 内のアンカー）がある：known-issues.ja.md の
   「フィード本文のスクリプトが記事リーダー内で実行される」を参照。これでアプリがアプリ内ブラウザにならず、Apple の
   年齢制限の質問票で「無制限の Web アクセス」とみなされない。Compose のリーダーにはメインフレームの規則を適用しない。
+  WebKit は別の最上位の遷移が始まると（ゲートが拒否する遷移でも）進行中の文書の読み込みを止めるので、リーダーは
+  自分の読み込みをコミットまで追跡し、それまでに最上位の遷移を拒否したとき、または読み込みが失敗したときに、
+  文書 1 つにつき決まった回数まで文書を読み直す（`:shared` の `presentation/article/ReaderDocumentLoad.kt`）。
+  これがないと、一覧は新しい選択を示しているのに、前の記事が表示されたまま残っていた。
 - **SwiftUI のリーダーは WebKit のコンテンツプロセスが落ちたら文書を読み込み直す。** iOS はアプリが
   バックグラウンドにある間（リンクから開いた外部ブラウザが前面にある間など）に `WKWebView` の WebContent
   プロセスを終了させることがあり、そのままではリーダーが白紙になる。`ArticleWebView` の
@@ -1740,8 +1758,8 @@ App Store ビルドへ渡ってはならない設定は、テンプレートに�
 
 ドラッグ＆ドロップは、Compose と同じ共有ルール
 （`presentation/home/FeedListDrag.kt` の `resolveFeedListDropHighlight`/`resolveFeedListDropAction`）を適用する。
-UI ごとに異なるのはフィードバックだけで、macOS では `NSOutlineView`/Finder のソースリストの慣習に従う
-（`Home/FeedListDropPresentation.swift`）。
+macOS では、ドロップの行き先を決めて適用するのは `SidebarDropGuard`（位置の読み取りは
+`Home/FeedListDropPresentation.swift`）で、フィードバックは Finder と同じく `NSOutlineView` 自身のものを使う。
 
 - **ドラッグは `List` 自身の行ドラッグ用フックである `.itemProvider` で開始する。** クリックとドラッグの判定は、
   行全体で `List` が行う。SwiftUI のジェスチャー方式のドラッグ元は、これらの行では使えない。`.onDrag`/`.draggable`
@@ -1750,10 +1768,39 @@ UI ごとに異なるのはフィードバックだけで、macOS では `NSOutl
 - プロバイダーのクロージャはドラッグ開始時に実行され、すべてのドロップ先はそのドラッグ中の項目を基に検証する。
   ペイロードは専用のエクスポート型（`works.merc.keryx.app.feedlistitem`、`project.yml` の
   `UTExportedTypeDeclarations` で宣言）を使うため、他アプリからのテキストのドラッグが並べ替えと誤認されることはない。
-- フィードバック：行間には挿入線（インデントはアウトライン自身が付ける）、フィードを落とすフォルダー・「フォルダーなし」・
-  タグの行にはアクセントカラーのハイライト、共有ルールで何も起きない位置では `.forbidden`、そしてシステムの
-  スプリングロード設定に従うスプリングロードフォルダー（Mac App Store ビルドは常にシステム既定の 0.5 秒を使う。
-  その設定の読み取りはプライバシーマニフェストの対象外のため）。
+- **フィードとフォルダーのドロップは、すべて SwiftUI ではなく `SidebarDropGuard`
+  （`Home/Sidebar/SidebarDropGuard.swift`）が決めて適用する。** SwiftUI 自身のドロップ処理は、フォルダーの
+  ドロップの適用で落ち、ほかのドロップも断ったり違う位置にしたりし、カーソルに「+」を付けた
+  （[known-issues.ja.md](known-issues.ja.md) の「macOS: フォルダーをフォルダーの間に落とすと SwiftUI の中で
+  クラッシュした」を参照）。そのため `List` には `.onInsert`/`.onDrop` を付けない。ガードは、`List` の背後にある
+  `NSOutlineView` とそのデータソースにメソッドを足す。
+  - データソースの `outlineView(_:validateDrop:proposedItem:proposedChildIndex:)` は、提案された行を読み
+    （`SidebarDropOutline`）、項目の行き先を決め（`sidebarDropDestination`）、共通の規則でそこにアクションが
+    作れるとき（`feedListInsertAction` / `resolveFeedListDropAction`）だけ受け付ける。そして `setDropItem` で
+    その行き先を設定し、「移動」を返す。解決したアクションは覚えておく。アウトラインの `performDragOperation:` は、
+    その行き先がまだ同じアクションに解決されるときだけ、それを `applyFeedListDropAction` で適用する。ドラッグ中に
+    sync がサイドバーの並びを変えた場合は、強調していたのと違う場所に入れず、ドロップを拒否する。
+  - フォルダーはフォルダーの間にだけ入る。フォルダーの上や中（その行、その中のフィード）はそのフォルダーの
+    すぐ後ろ、Folders の見出しは先頭になる。ドラッグ中のフォルダーのすぐ前と後ろにも線が出て、落としても
+    順序は変わらない。
+  - フィードは、フォルダー・「フォルダーなし」・タグの行の上か、フォルダーや「フォルダーなし」のフィードの間に
+    入る。タグの下のフィードのコピーは、そのタグとして扱い（Compose や iOS と同じく共有の
+    `FeedListDropTarget.FeedInTag`）、タグ自身の行を強調する。それ以外（フィード行の中）は拒否し、アウトラインが
+    次の候補の位置を提案し直す。
+  - ほかの型のドラッグは、そのまま SwiftUI の実装に渡す。
+- フィードバックはアウトライン自身のものを使う。挿入線、ドロップ先の行全体の強調、スプリングロード（フィードを
+  重ねた閉じたフォルダーやタグが開く）。フォルダーのドラッグでは何も開かない。これはアウトラインの `expandItem:` で
+  断る。SwiftUI のアウトラインは
+  `expandItem:` で行を開いたことを記録するので、断ればサイドバーの状態は変わらない。SwiftUI は自分の開閉状態を
+  別の経路で反映するので、ドラッグ中に SwiftUI が求めた展開は行われる。カーソルはシステムのまま。何も起きない
+  ドロップは拒否され、項目は元の位置に戻る。禁止カーソルは出さない。
+- タグの下のフィードのコピーには、専用の ID（`TagFeedRowID`：タグの ID + フィードの ID）を付ける。フィードの ID の
+  ままだと、アウトラインがコピーと本体を 1 つの項目と取り違え、別の行を強調したり、存在しない位置を提案したりする。
+- SwiftUI の内部が変わってガードを取り付けられないときは、サイドバーのドラッグ＆ドロップが何も起きなくなる
+  （落ちない）。移動とタグ付けはコンテキストメニューで行える。アウトラインはあるのに取り付けられないときは、
+  fault のログ（`SidebarDropGuard` カテゴリー）を残す。
+  `KeryxTests/SidebarDropGuardTests.swift` がサイドバーと同じ形の `List` を載せてガードの前提を確かめるので、
+  そうした変化は CI で分かる。
 
 ### サイドバー（iOS）
 
@@ -1843,13 +1890,14 @@ HIG が「表示中のビューの検索」に勧める位置であり、メー�
   受け渡す。セッションはアプリ内に限り、アイテムプロバイダーはデータを持たない。ドラッグするのは持ち上げた行
   だけで、ヘッダー、すべて／スター付き、タグ、名前変更中の行はドラッグしない。
 - **行の上か、行の間か。** フィードをフォルダーの行（上 1/4 はその上の行間のまま）、「フォルダーなし」の
-  ヘッダー、タグの行に重ねると `.insertIntoDestinationIndexPath` を提案し、セルのドロップ状態で `SelectionColor` の
+  ヘッダー、タグの行、タグの下のフィードのコピー（そのタグとして扱う。`FeedListDropTarget.FeedInTag`）に重ねると
+  `.insertIntoDestinationIndexPath` を提案し、セルのドロップ状態で `SelectionColor` の
   ハイライトを描く。それ以外は行間（`.insertAtDestinationIndexPath`）で、UIKit が隙間を開けて示す。
   行間の位置は UIKit が移動を数えるのと同じく、ドラッグ中の行（フォルダーならその中のフィードも。持ち上げた
   フォルダーはアウトラインが畳む）を除いて数える。開いた隙間の上に指があるあいだ、UIKit はドラッグ中の行自身の
   インデックスパスを返すので、そのときは直前の位置を保つ。ドロップ時のコーディネーターの行き先は本当の隙間で
   ある。どの位置も `FeedListDropTarget` と上下半分に直して `resolveFeedListDropAction` に通し、`nil` なら
-  `.forbidden`（タグの中、フィードにとってのセクションの先頭、閉じたフォルダーのすぐ下など）、そうでなければ
+  `.forbidden`（タグの行の間、フィードにとってのセクションの先頭、閉じたフォルダーのすぐ下など）、そうでなければ
   `applyFeedListDropAction` で適用する。
 - **行の上へのドロップは、プレビューをその行の中央へ縮める**（`UIDragPreviewTarget`）。UIKit の既定は
   ドラッグ中の行のスナップショットをターゲットの bounds いっぱいに合わせるので、ドロップのアニメーションの間
@@ -1925,6 +1973,14 @@ iOS の記事一覧は SwiftUI の `List` で、`ScrollViewProxy.scrollTo` で�
 ものかを `HomeObservable.articleRowsMatchFilter` / `searchRowsMatchFilter` が示す。切り替えへの対応は
 一度きりで、後から届いたリフレッシュで一覧がスクロールすることはない。
 
+画面にない一覧にスクロールを頼むこともしない（`Home/ArticleListScrollGate.swift`、`KeryxTests` でテスト）。
+`scrollTo` は一覧の次のレイアウトで実行され、Reader の下にある一覧はレイアウトされない。
+Reader のスワイプで選択が動いたときや、復元した選択が届いたときは一覧が隠れているので、そのスクロールは戻る操作の
+最初のレイアウトまで待つことになる。gate はこれらを保持し、一覧が画面に戻ったら最新の 1 件だけを、その行がまだ
+あれば実行する。サイドバーから戻る途中で再構築された一覧は先頭から始まるので、保持分を捨てる。「画面に戻った」とは
+pop の終わりではなく始まりを指す。ピルのジャンプは画面上でしかタップできないので対象外。これは再現できていないクラッシュへの防御的な変更である。
+[known-issues.ja.md](known-issues.ja.md) の「iOS: 記事一覧に戻ると `UICollectionView` でクラッシュした」を参照。
+
 ### iPhone Duo（iOS）
 
 iPhone Duo の外側ディスプレイと、横向きの内側ディスプレイでは、ナビゲーションバー・ツールバー・タブバーが
@@ -1934,10 +1990,10 @@ iOS 27.1 シミュレーターで計測した結果と、そこから決めた�
 
 - **ツールバーの優先度。** 縦のバーは、項目が入りきらないと下から順に「…」に入れる。外側ディスプレイの横向き
   では、全既読が真っ先に「…」に入り、検索ボタンは押しつぶされて空の円になっていた。iOS 27 以降、記事一覧の
-  項目には `visibilityPriority` を付けている。通知ベル（バッジ付きの項目）と全既読（よく使う操作）は `.high`、
-  並び替えボタンと一覧モードのメニューは `.low` で、HIG が求める順序に従っている。横のバーはこの
-  優先度を無視する（横向きの内側ディスプレイで幅 360pt の記事一覧の列では、並び替えと全既読が変わらず「…」に
-  入る）ので、効くのは縦のバーだけである。iOS 26 以前では、項目は従来どおり 2 つのグループのまま。
+  項目には `visibilityPriority` を付けている。全既読（よく使う操作）は `.high`、一覧モードのメニュー
+  （表示順もここに含む）は `.low` で、HIG が求める順序に従っている。横のバーはこの
+  優先度を無視する（並び替えボタンがあった頃の計測では、横向きの内側ディスプレイで幅 360pt の記事一覧の列で
+  並び替えと全既読が「…」に入っていた）ので、効くのは縦のバーだけである。iOS 26 以前では、項目は従来どおり 2 つのグループのまま。
   `visibilityPriority` は iOS 27 SDK にしかないため、この分岐は `#if compiler(>=6.4)`（Xcode 27）でだけ
   コンパイルされる。Xcode 26.6 に固定したリリースのビルドでは、iOS 27 上でも 2 つのグループのままになる。
 - **外側ディスプレイの一覧の上にある空白の帯**（82pt。ナビゲーションタイトルを持たない記事詳細の上は 24pt）は、

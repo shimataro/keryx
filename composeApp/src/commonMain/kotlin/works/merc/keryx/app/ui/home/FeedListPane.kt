@@ -139,6 +139,14 @@ internal const val FEED_LIST_DRAG_HOST_TEST_TAG = "feed-list-drag-host"
  *   has no entry point of its own on this pane at all: the field the user actually types into
  *   lives in `ArticleListPane`'s own expanded search bar alongside the results (see that
  *   composable's own KDoc), reachable through the article list's own search icon.
+ * @param notifVm Backs the footer's notification center row ([NotificationCenterRow]), always shown
+ *   (its count only while the notification center holds something). `null` (tests only) leaves the
+ *   row out.
+ * @param onNotificationNavigated Runs after a notification center row's action led somewhere (the
+ *   panel has closed by then) — the drawer passes "close the drawer", so the destination shows.
+ *   Deliberately not [onSelectionAdvance]: most actions (a dialog, a settings tab, a web page) change
+ *   no selection, so they must not move the keyboard's pane either; `ShowFeedDetail`'s own pane is
+ *   decided by `PendingNotificationActionHost`.
  * @param isTouchPrimary Overridable for tests only — see `feedListReorderDrag`'s own KDoc.
  * @param hasNativeAppMenu Overridable for tests only — see `platform/PlatformOs.kt`'s own KDoc.
  *   Gates this pane's header (an `app_name` title instead of none) and its settings footer row
@@ -157,9 +165,12 @@ internal fun FeedListPane(
     renameSelectedRequestId: Int = 0,
     deleteSelectedRequestId: Int = 0,
     onSelectionAdvance: (() -> Unit)? = null,
+    notifVm: NotificationCenterViewModel? = null,
+    onNotificationNavigated: () -> Unit = {},
     isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
     hasNativeAppMenu: Boolean = works.merc.keryx.app.platform.hasNativeAppMenu,
 ) {
+    val notificationCount = notificationCountOf(notifVm)
     val feeds by vm.structuralFeeds.collectAsState()
     val tags by vm.tags.collectAsState()
     val feedTagMap by vm.feedTagMap.collectAsState()
@@ -791,30 +802,42 @@ internal fun FeedListPane(
             VerticalScrollbarIfNeeded(listState)
         }
 
-        // A platform with no native application menu bar (Android — see hasNativeAppMenu's own
-        // KDoc) needs its own in-pane entry point to Settings; this pane's header carries the
-        // app's title instead (FeedListToolbarRow), so the entry point lives down here as a fixed
-        // footer row instead. No HorizontalDivider above it: the ui-guidelines skill's divider
+        // The fixed footer: the notification center's entry point and, on a platform with no
+        // native application menu bar (Android — see hasNativeAppMenu's own KDoc), the in-pane entry
+        // point to Settings; this pane's header carries the app's title instead
+        // (FeedListToolbarRow). No HorizontalDivider above it: the ui-guidelines skill's divider
         // policy reserves that for semantic section breaks within the scrolling list, not for a
         // fixed-row/scroll-area boundary, which the shared surfaceContainerLow tone already reads
         // clearly enough on its own (see FeedListToolbarRow just above, which gets the same
-        // treatment at the opposite edge).
-        if (!hasNativeAppMenu) {
+        // treatment at the opposite edge). The notification row is always there, empty or not, so
+        // the footer never changes height under the list; its count (SidebarRow draws it only when
+        // > 0) is what says something has arrived.
+        val showNotificationRow = notifVm != null
+        if (showNotificationRow || !hasNativeAppMenu) {
             // The bottom inset clears the navigation bar on Android's edge-to-edge layout (see
-            // HomeScreen's Scaffold) — this footer, not the scrolling list above it, is now the
-            // pane's last element, so the inset moved here instead of the list's contentPadding.
-            // Zero on desktop (WindowInsets.safeDrawing), and this branch never renders there
-            // anyway (hasNativeAppMenu is true).
-            Box(Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom))) {
-                SidebarRow(
-                    icon = { KeryxIcon(KeryxIcons.Tune, null) },
-                    label = stringResource(Res.string.menu_settings),
-                    count = null,
-                    selected = false,
-                    focused = false,
-                    onClick = { menuController.send(MenuCommand.OpenSettings) },
-                    isTouchPrimary = isTouchPrimary,
-                )
+            // HomeScreen's Scaffold) — this footer, not the scrolling list above it, is the pane's
+            // last element, so the inset lives here instead of the list's contentPadding. Zero on
+            // desktop (WindowInsets.safeDrawing).
+            Column(Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom))) {
+                if (showNotificationRow) {
+                    NotificationCenterRow(
+                        notifVm = notifVm,
+                        count = notificationCount,
+                        onNavigated = onNotificationNavigated,
+                        isTouchPrimary = isTouchPrimary,
+                    )
+                }
+                if (!hasNativeAppMenu) {
+                    SidebarRow(
+                        icon = { KeryxIcon(KeryxIcons.Tune, null) },
+                        label = stringResource(Res.string.menu_settings),
+                        count = null,
+                        selected = false,
+                        focused = false,
+                        onClick = { menuController.send(MenuCommand.OpenSettings) },
+                        isTouchPrimary = isTouchPrimary,
+                    )
+                }
             }
         }
     }

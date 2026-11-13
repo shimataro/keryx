@@ -71,9 +71,8 @@ enum class FeedListRowHalf { TOP, BOTTOM }
 /**
  * What a feed-list row or header currently under the pointer represents, independent of how each
  * UI hit-tests its own rows (Compose's `LazyColumn` item keys parsed by `parseFeedListRowKey`,
- * SwiftUI's own per-row `DropDelegate`). A row rendered as a feed's *copy* under an expanded tag is
- * deliberately not a variant here — see [TagHeader]'s own doc — matching
- * `FeedListRowKey.Tag`/`Other`'s existing "not a drop target" treatment.
+ * the Apple sidebars' own outline rows). A row rendered as a feed's *copy* under an expanded tag is
+ * [FeedInTag]: it stands for its tag, so every UI treats a drop on it the same way.
  */
 sealed interface FeedListDropTarget {
     data class FolderHeader(val folderId: String) : FeedListDropTarget
@@ -82,8 +81,13 @@ sealed interface FeedListDropTarget {
     /** A tag's own header row — a feed dropped here attaches the tag; [FeedListRowHalf] is
      * ignored, and dragging a folder here never resolves to anything. */
     data class TagHeader(val tagId: String) : FeedListDropTarget
-    /** Anything else: a feed's copy nested under a tag, a section divider, blank space. Never a
-     * valid drop target, matching Compose's own `FeedListRowKey.Other`. */
+    /** A feed's copy listed under the expanded tag [tagId]. It stands for that tag: a feed dropped
+     * here attaches the tag and highlights the tag's own row, exactly as [TagHeader] does, so a
+     * drop is not lost to a row that shows the tag's contents; [FeedListRowHalf] is ignored, and
+     * dragging a folder here never resolves to anything. */
+    data class FeedInTag(val tagId: String) : FeedListDropTarget
+    /** Anything else: a section divider, blank space. Never a valid drop target, matching
+     * Compose's own `FeedListRowKey.Other`. */
     data object Other : FeedListDropTarget
 }
 
@@ -124,6 +128,7 @@ fun resolveFeedListDropHighlight(
             boundary to null
         }
         is FeedListDropTarget.TagHeader -> null to target.tagId
+        is FeedListDropTarget.FeedInTag -> null to target.tagId
         FeedListDropTarget.Other -> null to null
     }
     is FeedListDraggedItem.Folder -> when (target) {
@@ -138,7 +143,8 @@ fun resolveFeedListDropHighlight(
                 ?.let(index::belowBoundaryForFolder)
             boundary to null
         }
-        FeedListDropTarget.NoFolderHeader, is FeedListDropTarget.TagHeader, FeedListDropTarget.Other -> null to null
+        FeedListDropTarget.NoFolderHeader, is FeedListDropTarget.TagHeader, is FeedListDropTarget.FeedInTag,
+        FeedListDropTarget.Other -> null to null
     }
 }
 
@@ -168,6 +174,7 @@ fun resolveFeedListDropAction(
             FeedListDropAction.MoveFeed(item.feedId, index.folderIdOfFeed[target.feedId], insertBeforeId)
         }
         is FeedListDropTarget.TagHeader -> FeedListDropAction.AttachTag(item.feedId, target.tagId)
+        is FeedListDropTarget.FeedInTag -> FeedListDropAction.AttachTag(item.feedId, target.tagId)
         FeedListDropTarget.Other -> null
     }
     is FeedListDraggedItem.Folder -> when (target) {

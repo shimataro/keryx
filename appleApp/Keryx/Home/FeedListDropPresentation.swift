@@ -12,10 +12,8 @@ struct FeedListDragPayload: Codable, Equatable {
     let kind: Kind
     let id: String
 
-    /// The pasteboard type the drag is published under. Feeds and folders get distinct types so
-    /// each `ForEach`'s `.onInsert(of:)` names only the kind it accepts, and the outline itself
-    /// then refuses — and draws no insertion line for — a folder between feeds or a feed between
-    /// folders.
+    /// The pasteboard type the drag is published under. Feeds and folders get distinct types, so
+    /// `SidebarDropGuard` tells which kind a drag carries from the pasteboard alone.
     var contentType: UTType {
         switch kind {
         case .feed: return feedListFeedDragType
@@ -36,32 +34,6 @@ struct FeedListDragPayload: Codable, Equatable {
 let feedListFeedDragType = UTType(exportedAs: "works.merc.keryx.app.feedlistitem.feed")
 let feedListFolderDragType = UTType(exportedAs: "works.merc.keryx.app.feedlistitem.folder")
 
-/// Swift-native mirror of which row a dragged feed is currently over, used only for `@State`
-/// identity (which row's highlight to clear on `dropExited`) — the bridged `FeedListDropTarget`
-/// Kotlin types aren't `Equatable` across the existential. Only the rows a feed is dropped *onto*
-/// are listed; dropping between rows is the outline's own `.onInsert`.
-enum FeedListHoverKey: Equatable {
-    case folder(String)
-    case noFolder
-    case tag(String)
-}
-
-/// How a row a dragged item is *over* (rather than between) answers it. Insertion between rows is
-/// the outline's own `.onInsert`, so only the drop-onto case is decided here.
-enum FeedListDropFeedback: Equatable {
-    /// Releasing here does nothing — the drag is refused, so a release slides the item back.
-    case invalid
-    /// Highlight the hovered row: the feed would be moved into that folder or the unfoldered group,
-    /// or tagged.
-    case dropOn
-}
-
-/// A feed dropped onto a folder row, tag row or the "No folder" header lands in it; a folder is
-/// never dropped *onto* a row — it is reordered between folders instead.
-func feedListDropFeedback(for kind: FeedListDragPayload.Kind) -> FeedListDropFeedback {
-    kind == .feed ? .dropOn : .invalid
-}
-
 /// A `ForEach` in the sidebar that items can be inserted into, with its rows in display order.
 enum FeedListInsertGroup {
     /// The feeds of one folder, or the unfoldered feeds when `folderId` is `nil`.
@@ -69,8 +41,7 @@ enum FeedListInsertGroup {
     /// The folders themselves.
     case folders(folderIds: [String])
 
-    /// Whether a dragged item of `kind` can be inserted here — each group's `.onInsert(of:)`
-    /// already names only its own kind's type; this re-checks it before acting.
+    /// Whether a dragged item of `kind` can be inserted here.
     func accepts(_ kind: FeedListDragPayload.Kind) -> Bool {
         switch self {
         case .feeds: return kind == .feed
@@ -79,7 +50,7 @@ enum FeedListInsertGroup {
     }
 }
 
-/// Translates an `.onInsert` position into the shared drop target and half
+/// Translates an insertion position into the shared drop target and half
 /// (`resolveFeedListDropAction`'s input): inserting before row `offset` is that row's top half,
 /// inserting after the last row is the last row's bottom half, and a group with no rows is its own
 /// header (the folder's row, or the "No folder" header). `nil` when there is nothing to insert
@@ -103,6 +74,145 @@ func feedListInsertTarget(
         return offset < folderIds.count
             ? (FeedListDropTargetFolderHeader(folderId: folderIds[max(offset, 0)]), .top)
             : (FeedListDropTargetFolderHeader(folderId: folderIds[folderIds.count - 1]), .bottom)
+    }
+}
+
+/// Inserting `dragging` at `offset` in `group`: the shared action that drop resolves to through
+/// `resolveFeedListDropAction` (the same rules the Compose app applies), or `nil` when the item does
+/// not belong in `group` or there is nowhere to insert it.
+///
+/// The slots just before and just after a dragged folder are the same place, where nothing moves.
+/// `feedListInsertTarget` would describe either from the dragged folder's own row, which the shared
+/// rules refuse as a folder dropped onto itself — leaving no insertion line there, while the slot on
+/// its other side shows one. So such a slot is described from the neighbouring folder instead
+/// (the next one's top half, else the previous one's bottom half), which resolves to a reorder that
+/// leaves the order as it is.
+func feedListInsertAction(
+    into group: FeedListInsertGroup,
+    at offset: Int,
+    dragging: FeedListDragPayload,
+    index: FeedListDropIndex
+) -> FeedListDropAction? {
+    guard group.accepts(dragging.kind) else { return nil }
+    let insert: (target: FeedListDropTarget, half: FeedListRowHalf)?
+    if case .folders(let folderIds) = group, let ownIndex = folderIds.firstIndex(of: dragging.id) {
+        let isBesideDraggedFolder = offset == ownIndex || offset == ownIndex + 1
+        insert = isBesideDraggedFolder
+            ? folderSlotBesideDraggedFolder(folderIds, ownIndex: ownIndex)
+            : feedListInsertTarget(in: group, at: offset)
+    } else {
+        insert = feedListInsertTarget(in: group, at: offset)
+    }
+    guard let insert else { return nil }
+    return FeedListDragKt.resolveFeedListDropAction(
+        item: dragging.toShared(), target: insert.target, half: insert.half, index: index
+    )
+}
+
+/// The slot beside the folder at `ownIndex` (the one being dragged), described from a neighbouring
+/// folder: the next one's top half, else the previous one's bottom half — `nil` when it is the only
+/// folder, with nothing to be reordered against.
+private func folderSlotBesideDraggedFolder(
+    _ folderIds: [String],
+    ownIndex: Int
+) -> (target: FeedListDropTarget, half: FeedListRowHalf)? {
+    if ownIndex + 1 < folderIds.count {
+        return (FeedListDropTargetFolderHeader(folderId: folderIds[ownIndex + 1]), .top)
+    }
+    if ownIndex > 0 {
+        return (FeedListDropTargetFolderHeader(folderId: folderIds[ownIndex - 1]), .bottom)
+    }
+    return nil
+}
+
+/// A row of the outline behind the macOS sidebar's `List`, as `SidebarDropGuard` reads it — what a
+/// drop is proposed onto or into.
+enum SidebarOutlineRow: Equatable {
+    /// The Folders section (its header row).
+    case foldersSection
+    /// The folder at `index` in the Folders section.
+    case folder(index: Int)
+    /// A feed shown in the folder at `folderIndex`.
+    case feedInFolder(folderIndex: Int)
+    /// The "No folder" section (its header row).
+    case noFolderSection
+    /// A feed in no folder.
+    case unfolderedFeed
+    /// The tag at `index` in the Tags section.
+    case tag(index: Int)
+    /// A feed's copy shown under the tag at `tagIndex`.
+    case feedInTag(tagIndex: Int)
+    /// Anything else, including a sidebar laid out other than expected.
+    case other
+}
+
+/// Where a drop on the macOS sidebar lands — the row the outline highlights or the slot its
+/// insertion line marks.
+enum SidebarDropDestination: Hashable {
+    /// Slot `index` among the folders.
+    case folderSlot(index: Int)
+    /// Onto the folder at `index`: the feed moves into it.
+    case ontoFolder(index: Int)
+    /// Onto the "No folder" header: the feed leaves its folder.
+    case ontoNoFolder
+    /// Onto the tag at `index`: the feed is tagged.
+    case ontoTag(index: Int)
+    /// Onto a feed's copy under the tag at `tagIndex`, which stands for that tag: the feed is tagged.
+    case ontoFeedInTag(tagIndex: Int)
+    /// Slot `offset` among the feeds of the folder at `index`.
+    case intoFolder(index: Int, offset: Int)
+    /// Slot `offset` among the feeds in no folder.
+    case intoNoFolder(offset: Int)
+}
+
+/// The child index `NSOutlineView` proposes for a drop *onto* a row rather than between rows
+/// (`NSOutlineViewDropOnItemIndex`).
+let sidebarDropOntoRowIndex = -1
+
+/// Where a dragged item of `kind` lands when the outline proposes `row` at `childIndex`, or `nil`
+/// to refuse it. Every proposal gets a destination of its own here, so the sidebar always shows the
+/// line or highlight of exactly where the item will go:
+///
+/// - A folder only ever goes between folders: a slot of the Folders section as proposed, its header
+///   is the first slot, and anywhere on or in a folder — its own row, its feeds — is the slot just
+///   after that folder.
+/// - A feed dropped onto a folder, the "No folder" header or a tag goes into it; onto a feed's copy
+///   under a tag, it goes to that tag (the shared `FeedListDropTarget.FeedInTag`). Between rows it
+///   goes into a folder's feeds or the unfoldered ones, at a slot that exists (`childIndex` at
+///   most `childCount`).
+/// - Anything else is refused — a feed row's own inside, say, which the outline proposes but which
+///   holds nothing.
+///
+/// - Parameter childCount: How many children the proposed row has.
+func sidebarDropDestination(
+    dragging kind: FeedListDragPayload.Kind,
+    proposed row: SidebarOutlineRow,
+    childIndex: Int,
+    childCount: Int
+) -> SidebarDropDestination? {
+    switch kind {
+    case .folder:
+        switch row {
+        case .foldersSection: return .folderSlot(index: max(childIndex, 0))
+        case .folder(let index), .feedInFolder(let index): return .folderSlot(index: index + 1)
+        default: return nil
+        }
+    case .feed:
+        if childIndex == sidebarDropOntoRowIndex {
+            switch row {
+            case .folder(let index): return .ontoFolder(index: index)
+            case .noFolderSection: return .ontoNoFolder
+            case .tag(let index): return .ontoTag(index: index)
+            case .feedInTag(let index): return .ontoFeedInTag(tagIndex: index)
+            default: return nil
+            }
+        }
+        guard (0...childCount).contains(childIndex) else { return nil }
+        switch row {
+        case .folder(let index): return .intoFolder(index: index, offset: childIndex)
+        case .noFolderSection: return .intoNoFolder(offset: childIndex)
+        default: return nil
+        }
     }
 }
 

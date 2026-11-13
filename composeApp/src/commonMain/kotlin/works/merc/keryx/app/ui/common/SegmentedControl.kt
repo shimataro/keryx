@@ -1,6 +1,7 @@
 package works.merc.keryx.app.ui.common
 
 import androidx.compose.runtime.Composable
+import org.jetbrains.compose.resources.DrawableResource
 
 /**
  * A single-select control. `expect`/`actual` per platform: the desktop `actual` renders a
@@ -14,14 +15,16 @@ expect fun <T> SegmentedControl(options: List<Pair<T, String>>, selected: T, onS
 
 /**
  * A pop-up button rendered with the same visual language as [SegmentedControl]'s selected segment
- * on desktop: [label] names the current choice, a trailing chevron says it opens a menu, and
+ * on desktop: [icon] leads, [label] names the current choice, a trailing chevron says it opens a menu, and
  * [onClick] opens it (typically `NativeMenuAnchor`'s `open`). [highlighted] fills it as a checked
  * chip, for a choice that narrows what is shown — `ArticleListPane`'s list mode (`HomeViewModel.mode`)
  * whenever it is not "All". `expect`/`actual` per platform: the Android `actual` is M3's own
  * `FilterChip` with a dropdown arrow, M3's chip-with-menu idiom.
  *
+ * @param icon What the menu is about, before [label] — `ArticleListPane` passes the filter icon,
+ *   since its menu holds both the list mode and the sort order.
  * @param label The current choice, shown on the chip.
  * @param accessibilityLabel What the chip chooses, announced with [label] as its state.
  */
 @Composable
-expect fun MenuChip(label: String, accessibilityLabel: String, highlighted: Boolean, onClick: () -> Unit)
+expect fun MenuChip(icon: DrawableResource, label: String, accessibilityLabel: String, highlighted: Boolean, onClick: () -> Unit)

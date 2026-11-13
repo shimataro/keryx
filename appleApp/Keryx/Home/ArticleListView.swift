@@ -1,13 +1,13 @@
 import KeryxShared
 import SwiftUI
 
-/// The center pane: toolbar (list mode, sort, mark-all-read, the notification bell),
+/// The center pane: toolbar (the list mode menu, which also holds the sort order; mark-all-read —
+/// the notification center lives at the bottom of the sidebar instead, `NotificationCenterRow`),
 /// the article rows themselves (search-highlighted when a query is active), the "new articles"
 /// pill, and the four empty states — see `external-spec.md` §7's article-list bullets and the M2
 /// research notes.
 struct ArticleListView: View {
     let home: HomeObservable
-    let notifications: NotificationCenterObservable
     let settingsNavigation: SettingsNavigation
     @Bindable var dialogs: SidebarDialogState
     var focusedPane: FocusState<HomeFocusedPane?>.Binding
@@ -50,6 +50,9 @@ struct ArticleListView: View {
     /// Whether `articleList`'s heading row is on screen, before iOS 26 only. While it has scrolled
     /// away, the bar's principal item names the list in its place (`toolbarContent`).
     @State private var listHeaderVisible = true
+    @State private var scrollGate = ArticleListScrollGate()
+    /// Whether this list is on screen rather than under the reader.
+    @State private var listVisible = false
     #endif
     /// `noArticlesView`'s header height, so the empty state below it fills exactly the rest.
     @State private var emptyListHeaderHeight: CGFloat = 0
@@ -90,6 +93,12 @@ struct ArticleListView: View {
             firstRowId: displayedRows.first?.id
         )
     }
+
+    /// `attachedToWindow` too: its first change rebuilds the list, and a scroll carried out before
+    /// that would be lost with the list it was aimed at.
+    private var scrollGateInput: ArticleListScrollGate.Input {
+        ArticleListScrollGate.Input(canScroll: listVisible && attachedToWindow, remountGeneration: remountGeneration)
+    }
     #endif
 
     var body: some View {
@@ -126,13 +135,10 @@ struct ArticleListView: View {
                     // composition — including a restored `lastArticleId` selection — is not a switch
                     // and is not scrolled out from under.
                     // Before iOS 26 the reset goes to the heading row above the first article, so the
-                    // new filter's name is on screen again.
+                    // new filter's name is on screen again (`carryOut`).
                     .onChange(of: topResetInput, initial: true) { _, input in
-                        guard let first = topReset.update(input) else { return }
-                        if Self.showsListHeader {
-                            proxy.scrollTo(Self.listHeaderRowId, anchor: .top)
-                        } else {
-                            proxy.scrollTo(first)
+                        if let first = topReset.update(input) {
+                            requestScroll(ArticleListScrollGate.Target(rowId: first), proxy)
                         }
                     }
                     // Only when the user selected an article (`selectionRevealRequests`) and it is off-screen
@@ -140,20 +146,24 @@ struct ArticleListView: View {
                     // Not on `selectedArticleId` itself: it also moves back without the user acting
                     // (a selection found tombstoned), which must not scroll the list.
                     .onChange(of: home.selectionRevealRequests) { _, _ in
-                        guard let id = home.selectedArticleId, !visibleRows.appearedIds.contains(id) else { return }
-                        proxy.scrollTo(id)
+                        guard let id = home.selectedArticleId else { return }
+                        requestScroll(ArticleListScrollGate.Target(rowId: id, onlyIfOffScreen: true), proxy)
                     }
-                    .onChange(of: displayedRows.isEmpty) { _, isEmpty in
+                    .onChange(of: showsRows) { _, shows in
                         // The article restored from the previous session is already selected before
                         // any row exists, so the selection-change scroll above never sees it; bring it
-                        // into view once, when the first rows land (after they are laid out).
-                        guard !didShowFirstRows, !isEmpty else { return }
+                        // into view once, when the list first shows rows (after they are laid out).
+                        // Not on the rows alone: they and `listBody` arrive separately, and rows
+                        // behind a pending body have no list to take the scroll.
+                        guard !didShowFirstRows, shows else { return }
                         didShowFirstRows = true
                         guard let id = home.selectedArticleId else { return }
-                        Task {
-                            await Task.yield()
-                            proxy.scrollTo(id)
-                        }
+                        requestScrollAfterUpdate(ArticleListScrollGate.Target(rowId: id), proxy)
+                    }
+                    // After the current update, so the rows coming back with the list have reported
+                    // themselves (`onlyIfOffScreen`).
+                    .onChange(of: scrollGateInput, initial: true) { _, input in
+                        if let target = scrollGate.update(input) { requestScrollAfterUpdate(target, proxy) }
                     }
             }
             #endif
@@ -167,6 +177,9 @@ struct ArticleListView: View {
                 Task { @MainActor in attachedToWindow = true }
             }
         }
+        // Outside the rebuilt `content` too, so a rebuild does not read as the list leaving the screen.
+        .onAppear { listVisible = true }
+        .onDisappear { listVisible = false }
         .focused(focusedPane, equals: .articleList)
         #endif
         .toolbar { toolbarContent }
@@ -286,7 +299,7 @@ struct ArticleListView: View {
             ToolbarItem(placement: .principal) {
                 if listHeaderVisible {
                     // Zero-sized: once the title has been shown, a flexible `Color.clear` keeps the
-                    // room it took and leaves Sort and Mark All as Read in the overflow menu.
+                    // room it took and leaves Mark All as Read in the overflow menu.
                     Color.clear.frame(width: 0, height: 0)
                 } else {
                     Text(home.articleListTitle).font(.headline).lineLimit(1)
@@ -302,18 +315,13 @@ struct ArticleListView: View {
         if #available(iOS 27.0, *) {
             // A vertical bar (iPhone Duo's outer display, and landscape on its inner one) overflows
             // from the bottom up, which hid Mark All as Read first and squeezed the search button
-            // out of shape. The HIG asks to keep frequent actions and badged items visible longest,
-            // so the bell and Mark All as Read outrank the rest. A horizontal bar ignores these.
+            // out of shape. The HIG asks to keep frequent actions visible longest, so Mark All as
+            // Read outranks the list mode menu. A horizontal bar ignores these.
             ToolbarItem(placement: .navigation) { listModeMenu }
                 .visibilityPriority(.low)
 
             FlexibleToolbarSpacer()
 
-            // Separate items, since a priority applies to a whole item or group.
-            ToolbarItem(placement: .primaryAction) { notificationBellButton }
-                .visibilityPriority(.high)
-            ToolbarItem(placement: .primaryAction) { sortButton }
-                .visibilityPriority(.low)
             ToolbarItem(placement: .primaryAction) { markAllReadButton }
                 .visibilityPriority(.high)
         } else {
@@ -328,9 +336,8 @@ struct ArticleListView: View {
     /// visibility priorities are unavailable.
     @ToolbarContentBuilder
     private var groupedToolbarItems: some ToolbarContent {
-        // Every item's label is a `Label`, not a bare icon (except the mode menu's on iOS — see
-        // `listModeMenu`): the toolbar still renders icon-only, but the overflow menu it collapses
-        // into at a narrow width takes each row's title from it.
+        // Every item's label is a `Label`, not a bare icon: the toolbar still renders icon-only, but
+        // the overflow menu it collapses into at a narrow width takes each row's title from it.
         // Separate items of one group (not an `HStack` in one item) so each gets its own row there.
         #if os(iOS)
         if #unavailable(iOS 26) {
@@ -340,8 +347,6 @@ struct ArticleListView: View {
             // trailing cluster keeps the mode menu in one place.
             ToolbarItemGroup(placement: .primaryAction) {
                 listModeMenu
-                notificationBellButton
-                sortButton
                 markAllReadButton
             }
         } else {
@@ -362,18 +367,17 @@ struct ArticleListView: View {
         FlexibleToolbarSpacer()
 
         ToolbarItemGroup(placement: .primaryAction) {
-            notificationBellButton
-            sortButton
             markAllReadButton
         }
     }
 
     private var listModeMenu: some View {
-        // A pop-up button (HIG): the current mode names the button, the menu offers all three.
-        // Each mode has its own icon (`listModeSymbol`), filled whenever it narrows the list, on the
-        // button and beside each item. Toggles rather than an inline Picker:
-        // a Picker option's own `.disabled` is not honored inside a menu, so Starred stayed
-        // choosable under the Starred filter. Same items as the View menu (`HomeCommands`).
+        // The view options menu: the list mode, then the sort order in a section of its own (as
+        // Photos' filter button holds both). The button wears the filter symbol, filled whenever the
+        // mode narrows the list (`listModeButtonSymbol`); each mode keeps its own icon beside its item
+        // (`listModeSymbol`). Toggles rather than an inline Picker: a Picker option's own `.disabled`
+        // is not honored inside a menu, so Starred stayed choosable under the Starred filter. The mode
+        // items match the View menu (`HomeCommands`), which also keeps its own sort toggle.
         Menu {
             ForEach(Self.listModes, id: \.self) { mode in
                 Toggle(L(Self.listModeLabelKey(mode)), systemImage: Self.listModeSymbol(mode), isOn: Binding(
@@ -382,46 +386,32 @@ struct ArticleListView: View {
                 ))
                 .disabled(mode == .starred && !home.starredModeEnabled)
             }
-        } label: {
-            #if os(iOS)
-            // iOS draws a toolbar menu as a bare icon and ignores `menuIndicator`, so the label carries
-            // the pop-up button's own chevrons: a tap opens a choice rather than acting at once
-            // (macOS's toolbar adds an indicator by itself). Not a `Label`: the toolbar keeps only the
-            // first image of a `Label`'s icon, dropping the chevrons.
-            HStack(spacing: 1) {
-                Image(systemName: Self.listModeSymbol(home.listMode))
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(.secondary)
+            Section(L("home_sort_section")) {
+                ForEach([true, false], id: \.self) { newestFirst in
+                    Toggle(L(newestFirst ? "home_sort_newest" : "home_sort_oldest"), isOn: Binding(
+                        get: { home.newestFirst == newestFirst },
+                        set: { if $0 { home.viewModel.setNewestFirst(newestFirst: newestFirst) } }
+                    ))
+                }
             }
-            #else
+            // Search results keep their own fixed order (FTS rank), as the View menu's toggle does.
+            .disabled(home.searchActive)
+        } label: {
             Label(
                 L(Self.listModeLabelKey(home.listMode)),
-                systemImage: Self.listModeSymbol(home.listMode)
+                systemImage: Self.listModeButtonSymbol(home.listMode)
             )
+            #if os(iOS)
+            // A filter symbol reads as a menu by itself, so no chevrons; still a `Label` so the
+            // overflow menu at a narrow width gets the row's title.
+            .labelStyle(.iconOnly)
+            #else
             .labelStyle(.titleAndIcon)
             #endif
         }
         .help(L("home_list_mode"))
         .accessibilityLabel(L("home_list_mode"))
         .accessibilityValue(L(Self.listModeLabelKey(home.listMode)))
-    }
-
-    private var notificationBellButton: some View {
-        NotificationBell(home: home, notifications: notifications, settingsNavigation: settingsNavigation, focusedPane: focusedPane)
-    }
-
-    private var sortButton: some View {
-        Button {
-            home.viewModel.toggleSort()
-        } label: {
-            Label(
-                L(home.newestFirst ? "home_sort_oldest" : "home_sort_newest"),
-                systemImage: home.newestFirst ? "arrow.down" : "arrow.up"
-            )
-        }
-        .disabled(home.searchActive)
-        .help(L(home.searchActive ? "home_sort_disabled_search" : (home.newestFirst ? "home_sort_oldest" : "home_sort_newest")))
     }
 
     private var markAllReadButton: some View {
@@ -524,7 +514,20 @@ struct ArticleListView: View {
         }
     }
 
-    /// The icon for `mode`: the app's unread dot and star, in the same circle as All's filter icon.
+    /// The list mode menu button's icon: the filter symbol, filled while `mode` narrows the list
+    /// (as Mail's filter button). Unfiltered, iOS drops the circle, since its toolbar already draws
+    /// the button inside a glass circle; macOS's toolbar draws no such shape, so it keeps it.
+    static func listModeButtonSymbol(_ mode: ArticleListMode) -> String {
+        guard mode == .all else { return "line.3.horizontal.decrease.circle.fill" }
+        #if os(iOS)
+        return "line.3.horizontal.decrease"
+        #else
+        return "line.3.horizontal.decrease.circle"
+        #endif
+    }
+
+    /// The icon for `mode`'s menu item: the app's unread dot and star, in the same circle as All's
+    /// filter icon.
     private static func listModeSymbol(_ mode: ArticleListMode) -> String {
         switch mode {
         case .all: "line.3.horizontal.decrease.circle"
@@ -765,6 +768,43 @@ struct ArticleListView: View {
     }
 
     #if os(iOS)
+    /// Whether the list is showing rows — see `ArticleListScrollGate.listShowsRows`.
+    private var showsRows: Bool {
+        ArticleListScrollGate.listShowsRows(
+            bodyIsContent: home.listBody == .content,
+            rowCount: displayedRows.count,
+            searchActive: home.searchActive,
+            searchShowsList: home.searchQueryHasTerms && home.hasSearchResults
+        )
+    }
+
+    /// Only a row the list shows: a scroll sent while it does not exist would be lost.
+    private func rowExists(_ id: String) -> Bool { showsRows && displayed.indexById[id] != nil }
+
+    /// Every scroll but the pill's goes through here: the pill can only be tapped on screen.
+    private func requestScroll(_ target: ArticleListScrollGate.Target, _ proxy: ScrollViewProxy) {
+        guard let target = scrollGate.request(target, rowExists: rowExists) else { return }
+        carryOut(target, proxy)
+    }
+
+    private func requestScrollAfterUpdate(_ target: ArticleListScrollGate.Target, _ proxy: ScrollViewProxy) {
+        Task {
+            await Task.yield()
+            requestScroll(target, proxy)
+        }
+    }
+
+    private func carryOut(_ target: ArticleListScrollGate.Target, _ proxy: ScrollViewProxy) {
+        guard !target.onlyIfOffScreen || !visibleRows.appearedIds.contains(target.rowId) else { return }
+        // Before iOS 26 the heading row sits above the first article, so a scroll to the first
+        // article goes to the heading instead — a filter switch's reset then shows the new filter's name.
+        if Self.showsListHeader, target.rowId == displayedRows.first?.id {
+            proxy.scrollTo(Self.listHeaderRowId, anchor: .top)
+        } else {
+            proxy.scrollTo(target.rowId)
+        }
+    }
+
     private func scrollToFreshEnd(_ proxy: ScrollViewProxy) {
         guard let target = home.newestFirst ? displayedRows.first?.id : displayedRows.last?.id else { return }
         proxy.scrollTo(target, anchor: home.newestFirst ? .top : .bottom)

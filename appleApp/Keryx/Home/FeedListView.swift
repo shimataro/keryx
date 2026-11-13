@@ -12,6 +12,9 @@ import SwiftUI
 /// menus, and drag-and-drop (feed reorder/move-to-folder/tag-attach, folder reorder).
 struct FeedListView: View {
     let home: HomeObservable
+    /// The notification center, whose entry point (`NotificationCenterRow`) is always pinned to the
+    /// bottom of this sidebar, with its count only while it holds something.
+    let notifications: NotificationCenterObservable
     @Bindable var dialogs: SidebarDialogState
     /// Opens the iOS Settings sheet from the toolbar's gear button (macOS reaches Settings from the
     /// app menu instead).
@@ -36,15 +39,12 @@ struct FeedListView: View {
     /// writes to a `@State` that `body` does not read invalidate nothing).
     @State var appearedRowKeys: Set<String> = []
 
-    // Drag-and-drop state: the item being dragged, and which row a dragged feed is over for the
-    // drop-onto highlight and spring-loading — mirrors Compose's own
-    // `draggedFeedIdState`/`hoveredAttachTagIdState` (`FeedListDragController.kt`). Insertion
-    // between rows is the outline's own `.onInsert`, which draws the insertion line itself. See
-    // `FeedListDragAndDrop.swift` for the drop wiring and `FeedListDropPresentation.swift` for the
-    // rules behind it. The iOS sidebar keeps its drag state in its collection view instead.
+    // Drag-and-drop state: the item being dragged — mirrors Compose's own `draggedFeedIdState`
+    // (`FeedListDragController.kt`). Where a drop lands, its insertion line or row highlight, and
+    // spring-loaded folders are the outline's own, driven by `SidebarDropGuard`; see
+    // `FeedListDropPresentation.swift` for the rules behind it. The iOS sidebar keeps its drag state
+    // in its collection view instead.
     @State var draggingItem: FeedListDragPayload?
-    @State var dropOnKey: FeedListHoverKey?
-    @State var hoveredKey: FeedListHoverKey?
     #endif
 
     var selectedRowKey: String { feedListRowSelectionKey(home.selectedRowInstance) }
@@ -56,6 +56,21 @@ struct FeedListView: View {
 
     var body: some View {
         rows
+        // The notification center's entry point, pinned below the rows and always there, so it
+        // stays in one place; its count is what says something has arrived.
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            VStack(spacing: 0) {
+                Divider()
+                NotificationCenterRow(
+                    home: home,
+                    notifications: notifications,
+                    settingsNavigation: settingsNavigation,
+                    focusedPane: focusedPane,
+                    onShowFeed: onOpenArticleList
+                )
+            }
+            .background(.bar)
+        }
         .toolbar { toolbarContent }
         #if os(iOS)
         .navigationTitle(L("app_name"))
@@ -70,22 +85,6 @@ struct FeedListView: View {
         // `.searchFocused(_:equals:)` exists; earlier systems get the field without them.
         .searchable(text: searchQueryBinding, placement: .sidebar, prompt: L("home_search_placeholder"))
         .modifier(SearchFocusModifier(focusedPane: focusedPane))
-        // Spring-loaded folder: holding a dragged feed over a collapsed folder opens it after a
-        // short pause, so its feeds become reachable drop targets mid-drag — matches Compose's own
-        // `LaunchedEffect(isFeedDragHighlight, collapsed)` (`FeedListRows.kt`). The pause and
-        // whether to spring at all follow the system's own spring-loading setting, as Finder does.
-        // Re-checks `hoveredKey` after the delay so releasing/moving away first cancels the expand.
-        .onChange(of: hoveredKey) { _, key in
-            guard draggingItem?.kind == .feed,
-                  case .folder(let folderId) = key,
-                  home.collapsedFolderIds.contains(folderId),
-                  let delay = springLoadingDelay() else { return }
-            Task {
-                try? await Task.sleep(for: delay)
-                guard hoveredKey == .folder(folderId) else { return }
-                withAnimation { home.viewModel.toggleFolderCollapsed(folderId: folderId) }
-            }
-        }
         #endif
         .modifier(SidebarCreateSheets(home: home, dialogs: dialogs))
         // Ends an in-place rename whose row stopped being rendered — deleted, removed by a sync

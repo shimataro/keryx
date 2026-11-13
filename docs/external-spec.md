@@ -91,7 +91,7 @@ data exists in the cloud it is automatically merged (imported) during the initia
 - Feed health management: 301/308 auto-updates the subscription URL (notification), 410 Gone shows a warning in the notification center, consecutive errors show an indicator in the feed list
 - In-app update on Windows, Linux, and Android (download and install, not just a link to the release
   page), and through Sparkle in the macOS build from GitHub Releases; the Mac App Store build has no
-  update controls, since the App Store updates it. Updates are surfaced via the notification-center bell, desktop
+  update controls, since the App Store updates it. Updates are surfaced via the notification center, desktop
   task tray, and application menu; clicking any of those routes opens Settings ▸ Updates. Every
   download and install is an explicit user action; downloaded files are verified against the GitHub
   release's SHA-256 digest (EdDSA signature on macOS) before installation. Install forms the app
@@ -101,14 +101,21 @@ data exists in the cloud it is automatically merged (imported) during the initia
 - Article list / article view (reader view). **Articles are marked as read the instant they are selected**. An action to mark as unread is available, and the reader toolbar's button for it is a read/unread toggle that shows the article's state (a filled dot while it is unread, like the article list's own unread dot) — so a tap on a reader shown alone, with the list out of sight, is visibly acknowledged and can be undone. Where the reader is swiped between articles (see §9), "selected" means the moment the swipe comes to rest on an article — the neighbouring articles the reader keeps ready are loaded but not selected, and stay unread until one is actually swiped to.
 - **The article list shows one of three modes: All, Unread, or Starred.** They are mutually exclusive
   rather than two independent filters, since almost every starred article is already read. The
-  current mode names a pop-up button that leads the article list's toolbar actions — ahead of the bell, Sort
-  and Mark All as Read, wherever the platform's toolbar places that group — and the View menu
+  current mode names a pop-up button that leads the article list's toolbar actions — ahead of Mark All
+  as Read, wherever the platform's toolbar places that group — and the View menu
   lists the three as check items chosen with ⌘/Ctrl+1, 2 and 3. **Starred** narrows whatever is
   selected (a feed, folder, tag or All Feeds, including search results) to its starred articles and
   lasts for the session only; while the subscription list's own Starred item is selected it is shown
   checked and disabled. **All / Unread** are saved and restored at the next launch. See
   [app-architecture.md](app-architecture.md) for the details.
-- **Unread mode deliberately does not hide an article the instant it becomes read** (so the list doesn't shift under the reader while reading down it). The read articles kept on screen — all but the one currently selected — go when the user next refreshes (Refresh All or a pull) or syncs by hand, switches to another feed, folder or tag, or chooses Unread from another mode; none of these leaves Unread mode. The View menu's "Hide Read Articles" (desktop and macOS, and on iPad the menu bar of iPadOS 26 and later) does the same on demand, without refreshing; it is disabled whenever there's nothing to hide — no read article other than the one currently selected, or a mode other than Unread. It is deliberately not a toolbar button: it is rarely needed with the routes above, and the toolbar's room goes to the actions used more often — on a narrow iPhone a sixth item would push Mark All as Read into the overflow menu.
+- **The sort order (newest first / oldest first) is chosen in the same pop-up button's menu**, below the
+  three modes, rather than with a toolbar button of its own: it is rarely changed, and the toolbar's
+  room goes to the actions used more often. The button wears a filter icon (filled while a mode narrows
+  the list) and keeps naming the current mode where it shows text; it does not show the order. The order
+  is saved and restored at the next launch, the View menu (desktop and macOS) keeps its own "Toggle Sort
+  Order", and while search results are showing the order items are disabled, since results keep their
+  own ranking.
+- **Unread mode deliberately does not hide an article the instant it becomes read** (so the list doesn't shift under the reader while reading down it). The read articles kept on screen — all but the one currently selected — go when the user next refreshes (Refresh All or a pull) or syncs by hand, switches to another feed, folder or tag, or chooses Unread from another mode; none of these leaves Unread mode. The View menu's "Hide Read Articles" (desktop and macOS, and on iPad the menu bar of iPadOS 26 and later) does the same on demand, without refreshing; it is disabled whenever there's nothing to hide — no read article other than the one currently selected, or a mode other than Unread. It is deliberately not a toolbar button: it is rarely needed with the routes above, and the toolbar's room goes to the actions used more often — a narrow iPhone's bar already overflowed Mark All as Read into the overflow menu when it also held a sort button, which is why the sort order moved into the mode menu.
 - **New articles that arrive beyond the current scroll position, toward the list's fresh end, surface
   as a floating pill** (e.g. "12 new articles") rather than silently piling up; tapping it jumps to
   them. The fresh end follows the sort direction, and scrolling to it clears the pill. Articles that
@@ -177,6 +184,15 @@ macOS's flat look. Android 12+ uses Material You dynamic color, falling back to 
 palette on older versions. Light / dark / system support. The layout is a 3-pane arrangement
 (feed list / article list / article detail) with keyboard navigation, adapting to fewer panes on
 narrower widths (see below).
+
+**Standard components first.** Each UI uses its platform's standard components and lets them draw
+themselves — selection, highlights, drop indicators, focus rings, cursors, colors, spacing and
+materials — rather than drawing a look-alike. A standard component follows the OS when its
+appearance changes (a new macOS or iOS design, a Material update) and when the user changes system
+settings (contrast, transparency, text size), with no work in the app. Where a standard component
+misbehaves, fix its behavior (what it is told), not its drawing. The exceptions are listed in the
+`ui-guidelines` skill ("Standard components over custom drawing"). Windows and Linux are the
+standing exception: Compose has no native components there (see above).
 
 ### Least surprise
 

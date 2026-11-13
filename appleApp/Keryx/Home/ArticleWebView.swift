@@ -44,7 +44,7 @@ struct ArticleWebView {
             )
         }
         coordinator.scrollRestoration.documentReplaced(key: key)
-        coordinator.load(html, in: webView)
+        coordinator.load(html, in: webView, isNewDocument: true)
     }
 
     /// The key `ReaderScrollRestoration` tells documents apart by — compared only within this process.
@@ -174,6 +174,12 @@ struct ArticleWebView {
     final class Coordinator: NSObject, WKNavigationDelegate {
         let gate = ReaderNavigationGate()
         let recovery = ReaderProcessRecovery()
+        /// Tracks the document's own load until it commits, and decides when a load lost to another
+        /// top-level navigation is loaded again — see `ReaderDocumentLoad` (`:shared`).
+        let documentLoad = ReaderDocumentLoad()
+        /// The reload of a lost document load already on its way (`reloadIfDocumentLoadLost`), if any.
+        /// Any `load` cancels it: whatever that load starts replaces the document it would have reloaded.
+        private var pendingReload: Task<Void, Never>?
         var scrollRestoration = ReaderScrollRestoration(restored: nil)
         var loadedHtml: String?
         var onScroll: ((Double) -> Void)?
@@ -202,7 +208,18 @@ struct ArticleWebView {
         /// Loads `html` as the reader's document. The gate cannot tell a previous article's script
         /// navigating to `about:blank` from this load while it is in flight, so `didCommit` reloads
         /// the document if such a navigation replaced it.
-        func load(_ html: String, in webView: WKWebView) {
+        ///
+        /// - Parameter isNewDocument: Whether `html` replaces the document (a new article, theme or
+        ///   size), rather than loading the same one again (a retry or a recovery).
+        func load(_ html: String, in webView: WKWebView, isNewDocument: Bool = false) {
+            // A reload scheduled for the previous document must not hold back this one's own recovery.
+            pendingReload?.cancel()
+            pendingReload = nil
+            if isNewDocument {
+                documentLoad.documentRequested()
+            } else {
+                documentLoad.retryStarted()
+            }
             loadedHtml = html
             self.webView = webView
             gate.beginDocumentLoad()
@@ -219,11 +236,33 @@ struct ArticleWebView {
                 load(html, in: webView)
                 return
             }
+            if navigation === documentNavigation { documentLoad.documentConfirmed() }
             endDocumentLoad(of: navigation)
         }
 
         func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-            endDocumentLoad(of: navigation)
+            guard let navigation, navigation === documentNavigation else { return }
+            // Not superseded by a load of ours (that one would be the current navigation instead):
+            // something else stopped the document's load, so it is not on screen.
+            abandonDocumentLoad()
+            reloadIfDocumentLoadLost(in: webView)
+        }
+
+        /// WebKit drops a document load still in flight when another top-level navigation starts —
+        /// typically the previous article's own script setting `location` or a meta refresh, which the
+        /// gate then refuses — and often reports nothing about the dropped load. Loads the document
+        /// again (outside the navigation callback) while `documentLoad` allows it.
+        /// Refusals arrive in bursts (a page retrying its navigation); one reload answers them all.
+        private func reloadIfDocumentLoadLost(in webView: WKWebView) {
+            guard pendingReload == nil, documentLoad.documentMayBeLost(), let html = loadedHtml else { return }
+            pendingReload = Task { @MainActor [weak self, weak webView] in
+                // Cancelled by a later `load`, which may already have scheduled a reload of its own.
+                guard let self, !Task.isCancelled else { return }
+                pendingReload = nil
+                // The load may have committed after all since this was scheduled: leave it alone.
+                guard let webView, documentLoad.isPending, loadedHtml == html else { return }
+                load(html, in: webView)
+            }
         }
 
         private func endDocumentLoad(of navigation: WKNavigation?) {
@@ -320,7 +359,8 @@ struct ArticleWebView {
                 targetIsMainFrame: navigationAction.targetFrame?.isMainFrame,
                 isLinkActivated: navigationAction.navigationType == .linkActivated
             )
-            switch gate.decide(url: navigationAction.request.url, kind: kind) {
+            let decision = gate.decide(url: navigationAction.request.url, kind: kind)
+            switch decision {
             case let .openInBrowser(url):
                 // The URL comes from the feed: only http(s) is ever handed to the OS.
                 openInBrowserIfAllowed(url.absoluteString)
@@ -329,6 +369,10 @@ struct ArticleWebView {
                 decisionHandler(.allow)
             case .cancel:
                 decisionHandler(.cancel)
+            }
+            // A refused top-level navigation has already stopped a document load still in flight.
+            if decision != .allow, kind != .subframe {
+                reloadIfDocumentLoadLost(in: webView)
             }
         }
     }

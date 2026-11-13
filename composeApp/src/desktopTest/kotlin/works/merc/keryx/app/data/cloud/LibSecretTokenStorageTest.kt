@@ -9,8 +9,8 @@ class LibSecretTokenStorageTest {
     /**
      * With libsecret unavailable, [LibSecretTokenStorage.save] must route the token to the
      * fallback *and* report that it did — that outcome is what makes `CloudSession` raise its
-     * bell warning. libsecret is injected as null rather than left to the real JNA binding: on a
-     * developer machine that isn't a snap, `libsecret-1.so.0` may not even be installed.
+     * notification-center warning. libsecret is injected as null rather than left to the real JNA
+     * binding: on a developer machine that isn't a snap, `libsecret-1.so.0` may not even be installed.
      */
     @Test
     fun saveReportsThePlaintextFallbackWhenLibSecretIsUnavailable() {

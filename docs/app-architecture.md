@@ -199,10 +199,10 @@ Tests live next to the code they test: `shared/src/{commonTest,desktopTest,andro
     macOS-toolbar-style capsule, and M3's own `PlainTooltip`, respectively), KeryxRaisedSurface (a distinctly-tinted
     `colorScheme.surfaceContainerHigh` tonal container instead of desktop's hairline-bordered flat
     card), KeryxBadgedIcon (M3's own `BadgedBox`/`Badge` instead of desktop's hand-rolled pill —
-    used by `NotificationsBell`), KeryxSettingRow (a real M3 `ListItem`, whose own tap target covers
+    used by the drawer button's notification count), KeryxSettingRow (a real M3 `ListItem`, whose own tap target covers
     the whole row — backs `SettingsComponents.kt`'s `LinkRow`/`ActionLinkRow`/`SwitchRow`),
-    KeryxAnchoredPanel (a real M3 `ModalBottomSheet` — backs `NotificationsBell`'s notification
-    popover and `TagColorPickerPopup`; necessary, not just idiomatic, since a bare `Popup` there
+    KeryxAnchoredPanel (a real M3 `ModalBottomSheet` — backs `NotificationCenterRow`'s notification
+    panel and `TagColorPickerPopup`; necessary, not just idiomatic, since a bare `Popup` there
     would composite behind the article reader's `WebView` the same way a bare Compose overlay does
     on desktop, see "Article Reader" below), KeryxPaneTopBar (a real M3 `TopAppBar` — backs each of
     the 3 panes' own header row, not a shared app-wide bar), DatabaseMerger/DatabaseSnapshot
@@ -450,8 +450,10 @@ resolves the live DB's real path per platform (see `db-schema.md`).
 ### In-App Update
 
 `domain/UpdateRepository` is the same kind of app-lifetime, Koin-`single` orchestrator as
-`SyncRepository` above — a `StateFlow<UpdateState>` every UI surface (Updates tab, tray, bell)
-reads, so a closed settings dialog doesn't cancel an in-flight download. It composes three seams:
+`SyncRepository` above — a `StateFlow<UpdateState>` the UI surfaces that show the update's state
+(Updates tab, tray) read, so a closed settings dialog doesn't cancel an in-flight download. The
+notification center does not read this state: `UpdateRepository` posts only selected notices to
+`NotificationCenter` (see "In-App Update" in `background-update.md`). It composes three seams:
 `domain/UpdateChecker` (candidate selection and version-comparison policy only — the GitHub
 Releases HTTP request and JSON parsing live in `data/remote/ReleaseFeedSource`, which
 `UpdateChecker` builds internally from the same constructor params rather than taking one as a
@@ -603,6 +605,20 @@ to the host executable, which fails with Access Denied whenever that location is
 (an uncaught exception from the failed creation also left the library's creation-retry timer
 running forever, which was the cause of an
 app-wide freeze on click).
+
+**A pushed document is pushed as soon as the view is ready, and checked until it is on screen.**
+`shouldLoadArticleHtml` pushes a new document whenever the view is past `Initializing`, without
+waiting for `Finished`: while the article on screen keeps starting navigations of its own (its script
+setting `location`), the native view stays loading and a guard that waited for `Finished` never
+pushed the next document at all. Such a navigation also drops a document load still in flight, and
+the library reports nothing about it — the loading flag stays set and the URL is `about:blank`
+either way — so `ArticleWebView` tags each document with a `<meta name="keryx-document">` carrying
+a marker unique to that push (`readerDocumentMarker`, not a hash of the HTML, which could collide
+with the document still on screen) and, every second after a push, reads that tag back from the page; a document
+not yet on screen is pushed again, up to `:shared`'s `READER_DOCUMENT_RELOAD_LIMIT` times
+(`presentation/article/ReaderDocumentLoad.kt`, the rule the SwiftUI reader follows too). Measured on
+desktop with an article whose script sets `location` every millisecond: the previous article stayed
+on screen under the new selection in 4 of 150 quick switches before, 0 after.
 
 **The reading position survives Android killing the process in the background.** `ArticleWebView`
 records the native view's vertical scroll position as a fraction of its scrollable height
@@ -1749,7 +1765,12 @@ override, stays out of the template.
   guard has a known gap (an anchor inside a closed shadow root); see "A feed body's own JavaScript
   runs inside the article reader" in [known-issues.md](known-issues.md). This keeps the app from
   being an in-app browser, which Apple's age-rating questionnaire would count as unrestricted web
-  access. The Compose readers do not apply the main-frame rule.
+  access. The Compose readers do not apply the main-frame rule. Because WebKit drops a document load
+  still in flight when another top-level navigation starts (one the gate refuses included), the
+  reader tracks its own load until it commits and loads the document again when a top-level
+  navigation is refused or its load fails before then, up to a fixed number of times per document
+  (`:shared`'s `presentation/article/ReaderDocumentLoad.kt`) — otherwise the previous article stayed
+  on screen while the list showed the new selection.
 - **The SwiftUI reader reloads its document when WebKit's content process dies.** iOS may terminate
   the `WKWebView`'s WebContent process while the app is in the background — while the external
   browser a link opened is in front, say — which leaves the reader blank. `ArticleWebView`'s
@@ -1809,9 +1830,9 @@ accent-tinted by the source list — while the selection and a drop target keep 
 colors.
 
 Drag and drop applies the same shared rules as Compose
-(`presentation/home/FeedListDrag.kt`'s `resolveFeedListDropHighlight`/`resolveFeedListDropAction`);
-only the feedback is per UI, and on macOS it follows the source-list conventions of
-`NSOutlineView`/Finder (`Home/FeedListDropPresentation.swift`).
+(`presentation/home/FeedListDrag.kt`'s `resolveFeedListDropHighlight`/`resolveFeedListDropAction`).
+On macOS, `SidebarDropGuard` decides where a drop lands and applies it (the positions are read in
+`Home/FeedListDropPresentation.swift`), and the feedback is `NSOutlineView`'s own, as in Finder.
 
 - **A drag starts through `.itemProvider`, the `List`'s own row-drag hook.** The list then tells a
   click from a drag anywhere in the row. SwiftUI's gesture-based sources do not work in these rows:
@@ -1821,11 +1842,42 @@ only the feedback is per UI, and on macOS it follows the source-list conventions
   in-progress item. The payload uses its own exported type (`works.merc.keryx.app.feedlistitem`,
   declared under `UTExportedTypeDeclarations` in `project.yml`), so a text drag from another app is
   never taken for a reorder.
-- Feedback: an insertion line between rows (indented by the outline itself), an accent highlight on
-  a folder, "No folder" or tag row a feed is dropped onto, `.forbidden` wherever the shared rules
-  resolve no action, and spring-loaded folders that follow the system's spring-loading setting (the
-  Mac App Store build always uses the system default, 0.5 s — reading that setting is not covered by
-  its privacy manifest).
+- **Every feed and folder drop is decided and applied by `SidebarDropGuard`
+  (`Home/Sidebar/SidebarDropGuard.swift`), never by SwiftUI.** SwiftUI's own drop handling crashed
+  applying a folder drop, refused or misplaced others, and marked the cursor with "+" (see "macOS:
+  dropping a folder between folders crashed inside SwiftUI" in [known-issues.md](known-issues.md)),
+  so the `List` carries no `.onInsert`/`.onDrop`. The guard adds methods to the `NSOutlineView`
+  behind the `List` and to its data source:
+  - The data source's `outlineView(_:validateDrop:proposedItem:proposedChildIndex:)` reads the
+    proposed row (`SidebarDropOutline`), picks where the item lands
+    (`sidebarDropDestination`), and accepts it only when the shared rules resolve an action there
+    (`feedListInsertAction` / `resolveFeedListDropAction`). It then sets that destination with
+    `setDropItem` and returns "move", keeping the action it resolved. The outline's
+    `performDragOperation:` applies that action through `applyFeedListDropAction` only if the
+    destination still resolves to it — a sync that reorders the sidebar under the drag makes the
+    drop refused rather than sent somewhere other than what was highlighted.
+  - A folder only goes between folders: anywhere on or inside a folder (its row, its feeds) is the
+    slot just after it, and the Folders header is the first slot. The slots just before and after
+    the dragged folder show a line too, and dropping there leaves the order as it is.
+  - A feed goes onto a folder, "No folder" or a tag row, or between the feeds of a folder or of "No
+    folder". A feed's copy under a tag stands for that tag (the shared `FeedListDropTarget.FeedInTag`,
+    as in Compose and on iOS), and the tag's own row is highlighted. Anything else (inside a feed row) is
+    refused, and the outline proposes the next position instead.
+  - Drags of any other type go on to SwiftUI's implementation untouched.
+- Feedback is the outline's own: the insertion line, the full-row highlight of a drop target, and
+  spring-loading (a collapsed folder or tag opens under a hovering feed). A folder drag springs
+  nothing open: the guard refuses it in the outline's `expandItem:`, which SwiftUI's outline
+  overrides to record the row as expanded, so a refused one leaves the sidebar's state as it was;
+  SwiftUI applies its own expansion state another way, so an expansion it asks for mid-drag still
+  happens. The cursor stays the system's: a drop that resolves to nothing is refused and the item
+  slides back, with no forbidden cursor.
+- A feed's copy under a tag gets an id of its own (`TagFeedRowID`: tag id + feed id). With the
+  feed's id, the outline would take the copy and the original for one item, highlighting the wrong
+  row and proposing positions that do not exist.
+- If SwiftUI's internals change so that the guard cannot be installed, sidebar drag and drop does
+  nothing (it does not crash), and moving and tagging remain available from the context menu. A
+  fault is logged (`SidebarDropGuard` category) when the outline is found but cannot be guarded. `KeryxTests/SidebarDropGuardTests.swift` hosts a
+  `List` shaped like the sidebar and checks the guard's assumptions, so CI catches such a change.
 
 ### Sidebar (iOS)
 
@@ -1926,14 +1978,15 @@ item gets overwritten. As in Notes, the collection view therefore takes the dele
   session's `localContext`; the session is restricted to the app and its item provider carries no data.
   Only the lifted row is dragged — never a header, All/Starred, a tag, or the row being renamed.
 - **Onto a row or between rows.** A feed over a folder row (below its top quarter, which stays the gap
-  above it), the "No folder" header or a tag row is proposed as `.insertIntoDestinationIndexPath`, and
+  above it), the "No folder" header, a tag row or a feed's copy under a tag (which stands for the tag,
+  `FeedListDropTarget.FeedInTag`) is proposed as `.insertIntoDestinationIndexPath`, and
   the cell's drop state paints it in `SelectionColor`; anywhere else it is a gap
   (`.insertAtDestinationIndexPath`), which UIKit draws by opening space. A gap's index is counted the way
   UIKit numbers a move: with the dragged row (and, for a folder, its feeds — the outline collapses a
   lifted folder) left out. While the finger is over the gap it has already opened, UIKit reports the
   dragged row's own index path, so the previous position is kept then; at the drop the coordinator's
   destination is the real gap. Every position becomes a `FeedListDropTarget` and half, goes through
-  `resolveFeedListDropAction` — `nil` is `.forbidden`, e.g. inside the tags, above a section's first
+  `resolveFeedListDropAction` — `nil` is `.forbidden`, e.g. between rows of the tags, above a section's first
   row for a feed, or just below a collapsed folder — and is applied with `applyFeedListDropAction`.
 - **Dropping onto a row shrinks the preview into its center** (`UIDragPreviewTarget`) instead of using
   UIKit's default, a snapshot of the dragged row fitted to the target's bounds, which would lay the dragged
@@ -2019,6 +2072,16 @@ therefore come paired with the filter that produced them — `HomeViewModel.arti
 say whether the rows on screen are the current filter's. The switch is carried out once; a refresh
 landing later never scrolls the list.
 
+A scroll is also never asked of a list that is not on screen (`Home/ArticleListScrollGate.swift`, tested
+in `KeryxTests`). `scrollTo` is carried out in the list's next layout, and a list under the reader is
+not laid out: a swipe in the reader moves the selection and a restored selection lands while the list is
+hidden, so their scrolls would wait for the back navigation's first layout. The gate holds them instead
+and, when the list is back on screen, carries out only the latest, provided its row still exists; a list
+rebuilt on the way back from the sidebar drops it, since that list starts at the top. "Back on screen"
+means as the pop starts, not when it ends. The pill's jump is exempt: it can only be tapped on screen.
+This is a defensive change for a crash that was not reproduced — see "iOS: going back to the article
+list crashed in `UICollectionView`" in [known-issues.md](known-issues.md).
+
 ### iPhone Duo (iOS)
 
 iPhone Duo's outer display, and its inner display in landscape, show the navigation bar, toolbar and
@@ -2028,10 +2091,11 @@ exists. What was measured on the iOS 27.1 simulator, and what follows from it:
 
 - **Toolbar priorities.** A vertical bar overflows its items into "…" from the bottom up, which on the
   outer display in landscape hid Mark All as Read first and squeezed the search button into an empty
-  circle. From iOS 27 the article list's items carry `visibilityPriority`: the notification bell (a
-  badged item) and Mark All as Read (a frequent action) `.high`, the sort button and the list mode
-  menu `.low` — the order the HIG asks for. A horizontal bar ignores these priorities (the
-  inner display's 360pt article list column in landscape still overflows sort and Mark All as Read),
+  circle. From iOS 27 the article list's items carry `visibilityPriority`: Mark All as Read (a frequent
+  action) `.high`, the list mode menu (which also holds the sort order) `.low` — the order the HIG
+  asks for. A horizontal bar ignores these priorities (measured
+  while the bar still held a sort button, the inner display's 360pt article list column in landscape
+  overflowed sort and Mark All as Read),
   so this changes vertical bars only. Before iOS 27 the items stay in their two groups.
   `visibilityPriority` exists only in the iOS 27 SDK, so this branch compiles only under
   `#if compiler(>=6.4)` (Xcode 27); a release built with the pinned Xcode 26.6 keeps the two groups

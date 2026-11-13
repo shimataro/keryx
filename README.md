@@ -50,7 +50,7 @@ The F-Droid build has no Google Drive sync (Dropbox and OneDrive work as usual).
 > browser).
 
 Once Keryx is running, it can check for, download, and install newer releases on its own — from
-the notification bell, the task tray, or Settings → Updates (on macOS, from **Keryx → Check for
+the notification center at the bottom of the feed list, the task tray, or Settings → Updates (on macOS, from **Keryx → Check for
 Updates…** in the menu bar, or automatically, as set in Settings → General). The Windows and
 Android steps above are therefore only needed for the first install: an update Keryx downloads
 itself is not a browser download, so it never triggers Windows SmartScreen's "unsigned file"

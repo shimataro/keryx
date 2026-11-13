@@ -33,8 +33,9 @@ You review Keryx (a cross-platform RSS reader, Kotlin Multiplatform / Compose Mu
 
 Read `.claude/skills/ui-guidelines/SKILL.md` and flag deviations from its conventions: pane tonal
 roles, divider policy, sticky section headers, article card style, layout stability, gaps and node
-count, metadata lines, flat native-feel components, context-menu and dialog/popup rules, icon usage
-via `ui/common/KeryxIcons.kt`.
+count, metadata lines, flat native-feel components, standard components over custom drawing (on
+Android: a Material 3 component replaced by a hand-built look-alike), context-menu and dialog/popup
+rules, icon usage via `ui/common/KeryxIcons.kt`.
 
 - Does any route to an action have its own effect, enablement condition or feedback instead of the
   action's shared handler/predicate ("Actions with more than one route")? A typical case: a
@@ -137,6 +138,11 @@ section describes. In particular:
   VoiceOver where the Compose app relies on a visual cue (see `Platform/VoiceOverAnnouncement.swift`)?
 - Does the change follow the native idiom described in `docs/external-spec.md` §9 (search placement,
   pull-to-refresh, toolbar contents per width) rather than copying the Compose layout?
+- Does the change draw something a standard component draws itself (a highlight, an indicator, a
+  cursor, fixed metrics, literal colors)? If so, does it fall under one of the exceptions in the
+  ui-guidelines skill's "Standard components over custom drawing", and is the exception recorded?
+  An unrecorded one is `Low`, or `Medium` when the custom drawing replaces a system-drawn state
+  (selection, focus, drop target).
 - Keyboard shortcuts (`.keyboardShortcut`, `HomeCommands.swift`, `HomeKeyboard.swift`): does a new
   one collide with an existing one, and is it reachable on iPad with a hardware keyboard?
 
