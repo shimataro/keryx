@@ -16,7 +16,7 @@
 
 ## Directory Structure
 
-The code is split across four Gradle modules. All share the package root `works.merc.keryx.app`
+The code is split across the Gradle modules below. All share the package root `works.merc.keryx.app`
 and the same source-set names, so the tree below is their combined `src/` tree:
 
 | Module | Contents |
@@ -27,14 +27,16 @@ and the same source-set names, so the tree below is their combined `src/` tree:
 | `:androidGms` | Everything that needs Google Play services: Google Drive on Android (`PlayServicesGoogleDriveAuth.kt`). Its own module so the `fdroid` flavor can omit it — only `:androidApp`'s `github`/`play` flavors depend on it (see below). |
 | `:testing` | Test-only helpers used by both modules' tests (`DbTestSupport`, `CloudTestSupport`, `FakeNotificationMessages`, token-storage fakes). Never a main-source dependency. |
 
-Tests live next to the code they test: `shared/src/{commonTest,desktopTest,androidDeviceTest}` and
-`composeApp/src/{commonTest,desktopTest,androidDeviceTest}`.
+Tests live next to the code they test: `shared/src/{commonTest,desktopTest,appleTest,macosTest,androidDeviceTest}`
+and `composeApp/src/{commonTest,desktopTest,androidDeviceTest}`. `appleTest`/`macosTest` test the Apple
+actuals — see "Apple targets in `:shared`" below.
 
 ```text
 {shared,composeApp}/src/
   commonMain/kotlin/works/merc/keryx/app/
     core/      Constants, Result, KeryxException, ArticleFilter, AppNotification, Clock, DateTimeParser, CloudStorageAvailability(expect),
-               AppInfo, CloudBackupPath, HtmlText, Log, SearchQuery, SemVer, SqliteFile, UntrustedText, UpdateDistribution
+               AppInfo, Cancellation, CloudBackupPath, DbFlag, HtmlText, Log, NetworkCondition, NotificationText, SearchQuery, SemVer,
+               SqliteFile, UntrustedText, UpdateDistribution
     data/local/   DatabaseDriverFactory(expect), FtsManager, FtsSearch, LocalSettings(Store)
     data/remote/  FeedFetcher, FeedParser, FeedDiscovery, FaviconResolver, UrlResolver, FeedModels, UpdateDownloader, ReleaseFeedSource (in-app update — see "In-App Update" below)
     data/cloud/   CloudStorage, CloudAuthManager, DropboxStorage, DropboxAuthManager, GoogleDriveStorage, GoogleDriveAuthManager, OneDriveStorage, OneDriveAuthManager, Pkce, TokenStorage, OAuthTokens,
@@ -131,7 +133,7 @@ Tests live next to the code they test: `shared/src/{commonTest,desktopTest,andro
                AppMenuDBusMenu, AppMenuRegistrar) — see external-spec.md §9
     platform/update/  DesktopUpdateInstaller, UpdateScriptWriter (pure self-replace/msiexec script templates), ProcessLauncher/RealProcessLauncher (the detached-launch seam a test fakes), ArchiveExtractor (DittoArchiveExtractor on macOS, where the signed bundle seals its own symlinks; InProcessArchiveExtractor in process elsewhere), CodeSigningVerifier/RealCodeSigningVerifier (the `codesign --verify` seam)
   androidMain/composeResources/drawable/  the Android `KeryxIcons` actual's own icon set — Material
-    Symbols Outlined (Apache-2.0), 43 vector drawables — see "Icon set" below
+    Symbols Outlined (Apache-2.0) vector drawables — see "Icon set" below
   androidMain/kotlin/…/  actual implementations not covered by jvmCommonMain: DatabaseDriverFactory
     (bundled SQLite, see below), DatabaseFile (`databaseFilePath()` — `Context.getDatabasePath`,
     a different directory than AppDirs.appDataDir()/`Context.filesDir`; see db-schema.md),
@@ -1021,10 +1023,9 @@ iconography than Material Design's (see the `ui-guidelines` skill for the full r
 Android `actual` uses Material Symbols Outlined (Apache-2.0), bundled under
 `androidMain/composeResources/drawable/`, matching Android's own native visual
 language. `KeryxIcon(...)` (the `Icon` wrapper composable) stays a single `commonMain` definition;
-only the `KeryxIcons` object's icon selection differs per platform. If iOS/iPadOS/macOS is ever
-rewritten as native SwiftUI (per `external-spec.md` §2's plan), that becomes a separate codebase
-unrelated to Kotlin's `KeryxIcons`, so it can use SF Symbols via `Image(systemName:)` directly with no
-additional Kotlin-side switching mechanism needed.
+only the `KeryxIcons` object's icon selection differs per platform. The SwiftUI app on macOS and
+iOS/iPadOS (`appleApp/`) is independent of Kotlin's `KeryxIcons`: it uses SF Symbols directly
+(`Image(systemName:)`, `Label(_:systemImage:)`), so no Kotlin-side switching mechanism exists for it.
 
 ## Domain Model Policy
 
@@ -1265,32 +1266,26 @@ derived flag that says whether the article list is currently showing search resu
 (`HomeViewModel.searchResults`, itself scoped to the current filter — see `FtsSearch.articleScopeSql`
 below) or the filter's own list (`HomeViewModel.articles`); `ArticleListPane` reads it to pick which
 one to feed into the one `ArticleListPaneContent` call that renders either. Because the filter is
-never displaced, there is nothing to snapshot and nothing to restore when search ends — the
-`SearchScopeEntry`/`enterSearchScope`/`exitSearchScope` machinery an earlier design needed for
-exactly that no longer exists.
+never displaced, there is nothing to snapshot and nothing to restore when search ends. Typing into
+`FeedListPane`'s permanent field (or into the narrow layout's expanded bar once open) is the whole
+entry point: `searchActive` follows from the query alone, so a tap, a keyboard cursor landing on the
+field, and arrow-key navigation all start a search the same way.
 
-**`_searchBarVisible` is the one piece of real state search still needs**, and it exists only for
-narrow layouts: at `PaneLayout.Triple`, `FeedListPane`'s own query field is permanent, so
-`HomeScreen`'s own `LaunchedEffect(layout)` keeps it `true` there the whole time; at a narrow
-layout it starts `false` and is toggled by `ArticleListTopBar`'s search icon
-(`onSearchClick` → `setSearchBarVisible(true)`) and the expanded bar's own back arrow
+**`_searchBarVisible` says whether the search field is open**, which matters only at narrow layouts:
+at `PaneLayout.Triple`, `FeedListPane`'s own query field is permanent, so `HomeScreen`'s own
+`LaunchedEffect(layout)` keeps it `true` there the whole time; on dropping to a narrow layout the same
+effect keeps it open only while the query has text, and otherwise it is toggled by `ArticleListTopBar`'s
+search icon (`onSearchClick` → `setSearchBarVisible(true)`) and the expanded bar's own back arrow
 (`onExitSearch` → `homeBackAction`'s `CloseSearchBar` case → `setSearchBarVisible(false)`). Its purpose
 is exactly the gap between "the query still has text" and "the bar is currently open": closing the
 bar at a narrow layout must show the filter's own list again without erasing the query, so a later
 tap on the search icon re-shows the same results — `searchActive` requiring both is what makes that
-true. `HomeViewModel.pendingSearchFocus` is still a latched `StateFlow<Boolean>` rather than a
-one-shot event, for the same reason as before: a request to focus the field is raised in the same
-click that opens the bar, so the composable that will own the field hasn't composed yet, and a
-`SharedFlow` with no subscriber yet would drop the request silently. `setSearchBarVisible(false)`
-drops an unconsumed request the same way leaving the filter used to.
-
-**The sidebar has no "Search" quick-filter row any more.** Typing directly into `FeedListPane`'s
-permanent field (or into the narrow layout's expanded bar once open) is the whole entry point —
-`searchActive` follows from the query alone, so a tap, a keyboard cursor landing on the field, and
-arrow-key navigation all behave identically; there is no separate "enter Search" action to trigger
-selectively, and therefore no asymmetry between how a tap and a keystroke start a search. This also
-means `buildOrderedFeedListRows` needs no `includeSearchRow` parameter and `feedListRowIndex` no
-longer special-cases a "Search" row — the row simply does not exist, at any layout.
+true. `HomeViewModel.pendingSearchFocus` is a latched `StateFlow<Boolean>` rather than a one-shot
+event: a request to focus the field is raised in the same click that opens the bar, so the composable
+that will own the field hasn't composed yet, and a `SharedFlow` with no subscriber yet would drop the
+request silently. The latch stays set until the field that gains focus consumes it
+(`consumeSearchFocusRequest()`), and `setSearchBarVisible(false)` drops an unconsumed request, so a
+stale one can never steal focus from an unrelated field later.
 
 **Search's own scope is the currently selected filter, not always every feed.** Selecting a
 different feed/folder/tag while a query is active re-scopes the *same* search immediately
@@ -1299,7 +1294,7 @@ searches everywhere. `FtsSearch.articleScopeSql` builds the `WHERE`-clause fragm
 `ArticleFilter` variant, matching `articles.sq`'s own `watchAll`/`watchStarred`/`watchByFeed`/
 `watchByTag`/`watchByFolder` queries row-for-row — including their existing asymmetry (`Starred`
 and `Feed` don't join `feeds` at all, so an unsubscribed feed's starred articles/own articles still
-show under those scopes; `All`/`Tag`/`Folder` do). See "FTS5 handling" in `sync-architecture.md` and
+show under those scopes; `All`/`Tag`/`Folder` do). See "FTS5 Handling" in `sync-architecture.md` and
 `db-schema.md`'s own `articles_fts` section for the query mechanics this composes with.
 
 **Nothing about ending a search restores anything.** Clearing the query (or, at a narrow layout,
@@ -1314,8 +1309,8 @@ read from the plain list.
 early `return`, and no per-branch (un)mounting the way `PaneLayout.Single`'s `NarrowPaneRow` panes
 get. Its `baseListState`/`searchListState` (two independent `LazyListState`s) and `lastFilter` are
 all declared unconditionally at the top, so switching in and out of search never disposes either
-list's scroll position — there is no snapshot/restore step needed to make a round trip through
-search leave the filter's own list exactly where it was.
+list's scroll position — a round trip through search leaves the filter's own list exactly where it
+was, with no snapshot/restore step.
 
 **Swiping away from an article and straight back returns to where it was being read**, rather than to
 its top: the reader keeps the immediate neighbours on either side ready, so the one just left is still
@@ -1810,7 +1805,9 @@ override, stays out of the template.
   computation uses the iOS-style flat `Keryx.app/Keryx` layout even when the active destination is
   macOS, whose bundle actually nests the executable under `Keryx.app/Contents/MacOS/Keryx`, so the
   test bundle fails to find its host. Being host-less means `KeryxTests` cannot exercise `AppModel`/
-  `HomeView` directly; it covers the `Bridge/`/`Localization/` adapters in isolation instead.
+  `HomeView` directly. Logic-only Swift files are instead listed in the test target's own `sources:`
+  in `appleApp/project.yml` and tested without hosting the app — for example files under `Bridge/`
+  and `Home/` such as `Home/FeedListSelectionEquality.swift`.
 - iOS Simulator only ships an arm64 slice (`EXCLUDED_ARCHS[sdk=iphonesimulator*]: x86_64` in
   `project.yml`), matching the rest of the repo's Apple-Silicon-only convention.
 
@@ -2078,12 +2075,10 @@ landing later never scrolls the list.
 ### Article list title (iOS)
 
 The article list is named by the standard inline navigation title on every iOS version, as the sidebar
-is. The name stays in the bar however far the list scrolls, so a larger form before the first scroll
-only took room from the rows: an earlier large title (iOS 26 and later) also stayed collapsed after a
-filter switch, and no scroll API expanded it again (scrolling to the first row's top, `ScrollPosition`'s
-`scrollTo(edge: .top)` and rebuilding the `List` were all tried), while an earlier heading row (before
-iOS 26) needed the bar to stand in for it once it had scrolled away. A filter switch's reset therefore
-goes to the first row on every version.
+is (`navigationBarTitleDisplayMode(.inline)` in `ArticleListView`), so the name stays in the bar however
+far the list scrolls — a large title would only take room from the rows above the first scroll and,
+from iOS 26, could not be expanded again after a filter switch. A filter switch's reset goes to the
+first row (`ArticleListTopReset`).
 
 The system search field (`.searchable(placement: .automatic)`) keeps its standard place for an inline
 title: the bottom bar on an iPhone from iOS 26, and a drawer under the bar otherwise — on an iPad from
@@ -2109,9 +2104,10 @@ exists. What was measured on the iOS 27.1 simulator, and what follows from it:
   group even on iOS 27. Either way the items sit at the same trailing edge.
 - **The band above the outer display's lists** (82pt, against 24pt above the reader, which has no
   navigation title) is the navigation title's own area, and the system Settings app leaves the same
-  band above its own lists. It is left as is. It now holds the article list's inline title (see "Article
-  list title (iOS)"); the 82pt was measured on iOS 27.1 while the list kept that area empty, and the band
-  has not been re-measured since.
+  band above its own lists. It is left as is, and holds the article list's inline title (see "Article
+  list title (iOS)"). The 82pt was measured on iOS 27.1 while the list kept that area empty; to re-measure
+  it, run the iPhone Duo simulator on its outer display and compare the band above the article list with
+  the one above the reader.
 - **The inner display in portrait** (669pt, a regular width) shows the reader alone, with the article
   list over it on demand. That is the split view's own decision: neither `.balanced` with a
   `.doubleColumn` visibility nor a 300pt ideal width for the list made the two columns tile, and the
