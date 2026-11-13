@@ -2075,6 +2075,27 @@ therefore come paired with the filter that produced them — `HomeViewModel.arti
 say whether the rows on screen are the current filter's. The switch is carried out once; a refresh
 landing later never scrolls the list.
 
+### Article list heading (iOS)
+
+The article list names its selection differently on either side of iOS 26. One property,
+`ArticleListView.showsListHeader`, decides which, and the title display mode, the bar's principal item
+and the filter switch's reset all follow it.
+
+- **From iOS 26** the standard large title names it, collapsing into the bar as the list scrolls.
+  iOS 26's toolbar is translucent, and an opaque heading band of the app's own stood out under it.
+- **Before iOS 26** the heading is the list's first row (`ArticleListHeader`, with the selection's
+  icon), under an `.inline` bar whose principal item is empty. Once the heading row has scrolled away,
+  the principal item shows the list's name instead: while the list is the content on screen (an empty,
+  loading or search state shows its own heading instead) and the current list's heading row last
+  reported itself off screen (`Home/ArticleListBarTitle.swift`, tested in `KeryxTests`). Coming back from
+  the reader with the heading scrolled away keeps the name, since only rows on screen report
+  `onAppear`; reports from a list that has since been rebuilt are ignored.
+
+A filter switch's reset goes to the heading row before iOS 26, so the new selection's name is on screen
+again. From iOS 26 it goes to the first row, and a large title the scrolling had collapsed stays
+collapsed, naming the selection inline — see "iOS: the article list's large title stays collapsed after
+a filter switch" in [known-issues.md](known-issues.md).
+
 A scroll is also never asked of a list that is not on screen (`Home/ArticleListScrollGate.swift`, tested
 in `KeryxTests`). `scrollTo` is carried out in the list's next layout, and a list under the reader is
 not laid out: a swipe in the reader moves the selection and a restored selection lands while the list is
@@ -2103,10 +2124,13 @@ exists. What was measured on the iOS 27.1 simulator, and what follows from it:
   (`.primaryAction`). `visibilityPriority` exists only in the iOS 27 SDK, so this branch compiles only
   under `#if compiler(>=6.4)` (Xcode 27); a release built with the pinned Xcode 26.6 keeps the one
   group even on iOS 27. Either way the items sit at the same trailing edge.
-- **The empty band above the outer display's lists** (82pt, against 24pt above the reader, which has no
-  navigation title) is the navigation title's own area: removing the article list's empty `.principal`
-  item shows the inline title there, and the system Settings app leaves the same band empty above its
-  own lists. It is left as is.
+- **The band above the outer display's lists** (82pt, against 24pt above the reader, which has no
+  navigation title) is the navigation title's own area, and the system Settings app leaves the same
+  band above its own lists. It is left as is. What it holds follows the article list's heading (see
+  "Article list heading (iOS)"): from iOS 26 the list's large title; before iOS 26 the bar's principal
+  item, zero-sized (so the band looks empty) while the heading row is on screen and the list's name once
+  it has scrolled away. The 82pt was measured on iOS 27.1 while the article list still had an
+  always-empty principal item; the band has not been re-measured since the list took the large title.
 - **The inner display in portrait** (669pt, a regular width) shows the reader alone, with the article
   list over it on demand. That is the split view's own decision: neither `.balanced` with a
   `.doubleColumn` visibility nor a 300pt ideal width for the list made the two columns tile, and the

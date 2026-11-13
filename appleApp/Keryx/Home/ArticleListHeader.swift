@@ -1,12 +1,13 @@
 #if os(iOS)
 import SwiftUI
 
-/// The heading above the article list on iOS: the selected item's icon and name, as Android's
-/// narrow-layout header shows. A navigation title cannot do this job — an inline one has no room
-/// left once the toolbar buttons fill the bar, and a large one is too big and takes no icon.
-/// Before iOS 26 only: under iOS 26's translucent toolbar this opaque band stands out, so the list
-/// takes the standard large title there instead (`ArticleListView.titleDisplayMode`).
-/// It scrolls away with the rows, and the bar then shows the title in its place.
+/// The heading above the article list on iOS before 26: the selected item's icon and name, as
+/// Android's narrow-layout header shows. Before iOS 26 a navigation title cannot do this job — an
+/// inline one has no room left once the toolbar buttons fill the bar, and a large one collapses out of
+/// sight in a bar too crowded for an inline one, and takes no icon. From iOS 26 the list takes the
+/// standard large title instead, since under iOS 26's translucent toolbar this opaque band stands out
+/// (`ArticleListView.showsListHeader`). It scrolls away with the rows, and the bar then shows the title
+/// in its place (`ArticleListBarTitle`).
 struct ArticleListHeader: View {
     let title: String
     let icon: SidebarRowIcon

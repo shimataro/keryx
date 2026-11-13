@@ -1431,6 +1431,23 @@ feed of a few dozen articles:
 - On an iPad, selecting an article off screen with a hardware keyboard and switching the filter still scroll
   the list, in the three-pane layout and in portrait.
 
+### (iOS) The article list title
+
+`ArticleListBarTitleTests` covers when the bar names the list before iOS 26, but how it looks needs a
+simulator or device. On iOS 17 or 18 and on iOS 26 or later, each on an iPhone and an iPad:
+
+- Before iOS 26: scrolling the heading row away shows the list's name in the bar, and scrolling back to
+  the top takes it away again.
+- Before iOS 26: with the heading scrolled away, open an article and go back: the name is still in the bar.
+- Before iOS 26: an empty list, a Starred mode with nothing in it and a search with no results each show
+  the heading once, with nothing in the bar.
+- From iOS 26: the large title collapses into the bar on scrolling and is large again at the top.
+- After scrolling down, choosing another feed goes back to the top (before iOS 26, to the heading). From
+  iOS 26 the title stays collapsed there, naming the feed inline — a known issue (see
+  [known-issues.md](known-issues.md)), not a regression.
+- On a narrow iPhone (iPhone SE) with a long feed name, the name is truncated in the bar and Mark All as
+  Read stays a toolbar button.
+
 ### (iOS) Restoring Home after termination
 
 `HomeRestorationTests` covers when the restored column and reader position are used and withdrawn, and
