@@ -308,56 +308,55 @@ struct ArticleListView: View {
         }
         // The same status as the sidebar's, for the column an iPhone mostly shows.
         RefreshStatusToolbarItem(home: home)
-        #endif
-        #if os(iOS) && compiler(>=6.4)
-        // `#available` is a runtime check, so `visibilityPriority` also needs the iOS 27 SDK at
-        // compile time; Swift 6.4 ships with it (Xcode 27), while an older Xcode keeps the groups.
-        if #available(iOS 27.0, *) {
-            // A vertical bar (iPhone Duo's outer display, and landscape on its inner one) overflows
-            // from the bottom up, which hid Mark All as Read first and squeezed the search button
-            // out of shape. The HIG asks to keep frequent actions visible longest, so Mark All as
-            // Read outranks the list mode menu. A horizontal bar ignores these.
-            ToolbarItem(placement: .navigation) { listModeMenu }
-                .visibilityPriority(.low)
-
-            FlexibleToolbarSpacer()
-
-            ToolbarItem(placement: .primaryAction) { markAllReadButton }
-                .visibilityPriority(.high)
-        } else {
-            groupedToolbarItems
-        }
-        #else
-        groupedToolbarItems
-        #endif
-    }
-
-    /// The toolbar's items in their two groups — what every platform shows where per-item
-    /// visibility priorities are unavailable.
-    @ToolbarContentBuilder
-    private var groupedToolbarItems: some ToolbarContent {
-        // Every item's label is a `Label`, not a bare icon: the toolbar still renders icon-only, but
-        // the overflow menu it collapses into at a narrow width takes each row's title from it.
-        // Separate items of one group (not an `HStack` in one item) so each gets its own row there.
-        #if os(iOS)
-        if #unavailable(iOS 26) {
-            // Before iOS 26 there is no flexible spacer, and once the principal item has shown the
-            // title (`listHeaderVisible`) the bar places a `.navigation` item around it — beside the
-            // back button on one layout, beside the trailing cluster on the next. Leading the
-            // trailing cluster keeps the mode menu in one place.
-            ToolbarItemGroup(placement: .primaryAction) {
-                listModeMenu
-                markAllReadButton
-            }
-        } else {
-            leadingModeMenuItems
-        }
+        trailingToolbarItems
         #else
         leadingModeMenuItems
         #endif
     }
 
-    /// The mode menu at the leading edge, with the actions pushed to the trailing edge.
+    #if os(iOS)
+    /// iOS: the mode menu leads the trailing cluster on every version, ahead of Mark All as Read.
+    /// It is a view option, not navigation (the HIG puts those at the trailing edge, and an
+    /// iPhone's leading edge holds the back button). Not a `.navigation` item: that placement
+    /// leaves the side to the system, which put it leading on iOS 26 and trailing on iOS 27.
+    @ToolbarContentBuilder
+    private var trailingToolbarItems: some ToolbarContent {
+        #if compiler(>=6.4)
+        // `#available` is a runtime check, so `visibilityPriority` also needs the iOS 27 SDK at
+        // compile time; Swift 6.4 ships with it (Xcode 27), while an older Xcode keeps the group.
+        if #available(iOS 27.0, *) {
+            // A vertical bar (iPhone Duo's outer display, and landscape on its inner one) overflows
+            // from the bottom up, which hid Mark All as Read first and squeezed the search button
+            // out of shape. The HIG asks to keep frequent actions visible longest, so Mark All as
+            // Read outranks the list mode menu. A horizontal bar ignores these.
+            ToolbarItem(placement: .primaryAction) { listModeMenu }
+                .visibilityPriority(.low)
+            ToolbarItem(placement: .primaryAction) { markAllReadButton }
+                .visibilityPriority(.high)
+        } else {
+            trailingGroup
+        }
+        #else
+        trailingGroup
+        #endif
+    }
+
+    /// Both items in one group — wherever per-item visibility priorities are unavailable.
+    @ToolbarContentBuilder
+    private var trailingGroup: some ToolbarContent {
+        // Every item's label is a `Label`, not a bare icon: the toolbar still renders icon-only, but
+        // the overflow menu it collapses into at a narrow width takes each row's title from it.
+        // Separate items of one group (not an `HStack` in one item) so each gets its own row there.
+        ToolbarItemGroup(placement: .primaryAction) {
+            listModeMenu
+            markAllReadButton
+        }
+    }
+    #endif
+
+    #if os(macOS)
+    /// macOS: the mode menu, with its name, at the column's leading edge, and the actions pushed
+    /// to the trailing edge.
     @ToolbarContentBuilder
     private var leadingModeMenuItems: some ToolbarContent {
         ToolbarItem(placement: .navigation) { listModeMenu }
@@ -370,6 +369,7 @@ struct ArticleListView: View {
             markAllReadButton
         }
     }
+    #endif
 
     private var listModeMenu: some View {
         // The view options menu: the list mode, then the sort order in a section of its own (as

@@ -1446,9 +1446,12 @@ What the user sees of the modes, beyond `external-spec.md` §7's summary:
 
 - Choosing the current mode again changes nothing. The pop-up button is filled whenever the mode
   narrows the list. On Windows, Linux and the Compose macOS build its own menu shows the same
-  ⌘/Ctrl+1–3 keys; on iOS / iPadOS, where the toolbar has no room for the mode's name, it shows the
-  mode's icon with the pop-up button's up-and-down chevrons, so it does not read as a button that acts
-  at once.
+  ⌘/Ctrl+1–3 keys; on iOS / iPadOS, where the toolbar has no room for the mode's name, it shows a
+  filter icon alone (filled while the mode narrows the list), which reads as a menu by itself. There it
+  leads the trailing cluster, ahead of Mark All as Read, on every iOS version: it is a view option, and
+  an iPhone's leading edge holds the back button. It is not a `.navigation` item, whose side the system
+  picks (iOS 26 put it leading, iOS 27 trailing). macOS shows the mode's name and keeps the button at
+  the column's leading edge.
 - Starred mode cannot be chosen while the subscription list's own Starred item is selected, which
   already shows nothing else and is the only place starred articles of an unsubscribed feed remain.
   Selecting that item does not leave Starred mode: going back to a feed, folder, tag or All Feeds shows
@@ -2096,10 +2099,10 @@ exists. What was measured on the iOS 27.1 simulator, and what follows from it:
   asks for. A horizontal bar ignores these priorities (measured
   while the bar still held a sort button, the inner display's 360pt article list column in landscape
   overflowed sort and Mark All as Read),
-  so this changes vertical bars only. Before iOS 27 the items stay in their two groups.
-  `visibilityPriority` exists only in the iOS 27 SDK, so this branch compiles only under
-  `#if compiler(>=6.4)` (Xcode 27); a release built with the pinned Xcode 26.6 keeps the two groups
-  even on iOS 27.
+  so this changes vertical bars only. Before iOS 27 the two items stay in one trailing group
+  (`.primaryAction`). `visibilityPriority` exists only in the iOS 27 SDK, so this branch compiles only
+  under `#if compiler(>=6.4)` (Xcode 27); a release built with the pinned Xcode 26.6 keeps the one
+  group even on iOS 27. Either way the items sit at the same trailing edge.
 - **The empty band above the outer display's lists** (82pt, against 24pt above the reader, which has no
   navigation title) is the navigation title's own area: removing the article list's empty `.principal`
   item shows the inline title there, and the system Settings app leaves the same band empty above its
