@@ -1390,8 +1390,8 @@ GitHub Release はそのあいだも先に進めてよく、そのプラット�
 | --- | --- |
 | `ios` | オン（既定）: iOS アプリを公開する |
 | `macos` | オン: Mac App Store ビルドを公開する。既定はオフ。`ios` と `macos` の少なくとも一方をオンにすること。両方オンなら 2 つは並列に動き、一方が失敗してももう一方は止まらない |
-| `ref` | ビルドするブランチ、tag、またはコミット。バージョンブランチ上にあること。空（既定）なら tag `v<version>` をビルドする |
 | `version` | App Store のバージョン（x.y.z）。`ref` が空のときにビルドする tag の名前にもなる |
+| `ref` | ビルドするブランチ、tag、またはコミット。バージョンブランチ上にあること。空（既定）なら tag `v<version>` をビルドする |
 | `submit` | オン（既定）: 審査に提出する。オフ: ビルドのアップロードと関連付けだけを行い、提出は App Store Connect で行う |
 | `release` | `automatic`（既定）: 承認され次第、App Store Connect がバージョンを公開する。`manual`: App Store Connect で公開するまで待つ |
 

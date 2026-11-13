@@ -1401,8 +1401,8 @@ Inputs:
 | --- | --- |
 | `ios` | On (default): publish the iOS app |
 | `macos` | On: publish the Mac App Store build. Off by default. At least one of `ios` and `macos` must be on; with both on, the two run in parallel and one failing does not stop the other |
-| `ref` | Branch, tag or commit to build; must be on a version branch. Empty (the default) builds the tag `v<version>` |
 | `version` | App Store version, x.y.z — also the name of the release tag built when `ref` is empty |
+| `ref` | Branch, tag or commit to build; must be on a version branch. Empty (the default) builds the tag `v<version>` |
 | `submit` | On (default): submit for review. Off: upload and attach the build only, and leave the submission to App Store Connect |
 | `release` | `automatic` (default): App Store Connect releases the version as soon as it is approved. `manual`: it waits for a release in App Store Connect |
 

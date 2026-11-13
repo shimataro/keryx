@@ -28,15 +28,15 @@ on:
         required: true
         type: boolean
         default: false
+      version:
+        description: "App Store version, x.y.z (also the tag v<version> built when ref is empty)"
+        required: true
+        type: string
       ref:
         description: "Branch, tag or commit to build (must be on a version branch); empty builds the tag v<version>. The workflow and its scripts come from \"Use workflow from\", which must be a version branch such as v0"
         required: false
         type: string
         default: ""
-      version:
-        description: "App Store version, x.y.z (also the tag v<version> built when ref is empty)"
-        required: true
-        type: string
       submit:
         description: "Submit for review (off: upload and attach the build only)"
         required: true
