@@ -1,6 +1,6 @@
 ---
 name: ui-guidelines
-description: Keryx UI/Compose style guidelines. Read when adding or modifying Compose under `ui/` (home / common / settings / setup / article) or `platform/NativeMenu`. Defines pane tonal roles, divider policy, article card style, layout stability, platform-native components (buttons / toggles / text fields / list rows / overflow menus / theme), dialog/popup conventions, and icon usage rules.
+description: Keryx UI/Compose style guidelines. Read when adding or modifying Compose under `ui/` (home / common / settings / setup / article) or `platform/NativeMenu`, or SwiftUI under `appleApp/`. Defines the standard-components-over-custom-drawing rule (all UIs), pane tonal roles, divider policy, article card style, layout stability, platform-native components (buttons / toggles / text fields / list rows / overflow menus / theme), dialog/popup conventions, and icon usage rules.
 ---
 
 # UI Guidelines (Compose Multiplatform)
@@ -14,7 +14,7 @@ overflow menu (`platform/NativeMenu`).
 **The governing principle is "each platform follows its own native UI idiom"** — see
 `external-spec.md` §9. Desktop (macOS, and Windows/Linux sharing its look for the Java/Swing
 reasons documented there) gets a flat, hairline-bordered, non-ripple aesthetic; Android gets
-Material 3's own shapes, ripple, and components; iOS will eventually get native SwiftUI. Most of
+Material 3's own shapes, ripple, and components; macOS and iOS ship a native SwiftUI app. Most of
 this document was originally written when Keryx was desktop-only, so **most rules below describe
 the desktop `actual` specifically**, not a shared app-wide style — where a rule doesn't already say
 "on Android" or "the Android `actual`", assume it's a desktop-only convention and check the
@@ -22,6 +22,9 @@ component's own `expect`/`actual` split (grep the component name) before assumin
 applies verbatim on Android. Do not read "flat", "no ripple", or "hairline border" anywhere below
 as a target for Android; those phrases describe desktop's own choice, not a default the Android
 `actual` is deviating from.
+
+Two sections also govern the SwiftUI app (`appleApp/`): "Standard components over custom drawing"
+and "Actions with more than one route". Read them for SwiftUI work too.
 
 ## Layout stability under state changes
 
@@ -1207,6 +1210,57 @@ field that takes focus itself, so `focusedPane` cannot report it), and it shares
 
 Creating still uses a dialog (`FeedListDialogs.kt`'s add folder / add tag): there is no row to edit
 in place yet, and a new tag picks its name and color at once.
+
+## Standard components over custom drawing
+
+Applies to every UI: SwiftUI (macOS, iOS), Android, and desktop Compose within exception 2 below.
+The principle is "Standard components first" in `external-spec.md` §9: a standard component
+follows the OS when its look changes and when the user changes system settings (contrast,
+transparency, text size), with no work in the app; a look-alike has to be redone every time.
+
+**Rule**
+
+- Use the standard component or view, and its own drawing: SwiftUI `List`/`Toggle`/`Picker`/`Menu`,
+  AppKit and UIKit views, Material 3 components on Android.
+- Do not paint over or beside a standard component to imitate a state it can draw itself — a row
+  highlight painted onto `NSTableRowView`, a hand-drawn insertion line, a custom cursor, a custom
+  spring-loading timer.
+- Do not override a standard component's own metrics with fixed values (row height, section
+  spacing, list insets). Spacing inside the app's own content is fine. Where a size has to follow
+  text size, use `@ScaledMetric`.
+- Colors for UI chrome are semantic: `Color.accentColor`, `.secondary`, `NSColor`/`UIColor` system
+  colors, Material 3 color roles — never a literal color. Colors that are content are not chrome,
+  e.g. a tag's own color (`colorFromHex`).
+- When a standard component behaves wrongly, correct what it is told — its data source's answer,
+  its delegate, its ids — and keep its drawing. The model is the macOS sidebar's drop guard
+  (`appleApp/Keryx/Home/Sidebar/SidebarDropGuard.swift`): it decides each drop, and `NSOutlineView`
+  draws the insertion line, the row highlight and the spring-loading (`app-architecture.md`
+  "Sidebar (macOS)").
+- The rule applies to new and changed code. Existing custom drawing is moved to standard components
+  when that code is next changed, not in a sweep of its own.
+
+**Exceptions** (each recorded where it is made — see below)
+
+1. **No standard component exists for the purpose** — the iOS transient toast
+   (`appleApp/Keryx/Home/TransientToast.swift`), the new-articles pill
+   (`appleApp/Keryx/Home/PillLabel.swift`). Build it from standard pieces (system materials, semantic
+   colors, system fonts, `@ScaledMetric`) so its parts still follow the OS: `PillLabel` fills with
+   `Color.accentColor`, and the toast is a `PillLabel`.
+2. **The desktop Compose app** (Windows, Linux, the internal macOS build). Compose has no native
+   components there; its flat look is the style §9 decided, defined by this skill's tokens. When the
+   same feature reaches SwiftUI, use the native component rather than porting the approximation
+   (see "Other native-migration candidates").
+3. **A defect in the standard component that users would otherwise hit, with no behavioral fix.**
+   Draw only what the defect breaks, and record it in `docs/known-issues.md` with what would let it
+   go.
+4. **A requirement in `external-spec.md` that the standard component cannot meet.** The spec names
+   the requirement, and the custom part covers only that requirement.
+
+Not exceptions: matching the Compose app's look, "it looks nicer", saving a few lines.
+
+**Recording an exception.** A source comment at the custom drawing says why the standard component
+will not do, which exception applies, and when it can go. Exception 3 also gets its
+`known-issues.md` entry.
 
 ## Native-feel restyle (per-platform press feedback, icon set, popovers)
 

@@ -507,7 +507,30 @@ class HomeCommonTest {
 
     @Test
     fun parseFeedListRowKeyDoesNotMistakeATagFeedRowForItsTagsOwnRow() {
-        assertEquals(FeedListRowKey.Other, parseFeedListRowKey("tag-t1-feed-f1"))
+        assertEquals(FeedListRowKey.TagFeed("t1", "f1"), parseFeedListRowKey(tagFeedRowKey("t1", "f1")))
+    }
+
+    @Test
+    fun parseFeedListRowKeyReadsATagFeedRowWithHyphenatedIds() {
+        assertEquals(
+            FeedListRowKey.TagFeed("aaaa-bbbb", "cccc-dddd"),
+            parseFeedListRowKey(tagFeedRowKey("aaaa-bbbb", "cccc-dddd")),
+        )
+    }
+
+    @Test
+    fun parseFeedListRowKeyKeepsATagIdThatContainsFeedWhole() {
+        // "feed" is hex, so a UUID can hold it as one of its groups.
+        val tagId = "12345678-feed-4abc-8def-123456789abc"
+        assertEquals(FeedListRowKey.Tag(tagId), parseFeedListRowKey(tagRowKey(tagId)))
+        assertEquals(FeedListRowKey.TagFeed(tagId, "f1"), parseFeedListRowKey(tagFeedRowKey(tagId, "f1")))
+    }
+
+    @Test
+    fun parseFeedListDragSourceKeyKeepsIdsThatContainFeedWhole() {
+        val tagId = "12345678-feed-4abc-8def-123456789abc"
+        val feedId = "87654321-feed-5abc-9def-cba987654321"
+        assertEquals(FeedListDragSourceKey.Feed(feedId), parseFeedListDragSourceKey(tagFeedRowKey(tagId, feedId)))
     }
 
     @Test
@@ -538,9 +561,9 @@ class HomeCommonTest {
 
     @Test
     fun parseFeedListDragSourceKeyDragsTheFeedItselfFromATagAttachedFeedRow() {
-        // Unlike parseFeedListRowKey (which resolves this row to Other, since dropping *onto* it
-        // means nothing), dragging it drags the feed.
-        assertEquals(FeedListDragSourceKey.Feed("f1"), parseFeedListDragSourceKey("tag-t1-feed-f1"))
+        // Unlike parseFeedListRowKey (which resolves this row to TagFeed, a drop target standing for
+        // its tag), dragging it drags the feed.
+        assertEquals(FeedListDragSourceKey.Feed("f1"), parseFeedListDragSourceKey(tagFeedRowKey("t1", "f1")))
     }
 
     @Test
@@ -567,7 +590,7 @@ class HomeCommonTest {
         )
         assertEquals(
             FeedListDragSourceKey.Feed("dddd-eeee-ffff"),
-            parseFeedListDragSourceKey("tag-aaaa-bbbb-cccc-feed-dddd-eeee-ffff"),
+            parseFeedListDragSourceKey(tagFeedRowKey("aaaa-bbbb-cccc", "dddd-eeee-ffff")),
         )
     }
 

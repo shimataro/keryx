@@ -80,6 +80,7 @@ private fun FeedListRowKey.toDropTarget(): FeedListDropTarget = when (this) {
     FeedListRowKey.NoFolderHeader -> FeedListDropTarget.NoFolderHeader
     is FeedListRowKey.Feed -> FeedListDropTarget.FeedRow(feedId)
     is FeedListRowKey.Tag -> FeedListDropTarget.TagHeader(tagId)
+    is FeedListRowKey.TagFeed -> FeedListDropTarget.FeedInTag(tagId)
     FeedListRowKey.Other -> FeedListDropTarget.Other
 }
 
