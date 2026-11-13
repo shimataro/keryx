@@ -1406,6 +1406,9 @@ Inputs:
 | `release` | `automatic` (default): App Store Connect releases the version as soon as it is approved. `manual`: it waits for a release in App Store Connect |
 | `ref` | Branch, tag or commit to build; must be on a version branch. Empty (the default) builds the tag `v<version>` |
 
+The Actions run list names each run after its inputs — the version, the platforms, `ref` when set, and
+"upload only" when `submit` is off (e.g. `App Store 1.2.0: iOS, macOS`).
+
 Run the first one with `submit` off and `release` set to `manual`: nothing but a real run exercises
 the build, the upload and the App Store Connect calls, so with `submit` off a mistake stops before
 review, and with `manual` an approved build still waits for a release in App Store Connect. Check the

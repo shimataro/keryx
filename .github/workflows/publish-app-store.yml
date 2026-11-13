@@ -1,4 +1,6 @@
 name: Publish to the App Store
+# Lists each run by what it publishes, e.g. "App Store 1.2.0: iOS, macOS (upload only)".
+run-name: "App Store ${{ inputs.version }}:${{ inputs.ios && ' iOS' || '' }}${{ inputs.ios && inputs.macos && ',' || '' }}${{ inputs.macos && ' macOS' || '' }}${{ inputs.ref != '' && format(' from {0}', inputs.ref) || '' }}${{ !inputs.submit && ' (upload only)' || '' }}"
 
 # Builds the SwiftUI app for each selected platform (`ios`, `macos`) from `ref` (by default the
 # release tag v<version>; any commit already on a version branch), uploads it to App Store Connect,

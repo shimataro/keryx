@@ -1395,6 +1395,9 @@ GitHub Release はそのあいだも先に進めてよく、そのプラット�
 | `release` | `automatic`（既定）: 承認され次第、App Store Connect がバージョンを公開する。`manual`: App Store Connect で公開するまで待つ |
 | `ref` | ビルドするブランチ、tag、またはコミット。バージョンブランチ上にあること。空（既定）なら tag `v<version>` をビルドする |
 
+Actions の実行一覧には、入力に応じた名前で各実行が表示される: バージョン、プラットフォーム、指定したときは `ref`、
+`submit` がオフなら "upload only"（例: `App Store 1.2.0: iOS, macOS`）。
+
 最初の 1 回は `submit` をオフ、`release` を `manual` にして実行すること: ビルド、アップロード、App Store Connect の
 API 呼び出しを確かめる方法は本番の実行しかない。`submit` がオフなら誤りがあっても審査の手前で止まり、`manual` なら
 承認されたビルドも App Store Connect で公開するまで出ない。App Store Connect でバージョンとそのビルドを確認してから、
