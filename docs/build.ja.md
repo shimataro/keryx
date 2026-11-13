@@ -311,8 +311,9 @@ Gradle のタスク履歴がないため、そのままでは prebuild の Gradl
 
 ### 署名
 
-このアプリのエンタイトルメント（`Keryx/Keryx.entitlements`：`app-sandbox`、
-`keychain-access-groups` など）は、**実在する Apple Development / Developer ID の証明書とチームでの
+このアプリのエンタイトルメント（iOS は `Keryx/Keryx.entitlements`、macOS は
+`Keryx/Keryx-macOS.entitlements` — 同じ項目に、Sparkle のサンドボックス化されたインストーラーが必要とする
+mach-lookup の例外を加えたもの。どちらも `app-sandbox`、`keychain-access-groups` などを含む）は、**実在する Apple Development / Developer ID の証明書とチームでの
 署名を必要とする**——アドホック署名（`CODE_SIGN_IDENTITY=-`）では、`CODE_SIGN_STYLE=Manual` にしても
 実行可能なサンドボックスビルドを作れない（「requires a provisioning profile」で失敗する）。ローカルで
 ビルド・実行するには：
@@ -506,9 +507,9 @@ snapd のポリシー上自動接続されないうえ、Snapcraft のレビュ�
 自動接続申請を却下する——セッション内の全シークレットへのアクセスを許してしまい、そのアプリ自身の
 ものだけに限定されないためだ（
 [NordPass](https://forum.snapcraft.io/t/nordpass-auto-connection-request-to-password-manager-service/50469)
-をはじめとする
+などの申請は「Secret portal を使え」として却下されている。これを前提にする前に、
 [store-requests › privileged-interfaces](https://forum.snapcraft.io/c/store-requests/privileged-interfaces/27)
-での申請は、いずれも「Secret portal を使え」として却下されている）——が、そのポリシーとは無関係に、
+で現在の方針を確認すること）——が、そのポリシーとは無関係に、
 このプラグを宣言して利用者に手動 `snap connect` させること自体が無意味だ。スナップ内では
 すべてのプロバイダで `LibSecretTokenStorage` を使う（配線は `PlatformModule.desktop.kt` の
 `providerTokenStorage`、`platform.isSnap` で分岐）ため、生の Secret Service に落ちる経路が
@@ -608,8 +609,8 @@ WebView のレンダラーサンドボックスのみを無効化するもので
 `libfontmanager.so` は JDK のフォント描画ライブラリである）。`snap/snapcraft.yaml` の `lint.ignore` で
 これらのパスを個別に抑制している。
 
-**この抑制は、同じパスに対する「不足依存」の検出も同時に無効化してしまう** — 以前 X11・フォント・
-HarfBuzz のライブラリの不足を発見したのは、まさにこのチェックである。`stage-packages` やバンドルする
+**この抑制は、同じパスに対する「不足依存」の検出も同時に無効化してしまう** — スナップに
+実行時ライブラリ（X11・フォント・HarfBuzz など）が欠けていることを検出するのが、このチェックである。`stage-packages` やバンドルする
 JDK のバージョンを変更した際は、`snap/snapcraft.yaml` の `lint:` ブロックを一時的にコメントアウトして
 一度再パックし、新たな不足依存の警告が出ないことを確認してから元に戻すこと。
 
@@ -896,7 +897,7 @@ Linux arm64 も `known-issues.ja.md` に記載の制約付きで出荷対象に�
 WebView ライブラリが `linux-aarch64` バイナリを同梱していないため、そのアーキテクチャでは
 リーダーがネイティブ WebView の代わりに Compose 描画の簡易リーダーにフォールバックする
 （フリーズはしない — ブロック構造・インライン装飾・画像を再現し、本物のブラウザエンジンが要る
-コンテンツは外部で開くボタンになる）。
+埋め込みコンテンツは外部で開くボタンになる）。
 
 **ワークフローの lint。** 本節で扱うものの大半（`release.yml`、`publish-play.yml`、`publish-app-store.yml`、
 `.github/scripts/`）はリリースやストアへの提出のときにしか動かないため、
@@ -1235,7 +1236,7 @@ Snap Store、`deploy-pages` など）が動く。そのため、GitHub での初
 - アプリは実際に Apple の公証サービスへ送られるが、何も公開されない。
 
 **新しい Apple アカウントの最初の公証は、時間がかかることがある。** 最初の送信は、以降の送信よりずっと長く
-`In Progress` のままになることがある（今回は約 35 分。2 回目は数分で終わった）。手作業で実行するときは
+`In Progress` のままになることがあり（以降の送信はたいてい数分で終わる）、下記の既定の 30 分を超えることもある。手作業で実行するときは
 `NOTARY_TIMEOUT`（既定は `30m`）で待ち時間を延ばせる。時間切れのときはスクリプトが送信 ID を表示するので、
 `xcrun notarytool wait <id>`（同じ認証情報で）で待ってから、もう一度実行する。ワークフローは `NOTARY_TIMEOUT` を
 渡さないため、そこでは各送信（アプリ、安定版では続けて DMG）の待ち時間は最大 30 分で、これより遅い最初の送信は
@@ -1249,8 +1250,8 @@ Snap Store、`deploy-pages` など）が動く。そのため、GitHub での初
 - `.p12` には、証明書とその**秘密鍵**の両方が入っている必要がある。使い捨てのキーチェーンに取り込んで、
   `security find-identity -v -p codesigning <keychain>` に出てくれば、署名に使える。
 - provisioning profile に入っている証明書は、`.p12` の証明書と同じものでなければならない（SHA-1 で比較できる）。
-- `.p12` のパスワードは、ASCII の英数字にするのがよい。100 文字のパスワードでは失敗し、32 文字では成功した
-  （原因は特定できていない）。
+- `.p12` のパスワードは、短い（せいぜい数十文字の）ASCII の英数字にするのがよい。非常に長いパスワードでは、
+  原因不明のまま失敗することがある。証明書を取り込めない・署名できないときは、ほかを疑う前に短いパスワードで書き出し直す。
 
 **GitHub での初回の実行。** 最後に、プレリリースのタグを切る。ワークフロー全体が動く（Play の internal/alpha への
 アップロードと Snap の `edge` チャンネルも含む）が、プレリリースでは DMG は作られず、GitHub の「latest」も前の
@@ -1338,7 +1339,7 @@ GitHub Release の `tag` と公開先の `tracks`（カンマ区切り、既定�
 `publish-play.sh` で、`tag` ではなくワークフロー自身の ref から取得するため、スクリプトが存在する
 前に切られたタグでも動く。既に公開済みの何かを
 再利用するのではなく、指定タグから AAB を毎回ビルドし直す — タグからは常に同じ `versionCode` と
-署名結果が再現され、また `release.yml` はもう AAB を GitHub Release に添付しないため再利用する
+署名結果が再現され、また `release.yml` は AAB を GitHub Release に添付しないため再利用する
 ものが無い。既に Play が見た `versionCode` を別のトラックへ**昇格**させることは、どちらのワークフローも
 行わない——どちらも新しくビルドした AAB をアップロードするだけである。Play Developer API 自体は
 昇格に対応している（`edits.tracks.update` は別トラックのリリースにアップロード済みの `versionCode` を
@@ -1545,7 +1546,7 @@ Compose 版のパッケージ成果物は **ad-hoc 署名**（実質未署名）
 > [!CAUTION]
 > **0.x のまま署名を導入する場合は注意が必要。** jpackage が `.app` を署名するため、その**後**に
 > `Info.plist` を編集するとバンドルの署名シールが壊れる。カスタム URI スキームは
-> `macOS { infoPlist { extraKeysRawXml } }` 経由になったのでこれには該当しない
+> `macOS { infoPlist { extraKeysRawXml } }` 経由なのでこれには該当しない
 > （jpackage が署名する plist に最初から含まれている）。残るのは `restoreMacOsShortVersion` だけで、
 > これはメジャーバージョンが `0` のときしか走らない。その書き戻しには既に `resealMacOsBundle` による
 > 再署名が続く（前述のバージョン処理の節を参照）が、これは **ad-hoc** 再署名であり、このビルドが
