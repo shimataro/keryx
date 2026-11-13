@@ -905,8 +905,10 @@ block through shellcheck. It cannot catch a misspelled `steps.<id>.outputs.<name
 outputs are only written at run time through `$GITHUB_OUTPUT`. actionlint is not preinstalled, so
 the workflow downloads a pinned release tarball and verifies it against a hardcoded SHA-256; to
 upgrade, update `ACTIONLINT_VERSION` and `ACTIONLINT_SHA256` together (the digest is listed in that
-release's `actionlint_<version>_checksums.txt`). Run the same checks locally, with no install, via
-Docker (keep the image tag in step with `ACTIONLINT_VERSION`):
+release's `actionlint_<version>_checksums.txt`). A runner label that version does not know yet (now the
+`xcode-27` preview label) is declared in `.github/actionlint.yaml`, which both the workflow and a local
+run read. Run the same checks locally, with no install, via Docker (keep the image tag in step with
+`ACTIONLINT_VERSION`):
 
 ```bash
 docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12

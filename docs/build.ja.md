@@ -913,7 +913,8 @@ WebView ライブラリが `linux-aarch64` バイナリを同梱していない�
 ランナーに同梱されていないので、ワークフローはバージョン固定のリリース tarball をダウンロードし、
 直書きした SHA-256 で検証してから使う。更新するときは `ACTIONLINT_VERSION` と `ACTIONLINT_SHA256` を
 一緒に変える（ダイジェストはそのリリースの `actionlint_<version>_checksums.txt` に載っている）。
-ローカルでは Docker で、何もインストールせずに同じ検査を実行できる（イメージのタグは
+その版がまだ知らないランナーラベル（今は Preview の `xcode-27`）は `.github/actionlint.yaml` で宣言しており、
+ワークフローもローカルでの実行もこの設定を読む。ローカルでは Docker で、何もインストールせずに同じ検査を実行できる（イメージのタグは
 `ACTIONLINT_VERSION` に揃える）:
 
 ```bash
