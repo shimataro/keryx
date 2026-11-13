@@ -29,7 +29,7 @@ on:
         type: boolean
         default: false
       ref:
-        description: "Branch, tag or commit to build (must be on a version branch); empty builds the tag v<version>"
+        description: "Branch, tag or commit to build (must be on a version branch); empty builds the tag v<version>. The workflow and its scripts come from \"Use workflow from\", which must be a version branch such as v0"
         required: false
         type: string
         default: ""
