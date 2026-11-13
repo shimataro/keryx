@@ -7,94 +7,65 @@ Each entry records what was ruled out, so a later investigation doesn't repeat t
 
 ## macOS: clicking a notification banner does not restore a tray-hidden window
 
-**Status**: not fixed — external (JDK/AWT) limitation, and the app-side `MacTray` code that
-attempted to work around it has been **removed as dead code** (it never actually did anything —
-see "The custom wiring was dead code" below). Restoring via the tray icon click or by relaunching
-the app (single-instance forwarding, e.g. clicking the Dock icon while already running) both work
-correctly, so the window is never permanently unreachable; only the notification banner's own
-click-through is affected, and only while tray-hidden.
+**Status**: not fixed — external (JDK/AWT) limitation. Applies to the **Compose macOS build only**,
+which is kept for internal verification and not released; the shipped macOS app is the native
+SwiftUI app (`external-spec.md` §2), which is not affected. The tray icon click and relaunching the
+app (single-instance forwarding, e.g. clicking the Dock icon while running) both restore the window,
+so it is never unreachable; only the banner's own click-through fails, and only while tray-hidden.
 
 ### Symptom
 
 With the window hidden to the tray on macOS, clicking a new-article desktop notification does
-nothing at all — no window flash, no Dock icon reappearing, no sound, nothing. Clicking the
-banner's "表示" (Show) action button dismisses the banner but likewise has no other effect. The
-same click, when the window is merely backgrounded (visible but unfocused/behind other windows),
-brings the window to front correctly.
+nothing at all — no window, no Dock icon, no sound. The banner's "Show" action button dismisses
+the banner and likewise does nothing else. When the window is merely backgrounded (visible but
+behind other windows), the same click brings it to front.
 
 ### Diagnosis
 
-An earlier version of `MacTray.kt` wired notification clicks through AWT's
-`TrayIcon.addActionListener(...)` — the only API `TrayIcon` exposes for a click on a
-`displayMessage(...)`-shown banner. Temporary diagnostic logging (`Log.info` as the very first
-statement inside that `ActionListener`, and at each subsequent stage of `main.kt`'s
-`activationRequests` collector) confirmed via `tail -f` on a real packaged build that **the
-`ActionListener` is never invoked at all** when the click happens while the window is tray-hidden
-(Accessory activation policy) — zero log lines, at any level, anywhere in the chain. The same
-collector, reached instead via the ordinary tray-icon click or via a second app launch being
-forwarded to the running instance (both logged, both restore correctly), proved the restore logic
-itself (`main.kt`'s `activationRequests` collector, including the Accessory→Regular
-activation-policy reordering fix living there) was not the problem.
+AWT's `TrayIcon.addActionListener(...)` is the only API `TrayIcon` offers for a click on a
+`displayMessage(...)` banner, and logging on a real packaged build showed **the `ActionListener` is
+never invoked** when the click happens while the window is tray-hidden (Accessory activation
+policy). The restore logic itself (`main.kt`'s `activationRequests` collector) is fine: reached via
+the tray-icon click or a forwarded second launch, it restores the window every time.
 
-This points at `TrayIcon`'s native macOS peer (`CTrayIcon`), which bridges `displayMessage(...)`
-through the deprecated `NSUserNotification` API. The click-through delegate callback
-(`userNotificationCenter:didActivateNotification:`) apparently is not reliably bridged back into
-Java's `ActionListener` when the owning app has no Dock icon (`NSApplicationActivationPolicyAccessory`)
-— i.e. exactly the tray-hidden state this feature existed for. This could not be narrowed further
-from Kotlin/Java code alone; it would need decompiling `CTrayIcon`'s native implementation or
-reproducing it in a minimal pure-AWT test app outside this codebase, neither of which has been done.
+The likely cause is `TrayIcon`'s native macOS peer (`CTrayIcon`), which bridges
+`displayMessage(...)` through the deprecated `NSUserNotification` API; its click delegate callback
+(`userNotificationCenter:didActivateNotification:`) apparently is not bridged back to Java while
+the app has no Dock icon (`NSApplicationActivationPolicyAccessory`). Narrowing it further would
+need decompiling `CTrayIcon` or a minimal pure-AWT reproduction, neither of which has been done.
 
-### The custom wiring was dead code
-
-A follow-up check settled the question of whether the `ActionListener`-based code contributed
-*anything*: the exact same behavior — front-on-click while backgrounded, no restore while
-tray-hidden — was confirmed on the `v0` branch, i.e. **before** `MacTray` had any
-`onNotificationClicked`/`ActionListener` wiring at all. This proves the "backgrounded → comes to
-front" case was never the app's own code running; it is macOS's own default notification
-click-to-activate behavior for any Regular-policy app, which happens regardless of whether the app
-registers a notification delegate. The custom AWT wiring added across a handful of commits (see
-git history around `MacTray.kt`) never ran on the one path it was built for (tray-hidden) and was
-redundant on the one path where the `ActionListener` does fire — so it has been removed outright:
-`MacTray` no longer takes an `onNotificationClicked` parameter or registers a `TrayIcon`
-`ActionListener` at all. Linux SNI's own, independently-working notification-click handling
-(`LinuxTray`, via `LinuxNotifier`'s D-Bus `ActionInvoked` signal) is untouched — `KeryxTray`'s
-`onNotificationClicked` parameter and `main.kt`'s `activationRequests.tryEmit(Unit)` callback still
-exist and still feed it.
+The backgrounded case working is macOS's own default click-to-activate behavior for a
+Regular-policy app, not app code: it behaves the same with no notification-click wiring at all. So
+`MacTray` registers no `ActionListener` and has no notification-click handling of its own. Linux's
+notification-click handling (`LinuxTray`, via `LinuxNotifier`'s D-Bus `ActionInvoked` signal) is
+separate and works; `KeryxTray`'s `onNotificationClicked` parameter and `main.kt`'s
+`activationRequests.tryEmit(Unit)` callback exist for it.
 
 ### Ruled out
 
-- **A bug in `main.kt`'s restore/activation-policy logic** — disproved: the exact same
-  `activationRequests` collector, reached via the tray-icon click or a forwarded second launch,
-  restores the window correctly every time, with logging confirming every stage completes.
-- **Ordering of the Cocoa activation-policy promotion vs. showing the window** — a full reorder
-  (promote to Regular + activate first, defer showing/fronting/focusing the window a further EDT
-  turn) was implemented and tested and made no observable difference for the notification-click
-  case specifically, while it *did* fix a real, separate bug: the same collector's restore-from-tray
-  behavior when reached via the single-instance/reopen path. Kept for that reason (it's still live
-  in `main.kt`, just no longer reachable from a macOS notification click).
+- **A bug in `main.kt`'s restore/activation-policy logic** — the same `activationRequests`
+  collector restores the window correctly when reached via the tray icon or a forwarded launch.
+- **Ordering of the Cocoa activation-policy promotion vs. showing the window** — promoting to
+  Regular and activating first, with showing/fronting/focusing deferred a further EDT turn, made no
+  difference to the notification click. The ordering stays in `main.kt` because it is what makes
+  restore-from-tray via the single-instance/reopen path work.
 
 ### Workaround
 
-None applied — the currently-working restore paths (tray icon click, relaunching the app) remain
-the supported way to bring a tray-hidden window back on macOS.
+None applied — the tray icon click and relaunching the app are the supported ways to bring a
+tray-hidden window back on macOS.
 
 ### What a real fix would need
 
-Bypass AWT's `TrayIcon.displayMessage()`/`ActionListener` for notification display and click
-detection on macOS entirely, and drive the Cocoa `NSUserNotificationCenter` (or the modern,
-non-deprecated `UserNotifications` framework) directly via a JNA-based Objective-C bridge — in the
-same spirit as `MacActivationPolicy`'s existing raw `objc_msgSend` calls, but substantially larger:
-it requires creating a runtime Objective-C class (`objc_allocateClassPair`/`class_addMethod` with a
-JNA `Callback` as the implementation) to act as the notification center's delegate, which is
-inherently higher-risk native interop (a mistake here can crash the JVM) and would need several
-real-hardware iterations to get right.
+Bypass AWT's `TrayIcon.displayMessage()`/`ActionListener` on macOS and drive
+`NSUserNotificationCenter` (or the non-deprecated `UserNotifications` framework) directly through a
+JNA-based Objective-C bridge — like `MacActivationPolicy`'s raw `objc_msgSend` calls, but much
+larger: it needs a runtime Objective-C class (`objc_allocateClassPair`/`class_addMethod` with a JNA
+`Callback` as the implementation) as the notification center's delegate, which is high-risk native
+interop (a mistake can crash the JVM) and needs several real-hardware iterations.
 
-This has since become moot rather than worth building: the macOS release is now the native SwiftUI
-app (`external-spec.md` §2), and the Compose macOS build this issue affects is no longer released —
-it remains for internal verification only. A native app uses `UNUserNotificationCenterDelegate`
-through the ordinary app lifecycle — no AWT bridge, no deprecated API, no
-Accessory-policy-specific bridging bug. Given that, and given the AWT-based version above turned out
-not to work anyway, the JNA bridge will not be built; this note stays as the record of why.
+It will not be built: the affected Compose macOS build is not released, and the shipped SwiftUI app
+gets notification clicks through `UNUserNotificationCenterDelegate` in the ordinary app lifecycle.
 
 ## Article list crashes the UI thread during heavy scroll + selection churn
 
@@ -267,6 +238,9 @@ and the node-count mitigation (revert the temporary change).
 **Status**: not fixed — it is macOS's own behaviour, reproduced with the same aim in Apple's Notes
 app. The app-side geometry it was first blamed on was measured and found exact. The genuine
 hit-area defects the investigation *did* uncover are fixed — see "What was actually fixed" below.
+This entry concerns the **Compose desktop build on macOS** (kept for internal verification; the
+shipped macOS app is the native SwiftUI app, `external-spec.md` §2) — the list rows, test and
+measurements below are all the Compose ones.
 
 ### Symptom
 
@@ -307,26 +281,19 @@ the same way. Whatever the exact per-pixel cause, matching it is not a defect in
 
 ### What was actually fixed
 
-The investigation started from this report and did find three real defects, all fixed and pinned by
-`ListRowHitAreaTest` (`composeApp/src/desktopTest/.../ui/home/`):
+The hit-area defects found while investigating this are fixed, and `ListRowHitAreaTest`
+(`composeApp/src/desktopTest/.../ui/home/`) pins the current geometry:
 
-- **Dead zones inside the row.** `clip`/`background` used to come *before* the interactive
-  modifiers, so hit-testing was clipped to the inset rounded rectangle: the outer margin and the
-  four rounded corners selected nothing at all. Worse, for rows that were wrapped in a `Column`
-  (to lay the drag insertion marker out as a sibling), any point outside a padded descendant's own
-  bounds was dead even though it was squarely inside the `Column`'s reported bounds. Fixed by
-  `listRowClickable` / `listRowSurface` (`ui/home/ListRowChrome.kt`), which split the hit area
-  (the row's whole band) from the painted highlight (inset and clipped).
-- **The gap between two rows split unevenly.** The insertion marker reserved a layout slot, and
-  that space belonged entirely to whichever row's layout contained it, so a click closer to one
-  row's highlight than to its neighbour's could still resolve to the neighbour. Fixed by painting
-  the marker into the row's own margin instead of laying it out (`insertionMarkers`), which puts
-  the hit boundary at the gap's true midpoint.
-- **Row heights varied with state.** A folder header's band changed height depending on whether it
-  was collapsed or the last folder, and a feed row's on whether it was last in its group.
+- **A row's hit area is its whole band**, margin and rounded corners included, while the painted
+  highlight is inset and clipped — `listRowClickable` / `listRowSurface`
+  (`ui/home/ListRowChrome.kt`) keep the two apart, so no point inside a row selects nothing.
+- **The hit boundary between two rows is the gap's midpoint.** The drag insertion marker is painted
+  into the rows' own margins (`insertionMarkers`) rather than laid out, so it takes no space from
+  either row.
+- **A row's band height does not depend on its state** (a folder header collapsed or last, a feed
+  row last in its group).
 
-Between them these removed every click that selected *nothing*, which was the other half of the
-original report. What remains is only the edge case above.
+What remains is only the edge case above.
 
 ### Ruled out
 
@@ -343,8 +310,9 @@ original report. What remains is only the edge case above.
 - **Shrinking the gap.** Tried at 6dp, 4dp, 2dp, and 0dp (highlight filling the whole band, no
   margin at all). Each step narrowed the window in which the effect occurs but none removed it —
   consistent with the cause being where the click lands, not where the rows are.
-- **Switching UI framework.** A SwiftUI/AppKit port would not help: Notes is native and behaves the
-  same way, and the cursor hotspot is decided by the OS.
+- **Compose itself.** Notes is a native AppKit app and behaves the same way, and the cursor
+  hotspot is decided by the OS, so nothing here is specific to the Compose build. (The SwiftUI app's
+  native lists were not measured for this.)
 
 ### Why this is not worked around
 
@@ -446,9 +414,8 @@ UpdateDownloaderTest[desktop] > progressArrivesWhileTheBodyIsStillStreaming[desk
     kotlinx.coroutines.TimeoutCancellationException
 ```
 
-Observed twice so far, on a different OS each time and never on more than one of the four jobs in
-the same run: `v0` @ `1cfb4993` (windows-latest, run 35158285213) and `fix/article-swipe-pager` @
-`0639f3b7` (ubuntu-latest, run 35179227601). Neither commit touches `UpdateDownloader` or its test.
+It is intermittent: seen on more than one runner OS, never on more than one job of the same run,
+and on commits that do not touch `UpdateDownloader` or its test.
 
 ### Why the failure carried no information
 
@@ -456,7 +423,7 @@ the same run: `v0` @ `1cfb4993` (windows-latest, run 35158285213) and `fix/artic
 [error-design.md](error-design.md)), and its `Result.Err` paths log nothing. The test waited only on
 the progress `CompletableDeferred`, so a download that gave up before emitting any progress left
 that deferred uncompleted forever — and the enclosing `finally` then cancelled the `Deferred`
-holding the reason. `composeApp/build.gradle.kts` configures no `testLogging`, so even the one
+holding the reason. `shared/build.gradle.kts` configures no `testLogging`, so even the one
 `Log.warn` path would not appear in CI output.
 
 ### Ruled out
@@ -794,21 +761,13 @@ Execution failed for task ':composeApp:packageDmg' (registered by plugin 'org.je
 > Command failed (exit 16): hdiutil detach /dev/disk31s1
 ```
 
-Observed on `feat/google-play-publishing` @ `e484ad6` (run 35576202091, job "Build & Test
-(macos-latest)"). The same branch's two preceding CI runs (35564082624, 35573298168) were both
-green, including the macOS leg, and the only diff between the last green run and this one was a
-docs-only commit (`docs/build.md` / `docs/build.ja.md`).
+It is intermittent: when first seen, the runs just before it had passed on the same code, with
+only a docs-only commit in between.
 
 ### Ruled out
 
-- **Not caused by that branch's own changes.** Its full diff against `v0` is scoped to
-  `androidApp/`, `.github/workflows/publish-play.yml`, `distribution/play/`, and docs; the only
-  `composeApp/build.gradle.kts` change is a pure deletion of an unused Android-only val, and
-  `gradle/libs.versions.toml` (which pins the Compose Multiplatform plugin) has no diff at all. The
-  new CI step that branch adds to `ci.yml` is guarded `if: runner.os == 'Linux'` and never runs on
-  the macOS job.
-- **Not a change to the `packageDmg` CI step itself** — that step has been stable since it was
-  introduced in #71.
+- **Not caused by a code change.** The branch it was first seen on changed nothing that feeds the
+  macOS packaging (no Compose plugin version, packaging configuration or macOS CI step).
 - **Not concurrent `packageDmg` runs on the same runner.** GitHub Actions runners are single-use
   VMs, so even runs that `ci.yml`'s `concurrency:` setting lets overlap (any two v* runs, or runs
   on different branches) never share a disk, and a stale mount can't come from a second run.
@@ -849,10 +808,14 @@ pick the same item again. Pulling the list now refreshes and syncs as
 usual, but no spinner appears; the list is simply pulled down and springs back.
 
 A related symptom has the same origin: the first pull after launch left the list resting tens of
-points short of the top (its header half under the navigation bar), about three times in five.
+points short of the top (the top of the list still partly under the navigation bar), about three
+times in five.
 
 Both were diagnosed on the iOS 27 simulator with Xcode 27; that is where they were last seen, not a
-range they are known to be limited to. See "Re-checking after an iOS or Xcode update" below.
+range they are known to be limited to. See "Re-checking after an iOS or Xcode update" below. They
+were diagnosed with an earlier layout in which the article list had a heading row of its own; the
+list now uses the standard inline navigation title and has no heading, and has not been re-measured
+since.
 
 ### Diagnosis
 
@@ -869,23 +832,24 @@ inset shrinks from 176 to 116 but the offset settles at about −58 to −76 ins
 once its column is in the navigation stack gets the control inside its own `UICollectionView`, and
 there the offset follows the inset. Both kinds of list are the navigation bar's tracked content
 scroll view (`contentScrollView(for: .top)`), so the bar's own scroll-edge behavior is unaffected.
-The symptom appeared with 920876d3, which let the list reach up under the navigation bar; it does
-not occur at `bc680237`.
+The inset and offset figures above were measured with the earlier layout that had a heading row,
+not with the current inline title.
 
 ### Ruled out
 
 - **A view drawn over the control** (the layering bug fixed for the sidebar's `UIRefreshControl` in
   `SidebarCollectionView.swift`). The control is absent, not hidden.
 - **A stale control state** (alpha, hidden, frame). The same reason.
-- **A recent regression.** It reproduces at `bc680237` (before the list carried its own header) and at
-  `ad022bbe` (before `PullRefreshHold`), so it predates both.
+- **A regression in this app.** The missing spinner predates the app's own article-list heading and
+  pull-to-refresh handling.
 - **Re-attaching only the action.** `EnvironmentValues.refresh` is read-only, so the action cannot be
   removed and restored without changing the list's identity.
 - **Returning from the reader.** The control survives that route, so the list is not rebuilt there and
   keeps its exact position and the return flash.
-- **The pinned header or `.contentMargins(.top, 0)`** (both from 920876d3) for the first-pull offset.
-  Without the margin it still occurs, and with the header as an ordinary first row the list still
-  rests short of the top.
+- **The pinned header or `.contentMargins(.top, 0)`** of the earlier layout, for the first-pull
+  offset. Without the margin it still occurred, and with the header as an ordinary first row the list
+  still rested short of the top. This was measured with that earlier layout; the current one has
+  neither, and has not been re-measured.
 - **Rebuilding as the first push starts** (when `compactColumn` changes). The column is not in a
   window yet, and the rebuilt list still gets its control under the navigation bar.
 - **Rebuilding a fixed 500 ms after the first push.** It works, but resets a list the reader has
@@ -919,7 +883,7 @@ the probe and the generation in place), build, and on an iPhone simulator check 
 1. Pull the article list, go back to the feed list, pick the same item, and pull again: does the
    spinner appear?
 2. Launch, pull the article list once, and let the refresh finish, five times over: does the list
-   always come back to rest at the top, its header fully below the navigation bar?
+   always come back to rest at the top, its first row fully below the navigation bar?
 
 If both hold on every supported iOS version, remove the workaround as above and delete this entry.
 If either fails, restore the `.id` and update the version this entry was last seen on.
