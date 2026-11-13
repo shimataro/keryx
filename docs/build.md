@@ -338,11 +338,19 @@ signed build:
 xcodebuild -scheme Keryx -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO build
 xcodebuild -scheme Keryx -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
 xcodebuild -scheme Keryx -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO test
+DEVELOPER_DIR=/Applications/Xcode_26.6.app/Contents/Developer \
+  xcodebuild -scheme Keryx -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
 xcodebuild archive -scheme Keryx -configuration Release -destination 'generic/platform=macOS' \
   -archivePath "$RUNNER_TEMP/Keryx.xcarchive" CODE_SIGNING_ALLOWED=NO
 xcodebuild archive -scheme KeryxMacAppStore -configuration Release -destination 'generic/platform=macOS' \
   -archivePath "$RUNNER_TEMP/KeryxMacAppStore.xcarchive" CODE_SIGNING_ALLOWED=NO
 ```
+
+The second iOS build uses the Xcode the release workflows pin (26.6) rather than the runner image's
+default. The Swift code has `#if compiler(>=6.4)` branches for iOS 27 SDK APIs (`visibilityPriority`),
+and each Xcode compiles only one side of them, so building with both keeps both sides compiling. The
+step fails, rather than skipping, when that Xcode is missing from the runner image; its path is then
+updated together with `release.yml` and `publish-app-store.yml`.
 
 The Debug builds compile only the active architecture and never take the Release-only settings, so
 the unsigned Release archive is what exercises them before a release does: the macOS x86_64

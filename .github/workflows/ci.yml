@@ -418,6 +418,25 @@ jobs:
           # The Info.plist and privacy-manifest settings that App Store upload and review depend on (see docs/build.md, "App Store submission materials").
           Scripts/verify-store-requirements.sh "$RUNNER_TEMP/dd-ios/Build/Products/Debug-iphonesimulator/Keryx.app"
 
+      # The release workflows build with a pinned Xcode 26.6 (release.yml, publish-app-store.yml),
+      # while the builds above use the runner image's default Xcode. The Swift code has
+      # `#if compiler(>=6.4)` branches for iOS 27 SDK APIs, and each Xcode compiles only one side of
+      # them, so the iOS app is built once more with the release Xcode: both sides then compile on
+      # every change. A missing Xcode fails the step rather than skipping it.
+      - name: Verify SwiftUI iOS build with the release Xcode
+        shell: bash
+        env:
+          # Update together with release.yml and publish-app-store.yml.
+          DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+        run: |
+          if [ ! -d "$DEVELOPER_DIR" ]; then
+            echo "::error::$DEVELOPER_DIR is not on this runner image; update it here together with release.yml and publish-app-store.yml."
+            exit 1
+          fi
+          cd appleApp
+          xcodebuild -scheme Keryx -destination 'generic/platform=iOS Simulator' -derivedDataPath "$RUNNER_TEMP/dd-ios-release-xcode" \
+            CODE_SIGNING_ALLOWED=NO build
+
       # The builds above are Debug, which compiles only the active architecture and never takes
       # the Release-only settings release.yml's package-macos job relies on: the x86_64
       # exclusion (EXCLUDED_ARCHS[sdk=macosx*] — a Release build would otherwise also build an

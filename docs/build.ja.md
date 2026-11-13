@@ -336,11 +336,19 @@ macOS の CI ジョブには Apple ID・チームが無いため、実際に署�
 xcodebuild -scheme Keryx -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO build
 xcodebuild -scheme Keryx -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
 xcodebuild -scheme Keryx -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO test
+DEVELOPER_DIR=/Applications/Xcode_26.6.app/Contents/Developer \
+  xcodebuild -scheme Keryx -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
 xcodebuild archive -scheme Keryx -configuration Release -destination 'generic/platform=macOS' \
   -archivePath "$RUNNER_TEMP/Keryx.xcarchive" CODE_SIGNING_ALLOWED=NO
 xcodebuild archive -scheme KeryxMacAppStore -configuration Release -destination 'generic/platform=macOS' \
   -archivePath "$RUNNER_TEMP/KeryxMacAppStore.xcarchive" CODE_SIGNING_ALLOWED=NO
 ```
+
+2 回目の iOS ビルドは、ランナーイメージの既定の Xcode ではなく、リリース用のワークフローが固定している
+Xcode（26.6）で行う。Swift のコードには iOS 27 SDK の API（`visibilityPriority`）のための
+`#if compiler(>=6.4)` の分岐があり、どちらの Xcode も片側しかコンパイルしないため、両方でビルドして
+両側ともコンパイルが通る状態を保つ。その Xcode がランナーイメージに無いときは、スキップせずにステップを
+失敗させる。そのときはパスを `release.yml`・`publish-app-store.yml` と合わせて更新する。
 
 Debug ビルドはアクティブなアーキテクチャしかコンパイルせず、Release 限定の設定も通らない。そのため、
 それらをリリースより前に通すのは署名なしの Release archive の役目になる：macOS の x86_64 除外と
