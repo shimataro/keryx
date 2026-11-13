@@ -48,8 +48,8 @@ struct ArticleListView: View {
     #if os(iOS)
     @State private var topReset = ArticleListTopReset()
     /// Whether `articleList`'s heading row is on screen, before iOS 26 only. While it has scrolled
-    /// away, the bar's principal item names the list in its place (`toolbarContent`).
-    @State private var listHeaderVisible = true
+    /// away, the bar's principal item names the list in its place (`barShowsTitle`).
+    @State private var barTitle = ArticleListBarTitle<ListIdentity>()
     @State private var scrollGate = ArticleListScrollGate()
     /// Whether this list is on screen rather than under the reader.
     @State private var listVisible = false
@@ -125,7 +125,7 @@ struct ArticleListView: View {
                 // lighter way to detach and re-attach the action. The rebuilt list starts at the top,
                 // as NetNewsWire's does on the same route: scrolling it back right after the rebuild
                 // made a row touched next jump for a moment.
-                withNewArticlesPill(content.id(ListIdentity(remountGeneration: remountGeneration, attachedToWindow: attachedToWindow))) {
+                withNewArticlesPill(content.id(listIdentity)) {
                     scrollToFreshEnd(proxy)
                 }
                     // Resets to the top on every filter switch, whatever the sort order — unlike
@@ -298,12 +298,12 @@ struct ArticleListView: View {
         // `showsListHeader`, the one place that decides which of the two this iOS gets.
         if Self.showsListHeader {
             ToolbarItem(placement: .principal) {
-                if listHeaderVisible {
+                if barShowsTitle {
+                    Text(home.articleListTitle).font(.headline).lineLimit(1)
+                } else {
                     // Zero-sized: once the title has been shown, a flexible `Color.clear` keeps the
                     // room it took and leaves Mark All as Read in the overflow menu.
                     Color.clear.frame(width: 0, height: 0)
-                } else {
-                    Text(home.articleListTitle).font(.headline).lineLimit(1)
                 }
             }
         }
@@ -446,6 +446,18 @@ struct ArticleListView: View {
         showsListHeader ? .inline : .large
     }
 
+    /// The identity `body` gives `content`: a change rebuilds the list (see `body`).
+    private var listIdentity: ListIdentity {
+        ListIdentity(remountGeneration: remountGeneration, attachedToWindow: attachedToWindow)
+    }
+
+    /// Whether the bar's principal item names the list: the list is what `content` shows and its
+    /// heading row has scrolled away (`ArticleListBarTitle`). Every other state of `content` shows
+    /// its heading through `headed`, so the bar names nothing there.
+    private var barShowsTitle: Bool {
+        barTitle.showsTitle(listShown: contentState.showsArticleList, current: listIdentity)
+    }
+
     /// The id of `articleList`'s heading row, for the reset to the top on a filter switch.
     private static let listHeaderRowId = "articleListHeader"
 
@@ -474,33 +486,73 @@ struct ArticleListView: View {
         #endif
     }
 
-    @ViewBuilder
-    private var content: some View {
+    /// What `content` shows. One value, so `content` and the bar's title (`barShowsTitle`) cannot
+    /// disagree about whether `articleList` is the one on screen.
+    private enum ContentState {
+        /// Nothing yet: the lists, the rows or a search are still on their way.
+        case blank
+        case noFeeds
+        case searchTooShort
+        case noSearchResults
+        case noArticles
+        case searchResults
+        case articles
+
+        /// Whether `articleList` is the state shown.
+        var showsArticleList: Bool { self == .searchResults || self == .articles }
+    }
+
+    private var contentState: ContentState {
         // Nothing until the lists have loaded, rather than flashing "no feeds" / "no articles"
         // before the first emission (`ArticleListBody.pending`).
-        if home.listBody == .pending {
+        if home.listBody == .pending { return .blank }
+        if home.listBody == .noFeeds { return .noFeeds }
+        if home.searchActive {
+            // A query with no 2+-character word (`searchTerms`, shared with the trigram/`LIKE` split
+            // `FtsSearch` makes — resolved once per query change as `searchQueryHasTerms`) is "too
+            // short"; an in-flight search with nothing yet shows nothing at all, rather than flashing
+            // "no results" between keystrokes; only a *settled* empty result set is "no results".
+            // Mirrors Compose's own `emptyContent` `when` in `ArticleListPane.kt`.
+            if !home.searchQueryHasTerms { return .searchTooShort }
+            if home.searching && !home.hasSearchResults { return .blank }
+            return home.hasSearchResults ? .searchResults : .noSearchResults
+        }
+        if displayedRows.isEmpty {
+            // Nothing while the rows are still on their way: being built, or held by the view model
+            // but not yet received here (`articleListCatchingUp`; `listHasRows` is observed, so the
+            // view is woken whichever way it settles).
+            let catchingUp = home.articleRowsBuilding
+                || ArticleListModelKt.articleListCatchingUp(
+                    displayedRows: Int32(displayedRows.count), viewModelHasRows: home.listHasRows
+                )
+            return catchingUp ? .blank : .noArticles
+        }
+        return .articles
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch contentState {
+        case .blank:
             headed(Color.clear)
-        } else if home.listBody == .noFeeds {
+        case .noFeeds:
             headed(ContentUnavailableView {
                 Label(L("home_no_feeds"), systemImage: "tray")
             } actions: {
                 Button(L("home_add_feed")) { dialogs.isAddingFeed = true }
             })
-        } else if home.searchActive {
-            searchContent
-        } else if displayedRows.isEmpty {
-            // Nothing while the rows are still on their way: being built, or held by the view model
-            // but not yet received here (`articleListCatchingUp`; `listHasRows` is observed, so the
-            // view is woken whichever way it settles).
-            if home.articleRowsBuilding
-                || ArticleListModelKt.articleListCatchingUp(
-                    displayedRows: Int32(displayedRows.count), viewModelHasRows: home.listHasRows
-                ) {
-                headed(Color.clear)
-            } else {
-                noArticlesView
-            }
-        } else {
+        case .searchTooShort:
+            headed(ContentUnavailableView(
+                L("home_search_too_short"),
+                systemImage: "magnifyingglass"
+            ))
+        case .noSearchResults:
+            headed(noSearchResultsView)
+        case .noArticles:
+            noArticlesView
+        case .searchResults:
+            articleList
+        case .articles:
             articleList
                 .modifier(PullToRefreshModifier(home: home))
         }
@@ -572,27 +624,6 @@ struct ArticleListView: View {
         #else
         emptyState
         #endif
-    }
-
-    /// Mirrors Compose's own `emptyContent` `when` in `ArticleListPane.kt`: a query with no
-    /// 2+-character word (`searchTerms`, shared with the trigram/`LIKE` split `FtsSearch` makes —
-    /// resolved once per query change as `searchQueryHasTerms`) is "too short"; an in-flight search
-    /// with nothing yet shows nothing at all, rather than flashing "no results" between keystrokes;
-    /// only a *settled* empty result set is "no results".
-    @ViewBuilder
-    private var searchContent: some View {
-        if !home.searchQueryHasTerms {
-            headed(ContentUnavailableView(
-                L("home_search_too_short"),
-                systemImage: "magnifyingglass"
-            ))
-        } else if home.searching && !home.hasSearchResults {
-            headed(Color.clear)
-        } else if !home.hasSearchResults {
-            headed(noSearchResultsView)
-        } else {
-            articleList
-        }
     }
 
     /// A secondary line pointing at "All Feeds" only when the search is actually narrowed to
@@ -667,16 +698,18 @@ struct ArticleListView: View {
     private var articleList: some View {
         let selectedId = displayedSelectedId
         let paneFocused = focusedPane.wrappedValue == .articleList && windowIsKey
+        // The `List` these reports belong to: a rebuilt list's (see `body`) is a different one.
+        let owner = listIdentity
         return List {
             if Self.showsListHeader {
-                // The first row, scrolling away with the rows; `listHeaderVisible` tracks it.
+                // The first row, scrolling away with the rows; `barTitle` tracks it.
                 listHeader
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .listRowInsets(EdgeInsets())
                     .listRowSeparator(.hidden)
                     .id(Self.listHeaderRowId)
-                    .onAppear { listHeaderVisible = true }
-                    .onDisappear { listHeaderVisible = false }
+                    .onAppear { barTitle.headerAppeared(in: owner, current: listIdentity) }
+                    .onDisappear { barTitle.headerDisappeared(from: owner, current: listIdentity) }
             }
             ForEach(displayedRows) { article in
                 articleRow(article, selectedId: selectedId, paneFocused: paneFocused)
@@ -685,9 +718,6 @@ struct ArticleListView: View {
         .listStyle(.plain)
         // No extra gap above the header, so it sits where it does over an empty list.
         .contentMargins(.top, Self.showsListHeader ? 0 : nil, for: .scrollContent)
-        // Every other state of `content` shows its heading through `headed`, so the bar goes back
-        // to naming nothing once this list leaves the screen.
-        .onDisappear { if Self.showsListHeader { listHeaderVisible = true } }
     }
 
     private func articleRow(_ article: ArticleRowModel, selectedId: String?, paneFocused: Bool) -> some View {
