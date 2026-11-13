@@ -1268,8 +1268,9 @@ below) or the filter's own list (`HomeViewModel.articles`); `ArticleListPane` re
 one to feed into the one `ArticleListPaneContent` call that renders either. Because the filter is
 never displaced, there is nothing to snapshot and nothing to restore when search ends. Typing into
 `FeedListPane`'s permanent field (or into the narrow layout's expanded bar once open) is the whole
-entry point: `searchActive` follows from the query alone, so a tap, a keyboard cursor landing on the
-field, and arrow-key navigation all start a search the same way.
+entry point: once the field is open — always, at `PaneLayout.Triple` — `searchActive` follows from the
+query, so a tap, a keyboard cursor landing on the field, and arrow-key navigation all start a search
+the same way.
 
 **`_searchBarVisible` says whether the search field is open**, which matters only at narrow layouts:
 at `PaneLayout.Triple`, `FeedListPane`'s own query field is permanent, so `HomeScreen`'s own
