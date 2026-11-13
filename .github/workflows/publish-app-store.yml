@@ -18,28 +18,25 @@ name: Publish to the App Store
 on:
   workflow_dispatch:
     inputs:
-      ios:
-        description: "Publish the iOS app"
+      version:
+        description: "Version to publish, x.y.z (builds the tag v<version> unless ref is set)"
         required: true
+        type: string
+      # A checkbox always has a value, so the booleans are not marked required: the form would
+      # otherwise flag them as if they had to be checked.
+      ios:
+        description: "Publish iOS / iPadOS (App Store)"
+        required: false
         type: boolean
         default: true
       macos:
-        description: "Publish the Mac App Store build"
-        required: true
-        type: boolean
-        default: false
-      version:
-        description: "App Store version, x.y.z (also the tag v<version> built when ref is empty)"
-        required: true
-        type: string
-      ref:
-        description: "Branch, tag or commit to build (must be on a version branch); empty builds the tag v<version>. The workflow and its scripts come from \"Use workflow from\", which must be a version branch such as v0"
+        description: "Publish macOS (Mac App Store)"
         required: false
-        type: string
-        default: ""
+        type: boolean
+        default: true
       submit:
         description: "Submit for review (off: upload and attach the build only)"
-        required: true
+        required: false
         type: boolean
         default: true
       release:
@@ -50,6 +47,12 @@ on:
           - automatic
           - manual
         default: automatic
+      # Last: an override most runs leave empty.
+      ref:
+        description: "Optional: branch, tag or commit to build instead of v<version> (must be on a version branch). The workflow itself always comes from \"Use workflow from\", a version branch such as v0"
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read

@@ -1388,12 +1388,12 @@ GitHub Release はそのあいだも先に進めてよく、そのプラット�
 
 | 入力 | 意味 |
 | --- | --- |
-| `ios` | オン（既定）: iOS アプリを公開する |
-| `macos` | オン: Mac App Store ビルドを公開する。既定はオフ。`ios` と `macos` の少なくとも一方をオンにすること。両方オンなら 2 つは並列に動き、一方が失敗してももう一方は止まらない |
 | `version` | App Store のバージョン（x.y.z）。`ref` が空のときにビルドする tag の名前にもなる |
-| `ref` | ビルドするブランチ、tag、またはコミット。バージョンブランチ上にあること。空（既定）なら tag `v<version>` をビルドする |
+| `ios` | オン（既定）: iOS / iPadOS アプリを公開する |
+| `macos` | オン（既定）: Mac App Store ビルドを公開する。iOS だけを出すときと、Mac App Store 版より前の tag を出すとき（そうした tag は何もビルドしないうちに拒否される）はオフにする。`ios` と `macos` の少なくとも一方をオンにすること。両方オンなら 2 つは並列に動き、一方が失敗してももう一方は止まらない |
 | `submit` | オン（既定）: 審査に提出する。オフ: ビルドのアップロードと関連付けだけを行い、提出は App Store Connect で行う |
 | `release` | `automatic`（既定）: 承認され次第、App Store Connect がバージョンを公開する。`manual`: App Store Connect で公開するまで待つ |
+| `ref` | ビルドするブランチ、tag、またはコミット。バージョンブランチ上にあること。空（既定）なら tag `v<version>` をビルドする |
 
 最初の 1 回は `submit` をオフ、`release` を `manual` にして実行すること: ビルド、アップロード、App Store Connect の
 API 呼び出しを確かめる方法は本番の実行しかない。`submit` がオフなら誤りがあっても審査の手前で止まり、`manual` なら

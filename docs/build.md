@@ -1399,12 +1399,12 @@ Inputs:
 
 | Input | Meaning |
 | --- | --- |
-| `ios` | On (default): publish the iOS app |
-| `macos` | On: publish the Mac App Store build. Off by default. At least one of `ios` and `macos` must be on; with both on, the two run in parallel and one failing does not stop the other |
 | `version` | App Store version, x.y.z — also the name of the release tag built when `ref` is empty |
-| `ref` | Branch, tag or commit to build; must be on a version branch. Empty (the default) builds the tag `v<version>` |
+| `ios` | On (default): publish the iOS / iPadOS app |
+| `macos` | On (default): publish the Mac App Store build. Turn it off to publish iOS alone, and for a tag from before the Mac App Store build (such a tag is refused before anything is built). At least one of `ios` and `macos` must be on; with both on, the two run in parallel and one failing does not stop the other |
 | `submit` | On (default): submit for review. Off: upload and attach the build only, and leave the submission to App Store Connect |
 | `release` | `automatic` (default): App Store Connect releases the version as soon as it is approved. `manual`: it waits for a release in App Store Connect |
+| `ref` | Branch, tag or commit to build; must be on a version branch. Empty (the default) builds the tag `v<version>` |
 
 Run the first one with `submit` off and `release` set to `manual`: nothing but a real run exercises
 the build, the upload and the App Store Connect calls, so with `submit` off a mistake stops before
