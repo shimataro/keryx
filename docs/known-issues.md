@@ -1077,36 +1077,3 @@ A fix in SwiftUI. Even then, the guard stays as long as SwiftUI's drop handling 
 drops as described above. Driving the outline directly instead (an `NSOutlineView` wrapped in
 `NSViewRepresentable`, as the iOS sidebar does with a `UICollectionView`) would remove the reliance on
 SwiftUI's internals, at the cost of drawing the rows, selection and metrics the `List` now provides.
-
-## iOS: the article list's large title stays collapsed after a filter switch
-
-From iOS 26 the article list is named by the standard large title (see "Article list heading (iOS)" in
-[app-architecture.md](app-architecture.md)).
-
-### Symptom
-
-With the list scrolled far enough for its large title to collapse into the bar, choosing another feed,
-folder or tag while the list stays on screen (an iPad's sidebar, the notification center's "show feed",
-a keyboard shortcut) goes back to the new selection's first row, but the large title stays collapsed:
-the bar names the new selection inline. On an iPhone, choosing in the sidebar rebuilds the list on the
-way back, and the title there is large. Seen on the iOS 26.5 and 27.0 simulators (iPhone and iPad).
-
-### What was ruled out
-
-Each was tried in place of the reset's `ScrollViewProxy.scrollTo(firstRow)`, on iOS 26.5 and 27.0:
-
-- `scrollTo(firstRow, anchor: .top)`: the first row comes to the top; the title stays collapsed.
-- `ScrollPosition.scrollTo(edge: .top)`, bound to the `List` with `.scrollPosition`: the list did not
-  even come back to the first row.
-- Rebuilding the `List` on every switch (the selection in its `.id`): the new list starts at the top,
-  and the title still stays collapsed. The navigation bar keeps the collapsed state itself.
-
-### Why this is not worked around
-
-The name stays on screen, inline in the bar, and nothing is lost. Before iOS 26 the reset scrolls to the
-list's own heading row, which has no such state.
-
-### What a real fix would need
-
-A way to have the navigation bar show its large title again on request, which none of the SwiftUI scroll
-APIs above offers.

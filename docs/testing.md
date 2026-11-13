@@ -1433,20 +1433,16 @@ feed of a few dozen articles:
 
 ### (iOS) The article list title
 
-`ArticleListBarTitleTests` covers when the bar names the list before iOS 26, but how it looks needs a
-simulator or device. On iOS 17 or 18 and on iOS 26 or later, each on an iPhone and an iPad:
+On iOS 17 or 18 and on iOS 26 or later, each on an iPhone and an iPad:
 
-- Before iOS 26: scrolling the heading row away shows the list's name in the bar, and scrolling back to
-  the top takes it away again.
-- Before iOS 26: with the heading scrolled away, open an article and go back: the name is still in the bar.
-- Before iOS 26: an empty list, a Starred mode with nothing in it and a search with no results each show
-  the heading once, with nothing in the bar.
-- From iOS 26: the large title collapses into the bar on scrolling and is large again at the top.
-- After scrolling down, choosing another feed goes back to the top (before iOS 26, to the heading). From
-  iOS 26 the title stays collapsed there, naming the feed inline — a known issue (see
-  [known-issues.md](known-issues.md)), not a regression.
-- On a narrow iPhone (iPhone SE) with a long feed name, the name is truncated in the bar and Mark All as
-  Read stays a toolbar button.
+- The list's name is in the bar from the start and stays there however far the list scrolls; choosing
+  another feed names it there at once.
+- On a narrow iPhone (iPhone SE) with a long feed name, the name is truncated in the bar and the mode
+  menu and Mark All as Read stay toolbar buttons.
+- An empty list, a Starred mode with nothing in it and a search with no results show their message with
+  no heading above it.
+- The search field: in the bottom bar on an iPhone from iOS 26, under the bar otherwise; on an iPad from
+  iOS 26 it appears when the list is pulled down, and ⌘F opens it.
 
 ### (iOS) Restoring Home after termination
 
