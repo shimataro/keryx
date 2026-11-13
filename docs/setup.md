@@ -37,9 +37,8 @@
   device/emulator, layout preview, etc.) is weaker than in Android Studio, so prefer Android
   Studio when the work is mainly on the Android side.
 - **[Visual Studio Code](https://code.visualstudio.com/)**: JetBrains' official "Kotlin by JetBrains"
-  extension has explicitly not supported Kotlin Multiplatform projects at any point checked so far —
-  verify its current KMP support status before relying on it, since this can change. Not recommended
-  for this project's development unless that has changed.
+  extension is not recommended for this project's development. Check the extension's current Kotlin
+  Multiplatform support before relying on it.
 
 ### Software Required to Build
 
@@ -153,7 +152,9 @@ Split into what every target needs in common, and what's specific to the Android
 
 Building `:shared`'s Apple targets and the SwiftUI app (`appleApp/`) needs a Mac on Apple Silicon.
 
-- **Xcode**, installed from the App Store or [developer.apple.com](https://developer.apple.com/xcode/).
+- **Xcode 26 or later**, installed from the App Store or [developer.apple.com](https://developer.apple.com/xcode/)
+  (the app icon needs Xcode 26 to build). The exact version CI and releases use is the `DEVELOPER_DIR`
+  set in the workflows under `.github/workflows/`.
 - **XcodeGen** (`brew install xcodegen`) — generates `appleApp/Keryx.xcodeproj` from
   `appleApp/project.yml`, which is the file actually kept in Git; the generated `.xcodeproj` is not.
 - **An Apple ID with a team** (even a free "Personal Team") to build a *runnable* `appleApp/`
@@ -360,7 +361,7 @@ display server (SSH session, container, etc.).
 
 ### Dropbox integration not showing
 
-`DROPBOX_APP_KEY` is not set (hidden by design as a feature). See `build.md`.
+`DROPBOX_APP_KEY` is not set (hidden by design as a feature). See [build.md](build.md).
 
 ### (Android emulator) Dropbox/OneDrive linking opens a page but taps don't respond
 
