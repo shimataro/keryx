@@ -158,7 +158,9 @@ jobs:
   publish:
     name: Build, upload & submit (${{ inputs.platform }} ${{ inputs.version }})
     needs: prepare
-    runs-on: macos-26
+    # The image with the newest Xcode, picked by "Select Xcode" below. `xcode-27` is a preview runner
+    # label; move to the regular macOS label once its image ships Xcode 27.
+    runs-on: xcode-27
     # The build takes about fifteen minutes; App Store Connect's processing of the upload is waited
     # for up to 45 more.
     timeout-minutes: 90
@@ -182,6 +184,14 @@ jobs:
           sparse-checkout: .github/scripts
           sparse-checkout-cone-mode: false
           persist-credentials: false
+
+      # The newest release (non-beta) Xcode on the image, rather than a pinned one: App Store Connect
+      # requires a recent SDK (the iPhone Duo badge, the iOS 27.1 SDK), and a beta-built app cannot be
+      # submitted. Its version and SDKs are reported in the job's notice and summary; check them
+      # before submitting. It sets DEVELOPER_DIR for every later step. See docs/build.md's
+      # "Publishing to the App Store".
+      - name: Select Xcode
+        run: .publish-tools/.github/scripts/select-xcode.sh
 
       # Fails the job, naming each missing secret, before anything is built. The OAuth ids are
       # required too: a build without one hides that provider, contradicting the listing.
@@ -270,7 +280,6 @@ jobs:
       - name: Pick the build number
         id: build
         env:
-          DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
           VERSION: ${{ inputs.version }}
           ASC_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
@@ -280,10 +289,6 @@ jobs:
 
       - name: Build, sign, validate and upload
         env:
-          # Pinned, not the image default, so a runner image update cannot change the toolchain
-          # (AppIcon.icon needs Xcode 26). Keep in step with release.yml, and raise it when App
-          # Store Connect starts requiring a newer Xcode.
-          DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
           REPO_ROOT: ${{ github.workspace }}
           VERSION: ${{ inputs.version }}
           BUILD_NUMBER: ${{ steps.build.outputs.build_number }}
@@ -305,7 +310,6 @@ jobs:
 
       - name: Attach the build and submit for review
         env:
-          DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
           VERSION: ${{ inputs.version }}
           BUILD_NUMBER: ${{ steps.build.outputs.build_number }}
           SUBMIT: ${{ inputs.submit }}

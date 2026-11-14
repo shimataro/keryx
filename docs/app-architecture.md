@@ -2101,8 +2101,8 @@ exists. What was measured on the iOS 27.1 simulator, and what follows from it:
   overflowed sort and Mark All as Read),
   so this changes vertical bars only. Before iOS 27 the two items stay in one trailing group
   (`.primaryAction`). `visibilityPriority` exists only in the iOS 27 SDK, so this branch compiles only
-  under `#if compiler(>=6.4)` (Xcode 27); a release built with the pinned Xcode 26.6 keeps the one
-  group even on iOS 27. Either way the items sit at the same trailing edge.
+  under `#if compiler(>=6.4)` (Xcode 27). Releases build with Xcode 27 or later, so they take this
+  branch on iOS 27; an older Xcode keeps the one group even on iOS 27. Either way the items sit at the same trailing edge.
 - **The band above the outer display's lists** (82pt, against 24pt above the reader, which has no
   navigation title) is the navigation title's own area, and the system Settings app leaves the same
   band above its own lists. It is left as is, and holds the article list's inline title (see "Article

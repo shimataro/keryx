@@ -222,9 +222,10 @@ To retake them:
 - [ ] Screenshots: iPhone, iPhone Duo, iPad and Mac are in `screenshots/` (see above). Upload the Mac ones under the
   version's App Previews and Screenshots ▸ macOS in App Store Connect.
 - [ ] Build with the Xcode version App Store Connect currently requires — Xcode 26 or later since
-  2026-04-28; Apple raises it periodically, so check its "Upcoming requirements" news first. The workflow pins
-  its Xcode (`DEVELOPER_DIR` in `publish-app-store.yml`, kept in step with `release.yml`), so raise the pin when
-  the requirement moves. The workflow validates every build with `altool --validate-app` before uploading it;
+  2026-04-28; Apple raises it periodically, so check its "Upcoming requirements" news first. The workflow builds
+  with the newest release Xcode on the `xcode-27` runner (`.github/scripts/select-xcode.sh`) and reports the Xcode
+  and SDK versions in the run's notice and the job summary; check them there. The iPhone Duo badge needs the iOS
+  27.1 SDK or later. The workflow validates every build with `altool --validate-app` before uploading it;
   for a hand-made archive, run **Validate App** in Organizer instead. Either must report no ITMS-90474
   (orientations) and no ITMS-91053 (privacy manifest) problems.
 - [x] Mac App Store build only: no self-updater (guideline 2.4.5(vii)). The `KeryxMacAppStore` target leaves out

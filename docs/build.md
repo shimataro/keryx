@@ -348,14 +348,21 @@ xcodebuild archive -scheme KeryxMacAppStore -configuration Release -destination 
 The Swift code has `#if compiler(>=6.4)` branches for iOS 27 SDK APIs (`visibilityPriority`), and each
 Xcode compiles only one side of them, so CI builds with two:
 
-- The `build-apple` job pins the Xcode the release workflows use (26.6, through `DEVELOPER_DIR`), so the
-  builds above compile the side releases ship, whatever the runner image's default becomes.
-- The `build-apple-xcode27` job builds the iOS app (the only platform with such a branch) with Xcode 27
-  on the `xcode-27` runner, a preview label, compiling the other side. It fails if that image's Xcode is
-  not 27.
+- The `build-apple` job runs on the `xcode-27` runner, a preview label, with the Xcode the release
+  workflows use, so the builds above compile the side releases ship.
+- The `build-apple-xcode26` job builds the iOS app (the only platform with such a branch) with Xcode 26.6
+  on `macos-26` (through `DEVELOPER_DIR`), compiling the other side. It fails if that Xcode is not 26.6.
 
-To move to a newer Xcode, update `DEVELOPER_DIR` in `ci.yml`, `release.yml` and `publish-app-store.yml`
-together.
+**Which Xcode builds a release.** `build-apple`, `release.yml`'s `package-macos` and
+`publish-app-store.yml`'s `publish` all run on `xcode-27` and start with `.github/scripts/select-xcode.sh`,
+which picks the newest release Xcode on the image and sets `DEVELOPER_DIR` for the rest of the job. No
+version is pinned, so a newer Xcode on the image is picked up without a workflow change. A beta is never
+picked (by its path, or by a build number ending in a lowercase letter): App Store Connect does not accept
+an app built with one. The script checks no minimum SDK; it reports the Xcode and SDK versions it picked
+as a notice on the run and in the job summary. The App Store shows the iPhone Duo badge only for an app
+built with the iOS 27.1 SDK or later, so check the iOS SDK there before submitting. `xcode-27` is the
+only GitHub-hosted image with Xcode 27 (`macos-26` has 26.x only); move the jobs to the regular macOS
+label once its image ships it.
 
 The Debug builds compile only the active architecture and never take the Release-only settings, so
 the unsigned Release archive is what exercises them before a release does: the macOS x86_64
@@ -1207,9 +1214,9 @@ the credentials):
    reach Xcode through a generated, gitignored `appleApp/Local.xcconfig` (so they do not leak onto
    Swift package targets), and the script refuses to run if a developer's own one exists.
    Xcode itself re-signs Sparkle's nested helpers on export, as Sparkle recommends; never add
-   `codesign --deep` when signing. The job runs on a pinned runner image (`macos-26`, not
-   `macos-latest`) with Xcode set through `DEVELOPER_DIR` in `release.yml` (`AppIcon.icon` needs
-   Xcode 26); change both together.
+   `codesign --deep` when signing. The job runs on the `xcode-27` runner with the newest release Xcode
+   there, picked by `select-xcode.sh` (see "Which Xcode builds a release" under "CI" in "Building the
+   SwiftUI app").
 3. Runs `generate-appcast.sh`: Sparkle's `generate_appcast` signs the `.zip` with `SPARKLE_PRIVATE_KEY`
    and writes `appcast.xml`.
 4. Attaches the `.zip`, the `.dmg` and `appcast.xml` — in a last step that only runs if everything
@@ -1503,8 +1510,10 @@ who reaches the signing material, move the secrets above into a GitHub environme
 branches are limited to the version branches, and name that environment in the `publish` job's
 `environment:`.
 
-The Xcode it builds with is pinned (`DEVELOPER_DIR`, kept in step with `release.yml`); raise it
-when App Store Connect starts requiring a newer Xcode.
+It builds with the newest release Xcode on the `xcode-27` runner, as `release.yml` does (see "Which
+Xcode builds a release" under "Building the SwiftUI app"). Before submitting, check the Xcode and iOS
+SDK it reports in the run's notice or the job summary: the iPhone Duo badge needs the iOS 27.1 SDK or
+later.
 
 ### Publishing to F-Droid
 
