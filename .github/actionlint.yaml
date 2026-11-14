@@ -1,7 +1,8 @@
 # actionlint 1.7.12 does not know `xcode-27`, a GitHub-hosted preview runner label (ci.yml's
-# build-apple-xcode27), so it is declared here. actionlint's only way to accept a label it does not
-# know is this self-hosted list; the runner itself is GitHub's. Remove the entry once actionlint
-# knows the label, or once the job moves to a regular macOS label.
+# build-apple, release.yml's package-macos and publish-app-store.yml's publish), so it is declared
+# here. actionlint's only way to accept a label it does not know is this self-hosted list; the runner
+# itself is GitHub's. Remove the entry once actionlint knows the label, or once those jobs move to a
+# regular macOS label.
 self-hosted-runner:
   labels:
     - xcode-27
