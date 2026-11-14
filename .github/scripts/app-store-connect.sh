@@ -11,7 +11,9 @@
 #                      have a higher CFBundleVersion than every build uploaded before it, whatever
 #                      its version (iOS restarts per version, but accepts this too). Build numbers
 #                      come from App Store Connect rather than from a workflow run number, which
-#                      restarts with every workflow.
+#                      restarts with every workflow. A dotted build (e.g. 10.2.3, which Apple
+#                      allows) counts by its leading number, so the result is always an integer
+#                      above every existing build.
 #                      It runs before the build, so a bad API key, or a version already in review
 #                      or approved but not released, fails the job within a minute.
 #   submit             Waits for BUILD_NUMBER to finish processing, points ASC_PLATFORM's App Store
@@ -204,7 +206,7 @@ if [ "$command" = "next-build-number" ]; then
   load_versions
   # Every version's builds on this platform, not only VERSION's (see the header).
   api_all "/v1/builds?filter[app]=$app_id&filter[preReleaseVersion.platform]=$ASC_PLATFORM&fields[builds]=version&limit=200"
-  next=$(jq -r '[.[].attributes.version | tonumber? // empty] | (max // 0) + 1' <<< "$ALL")
+  next=$(jq -r '[.[].attributes.version | split(".")[0] | tonumber? // empty] | (max // 0) + 1' <<< "$ALL")
   echo "Next build number for $VERSION: $next" >&2
   if [ -n "${GITHUB_OUTPUT:-}" ]; then
     echo "build_number=$next" >> "$GITHUB_OUTPUT"
