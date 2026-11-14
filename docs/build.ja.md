@@ -346,14 +346,20 @@ xcodebuild archive -scheme KeryxMacAppStore -configuration Release -destination 
 Swift のコードには iOS 27 SDK の API（`visibilityPriority`）のための `#if compiler(>=6.4)` の分岐があり、
 どちらの Xcode も片側しかコンパイルしない。そのため CI は 2 つの Xcode でビルドする。
 
-- `build-apple` ジョブは、リリース用のワークフローと同じ Xcode（26.6）を `DEVELOPER_DIR` で固定している。
-  ランナーイメージの既定が変わっても、上のビルドはリリースが出荷する側をコンパイルする。
-- `build-apple-xcode27` ジョブは、Preview のラベル `xcode-27` のランナーで、Xcode 27 を使って iOS アプリ
-  （この分岐があるのは iOS だけ）をビルドし、もう片側をコンパイルする。そのイメージの Xcode が 27 でなければ
-  失敗する。
+- `build-apple` ジョブは、Preview のラベル `xcode-27` のランナーで、リリース用のワークフローと同じ Xcode を
+  使う。そのため、上のビルドはリリースが出荷する側をコンパイルする。
+- `build-apple-xcode26` ジョブは、`macos-26` で Xcode 26.6（`DEVELOPER_DIR` で指定）を使って iOS アプリ
+  （この分岐があるのは iOS だけ）をビルドし、もう片側をコンパイルする。その Xcode が 26.6 でなければ失敗する。
 
-新しい Xcode に移るときは、`ci.yml`・`release.yml`・`publish-app-store.yml` の `DEVELOPER_DIR` を
-合わせて更新する。
+**リリースをビルドする Xcode。** `build-apple`、`release.yml` の `package-macos`、`publish-app-store.yml` の
+`publish` は、どれも `xcode-27` で動き、最初に `.github/scripts/select-xcode.sh` を実行する。このスクリプトは
+イメージに入っている中で最新の正式版 Xcode を選び、ジョブの残りのステップ用に `DEVELOPER_DIR` を設定する。
+バージョンは固定しないので、イメージに新しい Xcode が入れば、ワークフローを変えずにそれが使われる。beta 版は
+（パス、または最後が小文字のビルド番号で判別して）選ばない。beta 版でビルドしたアプリは App Store Connect が
+受け付けないため。スクリプトは SDK の下限を確かめず、選んだ Xcode と SDK のバージョンを、実行結果の注記と
+ジョブのサマリーに出力する。App Store で iPhone Duo のバッジが付くのは iOS 27.1 SDK 以降でビルドしたアプリ
+だけなので、提出前にそこで iOS SDK を確認すること。Xcode 27 が入っている GitHub ホストのイメージは `xcode-27`
+だけ（`macos-26` には 26.x しかない）。通常の macOS のラベルのイメージに入ったら、ジョブをそちらに移す。
 
 Debug ビルドはアクティブなアーキテクチャしかコンパイルせず、Release 限定の設定も通らない。そのため、
 それらをリリースより前に通すのは署名なしの Release archive の役目になる：macOS の x86_64 除外と
@@ -1210,8 +1216,8 @@ Compose 版はもうリリースしない。インストール済みの Compose 
    にも出力する（早めに直すべき警告が載るため）。署名設定は、生成する gitignore 済みの `appleApp/Local.xcconfig` 経由で
    Xcode に渡す（Swift パッケージのターゲットに波及させないため）。開発者自身の同名ファイルがあると、スクリプトは
    実行を拒否する。Sparkle の入れ子の補助ツールは、Sparkle の推奨どおり export 時に Xcode が再署名する。署名時に
-   `codesign --deep` を付けないこと。ジョブは `macos-latest` ではなく固定のランナーイメージ（`macos-26`）で動き、
-   Xcode は `release.yml` の `DEVELOPER_DIR` で指定している（`AppIcon.icon` に Xcode 26 が必要）。両方を一緒に更新する。
+   `codesign --deep` を付けないこと。ジョブは `xcode-27` のランナーで動き、そこに入っている最新の正式版
+   Xcode を `select-xcode.sh` が選ぶ（「SwiftUI アプリ（`appleApp/`）のビルド」の「CI」にある「リリースをビルドする Xcode」を参照）。
 3. `generate-appcast.sh` を実行する: Sparkle の `generate_appcast` が `SPARKLE_PRIVATE_KEY` で `.zip` に署名し、
    `appcast.xml` を書く。
 4. `.zip`・`.dmg`・`appcast.xml` を添付する——ここまでがすべて成功した場合にだけ動く最後のステップで。
@@ -1478,8 +1484,9 @@ Apple の認証情報を持つジョブは読み取りしかできない。
 どのワークフローからでも読める。署名素材に届く経路を本当に制限するには、上記の Secrets を、デプロイ可能なブランチを
 バージョンブランチに限った GitHub の environment に移し、`publish` ジョブの `environment:` にその environment を指定する。
 
-ビルドに使う Xcode は（`DEVELOPER_DIR` で、`release.yml` と揃えて）固定している。App Store Connect が
-より新しい Xcode を求めるようになったら上げること。
+ビルドには、`release.yml` と同じく `xcode-27` のランナーにある最新の正式版 Xcode を使う（「SwiftUI アプリ
+（`appleApp/`）のビルド」の「リリースをビルドする Xcode」を参照）。提出前に、実行結果の注記かジョブの
+サマリーに出る Xcode と iOS SDK を確認すること。iPhone Duo のバッジには iOS 27.1 SDK 以降が必要。
 
 ### F-Droid への公開
 
