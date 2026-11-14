@@ -1,9 +1,13 @@
 name: Publish to the App Store
+# Lists each run by what it publishes, e.g. "App Store 1.2.0: iOS, macOS (upload only)".
+run-name: "App Store ${{ inputs.version }}:${{ inputs.ios && ' iOS' || '' }}${{ inputs.ios && inputs.macos && ',' || '' }}${{ inputs.macos && ' macOS' || '' }}${{ inputs.ref != '' && format(' from {0}', inputs.ref) || '' }}${{ !inputs.submit && ' (upload only)' || '' }}"
 
-# Builds the SwiftUI app for `platform` from `ref` (by default the release tag v<version>; any commit
-# already on a version branch), uploads it to App Store Connect, attaches it to the App Store
-# version `version` and submits that version for review (see docs/build.md's "Publishing to the App
-# Store").
+# Builds the SwiftUI app for each selected platform (`ios`, `macos`) from `ref` (by default the
+# release tag v<version>; any commit already on a version branch), uploads it to App Store Connect,
+# attaches it to the App Store version `version` and submits that version for review (see
+# docs/build.md's "Publishing to the App Store"). With both selected the platforms run as separate
+# jobs in parallel: every App Store Connect call is limited to one platform, so they never collide,
+# and one platform failing does not stop the other.
 #
 # Run by hand, after the GitHub Release is published: release.yml ships every other platform at
 # once and does nothing for the App Store, so a long review holds back only that store. A rejection
@@ -16,26 +20,25 @@ name: Publish to the App Store
 on:
   workflow_dispatch:
     inputs:
-      platform:
-        description: "App Store platform to publish"
-        required: true
-        type: choice
-        options:
-          - ios
-          - macos
-        default: ios
-      ref:
-        description: "Branch, tag or commit to build (must be on a version branch); empty builds the tag v<version>"
-        required: false
-        type: string
-        default: ""
       version:
-        description: "App Store version, x.y.z (also the tag v<version> built when ref is empty)"
+        description: "Version to publish, x.y.z (builds the tag v<version> unless ref is set)"
         required: true
         type: string
+      # A checkbox always has a value, so the booleans are not marked required: the form would
+      # otherwise flag them as if they had to be checked.
+      ios:
+        description: "Publish iOS / iPadOS (App Store)"
+        required: false
+        type: boolean
+        default: true
+      macos:
+        description: "Publish macOS (Mac App Store)"
+        required: false
+        type: boolean
+        default: true
       submit:
         description: "Submit for review (off: upload and attach the build only)"
-        required: true
+        required: false
         type: boolean
         default: true
       release:
@@ -46,12 +49,19 @@ on:
           - automatic
           - manual
         default: automatic
+      # Last: an override most runs leave empty.
+      ref:
+        description: "Optional: branch, tag or commit to build instead of v<version> (must be on a version branch). The workflow itself always comes from \"Use workflow from\", a version branch such as v0"
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
 
 # Build numbers are read from App Store Connect before the build, so two runs at once could pick
-# the same one.
+# the same one. The parallel jobs within one run are for different platforms, whose build numbers
+# are separate, so they need no such guard.
 concurrency:
   group: publish-app-store
   cancel-in-progress: false
@@ -69,10 +79,27 @@ jobs:
       # generate-notes (the "What's New" text) needs write access to contents.
       contents: write
     outputs:
+      platforms: ${{ steps.platforms.outputs.platforms }}
       sha: ${{ steps.source.outputs.sha }}
       notes: ${{ steps.notes.outputs.notes }}
 
     steps:
+      # The publish job's matrix: one entry per selected platform.
+      - name: Check platforms
+        id: platforms
+        env:
+          IOS: ${{ inputs.ios }}
+          MACOS: ${{ inputs.macos }}
+        run: |
+          set -euo pipefail
+          platforms=$(jq -cn --argjson ios "$IOS" --argjson macos "$MACOS" \
+            '[if $ios then "ios" else empty end, if $macos then "macos" else empty end]')
+          if [ "$platforms" = "[]" ]; then
+            echo "::error::Select at least one platform (ios, macos)."
+            exit 1
+          fi
+          echo "platforms=$platforms" >> "$GITHUB_OUTPUT"
+
       # This workflow and the scripts in .publish-tools come from the branch the run was started
       # from ("Use workflow from"), not from `ref`.
       - name: Check the workflow's own branch
@@ -130,7 +157,7 @@ jobs:
       # build would fail only after the Gradle build and a build number were spent. Read as text,
       # so this job still runs none of `ref`'s code.
       - name: Check that ref has the Mac App Store target
-        if: inputs.platform == 'macos'
+        if: inputs.macos
         env:
           REF: ${{ inputs.ref || format('v{0}', inputs.version) }}
         run: |
@@ -156,14 +183,20 @@ jobs:
           { echo "notes<<$delimiter"; printf '%s\n' "$body"; echo "$delimiter"; } >> "$GITHUB_OUTPUT"
 
   publish:
-    name: Build, upload & submit (${{ inputs.platform }} ${{ inputs.version }})
+    name: Build, upload & submit (${{ matrix.platform }} ${{ inputs.version }})
     needs: prepare
     runs-on: macos-26
+    # One job per selected platform. A platform that cannot take a new version yet (one in review,
+    # say) fails on its own without cancelling the other.
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: ${{ fromJSON(needs.prepare.outputs.platforms) }}
     # The build takes about fifteen minutes; App Store Connect's processing of the upload is waited
     # for up to 45 more.
     timeout-minutes: 90
     env:
-      ASC_PLATFORM: ${{ inputs.platform == 'macos' && 'MAC_OS' || 'IOS' }}
+      ASC_PLATFORM: ${{ matrix.platform == 'macos' && 'MAC_OS' || 'IOS' }}
 
     steps:
       # The commit `prepare` checked, not `ref` again, which could have moved since.
@@ -241,7 +274,7 @@ jobs:
           APPLE_DISTRIBUTION_CERT_PASSWORD: ${{ secrets.APPLE_DISTRIBUTION_CERT_PASSWORD }}
           APPLE_MAC_INSTALLER_CERT_P12: ${{ secrets.APPLE_MAC_INSTALLER_CERT_P12 }}
           APPLE_MAC_INSTALLER_CERT_PASSWORD: ${{ secrets.APPLE_MAC_INSTALLER_CERT_PASSWORD }}
-          PROVISIONING_PROFILE: ${{ inputs.platform == 'macos' && secrets.APPLE_MAC_APP_STORE_PROVISIONING_PROFILE || secrets.APPLE_APP_STORE_PROVISIONING_PROFILE }}
+          PROVISIONING_PROFILE: ${{ matrix.platform == 'macos' && secrets.APPLE_MAC_APP_STORE_PROVISIONING_PROFILE || secrets.APPLE_APP_STORE_PROVISIONING_PROFILE }}
           APP_STORE_CONNECT_KEY: ${{ secrets.APP_STORE_CONNECT_KEY }}
           APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
         run: |

@@ -1370,8 +1370,9 @@ existing release once published.
 ### Publishing to the App Store
 
 The iOS app and the Mac App Store build go to App Store review through
-`.github/workflows/publish-app-store.yml`, run by hand once per platform (Actions → "Publish to the
-App Store" → Run workflow). `release.yml` does nothing for the App Store.
+`.github/workflows/publish-app-store.yml`, run by hand (Actions → "Publish to the App Store" → Run
+workflow) for one platform or both: each selected platform is built and submitted by a job of its
+own, in parallel. `release.yml` does nothing for the App Store.
 
 **The GitHub Release comes first.** App Store review can take a week or more, so it holds back only
 that store:
@@ -1390,18 +1391,23 @@ request is refused before anything is built.
 
 While a version is waiting for review, in review, or approved but not released, App Store Connect
 takes no other version for that platform, so the next one waits until that version is released. The
-other platform is not held back. GitHub Releases go ahead meanwhile; the platform catches up with the
+other platform is not held back: in a run with both selected, the held-back platform's job fails
+before it builds anything and the other one carries on. GitHub Releases go ahead meanwhile; the platform catches up with the
 latest one once the current version is out.
 
 Inputs:
 
 | Input | Meaning |
 | --- | --- |
-| `platform` | `ios` (default) or `macos`, the Mac App Store build |
-| `ref` | Branch, tag or commit to build; must be on a version branch. Empty (the default) builds the tag `v<version>` |
 | `version` | App Store version, x.y.z — also the name of the release tag built when `ref` is empty |
+| `ios` | On (default): publish the iOS / iPadOS app |
+| `macos` | On (default): publish the Mac App Store build. Turn it off to publish iOS alone, and for a tag from before the Mac App Store build (such a tag is refused before anything is built). At least one of `ios` and `macos` must be on; with both on, the two run in parallel and one failing does not stop the other |
 | `submit` | On (default): submit for review. Off: upload and attach the build only, and leave the submission to App Store Connect |
 | `release` | `automatic` (default): App Store Connect releases the version as soon as it is approved. `manual`: it waits for a release in App Store Connect |
+| `ref` | Branch, tag or commit to build; must be on a version branch. Empty (the default) builds the tag `v<version>` |
+
+The Actions run list names each run after its inputs — the version, the platforms, `ref` when set, and
+"upload only" when `submit` is off (e.g. `App Store 1.2.0: iOS, macOS`).
 
 Run the first one with `submit` off and `release` set to `manual`: nothing but a real run exercises
 the build, the upload and the App Store Connect calls, so with `submit` off a mistake stops before
@@ -1414,7 +1420,7 @@ from `ref`):
 
 1. A first job, which runs none of `ref`'s code, checks that `ref` is on a version branch (and,
    with `ref` empty, that the tag `v<version>` exists) and generates GitHub's release notes for that
-   commit (for "What's New" below). For `macos` it also checks that `ref` has the `KeryxMacAppStore`
+   commit (for "What's New" below). When `macos` is selected it also checks that `ref` has the `KeryxMacAppStore`
    target, so a tag from before the Mac App Store build is refused before anything is built. The
    build job then checks out exactly that commit.
 2. Checks that every secret below is set (`check-release-config.sh`), imports the certificate into a
@@ -1429,7 +1435,7 @@ from `ref`):
 4. `package-ios-app-store.sh` archives and exports the app with manual signing (Release,
    `generic/platform=iOS`, `MARKETING_VERSION`/`CURRENT_PROJECT_VERSION` set from the inputs),
    checks the exported app with `verify-store-requirements.sh` and its signature (Team ID, Apple
-   Distribution), runs `altool --validate-app`, then uploads it. For `macos`,
+   Distribution), runs `altool --validate-app`, then uploads it. For the Mac App Store build,
    `package-mac-app-store.sh` does the same with the `KeryxMacAppStore` scheme and
    `generic/platform=macOS`: the export is a `.pkg` signed with the installer certificate, so it
    checks that signature, then the app inside the package with `--mac-app-store`, and also that the
