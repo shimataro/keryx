@@ -1026,7 +1026,7 @@ How it turns out when something does not go as intended:
 
 `KeryxTests/SidebarDropGuardTests.swift` hosts a `List` shaped like the sidebar in an offscreen
 window and checks what the guard relies on: that the `List` is an `NSOutlineView` whose data source
-answers `validateDrop`, that its root items are the `List`'s sections in order (the headerless
+answers `validateDrop`, that its sections are found among its root items in order (the headerless
 All/Starred section first, then Folders, "No folder" and Tags), that each row is read as the row it
 is, and that drops sent through a stand-in `NSDraggingInfo` are decided and applied by the guard. CI
 runs it on `macos-latest`, so a new SDK or macOS that changes these fails there. It cannot cover the
@@ -1034,6 +1034,14 @@ older macOS releases users run (14 and later) or a real mouse drag; re-check tho
 new macOS: drop a folder at the top, the middle and the bottom of a folder row, over a feed inside a
 folder, at the top and at the end, and drop a feed onto a folder, "No folder", a tag and a feed's
 copy under a tag.
+
+Before macOS 26 the sidebar's search field (`.searchable(placement: .sidebar)`) is a root item of the
+outline too, ahead of the sections, and not a group item as every section is. The guard first
+required the roots to be exactly the sections, so on macOS 15 it read no section and refused every
+drop (sidebar reordering stopped working). Where the roots outnumber the sections, the guard now
+takes the group items as the sections (`SidebarDropOutline.sectionItems`). The test sidebar carries
+the same search field, so this structure is covered wherever the tests run on macOS 15. Confirmed by
+hand on macOS 15.7.
 
 ### What a real fix would need
 
