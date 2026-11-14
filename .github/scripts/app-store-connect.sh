@@ -5,10 +5,13 @@
 #
 # Subcommands:
 #   next-build-number  Prints the next free CFBundleVersion for VERSION on ASC_PLATFORM (one more
-#                      than the highest build already uploaded for it, or 1), and writes it to
-#                      $GITHUB_OUTPUT as `build_number` when that is set. Build numbers come from
-#                      App Store Connect rather than from a workflow run number, which restarts
-#                      with every workflow.
+#                      than the highest build already uploaded for any version on that platform,
+#                      or 1), and writes it to $GITHUB_OUTPUT as `build_number` when that is set.
+#                      The highest across all versions, not just VERSION's: a macOS build must
+#                      have a higher CFBundleVersion than every build uploaded before it, whatever
+#                      its version (iOS restarts per version, but accepts this too). Build numbers
+#                      come from App Store Connect rather than from a workflow run number, which
+#                      restarts with every workflow.
 #                      It runs before the build, so a bad API key, or a version already in review
 #                      or approved but not released, fails the job within a minute.
 #   submit             Waits for BUILD_NUMBER to finish processing, points ASC_PLATFORM's App Store
@@ -199,7 +202,8 @@ builds_url="/v1/builds?filter[app]=$app_id&filter[preReleaseVersion.version]=$VE
 if [ "$command" = "next-build-number" ]; then
   # Checked before the build too, so a version stuck in review fails the job in seconds.
   load_versions
-  api_all "$builds_url"
+  # Every version's builds on this platform, not only VERSION's (see the header).
+  api_all "/v1/builds?filter[app]=$app_id&filter[preReleaseVersion.platform]=$ASC_PLATFORM&fields[builds]=version&limit=200"
   next=$(jq -r '[.[].attributes.version | tonumber? // empty] | (max // 0) + 1' <<< "$ALL")
   echo "Next build number for $VERSION: $next" >&2
   if [ -n "${GITHUB_OUTPUT:-}" ]; then

@@ -1421,9 +1421,11 @@ from `ref`):
    throwaway keychain, and writes the profile and the API key into the runner's temp directory (all
    removed at the end).
 3. `app-store-connect.sh next-build-number` picks the build number: one more than the highest build
-   App Store Connect already has for that version (a workflow run number would restart per
-   workflow). It also fails at once, before the build, if the API key is rejected or a version is
-   already in review or approved but not released — App Store Connect takes no other version then.
+   App Store Connect already has for that platform, across all its versions (a workflow run number
+   would restart per workflow). Not just that version's: a macOS build must have a higher build
+   number than every build uploaded before it, whatever its version (iOS only requires this within a
+   version, but accepts it too). It also fails at once, before the build, if the API key is
+   rejected or a version is already in review or approved but not released — App Store Connect takes no other version then.
 4. `package-ios-app-store.sh` archives and exports the app with manual signing (Release,
    `generic/platform=iOS`, `MARKETING_VERSION`/`CURRENT_PROJECT_VERSION` set from the inputs),
    checks the exported app with `verify-store-requirements.sh` and its signature (Team ID, Apple
