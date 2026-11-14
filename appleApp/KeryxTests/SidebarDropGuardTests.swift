@@ -19,6 +19,7 @@ struct SidebarDropGuardTests {
         let recorder: DropRecorder
 
         @State private var selection: String?
+        @State private var query = ""
 
         var body: some View {
             let expanded = recorder.expanded
@@ -49,6 +50,8 @@ struct SidebarDropGuardTests {
                 }
             }
             .listStyle(.sidebar)
+            // As the app's sidebar has: before macOS 26 its field is a root item of the outline.
+            .searchable(text: $query, placement: .sidebar)
             .background(SidebarDropGuard(
                 folderCount: 2,
                 tagCount: 1,
@@ -130,7 +133,8 @@ struct SidebarDropGuardTests {
     @Test
     func theListsSectionsAreTheOutlinesRootItems() throws {
         let outline = try guardedOutline()
-        #expect(outline.numberOfChildren(ofItem: nil) == SidebarRootSection.roots(folderCount: 2, tagCount: 1).count)
+        let sections = SidebarDropOutline.sectionItems(of: outline, expecting: SidebarRootSection.roots(folderCount: 2, tagCount: 1).count)
+        #expect(sections != nil)
         let reader = SidebarDropOutline(outline, folderCount: 2, tagCount: 1)
         #expect(reader.foldersSection != nil)
         #expect(reader.noFolderSection != nil)

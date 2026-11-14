@@ -163,7 +163,7 @@ struct SidebarDropOutline {
     init(_ outline: NSOutlineView, folderCount: Int, tagCount: Int) {
         self.outline = outline
         let roots = SidebarRootSection.roots(folderCount: folderCount, tagCount: tagCount)
-        guard outline.numberOfChildren(ofItem: nil) == roots.count else {
+        guard let sectionItems = Self.sectionItems(of: outline, expecting: roots.count) else {
             (foldersSection, noFolderSection, tagsSection) = (nil, nil, nil)
             return
         }
@@ -171,13 +171,24 @@ struct SidebarDropOutline {
         // number when `nil`).
         func root(_ section: SidebarRootSection, holding count: Int?) -> AnyObject? {
             guard let index = roots.firstIndex(of: section) else { return nil }
-            let item = outline.child(index, ofItem: nil) as AnyObject
+            let item = sectionItems[index]
             guard let count else { return item }
             return outline.numberOfChildren(ofItem: item) == count ? item : nil
         }
         foldersSection = root(.folders, holding: folderCount)
         noFolderSection = root(.noFolder, holding: nil)
         tagsSection = root(.tags, holding: tagCount)
+    }
+
+    /// The outline's root items that are the `List`'s sections, in order, or `nil` when they are not
+    /// exactly `count`. Before macOS 26, the sidebar's search field (`.searchable(placement: .sidebar)`)
+    /// is a root item of its own, ahead of the sections, and not a group item as every section is —
+    /// so where the roots outnumber the sections, only the group items are taken.
+    static func sectionItems(of outline: NSOutlineView, expecting count: Int) -> [AnyObject]? {
+        let items = (0..<outline.numberOfChildren(ofItem: nil)).map { outline.child($0, ofItem: nil) as AnyObject }
+        if items.count == count { return items }
+        let groups = items.filter { outline.delegate?.outlineView?(outline, isGroupItem: $0) ?? false }
+        return groups.count == count ? groups : nil
     }
 
     func classify(_ proposed: Any?) -> SidebarOutlineRow {
@@ -229,12 +240,27 @@ private final class GuardAnchorView: NSView {
         installWhenInHierarchy()
     }
 
+    /// The outline this view last guarded.
+    private weak var guardedOutline: NSOutlineView?
+
+    /// Until the outline is guarded, every layout tries again: SwiftUI may add the outline after this
+    /// view, and a main-queue turn can come late (inside a nested run loop), while layout still runs.
+    override func layout() {
+        super.layout()
+        if guardedOutline == nil { install() }
+    }
+
     func installWhenInHierarchy() {
-        // SwiftUI may add the outline after this view, so look again on the next turn.
-        DispatchQueue.main.async { [weak self] in
-            guard let self, self.window != nil, let outline = self.nearestOutline() else { return }
-            SidebarDropGuardInstaller.install(on: outline, handler: self.handler)
-        }
+        // Right away where the outline is already there, and again on the next turn, in case SwiftUI
+        // adds it after this view.
+        install()
+        DispatchQueue.main.async { [weak self] in self?.install() }
+    }
+
+    private func install() {
+        guard window != nil, let outline = nearestOutline(),
+              SidebarDropGuardInstaller.install(on: outline, handler: handler) else { return }
+        guardedOutline = outline
     }
 
     /// The `NSOutlineView` nearest this view: the first one found under each ancestor in turn, so
