@@ -100,12 +100,13 @@ final class SidebarDropHandler: NSObject {
         let reader = SidebarDropOutline(outline: outline, folderIds: folderIds, tagIds: tagIds) {
             SidebarDropGuardInstaller.report("A sidebar row carries no marker", refusing: "a drop onto it")
         }
+        let row = reader.classify(item)
         guard let destination = sidebarDropDestination(
             dragging: kind,
-            proposed: reader.classify(item),
+            proposed: row,
             childIndex: childIndex,
             childCount: outline.numberOfChildren(ofItem: item)
-        ), let action = resolve(destination), let place = reader.place(destination, proposed: item) else {
+        ), let action = resolve(destination), let place = reader.place(destination, proposed: item, row: row) else {
             pending = nil
             return []
         }
@@ -206,12 +207,15 @@ struct SidebarDropOutline {
         }
     }
 
-    /// The outline's own terms for `destination`, which a drop proposed at `proposed` resolved to: the
-    /// item and child index to point it at.
-    func place(_ destination: SidebarDropDestination, proposed: Any?) -> (item: Any, childIndex: Int)? {
+    /// The outline's own terms for `destination`, which a drop proposed at `proposed` (read as `row` by
+    /// `classify`) resolved to: the item and child index to point it at.
+    func place(
+        _ destination: SidebarDropDestination,
+        proposed: Any?,
+        row: SidebarOutlineRow
+    ) -> (item: Any, childIndex: Int)? {
         let onto = sidebarDropOntoRowIndex
         let item = proposed as AnyObject?
-        let row = classify(proposed)
         switch destination {
         case .folderSlot(let index):
             return foldersSection(from: item, row: row).map { ($0, index) }
