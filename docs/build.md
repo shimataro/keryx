@@ -1420,8 +1420,10 @@ The Actions run list names each run after its inputs — the version, the platfo
 Run the first one with `submit` off and `release` set to `manual`: nothing but a real run exercises
 the build, the upload and the App Store Connect calls, so with `submit` off a mistake stops before
 review, and with `manual` an approved build still waits for a release in App Store Connect. Check the
-version and its build in App Store Connect, then submit it there.
-Setting `ref` to `v0` makes such a rehearsal possible before the GitHub Release exists.
+version and its build in App Store Connect, then submit it there. Setting `ref` to `v0` makes such a
+rehearsal possible before the GitHub Release exists; never submit a build made that way, since it is not
+built from the release tag. Once the GitHub Release is published, run again with `ref` empty and `submit`
+off, check that build, and submit it.
 
 **What a run does** (scripts under `.github/scripts/`, taken from the workflow's own ref rather than
 from `ref`):
