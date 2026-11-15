@@ -50,7 +50,9 @@ Please specify a GitHub PR review link (.../pull/<number>#discussion_r<id> or #p
 
 Keeping the order the URLs were given, split them into runs of consecutive URLs of the same type.
 For each run, in order, invoke the target skill with the `Skill` tool, passing the run's URLs
-(space-separated) as `args`, and let it finish before starting the next run.
+(space-separated) as `args`, and let it finish before starting the next run. If a run ends with
+the run outcome `Cancelled` (the user cancelled the whole evaluation), stop there: do not invoke
+the `Skill` tool for any later run.
 
 From the moment a skill is invoked, follow its instructions completely. Add no preface, summary
 or output of your own: the dispatched skill's output is this skill's final output.
