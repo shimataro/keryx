@@ -1029,7 +1029,7 @@ window and checks what the guard relies on: that the `List` is an `NSOutlineView
 answers `validateDrop`, that each row's marker is read from its row, that each row is read as the
 row it is — also with unmarked sections and rows before and between the sidebar's own — that a drop
 onto an unmarked row is refused, and that drops sent through a stand-in `NSDraggingInfo` are decided and applied by the guard. CI
-runs it on macOS 26 (`build-apple`) and macOS 15 (`apple-oldest-supported`), so a new SDK or macOS
+runs it on macOS 26 (`apple-release-toolchain`) and macOS 15 (`apple-oldest-supported`), so a new SDK or macOS
 that changes these fails there. It cannot cover macOS 14, which users can still run, or a real mouse drag; re-check those by hand on each
 new macOS: drop a folder at the top, the middle and the bottom of a folder row, over a feed inside a
 folder, at the top and at the end, and drop a feed onto a folder, "No folder", a tag and a feed's

@@ -346,14 +346,14 @@ xcodebuild archive -scheme KeryxMacAppStore -configuration Release -destination 
 Swift のコードには iOS 27 SDK の API（`visibilityPriority`）のための `#if compiler(>=6.4)` の分岐があり、
 どちらの Xcode も片側しかコンパイルしない。そのため CI は 2 つの Xcode でビルドする。
 
-- `build-apple` ジョブは、Preview のラベル `xcode-27` のランナーで、リリース用のワークフローと同じ Xcode を
+- `apple-release-toolchain` ジョブは、Preview のラベル `xcode-27` のランナーで、リリース用のワークフローと同じ Xcode を
   使う。そのため、上のビルドはリリースが出荷する側をコンパイルする。
 - `apple-oldest-supported` ジョブは、アプリの開発環境として対応する中で最も古い `macos-15` で、そこにある最新の正式版
   Xcode 26（執筆時点では 26.3。`select-xcode.sh` が選ぶ）を使う。iOS アプリ（この分岐があるのは iOS だけ）をビルドして
   もう片側をコンパイルし、あわせて macOS 15 で macOS アプリをビルドしてテストする。ランナーが macOS 15 でないか、
   Xcode が 26 でなければ失敗する。
 
-**リリースをビルドする Xcode。** `build-apple`、`release.yml` の `package-macos`、`publish-app-store.yml` の
+**リリースをビルドする Xcode。** `apple-release-toolchain`、`release.yml` の `package-macos`、`publish-app-store.yml` の
 `publish` は、どれも `xcode-27` で動き、最初に `.github/scripts/select-xcode.sh` を実行する。このスクリプトは
 イメージに入っている中で最新の正式版 Xcode を選び、ジョブの残りのステップ用に `DEVELOPER_DIR` を設定する。
 バージョンは固定しないので、イメージに新しい Xcode が入れば、ワークフローを変えずにそれが使われる。beta 版は
@@ -382,7 +382,7 @@ iOS / Mac App Store 版の掲載文、App Store Connect への回答、審査メ
 これらの資料が前提とするビルド設定は CI が守る。`appleApp/Scripts/verify-store-requirements.sh <Keryx.app>` は、
 ビルドしたアプリにプライバシーマニフェストの Required Reason API の宣言、ATS の例外（`NSAllowsArbitraryLoads`。
 `NSAllowsArbitraryLoadsInWebContent` は無いこと）、`ITSAppUsesNonExemptEncryption = NO`、（iOS では）iPad の 4 方向が
-そろっていなければ失敗する。`build-apple` ジョブが、iOS シミュレーター向けのビルドと macOS の Release アーカイブに対して実行する。
+そろっていなければ失敗する。`apple-release-toolchain` ジョブが、iOS シミュレーター向けのビルドと macOS の Release アーカイブに対して実行する。
 `--mac-app-store` を付けると、Sparkle の Info.plist キーや埋め込まれた `Sparkle.framework` があっても失敗する。同ジョブは
 `KeryxMacAppStore` のアーカイブに対してこの形で実行する。
 

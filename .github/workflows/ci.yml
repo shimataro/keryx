@@ -91,7 +91,7 @@ jobs:
       # desktop test suites (where the OS-specific code paths are — e.g. ArchiveExtractorTest's
       # `ditto` cases only run on macOS) and their packaging below. On macOS a plain `build` would also link every
       # Kotlin/Native framework in both build types (~11 min, never build-cached); the Apple side
-      # (Kotlin/Native tests, XCFramework, SwiftUI app) is `build-apple`'s job instead, run in
+      # (Kotlin/Native tests, XCFramework, SwiftUI app) is `apple-release-toolchain`'s job instead, run in
       # parallel.
       - name: Build & Test
         shell: bash
@@ -321,8 +321,8 @@ jobs:
   # release XCFramework is linked — once — since that is what the app consumes; linking the
   # debug frameworks too would add ~5 min without verifying anything the release link and the
   # test-binary links don't already.
-  build-apple:
-    name: Build & Test (xcode-27 / SwiftUI)
+  apple-release-toolchain:
+    name: "Apple: release toolchain (newest Xcode, macOS 26)"
     # The image the release workflows build on, with the Xcode they pick (see "Select Xcode").
     # `xcode-27` is a preview runner label; move to the regular macOS label once its image ships
     # Xcode 27.
@@ -471,7 +471,7 @@ jobs:
           if-no-files-found: warn
 
   # The oldest environment the Apple app supports developing in: macOS 15 with Xcode 26 (Xcode 27
-  # does not run on macOS 15). It guards two things build-apple, on macOS 26 with the newest Xcode,
+  # does not run on macOS 15). It guards two things apple-release-toolchain, on macOS 26 with the newest Xcode,
   # never sees:
   # - The `#else` side of the Swift code's `#if compiler(>=6.4)` branches (iOS 27 SDK APIs such as
   #   `visibilityPriority`), which only an Xcode older than 27 compiles. The app's only such branch
@@ -482,7 +482,7 @@ jobs:
   # The Xcode is the newest release one on the image, not a pinned path; "Check environment" fails
   # the job if the image stops being macOS 15 or that Xcode stops being 26. When GitHub retires the
   # macos-15 image, move this job to the oldest image left. The framework is built here rather than
-  # restored from build-apple's cache, whose key is another Xcode.
+  # restored from apple-release-toolchain's cache, whose key is another Xcode.
   apple-oldest-supported:
     name: "Apple: oldest supported (Xcode 26, macOS 15)"
     runs-on: macos-15

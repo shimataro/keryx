@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # Selects the newest non-beta Xcode installed on the runner and makes the rest of the job use it.
 #
-# The Apple jobs (ci.yml's build-apple, release.yml's package-macos and publish-app-store.yml's
-# publish) run on the `xcode-27` image and build with whatever release Xcode it has newest, rather
-# than a pinned path, so a new Xcode on the image is picked up without a workflow change. A beta is
+# The Apple jobs (ci.yml's apple-release-toolchain, release.yml's package-macos and
+# publish-app-store.yml's publish) run on the `xcode-27` image and build with whatever release Xcode
+# it has newest, rather than a pinned path, so a new Xcode on the image is picked up without a
+# workflow change. ci.yml's apple-oldest-supported uses it the same way on `macos-15`, where the
+# newest release Xcode is a 26. A beta is
 # never picked: App Store Connect does not accept a build made with one. Nothing is checked against a
 # minimum SDK; the Xcode and SDK versions picked are reported every time instead (a job notice and
 # the step summary), so a release can be checked for, say, the iOS 27.1 SDK the iPhone Duo badge
