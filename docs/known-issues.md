@@ -1035,20 +1035,18 @@ new macOS: drop a folder at the top, the middle and the bottom of a folder row, 
 folder, at the top and at the end, and drop a feed onto a folder, "No folder", a tag and a feed's
 copy under a tag.
 
-Before macOS 26 the sidebar's search field (`.searchable(placement: .sidebar)`) is a root item of the
-outline too, ahead of the sections, and not a group item as every section is. The guard first read
-the sections by their position among the roots, so on macOS 15 it read no section and refused every
-drop (sidebar reordering stopped working). The guard no longer tells a row by its position among the roots or
-within a section; it only checks that a folder or tag row read by its marker sits at its own index
-among its siblings. Every row the guard needs carries an invisible marker view behind its content (`SidebarRowMarker`), naming its
-`SidebarItemID`, which the guard finds in the outline's existing row view
-(`makeIfNecessary: false` — a freshly made row gets its content only on a later turn). The Folders
-section is told by a marked child, the Tags section is reached as the parent of a marked tag row,
-the "No folder" section by its header's marker, and a
-feed's folder by its parent's marker. An accessibility identifier cannot serve: SwiftUI exposes it
-neither on the row views nor on the outline's accessibility rows. The test sidebar carries the same
-search field, so this structure is covered wherever the tests run on macOS 15. Confirmed by hand on
-macOS 15.7.
+Before macOS 26 the sidebar's search field (`.searchable(placement: .sidebar)`) is a root item of
+the outline too, ahead of the sections, and not a group item as every section is. The guard
+therefore never tells a row by its position among the roots or within a section; it only checks that
+a folder or tag row read by its marker sits at its own index among its siblings. Every row the guard
+needs carries an invisible marker view behind its content (`SidebarRowMarker`), naming its
+`SidebarItemID`, which the guard finds in the outline's existing row view (`makeIfNecessary: false`
+— a freshly made row gets its content only on a later turn). The Folders section is told by a marked
+child, the Tags section is reached as the parent of a marked tag row, the "No folder" section by its
+header's marker, and a feed's folder by its parent's marker. An accessibility identifier cannot
+serve: SwiftUI exposes it neither on the row views nor on the outline's accessibility rows. The test
+sidebar carries the same search field, so this structure is covered wherever the tests run on macOS
+15; CI runs a newer macOS, so on 14 and 15 re-check it with the manual drops listed above.
 
 ### What a real fix would need
 
