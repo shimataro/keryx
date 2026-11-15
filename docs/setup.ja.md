@@ -150,8 +150,9 @@
 `:shared` の Apple ターゲットと SwiftUI アプリ（`appleApp/`）のビルドには、Apple Silicon の Mac が必要。
 
 - **Xcode 26 以降**（App Store か [developer.apple.com](https://developer.apple.com/xcode/) からインストール）。
-  アプリアイコンのビルドに Xcode 26 以降が必要なため。CI とリリースで使う正確なバージョンは
-  `.github/workflows/` 配下のワークフローで指定している `DEVELOPER_DIR` を参照。
+  アプリアイコンのビルドに Xcode 26 以降が必要なため。リリースは、CI の `xcode-27` のランナーにある最新の
+  正式版 Xcode（`.github/scripts/select-xcode.sh` が選ぶ）でビルドする。Xcode 26.6 でもビルドできることは
+  CI のジョブで確かめている。[build.ja.md](build.ja.md) の「CI」を参照。
 - **XcodeGen**（`brew install xcodegen`）——`appleApp/project.yml` から `appleApp/Keryx.xcodeproj` を
   生成する。Git で管理するのは `project.yml` の方で、生成される `.xcodeproj` は管理しない。
 - **チーム付きの Apple ID**（無料の「Personal Team」でよい）。ローカルで実行可能な `appleApp/`

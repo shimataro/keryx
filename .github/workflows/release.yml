@@ -12,7 +12,9 @@ jobs:
   # "Release (CD)".
   package-macos:
     name: Package (macOS arm64)
-    runs-on: macos-26
+    # The image with the newest Xcode, picked by "Select Xcode" below. `xcode-27` is a preview runner
+    # label; move to the regular macOS label once its image ships Xcode 27.
+    runs-on: xcode-27
     # Notarization alone can take a while; the build itself needs about ten minutes.
     timeout-minutes: 60
     permissions:
@@ -24,6 +26,12 @@ jobs:
         with:
           ref: ${{ github.event.release.tag_name }}
           persist-credentials: false
+
+      # The newest release (non-beta) Xcode on the image, rather than a pinned one, so a new Xcode is
+      # picked up without a workflow change; its version and SDKs are reported in the job's notice
+      # and summary. It sets DEVELOPER_DIR for every later step. See docs/build.md's "Release (CD)".
+      - name: Select Xcode
+        run: .github/scripts/select-xcode.sh
 
       # Fails the job, naming each missing secret, before anything is built. An unset secret
       # reaches the script as an empty string, which counts as missing.
@@ -102,9 +110,6 @@ jobs:
 
       - name: Build, sign, notarize and package
         env:
-          # Pinned, not the image default, so a runner image update cannot change the toolchain
-          # (AppIcon.icon needs Xcode 26). Update together with the runner image.
-          DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
           VERSION: ${{ steps.version.outputs.version }}
           BUILD_NUMBER: ${{ github.run_number }}
           IS_PRERELEASE: ${{ steps.version.outputs.is_prerelease }}
@@ -128,7 +133,6 @@ jobs:
       # signature does not match the SUPublicEDKey in the app they are running.
       - name: Generate the Sparkle appcast
         env:
-          DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
           ZIP_PATH: ${{ runner.temp }}/release-assets/Keryx-${{ steps.version.outputs.version }}-macos-arm64.zip
           RELEASE_TAG: ${{ github.event.release.tag_name }}
           OUTPUT_DIR: ${{ runner.temp }}/release-assets

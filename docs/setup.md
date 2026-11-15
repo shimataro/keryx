@@ -153,8 +153,9 @@ Split into what every target needs in common, and what's specific to the Android
 Building `:shared`'s Apple targets and the SwiftUI app (`appleApp/`) needs a Mac on Apple Silicon.
 
 - **Xcode 26 or later**, installed from the App Store or [developer.apple.com](https://developer.apple.com/xcode/)
-  (the app icon needs Xcode 26 to build). The exact version CI and releases use is the `DEVELOPER_DIR`
-  set in the workflows under `.github/workflows/`.
+  (the app icon needs Xcode 26 to build). Releases build with the newest release Xcode on CI's `xcode-27`
+  runner, picked by `.github/scripts/select-xcode.sh`; a CI job keeps the code building with Xcode 26.6
+  too. See "CI" in [build.md](build.md).
 - **XcodeGen** (`brew install xcodegen`) — generates `appleApp/Keryx.xcodeproj` from
   `appleApp/project.yml`, which is the file actually kept in Git; the generated `.xcodeproj` is not.
 - **An Apple ID with a team** (even a free "Personal Team") to build a *runnable* `appleApp/`
