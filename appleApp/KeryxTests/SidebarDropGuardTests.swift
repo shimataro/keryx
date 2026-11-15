@@ -217,6 +217,25 @@ struct SidebarDropGuardTests {
     }
 
     @Test
+    func onlyARowThatShouldBeMarkedButIsNotIsReported() throws {
+        showExtras()
+        let outline = try guardedOutline()
+        var reports = 0
+        let reader = SidebarDropOutline(outline: outline, folderIds: ["d1", "d2"], tagIds: ["t1"]) {
+            reports += 1
+        }
+        let folders = try #require(foldersSection(in: outline))
+        let noFolder = try #require(noFolderSection(in: outline))
+        _ = reader.classify(folders)
+        _ = reader.classify(noFolder)
+        _ = reader.classify(outline.child(0, ofItem: noFolder))
+        #expect(reports == 0)
+
+        _ = reader.classify(outline.child(1, ofItem: noFolder))
+        #expect(reports == 1)
+    }
+
+    @Test
     func aFolderDropAmongUnmarkedSectionsIsPlacedAmongTheFolders() throws {
         showExtras()
         let outline = try guardedOutline()
