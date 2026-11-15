@@ -357,7 +357,7 @@ Xcode compiles only one side of them, so CI builds with two:
 `publish-app-store.yml`'s `publish` all run on `xcode-27` and start with `.github/scripts/select-xcode.sh`,
 which picks the newest release Xcode on the image and sets `DEVELOPER_DIR` for the rest of the job. No
 version is pinned, so a newer Xcode on the image is picked up without a workflow change. A beta is never
-picked (by its path, or by a build number ending in a lowercase letter): App Store Connect does not accept
+picked (by its path, or by the `licenseType` in its `LicenseInfo.plist`): App Store Connect does not accept
 an app built with one. The script checks no minimum SDK; it reports the Xcode and SDK versions it picked
 as a notice on the run and in the job summary. The App Store shows the iPhone Duo badge only for an app
 built with the iOS 27.1 SDK or later, so check the iOS SDK there before submitting. `xcode-27` is the

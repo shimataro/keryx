@@ -355,7 +355,7 @@ Swift のコードには iOS 27 SDK の API（`visibilityPriority`）のため�
 `publish` は、どれも `xcode-27` で動き、最初に `.github/scripts/select-xcode.sh` を実行する。このスクリプトは
 イメージに入っている中で最新の正式版 Xcode を選び、ジョブの残りのステップ用に `DEVELOPER_DIR` を設定する。
 バージョンは固定しないので、イメージに新しい Xcode が入れば、ワークフローを変えずにそれが使われる。beta 版は
-（パス、または最後が小文字のビルド番号で判別して）選ばない。beta 版でビルドしたアプリは App Store Connect が
+（パス、または `LicenseInfo.plist` の `licenseType` で判別して）選ばない。beta 版でビルドしたアプリは App Store Connect が
 受け付けないため。スクリプトは SDK の下限を確かめず、選んだ Xcode と SDK のバージョンを、実行結果の注記と
 ジョブのサマリーに出力する。App Store で iPhone Duo のバッジが付くのは iOS 27.1 SDK 以降でビルドしたアプリ
 だけなので、提出前にそこで iOS SDK を確認すること。Xcode 27 が入っている GitHub ホストのイメージは `xcode-27`

@@ -9,8 +9,9 @@
 # the step summary), so a release can be checked for, say, the iOS 27.1 SDK the iPhone Duo badge
 # needs. See docs/build.md's "Building the SwiftUI app".
 #
-# A beta is recognized by its path (Xcode_27_beta_3.app, Xcode-beta.app) or by its build number,
-# which ends in a lowercase letter for a beta (27A5218g) and not for a release (27A9275).
+# A beta is recognized by its path (Xcode_27_beta_3.app, Xcode-beta.app) or by the licenseType in
+# its Contents/Resources/LicenseInfo.plist ("Beta" for a beta, "GM" for a release). The build number
+# is not used: a release's can end in a lowercase letter too (Xcode 15.4 is 15F31d).
 #
 # Usage: select-xcode.sh
 #
@@ -45,6 +46,14 @@ for app in "$search_dir"/Xcode*.app; do
         continue
     fi
 
+    # A missing or unreadable LicenseInfo.plist does not make a beta; the path check still applies.
+    license_type="$(/usr/libexec/PlistBuddy -c 'Print :licenseType' \
+        "$real/Contents/Resources/LicenseInfo.plist" 2>/dev/null || true)"
+    if [ "$license_type" = "Beta" ]; then
+        echo "Skipping $app: a beta (by its LicenseInfo.plist)"
+        continue
+    fi
+
     xcodebuild="$real/Contents/Developer/usr/bin/xcodebuild"
     if [ ! -x "$xcodebuild" ]; then
         echo "Skipping $app: no xcodebuild"
@@ -58,10 +67,6 @@ for app in "$search_dir"/Xcode*.app; do
     build="$(sed -n 's/^Build version \([^ ]*\).*$/\1/p' <<<"$out" | head -n 1)"
     if [ -z "$version" ] || [ -z "$build" ]; then
         echo "Skipping $app: unrecognized xcodebuild -version output"
-        continue
-    fi
-    if [[ "$build" =~ [a-z]$ ]]; then
-        echo "Skipping $app: Xcode $version ($build) is a beta (by its build number)"
         continue
     fi
     echo "Found $app: Xcode $version ($build)"
