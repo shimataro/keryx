@@ -1851,7 +1851,7 @@ On macOS, `SidebarDropGuard` decides where a drop lands and applies it (the posi
   behind the `List` and to its data source:
   - The data source's `outlineView(_:validateDrop:proposedItem:proposedChildIndex:)` reads the
     proposed row (`SidebarDropOutline`) by the marker it carries (`SidebarRowMarker`, an invisible view
-    behind each row's content naming its `SidebarItemID`) — never by where a row or section sits, so a
+    behind each row's content naming its `SidebarItemID`) — never telling a row by where it sits (only checking that a folder or tag row sits at its own index among its siblings), so a
     row SwiftUI adds of its own (the search field before macOS 26) changes nothing — picks where the item lands
     (`sidebarDropDestination`), and accepts it only when the shared rules resolve an action there
     (`feedListInsertAction` / `resolveFeedListDropAction`). It then sets that destination with

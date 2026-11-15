@@ -1038,8 +1038,9 @@ copy under a tag.
 Before macOS 26 the sidebar's search field (`.searchable(placement: .sidebar)`) is a root item of the
 outline too, ahead of the sections, and not a group item as every section is. The guard first read
 the sections by their position among the roots, so on macOS 15 it read no section and refused every
-drop (sidebar reordering stopped working). The guard now reads no position at all: every row the
-guard needs carries an invisible marker view behind its content (`SidebarRowMarker`), naming its
+drop (sidebar reordering stopped working). The guard no longer tells a row by its position among the roots or
+within a section; it only checks that a folder or tag row read by its marker sits at its own index
+among its siblings. Every row the guard needs carries an invisible marker view behind its content (`SidebarRowMarker`), naming its
 `SidebarItemID`, which the guard finds in the outline's existing row view
 (`makeIfNecessary: false` — a freshly made row gets its content only on a later turn). The Folders
 section is told by a marked child, the Tags section is reached as the parent of a marked tag row,

@@ -136,9 +136,11 @@ final class SidebarDropHandler: NSObject {
     var refusesExpansion: Bool { draggedKind == .folder }
 }
 
-/// Reads the `List`'s outline by the markers its rows carry (`SidebarRowMarker`), never by where a row
-/// or a section sits — so a row SwiftUI adds of its own (before macOS 26, the sidebar's search field is
-/// a root item ahead of the sections) or a reordered section changes nothing. A row is never created to
+/// Reads the `List`'s outline by the markers its rows carry (`SidebarRowMarker`), never telling a row by
+/// where it sits — so a row SwiftUI adds of its own (before macOS 26, the sidebar's search field is a
+/// root item ahead of the sections) or a reordered section changes nothing. Position is only checked
+/// afterwards: a folder or tag row read by its marker must sit at its own index among its siblings
+/// (`index(of:in:matching:)`). A row is never created to
 /// be read: SwiftUI fills a fresh row's content only on a later turn, so only the rows the outline
 /// already has are read, and anything else is found from the proposed item and its outline
 /// parent/children.
