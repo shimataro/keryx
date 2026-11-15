@@ -171,11 +171,11 @@ enum SidebarDropGuardInstaller {
         return true
     }
 
-    /// Logs a failure to guard the sidebar once per message, as a fault: sidebar drag and drop does
-    /// nothing until SwiftUI's internals are what the guard expects again.
-    private static func report(_ message: String) {
+    /// Logs a failure of the guard once per message, as a fault: what `refusing` names (by default,
+    /// all sidebar drag and drop) does nothing until SwiftUI's internals are what the guard expects again.
+    static func report(_ message: String, refusing: String = "sidebar drag and drop") {
         guard reportedFailures.insert(message).inserted else { return }
-        logger.fault("Sidebar drag and drop is off: \(message, privacy: .public)")
+        logger.fault("\(message, privacy: .public); \(refusing, privacy: .public) is refused")
     }
 }
 #endif

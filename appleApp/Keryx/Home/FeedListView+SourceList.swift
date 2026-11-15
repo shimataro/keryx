@@ -16,8 +16,8 @@ extension FeedListView {
     /// spacing between them is left to the system.
     @ViewBuilder
     var listContent: some View {
-        // `SidebarDropGuard` reads this `List` by its sections, in this order (`SidebarRootSection`):
-        // adding, removing or reordering a section means changing that too.
+        // `SidebarDropGuard` reads this `List` by the markers its rows carry (`SidebarRowMarker`): a
+        // row that can be dropped onto or among, or whose parent tells where a feed sits, needs one.
         List(selection: selectionKeyBinding) {
             Section {
                 allRow
@@ -52,8 +52,8 @@ extension FeedListView {
         // Every feed and folder drop is decided and applied by the guard, never by SwiftUI's own drop
         // handling — see `SidebarDropGuard`. So the `List` carries no `.onInsert`/`.onDrop`.
         .background(SidebarDropGuard(
-            folderCount: sortedFolders.count,
-            tagCount: sortedTags.count,
+            folderIds: sortedFolders.map(\.id),
+            tagIds: sortedTags.map(\.id),
             resolve: dropAction(for:),
             apply: applyDrop(_:)
         ))
@@ -136,11 +136,11 @@ extension FeedListView {
     // MARK: - All / Starred
 
     private var allRow: some View {
-        row(content: .all, unread: .total, selection: rowSelection(.all, FeedListRowSelectionAll()))
+        row(content: .all, unread: .total, selection: rowSelection(.all, FeedListRowSelectionAll()), item: .all)
     }
 
     private var starredRow: some View {
-        row(content: .starred, unread: .starred, selection: rowSelection(.starred, FeedListRowSelectionStarred()))
+        row(content: .starred, unread: .starred, selection: rowSelection(.starred, FeedListRowSelectionStarred()), item: .starred)
     }
 
     // MARK: - Folders
@@ -153,6 +153,7 @@ extension FeedListView {
         Text(L("home_no_folder"))
             .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .background(SidebarRowMarker(item: .noFolderHeader))
     }
 
     /// `toggleFolderCollapsed` flips the state, so it only runs when the requested state differs —
@@ -183,6 +184,7 @@ extension FeedListView {
                 editor: folderRenameEditor(folder)
             )
                 .equatable()
+                .background(SidebarRowMarker(item: .folder(folder.id)))
                 .selectsOnContextMenu(id: selection.key) { selectForContextMenu(instance) }
                 .contextMenu {
                     // Opening the menu selects the row first, matching Compose's own
@@ -255,6 +257,7 @@ extension FeedListView {
             content: sidebar.feedContents[feed.id] ?? SidebarRowStaticContent(feed: feed),
             unread: .feed(feed.id),
             selection: selection,
+            item: item,
             editor: feedRenameEditor(feed, instance: instance)
         )
         .feedListDraggable(
@@ -311,6 +314,7 @@ extension FeedListView {
         content: SidebarRowStaticContent,
         unread: SidebarUnreadSource,
         selection: SidebarRowSelection,
+        item: SidebarItemID,
         editor: InlineRenameField? = nil
     ) -> some View {
         SidebarSourceListRow(
@@ -321,6 +325,7 @@ extension FeedListView {
             editor: editor
         )
         .equatable()
+        .background(SidebarRowMarker(item: item))
         .tag(selection.key)
         .trackAppearance(selection.key, in: $appearedRowKeys)
     }
@@ -392,6 +397,7 @@ private struct TagRowLabel: View {
             }
         }
         .equatable()
+        .background(SidebarRowMarker(item: .tag(tag.id)))
         .selectsOnContextMenu(id: selection.key) { selectForContextMenu() }
         .contextMenu {
             // Opening the menu selects the row first, matching Compose's own
