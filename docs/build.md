@@ -350,8 +350,10 @@ Xcode compiles only one side of them, so CI builds with two:
 
 - The `build-apple` job runs on the `xcode-27` runner, a preview label, with the Xcode the release
   workflows use, so the builds above compile the side releases ship.
-- The `build-apple-xcode26` job builds the iOS app (the only platform with such a branch) with Xcode 26.6
-  on `macos-26` (through `DEVELOPER_DIR`), compiling the other side. It fails if that Xcode is not 26.6.
+- The `apple-oldest-supported` job runs on `macos-15` with the newest release Xcode 26 there (26.3 at
+  the time of writing, picked by `select-xcode.sh`), the oldest environment the app supports developing
+  in. It builds the iOS app (the only platform with such a branch), compiling the other side, and also
+  builds and tests the macOS app on macOS 15. It fails if the runner is not macOS 15 or the Xcode is not 26.
 
 **Which Xcode builds a release.** `build-apple`, `release.yml`'s `package-macos` and
 `publish-app-store.yml`'s `publish` all run on `xcode-27` and start with `.github/scripts/select-xcode.sh`,

@@ -348,8 +348,10 @@ Swift のコードには iOS 27 SDK の API（`visibilityPriority`）のため�
 
 - `build-apple` ジョブは、Preview のラベル `xcode-27` のランナーで、リリース用のワークフローと同じ Xcode を
   使う。そのため、上のビルドはリリースが出荷する側をコンパイルする。
-- `build-apple-xcode26` ジョブは、`macos-26` で Xcode 26.6（`DEVELOPER_DIR` で指定）を使って iOS アプリ
-  （この分岐があるのは iOS だけ）をビルドし、もう片側をコンパイルする。その Xcode が 26.6 でなければ失敗する。
+- `apple-oldest-supported` ジョブは、アプリの開発環境として対応する中で最も古い `macos-15` で、そこにある最新の正式版
+  Xcode 26（執筆時点では 26.3。`select-xcode.sh` が選ぶ）を使う。iOS アプリ（この分岐があるのは iOS だけ）をビルドして
+  もう片側をコンパイルし、あわせて macOS 15 で macOS アプリをビルドしてテストする。ランナーが macOS 15 でないか、
+  Xcode が 26 でなければ失敗する。
 
 **リリースをビルドする Xcode。** `build-apple`、`release.yml` の `package-macos`、`publish-app-store.yml` の
 `publish` は、どれも `xcode-27` で動き、最初に `.github/scripts/select-xcode.sh` を実行する。このスクリプトは

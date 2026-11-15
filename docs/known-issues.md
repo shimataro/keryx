@@ -1029,8 +1029,8 @@ window and checks what the guard relies on: that the `List` is an `NSOutlineView
 answers `validateDrop`, that each row's marker is read from its row, that each row is read as the
 row it is — also with unmarked sections and rows before and between the sidebar's own — that a drop
 onto an unmarked row is refused, and that drops sent through a stand-in `NSDraggingInfo` are decided and applied by the guard. CI
-runs it on `macos-latest`, so a new SDK or macOS that changes these fails there. It cannot cover the
-older macOS releases users run (14 and later) or a real mouse drag; re-check those by hand on each
+runs it on macOS 26 (`build-apple`) and macOS 15 (`apple-oldest-supported`), so a new SDK or macOS
+that changes these fails there. It cannot cover macOS 14, which users can still run, or a real mouse drag; re-check those by hand on each
 new macOS: drop a folder at the top, the middle and the bottom of a folder row, over a feed inside a
 folder, at the top and at the end, and drop a feed onto a folder, "No folder", a tag and a feed's
 copy under a tag.
@@ -1046,7 +1046,7 @@ child, the Tags section is reached as the parent of a marked tag row, the "No fo
 header's marker, and a feed's folder by its parent's marker. An accessibility identifier cannot
 serve: SwiftUI exposes it neither on the row views nor on the outline's accessibility rows. The test
 sidebar carries the same search field, so this structure is covered wherever the tests run on macOS
-15; CI runs a newer macOS, so on 14 and 15 re-check it with the manual drops listed above.
+15, as CI's `apple-oldest-supported` does; on 14, re-check it with the manual drops listed above.
 
 ### What a real fix would need
 
