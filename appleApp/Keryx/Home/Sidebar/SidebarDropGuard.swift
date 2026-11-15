@@ -36,15 +36,16 @@ import SwiftUI
 /// goes to the original implementations.
 ///
 /// This relies on SwiftUI's internals: that the `List` is an `NSOutlineView` whose data source answers
-/// `validateDrop`, and whose root items are the `List`'s sections. Where the outline cannot be read as
+/// `validateDrop`, whose items nest as the `List`'s sections and rows do, and whose row views hold each
+/// row's content — where the rows' markers (`SidebarRowMarker`) are read. Where the outline cannot be read as
 /// expected, a drop is refused; where the guard cannot be installed, no drag type is registered, so
 /// sidebar drag and drop does nothing — either way nothing reaches SwiftUI. `SidebarDropGuardTests`
 /// checks these assumptions against the SwiftUI the tests run on.
 struct SidebarDropGuard: NSViewRepresentable {
-    /// How many folders the Folders section shows.
-    let folderCount: Int
-    /// How many tags the Tags section shows.
-    let tagCount: Int
+    /// The folders' ids, in the order the Folders section shows them.
+    let folderIds: [String]
+    /// The tags' ids, in the order the Tags section shows them.
+    let tagIds: [String]
     /// The shared action a drop at a destination takes, or `nil` where it would do nothing.
     let resolve: (SidebarDropDestination) -> FeedListDropAction?
     /// Applies a drop's action.
@@ -56,8 +57,8 @@ struct SidebarDropGuard: NSViewRepresentable {
 
     func updateNSView(_ view: NSView, context: Context) {
         guard let anchor = view as? GuardAnchorView else { return }
-        anchor.handler.folderCount = folderCount
-        anchor.handler.tagCount = tagCount
+        anchor.handler.folderIds = folderIds
+        anchor.handler.tagIds = tagIds
         anchor.handler.resolve = resolve
         anchor.handler.apply = apply
         anchor.installWhenInHierarchy()
@@ -68,8 +69,8 @@ struct SidebarDropGuard: NSViewRepresentable {
 /// and the drag in progress.
 @MainActor
 final class SidebarDropHandler: NSObject {
-    var folderCount = 0
-    var tagCount = 0
+    var folderIds: [String] = []
+    var tagIds: [String] = []
     var resolve: (SidebarDropDestination) -> FeedListDropAction? = { _ in nil }
     var apply: (FeedListDropAction) -> Void = { _ in }
 
@@ -96,13 +97,16 @@ final class SidebarDropHandler: NSObject {
         childIndex: Int
     ) -> NSDragOperation {
         draggedKind = kind
-        let reader = SidebarDropOutline(outline, folderCount: folderCount, tagCount: tagCount)
+        let reader = SidebarDropOutline(outline: outline, folderIds: folderIds, tagIds: tagIds) {
+            SidebarDropGuardInstaller.report("A sidebar row carries no marker", refusing: "a drop onto it")
+        }
+        let row = reader.classify(item)
         guard let destination = sidebarDropDestination(
             dragging: kind,
-            proposed: reader.classify(item),
+            proposed: row,
             childIndex: childIndex,
             childCount: outline.numberOfChildren(ofItem: item)
-        ), let action = resolve(destination), let place = reader.place(destination) else {
+        ), let action = resolve(destination), let place = reader.place(destination, proposed: item, row: row) else {
             pending = nil
             return []
         }
@@ -132,90 +136,147 @@ final class SidebarDropHandler: NSObject {
     var refusesExpansion: Bool { draggedKind == .folder }
 }
 
-/// The `List`'s root items, in order: every section is one — All/Starred, Folders (only while there
-/// are folders), "No folder", Tags (only while there are tags). Mirrors the sections
-/// `FeedListView+SourceList.swift` builds; change both together.
-enum SidebarRootSection: CaseIterable {
-    case smart, folders, noFolder, tags
-
-    /// The root items the `List` shows for `folderCount` folders and `tagCount` tags.
-    static func roots(folderCount: Int, tagCount: Int) -> [SidebarRootSection] {
-        allCases.filter { section in
-            switch section {
-            case .smart, .noFolder: return true
-            case .folders: return folderCount > 0
-            case .tags: return tagCount > 0
-            }
-        }
-    }
-}
-
-/// Reads the `List`'s outline by its root sections (`SidebarRootSection`). Where the roots or a
-/// section's children don't add up, the sections it can't be sure of are left unread, so nothing in
-/// them is a drop target.
+/// Reads the `List`'s outline by the markers its rows carry (`SidebarRowMarker`), never telling a row by
+/// where it sits — so a row SwiftUI adds of its own (before macOS 26, the sidebar's search field is a
+/// root item ahead of the sections) or a reordered section changes nothing. Position is only checked
+/// afterwards: a folder or tag row read by its marker must sit at its own index among its siblings
+/// (`index(of:in:matching:)`). A row is never created to
+/// be read: SwiftUI fills a fresh row's content only on a later turn, so only the rows the outline
+/// already has are read, and anything else is found from the proposed item and its outline
+/// parent/children.
+///
+/// A section's own item is told by a marker on its header row ("No folder") or, for Folders, whose
+/// header carries none, by a marked child (the section is shown only while it holds a folder). The Tags
+/// section is never told on its own: it is reached as the parent of a marked tag row. A row that
+/// should carry a marker but has none readable is not a drop target.
 @MainActor
 struct SidebarDropOutline {
     let outline: NSOutlineView
-    let foldersSection: AnyObject?
-    let noFolderSection: AnyObject?
-    let tagsSection: AnyObject?
+    /// The folders' ids, in the order the Folders section shows them.
+    let folderIds: [String]
+    /// The tags' ids, in the order the Tags section shows them.
+    let tagIds: [String]
+    /// Called when a row that should be marked has no readable marker.
+    var reportUnmarkedRow: () -> Void = {}
 
-    init(_ outline: NSOutlineView, folderCount: Int, tagCount: Int) {
-        self.outline = outline
-        let roots = SidebarRootSection.roots(folderCount: folderCount, tagCount: tagCount)
-        guard outline.numberOfChildren(ofItem: nil) == roots.count else {
-            (foldersSection, noFolderSection, tagsSection) = (nil, nil, nil)
-            return
-        }
-        // The root item of `section`, if the `List` shows it and it holds `count` children (any
-        // number when `nil`).
-        func root(_ section: SidebarRootSection, holding count: Int?) -> AnyObject? {
-            guard let index = roots.firstIndex(of: section) else { return nil }
-            let item = outline.child(index, ofItem: nil) as AnyObject
-            guard let count else { return item }
-            return outline.numberOfChildren(ofItem: item) == count ? item : nil
-        }
-        foldersSection = root(.folders, holding: folderCount)
-        noFolderSection = root(.noFolder, holding: nil)
-        tagsSection = root(.tags, holding: tagCount)
+    /// The item `item`'s row is marked with, or `nil` where it has no row yet or carries no marker.
+    func marker(of item: Any?) -> SidebarItemID? {
+        let row = outline.row(forItem: item)
+        guard row >= 0 else { return nil }
+        let views = [
+            outline.rowView(atRow: row, makeIfNecessary: false),
+            outline.view(atColumn: 0, row: row, makeIfNecessary: false),
+        ]
+        return views.lazy.compactMap { $0.flatMap(Self.marker(in:)) }.first
+    }
+
+    private static func marker(in view: NSView) -> SidebarItemID? {
+        if let marker = view as? SidebarRowMarkerView { return marker.item }
+        return view.subviews.lazy.compactMap { marker(in: $0) }.first
     }
 
     func classify(_ proposed: Any?) -> SidebarOutlineRow {
         guard let item = proposed as AnyObject? else { return .other }
-        if Self.same(item, foldersSection) { return .foldersSection }
-        if Self.same(item, noFolderSection) { return .noFolderSection }
-        guard let parent = outline.parent(forItem: item) as AnyObject? else { return .other }
-        if Self.same(parent, foldersSection) { return .folder(index: outline.childIndex(forItem: item)) }
-        if Self.same(parent, noFolderSection) { return .unfolderedFeed }
-        if Self.same(parent, tagsSection) { return .tag(index: outline.childIndex(forItem: item)) }
-        let grandparent = outline.parent(forItem: parent) as AnyObject?
-        if Self.same(grandparent, foldersSection) { return .feedInFolder(folderIndex: outline.childIndex(forItem: parent)) }
-        if Self.same(grandparent, tagsSection) { return .feedInTag(tagIndex: outline.childIndex(forItem: parent)) }
-        return .other
-    }
-
-    /// The outline's own terms for `destination`: the item and child index to point it at.
-    func place(_ destination: SidebarDropDestination) -> (item: Any, childIndex: Int)? {
-        let onto = sidebarDropOntoRowIndex
-        switch destination {
-        case .folderSlot(let index): return foldersSection.map { ($0, index) }
-        case .ontoFolder(let index): return child(index, of: foldersSection).map { ($0, onto) }
-        case .ontoNoFolder: return noFolderSection.map { ($0, onto) }
-        // A feed's copy stands for its tag, so the tag's own row is the one highlighted.
-        case .ontoTag(let index), .ontoFeedInTag(let index): return child(index, of: tagsSection).map { ($0, onto) }
-        case .intoFolder(let index, let offset): return child(index, of: foldersSection).map { ($0, offset) }
-        case .intoNoFolder(let offset): return noFolderSection.map { ($0, offset) }
+        guard let id = marker(of: item) else {
+            // A section of its own, told by its children; or a row that ought to be marked.
+            if outline.parent(forItem: item) == nil {
+                if case .folder? = firstChildMarker(of: item) { return .foldersSection }
+                return .other
+            }
+            reportUnmarkedRow()
+            return .other
+        }
+        switch id {
+        case .noFolderHeader:
+            return .noFolderSection
+        case .folder(let folderId):
+            return index(of: folderId, in: folderIds, matching: item).map { .folder(index: $0) } ?? .other
+        case .tag(let tagId):
+            return index(of: tagId, in: tagIds, matching: item).map { .tag(index: $0) } ?? .other
+        case .feedInTag(_, let tagId):
+            return tagIds.firstIndex(of: tagId).map { .feedInTag(tagIndex: $0) } ?? .other
+        case .feed:
+            let parent = outline.parent(forItem: item)
+            switch marker(of: parent) {
+            case .folder(let folderId):
+                return folderIds.firstIndex(of: folderId).map { .feedInFolder(folderIndex: $0) } ?? .other
+            case .noFolderHeader:
+                return .unfolderedFeed
+            default:
+                return .other
+            }
+        case .all, .starred, .sectionHeader:
+            return .other
         }
     }
 
-    private func child(_ index: Int, of section: AnyObject?) -> AnyObject? {
-        guard let section, (0..<outline.numberOfChildren(ofItem: section)).contains(index) else { return nil }
-        return outline.child(index, ofItem: section) as AnyObject
+    /// The outline's own terms for `destination`, which a drop proposed at `proposed` (read as `row` by
+    /// `classify`) resolved to: the item and child index to point it at.
+    func place(
+        _ destination: SidebarDropDestination,
+        proposed: Any?,
+        row: SidebarOutlineRow
+    ) -> (item: Any, childIndex: Int)? {
+        let onto = sidebarDropOntoRowIndex
+        let item = proposed as AnyObject?
+        switch destination {
+        case .folderSlot(let index):
+            return foldersSection(from: item, row: row).map { ($0, index) }
+        case .ontoFolder(let index):
+            return folder(index, from: item, row: row).map { ($0, onto) }
+        case .intoFolder(let index, let offset):
+            return folder(index, from: item, row: row).map { ($0, offset) }
+        case .ontoNoFolder:
+            return row == .noFolderSection ? item.map { ($0, onto) } : nil
+        case .intoNoFolder(let offset):
+            return row == .noFolderSection ? item.map { ($0, offset) } : nil
+        // A feed's copy stands for its tag, so the tag's own row is the one highlighted.
+        case .ontoTag(let index), .ontoFeedInTag(let index):
+            let tags: AnyObject? = switch row {
+            case .tag: outline.parent(forItem: item) as AnyObject?
+            case .feedInTag: outline.parent(forItem: outline.parent(forItem: item)) as AnyObject?
+            default: nil
+            }
+            return child(index, of: tags, markedAs: tagIds.indices.contains(index) ? .tag(tagIds[index]) : nil)
+                .map { ($0, onto) }
+        }
     }
 
-    private static func same(_ lhs: AnyObject?, _ rhs: AnyObject?) -> Bool {
-        guard let lhs, let rhs else { return false }
-        return lhs === rhs
+    /// The Folders section's item, found from the proposed `item` read as `row`.
+    private func foldersSection(from item: AnyObject?, row: SidebarOutlineRow) -> AnyObject? {
+        switch row {
+        case .foldersSection: return item
+        case .folder: return outline.parent(forItem: item) as AnyObject?
+        case .feedInFolder: return outline.parent(forItem: outline.parent(forItem: item)) as AnyObject?
+        default: return nil
+        }
+    }
+
+    private func folder(_ index: Int, from item: AnyObject?, row: SidebarOutlineRow) -> AnyObject? {
+        guard folderIds.indices.contains(index) else { return nil }
+        return child(index, of: foldersSection(from: item, row: row), markedAs: .folder(folderIds[index]))
+    }
+
+    /// The child at `index` of `section` — unless its row is marked as anything but `expected`.
+    private func child(_ index: Int, of section: AnyObject?, markedAs expected: SidebarItemID?) -> AnyObject? {
+        guard let section, let expected, (0..<outline.numberOfChildren(ofItem: section)).contains(index) else { return nil }
+        let child = outline.child(index, ofItem: section) as AnyObject
+        if let id = marker(of: child), id != expected { return nil }
+        return child
+    }
+
+    /// The index of `id` in `ids`, provided `item` sits at that index among its siblings — so a row
+    /// whose position disagrees with the sidebar's own order is not a drop target.
+    private func index(of id: String, in ids: [String], matching item: AnyObject) -> Int? {
+        guard let index = ids.firstIndex(of: id), outline.childIndex(forItem: item) == index else { return nil }
+        return index
+    }
+
+    /// The marker of the first of `item`'s children that has one.
+    private func firstChildMarker(of item: AnyObject) -> SidebarItemID? {
+        (0..<outline.numberOfChildren(ofItem: item)).lazy
+            .compactMap { marker(of: outline.child($0, ofItem: item)) }
+            .first
     }
 }
 
@@ -229,12 +290,27 @@ private final class GuardAnchorView: NSView {
         installWhenInHierarchy()
     }
 
+    /// The outline this view last guarded.
+    private weak var guardedOutline: NSOutlineView?
+
+    /// Until the outline is guarded, every layout tries again: SwiftUI may add the outline after this
+    /// view, and a main-queue turn can come late (inside a nested run loop), while layout still runs.
+    override func layout() {
+        super.layout()
+        if guardedOutline == nil { install() }
+    }
+
     func installWhenInHierarchy() {
-        // SwiftUI may add the outline after this view, so look again on the next turn.
-        DispatchQueue.main.async { [weak self] in
-            guard let self, self.window != nil, let outline = self.nearestOutline() else { return }
-            SidebarDropGuardInstaller.install(on: outline, handler: self.handler)
-        }
+        // Right away where the outline is already there, and again on the next turn, in case SwiftUI
+        // adds it after this view.
+        install()
+        DispatchQueue.main.async { [weak self] in self?.install() }
+    }
+
+    private func install() {
+        guard window != nil, let outline = nearestOutline(),
+              SidebarDropGuardInstaller.install(on: outline, handler: handler) else { return }
+        guardedOutline = outline
     }
 
     /// The `NSOutlineView` nearest this view: the first one found under each ancestor in turn, so

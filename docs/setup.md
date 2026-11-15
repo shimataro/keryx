@@ -154,7 +154,7 @@ Building `:shared`'s Apple targets and the SwiftUI app (`appleApp/`) needs a Mac
 
 - **Xcode 26 or later**, installed from the App Store or [developer.apple.com](https://developer.apple.com/xcode/)
   (the app icon needs Xcode 26 to build). Releases build with the newest release Xcode on CI's `xcode-27`
-  runner, picked by `.github/scripts/select-xcode.sh`; a CI job keeps the code building with Xcode 26.6
+  runner, picked by `.github/scripts/select-xcode.sh`; a CI job on macOS 15 keeps the code building with Xcode 26
   too. See "CI" in [build.md](build.md).
 - **XcodeGen** (`brew install xcodegen`) — generates `appleApp/Keryx.xcodeproj` from
   `appleApp/project.yml`, which is the file actually kept in Git; the generated `.xcodeproj` is not.

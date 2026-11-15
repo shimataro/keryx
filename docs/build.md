@@ -348,12 +348,14 @@ xcodebuild archive -scheme KeryxMacAppStore -configuration Release -destination 
 The Swift code has `#if compiler(>=6.4)` branches for iOS 27 SDK APIs (`visibilityPriority`), and each
 Xcode compiles only one side of them, so CI builds with two:
 
-- The `build-apple` job runs on the `xcode-27` runner, a preview label, with the Xcode the release
+- The `apple-release-toolchain` job runs on the `xcode-27` runner, a preview label, with the Xcode the release
   workflows use, so the builds above compile the side releases ship.
-- The `build-apple-xcode26` job builds the iOS app (the only platform with such a branch) with Xcode 26.6
-  on `macos-26` (through `DEVELOPER_DIR`), compiling the other side. It fails if that Xcode is not 26.6.
+- The `apple-oldest-supported` job runs on `macos-15` with the newest release Xcode 26 there (26.3 at
+  the time of writing, picked by `select-xcode.sh`), the oldest environment the app supports developing
+  in. It builds the iOS app (the only platform with such a branch), compiling the other side, and also
+  builds and tests the macOS app on macOS 15. It fails if the runner is not macOS 15 or the Xcode is not 26.
 
-**Which Xcode builds a release.** `build-apple`, `release.yml`'s `package-macos` and
+**Which Xcode builds a release.** `apple-release-toolchain`, `release.yml`'s `package-macos` and
 `publish-app-store.yml`'s `publish` all run on `xcode-27` and start with `.github/scripts/select-xcode.sh`,
 which picks the newest release Xcode on the image and sets `DEVELOPER_DIR` for the rest of the job. No
 version is pinned, so a newer Xcode on the image is picked up without a workflow change. A beta is never
@@ -384,7 +386,7 @@ They are drafts to copy by hand; no build reads them.
 CI guards the build settings those materials rely on: `appleApp/Scripts/verify-store-requirements.sh <Keryx.app>`
 fails when the built app lacks the privacy manifest's required-reason declarations, the ATS exception
 (`NSAllowsArbitraryLoads`, with `NSAllowsArbitraryLoadsInWebContent` absent), `ITSAppUsesNonExemptEncryption = NO`, or
-(iOS) the four iPad orientations. The `build-apple` job runs it on the iOS Simulator build and on the macOS Release
+(iOS) the four iPad orientations. The `apple-release-toolchain` job runs it on the iOS Simulator build and on the macOS Release
 archive. With `--mac-app-store` it also fails on Sparkle's Info.plist keys or an embedded `Sparkle.framework`; the job
 runs it that way on the `KeryxMacAppStore` archive.
 

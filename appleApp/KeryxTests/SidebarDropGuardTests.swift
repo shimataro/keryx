@@ -14,44 +14,62 @@ import UniformTypeIdentifiers
 @Suite(.serialized)
 struct SidebarDropGuardTests {
     /// The sidebar's sections and rows, without the app around them: All/Starred, two folders with a
-    /// feed each, one unfoldered feed, and a tag with a copy of a feed under it.
+    /// feed each, one unfoldered feed, and a tag with a copy of a feed under it — each row marked as the
+    /// app marks it. With `extras`, unmarked sections and rows SwiftUI or a later layout might add are
+    /// put before and between them.
     private struct GuardedSidebar: View {
         let recorder: DropRecorder
+        var extras = false
 
         @State private var selection: String?
+        @State private var query = ""
 
         var body: some View {
             let expanded = recorder.expanded
             List(selection: $selection) {
-                Section { Text("All") }
+                Section { Text("All").background(SidebarRowMarker(item: .all)) }
+                if extras {
+                    Section { Text("Extra") }
+                    Section("Extra section") { Text("Extra row") }
+                }
                 Section("Folders", isExpanded: .constant(true)) {
                     ForEach(["d1", "d2"], id: \.self) { folder in
                         DisclosureGroup(isExpanded: isExpanded(folder, in: expanded)) {
-                            ForEach(["\(folder)-f"], id: \.self) { Text($0) }
+                            ForEach(["\(folder)-f"], id: \.self) { Text($0).background(SidebarRowMarker(item: .feed($0))) }
                         } label: {
-                            Text(folder)
+                            Text(folder).background(SidebarRowMarker(item: .folder(folder)))
                         }
                     }
                 }
                 Section {
-                    ForEach(["loose"], id: \.self) { Text($0) }
+                    ForEach(["loose"], id: \.self) { Text($0).background(SidebarRowMarker(item: .feed($0))) }
+                    if extras { Text("Unmarked") }
                 } header: {
-                    Text("No folder")
+                    Text("No folder").background(SidebarRowMarker(item: .noFolderHeader))
+                }
+                if extras {
+                    Section("Another extra section") { Text("Another extra row") }
                 }
                 Section("Tags", isExpanded: .constant(true)) {
                     ForEach(["t1"], id: \.self) { tag in
                         DisclosureGroup(isExpanded: isExpanded(tag, in: expanded)) {
-                            ForEach(["\(tag)/loose"], id: \.self) { Text($0) }
+                            // Identified by tag and feed, as the app's copies are: sharing the feed row's
+                            // identity would make the outline take one row for the other.
+                            ForEach(["\(tag)/loose"], id: \.self) {
+                                Text($0).background(SidebarRowMarker(item: .feedInTag(feedId: "loose", tagId: tag)))
+                            }
                         } label: {
-                            Text(tag)
+                            Text(tag).background(SidebarRowMarker(item: .tag(tag)))
                         }
                     }
                 }
             }
             .listStyle(.sidebar)
+            // As the app's sidebar has: before macOS 26 its field is a root item of the outline.
+            .searchable(text: $query, placement: .sidebar)
             .background(SidebarDropGuard(
-                folderCount: 2,
-                tagCount: 1,
+                folderIds: ["d1", "d2"],
+                tagIds: ["t1"],
                 resolve: { recorder.actions[$0] },
                 apply: { recorder.applied.append($0) }
             ))
@@ -89,11 +107,18 @@ struct SidebarDropGuardTests {
         window.orderFrontRegardless()
     }
 
-    /// The guarded outline, once SwiftUI has built it and the guard has had its turn.
+    /// Shows the sidebar with unmarked sections and rows among its own (`GuardedSidebar.extras`).
+    private func showExtras() {
+        window.contentView = NSHostingView(rootView: GuardedSidebar(recorder: recorder, extras: true))
+    }
+
+    /// The guarded outline, once SwiftUI has built it, the guard has had its turn and the rows carry
+    /// their markers.
     private func guardedOutline() throws -> NSOutlineView {
         let deadline = Date().addingTimeInterval(5)
         while Date() < deadline {
-            if let outline = Self.firstOutline(in: window.contentView), SidebarDropGuardInstaller.isGuarded(outline) {
+            if let outline = Self.firstOutline(in: window.contentView), SidebarDropGuardInstaller.isGuarded(outline),
+               item(.noFolderHeader, in: outline) != nil, item(.tag("t1"), in: outline) != nil {
                 return outline
             }
             RunLoop.main.run(until: Date().addingTimeInterval(0.05))
@@ -112,6 +137,30 @@ struct SidebarDropGuardTests {
         let inWindow: Bool
     }
 
+    private func reader(_ outline: NSOutlineView) -> SidebarDropOutline {
+        SidebarDropOutline(outline: outline, folderIds: ["d1", "d2"], tagIds: ["t1"])
+    }
+
+    /// The outline item whose row is marked `id`.
+    private func item(_ id: SidebarItemID, in outline: NSOutlineView) -> AnyObject? {
+        let reader = reader(outline)
+        return (0..<outline.numberOfRows).lazy
+            .compactMap { outline.item(atRow: $0) as AnyObject? }
+            .first { reader.marker(of: $0) == id }
+    }
+
+    private func foldersSection(in outline: NSOutlineView) -> AnyObject? {
+        item(.folder("d1"), in: outline).flatMap { outline.parent(forItem: $0) as AnyObject? }
+    }
+
+    private func noFolderSection(in outline: NSOutlineView) -> AnyObject? {
+        item(.noFolderHeader, in: outline)
+    }
+
+    private func tagsSection(in outline: NSOutlineView) -> AnyObject? {
+        item(.tag("t1"), in: outline).flatMap { outline.parent(forItem: $0) as AnyObject? }
+    }
+
     private static func firstOutline(in view: NSView?) -> NSOutlineView? {
         guard let view else { return nil }
         if let outline = view as? NSOutlineView { return outline }
@@ -128,22 +177,83 @@ struct SidebarDropGuardTests {
     }
 
     @Test
-    func theListsSectionsAreTheOutlinesRootItems() throws {
+    func everyRowsMarkerIsReadFromItsRow() throws {
         let outline = try guardedOutline()
-        #expect(outline.numberOfChildren(ofItem: nil) == SidebarRootSection.roots(folderCount: 2, tagCount: 1).count)
-        let reader = SidebarDropOutline(outline, folderCount: 2, tagCount: 1)
-        #expect(reader.foldersSection != nil)
-        #expect(reader.noFolderSection != nil)
-        #expect(reader.tagsSection != nil)
+        let reader = reader(outline)
+        let expected: [SidebarItemID] = [
+            .all, .folder("d1"), .feed("d1-f"), .folder("d2"), .feed("d2-f"), .noFolderHeader, .feed("loose"),
+            .tag("t1"), .feedInTag(feedId: "loose", tagId: "t1"),
+        ]
+        let read = (0..<outline.numberOfRows).compactMap { reader.marker(of: outline.item(atRow: $0)) }
+        #expect(read == expected)
     }
 
     @Test
     func everyRowIsReadAsTheRowItIs() throws {
+        try expectEveryRowReadAsTheRowItIs(in: guardedOutline())
+    }
+
+    @Test
+    func unmarkedSectionsAndRowsAmongTheSidebarsOwnChangeNothing() throws {
+        showExtras()
+        try expectEveryRowReadAsTheRowItIs(in: guardedOutline())
+    }
+
+    @Test
+    func aDropOntoAnUnmarkedRowIsRefused() throws {
+        showExtras()
         let outline = try guardedOutline()
-        let reader = SidebarDropOutline(outline, folderCount: 2, tagCount: 1)
-        let folders = try #require(reader.foldersSection)
-        let noFolder = try #require(reader.noFolderSection)
-        let tags = try #require(reader.tagsSection)
+        let noFolder = try #require(noFolderSection(in: outline))
+        let unmarked = outline.child(1, ofItem: noFolder)
+        #expect(reader(outline).marker(of: unmarked) == nil)
+        #expect(reader(outline).classify(unmarked) == .other)
+        let move = FeedListDropActionMoveFeed(feedId: "f", folderId: nil, targetFeedId: nil)
+        recorder.actions = [.ontoNoFolder: move]
+        let info = StandInDraggingInfo(carrying: feedListFeedDragType, over: outline)
+
+        #expect(validate(outline, info, proposing: unmarked, at: sidebarDropOntoRowIndex) == [])
+        #expect(!outline.performDragOperation(info))
+        #expect(recorder.applied.isEmpty)
+    }
+
+    @Test
+    func onlyARowThatShouldBeMarkedButIsNotIsReported() throws {
+        showExtras()
+        let outline = try guardedOutline()
+        var reports = 0
+        let reader = SidebarDropOutline(outline: outline, folderIds: ["d1", "d2"], tagIds: ["t1"]) {
+            reports += 1
+        }
+        let folders = try #require(foldersSection(in: outline))
+        let noFolder = try #require(noFolderSection(in: outline))
+        _ = reader.classify(folders)
+        _ = reader.classify(noFolder)
+        _ = reader.classify(outline.child(0, ofItem: noFolder))
+        #expect(reports == 0)
+
+        _ = reader.classify(outline.child(1, ofItem: noFolder))
+        #expect(reports == 1)
+    }
+
+    @Test
+    func aFolderDropAmongUnmarkedSectionsIsPlacedAmongTheFolders() throws {
+        showExtras()
+        let outline = try guardedOutline()
+        let folders = try #require(foldersSection(in: outline))
+        let reorder = FeedListDropActionReorderFolder(draggedFolderId: "d1", targetFolderId: nil)
+        recorder.actions = [.folderSlot(index: 2): reorder]
+        let info = StandInDraggingInfo(carrying: feedListFolderDragType, over: outline)
+
+        #expect(validate(outline, info, proposing: outline.child(1, ofItem: folders), at: 0) == .move)
+        #expect(outline.performDragOperation(info))
+        #expect(applied([reorder]))
+    }
+
+    private func expectEveryRowReadAsTheRowItIs(in outline: NSOutlineView) throws {
+        let reader = reader(outline)
+        let folders = try #require(foldersSection(in: outline))
+        let noFolder = try #require(noFolderSection(in: outline))
+        let tags = try #require(tagsSection(in: outline))
         let secondFolder = outline.child(1, ofItem: folders)
         let tag = outline.child(0, ofItem: tags)
         #expect(reader.classify(folders) == .foldersSection)
@@ -163,7 +273,7 @@ struct SidebarDropGuardTests {
         let observer = NSObject()
         outline.addObserver(observer, forKeyPath: "toolTip", context: nil)
         defer { outline.removeObserver(observer, forKeyPath: "toolTip") }
-        let folders = try #require(SidebarDropOutline(outline, folderCount: 2, tagCount: 1).foldersSection)
+        let folders = try #require(foldersSection(in: outline))
         let reorder = FeedListDropActionReorderFolder(draggedFolderId: "d1", targetFolderId: nil)
         recorder.actions = [.folderSlot(index: 2): reorder]
         let info = StandInDraggingInfo(carrying: feedListFolderDragType, over: outline)
@@ -183,7 +293,7 @@ struct SidebarDropGuardTests {
     @Test
     func aFolderDropIsDecidedAndAppliedByTheGuard() throws {
         let outline = try guardedOutline()
-        let folders = try #require(SidebarDropOutline(outline, folderCount: 2, tagCount: 1).foldersSection)
+        let folders = try #require(foldersSection(in: outline))
         let reorder = FeedListDropActionReorderFolder(draggedFolderId: "d2", targetFolderId: "d2")
         recorder.actions = [.folderSlot(index: 1): reorder]
         let info = StandInDraggingInfo(carrying: feedListFolderDragType, over: outline)
@@ -198,7 +308,7 @@ struct SidebarDropGuardTests {
     @Test
     func aFeedProposedIntoAFeedRowIsRefused() throws {
         let outline = try guardedOutline()
-        let noFolder = try #require(SidebarDropOutline(outline, folderCount: 2, tagCount: 1).noFolderSection)
+        let noFolder = try #require(noFolderSection(in: outline))
         let move = FeedListDropActionMoveFeed(feedId: "f", folderId: nil, targetFeedId: nil)
         recorder.actions = [.intoNoFolder(offset: 0): move, .ontoNoFolder: move]
         let info = StandInDraggingInfo(carrying: feedListFeedDragType, over: outline)
@@ -212,7 +322,7 @@ struct SidebarDropGuardTests {
     @Test
     func aFeedOverACopyUnderATagGoesToThatTag() throws {
         let outline = try guardedOutline()
-        let tags = try #require(SidebarDropOutline(outline, folderCount: 2, tagCount: 1).tagsSection)
+        let tags = try #require(tagsSection(in: outline))
         let attach = FeedListDropActionAttachTag(feedId: "f", tagId: "t1")
         recorder.actions = [.ontoFeedInTag(tagIndex: 0): attach]
         let info = StandInDraggingInfo(carrying: feedListFeedDragType, over: outline)
@@ -226,7 +336,7 @@ struct SidebarDropGuardTests {
     @Test
     func aDropTheSharedRulesRefuseIsRefused() throws {
         let outline = try guardedOutline()
-        let folders = try #require(SidebarDropOutline(outline, folderCount: 2, tagCount: 1).foldersSection)
+        let folders = try #require(foldersSection(in: outline))
         recorder.actions = [:]
         let info = StandInDraggingInfo(carrying: feedListFeedDragType, over: outline)
 
@@ -236,7 +346,7 @@ struct SidebarDropGuardTests {
     @Test
     func aDragFromAnotherAppIsRefused() throws {
         let outline = try guardedOutline()
-        let folders = try #require(SidebarDropOutline(outline, folderCount: 2, tagCount: 1).foldersSection)
+        let folders = try #require(foldersSection(in: outline))
         recorder.actions = [.ontoFolder(index: 0): FeedListDropActionMoveFeed(feedId: "f", folderId: "d1", targetFeedId: nil)]
         let info = StandInDraggingInfo(carrying: feedListFeedDragType, over: outline, fromAnotherApp: true)
 
@@ -248,7 +358,7 @@ struct SidebarDropGuardTests {
     @Test
     func aDropWhoseDestinationChangedUnderTheDragIsRefused() throws {
         let outline = try guardedOutline()
-        let folders = try #require(SidebarDropOutline(outline, folderCount: 2, tagCount: 1).foldersSection)
+        let folders = try #require(foldersSection(in: outline))
         recorder.actions = [.ontoFolder(index: 0): FeedListDropActionMoveFeed(feedId: "f", folderId: "d1", targetFeedId: nil)]
         let info = StandInDraggingInfo(carrying: feedListFeedDragType, over: outline)
         #expect(validate(outline, info, proposing: outline.child(0, ofItem: folders), at: sidebarDropOntoRowIndex) == .move)
@@ -265,7 +375,7 @@ struct SidebarDropGuardTests {
     func theDragEndsWhenItLeavesTheOutlineOrDrops() throws {
         let outline = try guardedOutline()
         let handler = try #require(SidebarDropGuardInstaller.handler(of: outline))
-        let folders = try #require(SidebarDropOutline(outline, folderCount: 2, tagCount: 1).foldersSection)
+        let folders = try #require(foldersSection(in: outline))
         recorder.actions = [.folderSlot(index: 1): FeedListDropActionReorderFolder(draggedFolderId: "d2", targetFolderId: "d2")]
         let info = StandInDraggingInfo(carrying: feedListFolderDragType, over: outline)
 
@@ -342,9 +452,8 @@ struct SidebarDropGuardTests {
     private func collapsedFolderAndTag(in outline: NSOutlineView) throws -> (folder: Any, tag: Any) {
         // Read the rows afresh after collapsing them: SwiftUI may hand the outline new items for them.
         func rows() -> (folder: Any?, tag: Any?) {
-            let reader = SidebarDropOutline(outline, folderCount: 2, tagCount: 1)
-            return (reader.foldersSection.map { outline.child(0, ofItem: $0) } ?? nil,
-                    reader.tagsSection.map { outline.child(0, ofItem: $0) } ?? nil)
+            (foldersSection(in: outline).map { outline.child(0, ofItem: $0) } ?? nil,
+             tagsSection(in: outline).map { outline.child(0, ofItem: $0) } ?? nil)
         }
         func collapsed() -> Bool {
             let (folder, tag) = rows()

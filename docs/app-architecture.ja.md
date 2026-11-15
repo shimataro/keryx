@@ -1776,8 +1776,10 @@ macOS では、ドロップの行き先を決めて適用するのは `SidebarDr
   （[known-issues.ja.md](known-issues.ja.md) の「macOS: フォルダーをフォルダーの間に落とすと SwiftUI の中で
   クラッシュした」を参照）。そのため `List` には `.onInsert`/`.onDrop` を付けない。ガードは、`List` の背後にある
   `NSOutlineView` とそのデータソースにメソッドを足す。
-  - データソースの `outlineView(_:validateDrop:proposedItem:proposedChildIndex:)` は、提案された行を読み
-    （`SidebarDropOutline`）、項目の行き先を決め（`sidebarDropDestination`）、共通の規則でそこにアクションが
+  - データソースの `outlineView(_:validateDrop:proposedItem:proposedChildIndex:)` は、提案された行を、その行が持つ
+    マーカー（`SidebarRowMarker`。各行の内容の背後にある見えないビューで、行の `SidebarItemID` を載せる）で読み
+    （`SidebarDropOutline`）、行がどこにあるかで行を見分けないので、SwiftUI が自分で足す行（macOS 26 より前の検索
+    フィールド）があっても影響しない。確かめるのは、フォルダーやタグの行が兄弟の中で自分の位置にあることだけである。そして項目の行き先を決め（`sidebarDropDestination`）、共通の規則でそこにアクションが
     作れるとき（`feedListInsertAction` / `resolveFeedListDropAction`）だけ受け付ける。そして `setDropItem` で
     その行き先を設定し、「移動」を返す。解決したアクションは覚えておく。アウトラインの `performDragOperation:` は、
     その行き先がまだ同じアクションに解決されるときだけ、それを `applyFeedListDropAction` で適用する。ドラッグ中に

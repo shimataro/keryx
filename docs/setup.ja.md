@@ -151,8 +151,8 @@
 
 - **Xcode 26 以降**（App Store か [developer.apple.com](https://developer.apple.com/xcode/) からインストール）。
   アプリアイコンのビルドに Xcode 26 以降が必要なため。リリースは、CI の `xcode-27` のランナーにある最新の
-  正式版 Xcode（`.github/scripts/select-xcode.sh` が選ぶ）でビルドする。Xcode 26.6 でもビルドできることは
-  CI のジョブで確かめている。[build.ja.md](build.ja.md) の「CI」を参照。
+  正式版 Xcode（`.github/scripts/select-xcode.sh` が選ぶ）でビルドする。Xcode 26 でもビルドできることは
+  macOS 15 で動く CI のジョブで確かめている。[build.ja.md](build.ja.md) の「CI」を参照。
 - **XcodeGen**（`brew install xcodegen`）——`appleApp/project.yml` から `appleApp/Keryx.xcodeproj` を
   生成する。Git で管理するのは `project.yml` の方で、生成される `.xcodeproj` は管理しない。
 - **チーム付きの Apple ID**（無料の「Personal Team」でよい）。ローカルで実行可能な `appleApp/`
