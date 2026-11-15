@@ -1041,8 +1041,9 @@ the sections by their position among the roots, so on macOS 15 it read no sectio
 drop (sidebar reordering stopped working). The guard now reads no position at all: every row the
 guard needs carries an invisible marker view behind its content (`SidebarRowMarker`), naming its
 `SidebarItemID`, which the guard finds in the outline's existing row view
-(`makeIfNecessary: false` — a freshly made row gets its content only on a later turn). Folders and
-Tags sections are told by a marked child, the "No folder" section by its header's marker, and a
+(`makeIfNecessary: false` — a freshly made row gets its content only on a later turn). The Folders
+section is told by a marked child, the Tags section is reached as the parent of a marked tag row,
+the "No folder" section by its header's marker, and a
 feed's folder by its parent's marker. An accessibility identifier cannot serve: SwiftUI exposes it
 neither on the row views nor on the outline's accessibility rows. The test sidebar carries the same
 search field, so this structure is covered wherever the tests run on macOS 15. Confirmed by hand on

@@ -143,9 +143,10 @@ final class SidebarDropHandler: NSObject {
 /// already has are read, and anything else is found from the proposed item and its outline
 /// parent/children.
 ///
-/// A section's own item is told by a marker on its header row ("No folder") or, where its header
-/// carries none (Folders, Tags), by a marked child: those sections are shown only while they hold
-/// something. A row that should carry a marker but has none readable is not a drop target.
+/// A section's own item is told by a marker on its header row ("No folder") or, for Folders, whose
+/// header carries none, by a marked child (the section is shown only while it holds a folder). The Tags
+/// section is never told on its own: it is reached as the parent of a marked tag row. A row that
+/// should carry a marker but has none readable is not a drop target.
 @MainActor
 struct SidebarDropOutline {
     let outline: NSOutlineView
