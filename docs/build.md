@@ -1420,7 +1420,7 @@ The Actions run list names each run after its inputs — the version, the platfo
 Run the first one with `submit` off and `release` set to `manual`: nothing but a real run exercises
 the build, the upload and the App Store Connect calls, so with `submit` off a mistake stops before
 review, and with `manual` an approved build still waits for a release in App Store Connect. Check the
-version and its build in App Store Connect, then submit it there (or run again with `submit` on).
+version and its build in App Store Connect, then submit it there.
 Setting `ref` to `v0` makes such a rehearsal possible before the GitHub Release exists.
 
 **What a run does** (scripts under `.github/scripts/`, taken from the workflow's own ref rather than
@@ -1520,8 +1520,9 @@ branches are limited to the version branches, and name that environment in the `
 It builds with the newest release Xcode on the `xcode-27` runner, as `release.yml` does (see "Which
 Xcode builds a release" under "Building the SwiftUI app"). `submit` is on by default, so a run would
 submit before anyone sees the SDK: run with `submit` off, check the Xcode and iOS SDK it reports in the
-run's notice or the job summary (the iPhone Duo badge needs the iOS 27.1 SDK or later), then submit the
-version in App Store Connect (or run again with `submit` on).
+run's notice or the job summary (the iPhone Duo badge needs the iOS 27.1 SDK or later), then submit that
+version, with the build you checked, in App Store Connect. Do not run again with `submit` on instead: a
+new run uploads a new build, which may be built with a different Xcode.
 
 ### Publishing to F-Droid
 

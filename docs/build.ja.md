@@ -1408,7 +1408,7 @@ Actions の実行一覧には、入力に応じた名前で各実行が表示さ
 最初の 1 回は `submit` をオフ、`release` を `manual` にして実行すること: ビルド、アップロード、App Store Connect の
 API 呼び出しを確かめる方法は本番の実行しかない。`submit` がオフなら誤りがあっても審査の手前で止まり、`manual` なら
 承認されたビルドも App Store Connect で公開するまで出ない。App Store Connect でバージョンとそのビルドを確認してから、
-そこで提出する（または `submit` をオンにしてもう一度実行する）。
+そこで提出する。
 `ref` を `v0` にすれば、GitHub Release を作る前にこのリハーサルができる。
 
 **1 回の実行で行うこと**（スクリプトは `.github/scripts/` にあり、`ref` ではなくワークフロー自身の ref から取る）:
@@ -1497,8 +1497,9 @@ Apple の認証情報を持つジョブは読み取りしかできない。
 ビルドには、`release.yml` と同じく `xcode-27` のランナーにある最新の正式版 Xcode を使う（「SwiftUI アプリ
 （`appleApp/`）のビルド」の「リリースをビルドする Xcode」を参照）。`submit` は既定でオンなので、そのまま
 実行すると SDK を確かめる前に提出される。`submit` をオフにして実行し、実行結果の注記かジョブのサマリーに
-出る Xcode と iOS SDK を確認してから（iPhone Duo のバッジには iOS 27.1 SDK 以降が必要）、App Store Connect
-でそのバージョンを提出する（または `submit` をオンにして再実行する）。
+出る Xcode と iOS SDK を確認してから（iPhone Duo のバッジには iOS 27.1 SDK 以降が必要）、確認したビルドのまま
+App Store Connect でそのバージョンを提出する。`submit` をオンにして再実行しないこと: 再実行すると新しいビルドが
+アップロードされ、そのビルドは別の Xcode でビルドされることがある。
 
 ### F-Droid への公開
 
