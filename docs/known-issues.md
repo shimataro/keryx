@@ -1019,16 +1019,16 @@ How it turns out when something does not go as intended:
 | --- | --- |
 | No outline is found next to the guard | The guard is not installed: sidebar drag and drop does nothing (no crash), and moving and tagging remain available from the context menu. No fault is logged: the outline is looked for again on every update, and missing it for a moment right after launch is normal. The integration test catches this case |
 | The outline is found, but it has no data source or its classes lack a method the guard overrides | The guard is not installed, with the same result. A fault is logged once (`SidebarDropGuard` category) |
-| The sections are not laid out as expected | The guard is installed, but each affected drop is refused and nothing moves. No fault is logged |
+| A proposed row carries no readable marker (`SidebarRowMarker`), or its position disagrees with the sidebar's own order | The guard is installed, but each affected drop is refused and nothing moves. A row that should be marked but is not logs a fault once (`SidebarDropGuard` category) |
 | KVO observes the outline, before or after the guard is installed | No effect: the methods are on SwiftUI's classes, which KVO's class inherits from. Covered by a test |
 | Another `List` in the app shares the classes | Its outline has no handler attached, so every method goes on to the original implementation |
 | SwiftUI's own implementation of a replaced method changes later | Other drags get the kept original, or the superclass's method looked up per call |
 
 `KeryxTests/SidebarDropGuardTests.swift` hosts a `List` shaped like the sidebar in an offscreen
 window and checks what the guard relies on: that the `List` is an `NSOutlineView` whose data source
-answers `validateDrop`, that its sections are found among its root items in order (the headerless
-All/Starred section first, then Folders, "No folder" and Tags), that each row is read as the row it
-is, and that drops sent through a stand-in `NSDraggingInfo` are decided and applied by the guard. CI
+answers `validateDrop`, that each row's marker is read from its row, that each row is read as the
+row it is — also with unmarked sections and rows before and between the sidebar's own — that a drop
+onto an unmarked row is refused, and that drops sent through a stand-in `NSDraggingInfo` are decided and applied by the guard. CI
 runs it on `macos-latest`, so a new SDK or macOS that changes these fails there. It cannot cover the
 older macOS releases users run (14 and later) or a real mouse drag; re-check those by hand on each
 new macOS: drop a folder at the top, the middle and the bottom of a folder row, over a feed inside a
@@ -1036,12 +1036,17 @@ folder, at the top and at the end, and drop a feed onto a folder, "No folder", a
 copy under a tag.
 
 Before macOS 26 the sidebar's search field (`.searchable(placement: .sidebar)`) is a root item of the
-outline too, ahead of the sections, and not a group item as every section is. The guard first
-required the roots to be exactly the sections, so on macOS 15 it read no section and refused every
-drop (sidebar reordering stopped working). Where the roots outnumber the sections, the guard now
-takes the group items as the sections (`SidebarDropOutline.sectionItems`). The test sidebar carries
-the same search field, so this structure is covered wherever the tests run on macOS 15. Confirmed by
-hand on macOS 15.7.
+outline too, ahead of the sections, and not a group item as every section is. The guard first read
+the sections by their position among the roots, so on macOS 15 it read no section and refused every
+drop (sidebar reordering stopped working). The guard now reads no position at all: every row the
+guard needs carries an invisible marker view behind its content (`SidebarRowMarker`), naming its
+`SidebarItemID`, which the guard finds in the outline's existing row view
+(`makeIfNecessary: false` — a freshly made row gets its content only on a later turn). Folders and
+Tags sections are told by a marked child, the "No folder" section by its header's marker, and a
+feed's folder by its parent's marker. An accessibility identifier cannot serve: SwiftUI exposes it
+neither on the row views nor on the outline's accessibility rows. The test sidebar carries the same
+search field, so this structure is covered wherever the tests run on macOS 15. Confirmed by hand on
+macOS 15.7.
 
 ### What a real fix would need
 
