@@ -360,7 +360,8 @@ version is pinned, so a newer Xcode on the image is picked up without a workflow
 picked (by its path, or by the `licenseType` in its `LicenseInfo.plist`): App Store Connect does not accept
 an app built with one. The script checks no minimum SDK; it reports the Xcode and SDK versions it picked
 as a notice on the run and in the job summary. The App Store shows the iPhone Duo badge only for an app
-built with the iOS 27.1 SDK or later, so check the iOS SDK there before submitting. `xcode-27` is the
+built with the iOS 27.1 SDK or later, so for an App Store release run `publish-app-store.yml` with
+`submit` off, check the iOS SDK there, and only then submit. `xcode-27` is the
 only GitHub-hosted image with Xcode 27 (`macos-26` has 26.x only); move the jobs to the regular macOS
 label once its image ships it.
 
@@ -1517,9 +1518,10 @@ branches are limited to the version branches, and name that environment in the `
 `environment:`.
 
 It builds with the newest release Xcode on the `xcode-27` runner, as `release.yml` does (see "Which
-Xcode builds a release" under "Building the SwiftUI app"). Before submitting, check the Xcode and iOS
-SDK it reports in the run's notice or the job summary: the iPhone Duo badge needs the iOS 27.1 SDK or
-later.
+Xcode builds a release" under "Building the SwiftUI app"). `submit` is on by default, so a run would
+submit before anyone sees the SDK: run with `submit` off, check the Xcode and iOS SDK it reports in the
+run's notice or the job summary (the iPhone Duo badge needs the iOS 27.1 SDK or later), then submit the
+version in App Store Connect (or run again with `submit` on).
 
 ### Publishing to F-Droid
 

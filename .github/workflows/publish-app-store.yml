@@ -220,8 +220,8 @@ jobs:
 
       # The newest release (non-beta) Xcode on the image, rather than a pinned one: App Store Connect
       # requires a recent SDK (the iPhone Duo badge, the iOS 27.1 SDK), and a beta-built app cannot be
-      # submitted. Its version and SDKs are reported in the job's notice and summary; check them
-      # before submitting. It sets DEVELOPER_DIR for every later step. See docs/build.md's
+      # submitted. Its version and SDKs are reported in the job's notice and summary; check them on a
+      # run with `submit` off, then submit. It sets DEVELOPER_DIR for every later step. See docs/build.md's
       # "Publishing to the App Store".
       - name: Select Xcode
         run: .publish-tools/.github/scripts/select-xcode.sh

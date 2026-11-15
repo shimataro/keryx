@@ -358,7 +358,8 @@ Swift のコードには iOS 27 SDK の API（`visibilityPriority`）のため�
 （パス、または `LicenseInfo.plist` の `licenseType` で判別して）選ばない。beta 版でビルドしたアプリは App Store Connect が
 受け付けないため。スクリプトは SDK の下限を確かめず、選んだ Xcode と SDK のバージョンを、実行結果の注記と
 ジョブのサマリーに出力する。App Store で iPhone Duo のバッジが付くのは iOS 27.1 SDK 以降でビルドしたアプリ
-だけなので、提出前にそこで iOS SDK を確認すること。Xcode 27 が入っている GitHub ホストのイメージは `xcode-27`
+だけなので、App Store へのリリースでは `publish-app-store.yml` を `submit` オフで実行し、そこで
+iOS SDK を確認してから提出すること。Xcode 27 が入っている GitHub ホストのイメージは `xcode-27`
 だけ（`macos-26` には 26.x しかない）。通常の macOS のラベルのイメージに入ったら、ジョブをそちらに移す。
 
 Debug ビルドはアクティブなアーキテクチャしかコンパイルせず、Release 限定の設定も通らない。そのため、
@@ -1494,8 +1495,10 @@ Apple の認証情報を持つジョブは読み取りしかできない。
 バージョンブランチに限った GitHub の environment に移し、`publish` ジョブの `environment:` にその environment を指定する。
 
 ビルドには、`release.yml` と同じく `xcode-27` のランナーにある最新の正式版 Xcode を使う（「SwiftUI アプリ
-（`appleApp/`）のビルド」の「リリースをビルドする Xcode」を参照）。提出前に、実行結果の注記かジョブの
-サマリーに出る Xcode と iOS SDK を確認すること。iPhone Duo のバッジには iOS 27.1 SDK 以降が必要。
+（`appleApp/`）のビルド」の「リリースをビルドする Xcode」を参照）。`submit` は既定でオンなので、そのまま
+実行すると SDK を確かめる前に提出される。`submit` をオフにして実行し、実行結果の注記かジョブのサマリーに
+出る Xcode と iOS SDK を確認してから（iPhone Duo のバッジには iOS 27.1 SDK 以降が必要）、App Store Connect
+でそのバージョンを提出する（または `submit` をオンにして再実行する）。
 
 ### F-Droid への公開
 
