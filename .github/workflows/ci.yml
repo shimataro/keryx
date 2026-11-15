@@ -537,7 +537,14 @@ jobs:
           cd appleApp
           xcodegen generate
           xcodebuild -scheme Keryx -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
-          xcodebuild -scheme Keryx -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO test
+          # On the macos-15 runner image, actool crashes (IBPlatformToolFailureException,
+          # AssetCatalogAgent-AssetRuntime) compiling AppIcon.icon for macOS, though the same macOS 15 +
+          # Xcode 26.3 builds it fine on a developer Mac. The tests don't need the icon, so it is taken
+          # out of the project for the macOS test only (actool compiles any .icon in the target,
+          # whatever ASSETCATALOG_COMPILER_APPICON_NAME says, hence removing the file).
+          rm -r Keryx/Resources/AppIcon.icon
+          xcodegen generate
+          xcodebuild -scheme Keryx -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO ASSETCATALOG_COMPILER_APPICON_NAME= test
 
   android-instrumented-test:
     name: Android Instrumented Tests
