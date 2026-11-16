@@ -1960,8 +1960,10 @@ macOS の記事一覧は、SwiftUI の `List` ではなく、行の高さを固�
 1 か所に決め（`ArticleSwipeActions.kt`、`HomeViewModel.performSwipeAction`）、各 UI は見せ方だけを受け持つ。
 
 - **iOS。** `List` の行の `.swipeActions(edge:allowsFullSwipe: true)` で、各辺にボタンを 1 つ出す
-  （`Home/ArticleListView.swift`）。記号はリーダーのツールバー、ラベルはコンテキストメニューと同じものを
-  `ArticleSwipeActionStyle` が返す。ボタンはアイコンだけ（`.labelStyle(.iconOnly)`）で、ラベルは
+  （`Home/ArticleListView.swift`）。`ArticleSwipeActionStyle` が記号、色、ラベルを返す。記号は操作後の状態を
+  表す（スターを外す操作だけは、Mail の旗を外す `flag.slash` にならって `star.slash`）。色はアクセント
+  カラーと、スターは Mail の旗と同じオレンジ（ボタンのアイコンは常に白で、行の星の黄色ではコントラストが
+  約 1.5:1 しかないため）。ラベルはコンテキストメニューと同じもの。ボタンはアイコンだけ（`.labelStyle(.iconOnly)`）で、ラベルは
   VoiceOver 用に残す。ボタンは UIKit が VoiceOver のアクションとして公開する。
 - **macOS。** 記事テーブルの `tableView(_:rowActionsForRow:edge:)` が各辺に `NSTableViewRowAction` を 1 つ
   返す（`Home/ArticleTableView.swift`）。Mail のメッセージ一覧と同じ仕組みで、ボタンの描画、行のスライド、
@@ -1970,13 +1972,27 @@ macOS の記事一覧は、SwiftUI の `List` ではなく、行の高さを固�
   アクセシビリティ説明に入れて VoiceOver に読ませる。これでボタンは 48pt になる。`shouldSelectRow` は
   `false` のままなので、行は選択されない。
 - **Android。** `ui/home/ArticleRowSwipe.kt` の `Modifier.articleRowSwipe` を、`ArticleRow` が
-  `isTouchPrimary` のときだけ付ける。横方向の `draggable` が `ARTICLE_SWIPE_THRESHOLD`（56dp。越えると
-  触覚フィードバック）を越えて離されると操作を実行し、行をアニメーションで戻す。M3 の `SwipeToDismissBox`
-  ではなく行自身のノードに付ける修飾子だけで作る。`SwipeToDismissBox` は、
+  `isTouchPrimary` のときだけ付ける。M3 の `SwipeToDismissBox` ではなく、行自身のノードに付ける修飾子
+  （`pointerInput`、`drawBehind`、`absoluteOffset`）だけで作る。`SwipeToDismissBox` は、
   [known-issues.ja.md](known-issues.ja.md) の `LazyColumn` の再利用プールのクラッシュの近くにある行に
-  ノードを増やしてしまうため。両方の操作は TalkBack のカスタムアクションにもなる。行は狭いレイアウトの
-  `ModalNavigationDrawer` の子なので、行の上で始めた横ドラッグは行が先に取り、行以外から始めたドラッグ
-  だけがドロワーを開く。
+  ノードを増やしてしまうため。
+  - *アームの条件。* ジェスチャーのループは Main パスで動くので、行は `LazyColumn` やドロワーより先に
+    イベントを見る。アームするまでは何も消費しない。アームの条件はリーダーのスワイプと同じ
+    `swipeArmsHorizontally`（タッチスロップを越え、縦の 1.5 倍以上横に動いた）。縦に固定された
+    ジェスチャー、祖先が先に消費したジェスチャー（同じイベントの Final パスで読む。一覧のスクロールや
+    ドロワー）、縦のジェスチャーの終了から `SWIPE_AFTER_VERTICAL_LOCKOUT_MS` 以内に始まったジェスチャーでは
+    アームしない。この lockout はリーダーの `ArticleSwipeController` と共通の `VerticalGestureLockout` で、
+    `ArticleListPaneContent` がすべての行で共有する 1 つを `remember` する。flick を続けると指の下の行が
+    毎回変わるため。
+  - *ドラッグと離したとき。* アームしたあとは移動を消費する（行のタップと長押しは取り消される）。
+    `ARTICLE_SWIPE_THRESHOLD`（56dp）を越えると触覚フィードバックが返り、見えている帯が操作の色になる
+    （`primary` / `StarredColor`、アイコンは `onPrimary` / `OnStarredColor`）。越えたまま離すと、描かれて
+    いる側（`showsLeading`）の操作を実行し、行はアニメーションで戻る。この戻りは次にアームした
+    ジェスチャーが取り消す job。戻り終わるまでは帯が離した時点の状態を保つので、行の状態が変わった瞬間に
+    反対の操作の表示に変わることはない。
+  - 両方の操作は TalkBack のカスタムアクションにもなる。行は狭いレイアウトの `ModalNavigationDrawer` の子
+    なので、行の上で始めたはっきり横向きのドラッグは行が先に取る。行以外から始めたドラッグや、ドロワーが
+    先に取った斜めのドラッグはドロワーを開く。
 
 ### 選択の表示（iOS）
 

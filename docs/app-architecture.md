@@ -2055,8 +2055,10 @@ edge shows and what it does are decided once in `:shared` (`ArticleSwipeActions.
 `HomeViewModel.performSwipeAction`); each UI only presents it.
 
 - **iOS.** The `List` row's `.swipeActions(edge:allowsFullSwipe: true)`, one button per edge
-  (`Home/ArticleListView.swift`); `ArticleSwipeActionStyle` supplies the reader toolbar's symbols and
-  the context menu's labels. The buttons are icon-only (`.labelStyle(.iconOnly)`), the label left to
+  (`Home/ArticleListView.swift`); `ArticleSwipeActionStyle` supplies the symbols (the state the action
+  leaves the article in, except unstar, which is `star.slash` as Mail's unflag is `flag.slash`), the
+  colors (the accent color, and orange for star as Mail's flag: the button's icon is always white, and
+  the row's star yellow left it at about 1.5:1) and the context menu's labels. The buttons are icon-only (`.labelStyle(.iconOnly)`), the label left to
   VoiceOver, which UIKit exposes the buttons to as actions.
 - **macOS.** The article table's `tableView(_:rowActionsForRow:edge:)` returns one
   `NSTableViewRowAction` per edge (`Home/ArticleTableView.swift`), as Mail's message list does; AppKit
@@ -2065,12 +2067,26 @@ edge shows and what it does are decided once in `:shared` (`ArticleSwipeActions.
   is empty and the label goes in the image's accessibility description, which VoiceOver reads; the
   button is then 48pt. `shouldSelectRow` stays `false`, so the row is not selected.
 - **Android.** `ui/home/ArticleRowSwipe.kt`'s `Modifier.articleRowSwipe`, applied by `ArticleRow` only
-  where `isTouchPrimary`: a horizontal `draggable` past `ARTICLE_SWIPE_THRESHOLD` (56dp, with a haptic
-  tick) runs the action on release and animates the row back. It is built from modifiers on the row's
-  own node rather than M3's `SwipeToDismissBox`, which would add nodes to a row that sits next to the
-  `LazyColumn` reuse-pool crash in [known-issues.md](known-issues.md). Both actions are also TalkBack
-  custom actions. Being a child of the narrow layout's `ModalNavigationDrawer`, the row claims a
-  horizontal drag that starts on it first, so only a drag started off the rows opens the drawer.
+  where `isTouchPrimary`. It is built from modifiers on the row's own node (`pointerInput`, `drawBehind`,
+  `absoluteOffset`) rather than M3's `SwipeToDismissBox`, which would add nodes to a row that sits next
+  to the `LazyColumn` reuse-pool crash in [known-issues.md](known-issues.md).
+  - *Arming.* The gesture loop runs on the Main pass, so the row sees each event before the
+    `LazyColumn` and the drawer, and consumes nothing until it arms. It arms on the reader swipe's own
+    rule, `swipeArmsHorizontally` (past the touch slop and 1.5× more horizontal than vertical). It never
+    arms for a gesture latched vertical, one an ancestor consumed first (read on the same event's Final
+    pass: the list's scroll, or the drawer), or one starting within `SWIPE_AFTER_VERTICAL_LOCKOUT_MS`
+    of a vertical gesture. That lockout is a `VerticalGestureLockout` shared with the reader's
+    `ArticleSwipeController`; `ArticleListPaneContent` remembers one for all its rows, since a run of
+    flicks puts a different row under the finger each time.
+  - *Dragging and release.* Once armed, moves are consumed (cancelling the row's tap and long press);
+    crossing `ARTICLE_SWIPE_THRESHOLD` (56dp) gives a haptic tick and fills the revealed strip with the
+    action's color (`primary` / `StarredColor`, icon `onPrimary` / `OnStarredColor`). Released past it,
+    the row runs the action of the side drawn (`showsLeading`) and springs back as a job the next
+    armed gesture cancels; until it settles, the strip keeps the state it had at release, so it does
+    not flip to the opposite action the moment the row's state changes.
+  - Both actions are also TalkBack custom actions. Being a child of the narrow layout's
+    `ModalNavigationDrawer`, the row takes a clearly horizontal drag that starts on it first; a drag
+    started off the rows, or a diagonal one the drawer claims first, opens the drawer.
 
 ### Selection display (iOS)
 

@@ -275,9 +275,9 @@ opens automatically the first time the app has no feeds and no cloud account, so
 the "Add feed" button. A phone-width screen shows one of the two remaining panes (article list,
 reader) at a time with its own back control; a tablet-width screen shows both together. Only the
 number of simultaneous panes changes—their content stays the same. On Android, going back from the
-reader to the article list uses predictive back where the system supports it. A horizontal drag that
-starts on an article row swipes that row (see "Swipe on article rows" below) rather than opening the
-drawer; one that starts elsewhere still opens it.
+reader to the article list uses predictive back where the system supports it. A clearly horizontal drag
+that starts on an article row swipes that row (see "Swipe on article rows" below) rather than opening
+the drawer; one that starts elsewhere, or a diagonal one that starts on a row, may still open it.
 
 **Search field placement.** At the 3-pane width the search field lives in the feed-list sidebar and
 filters the article list beside it. At narrower widths the drawer has no search field; search is
@@ -310,7 +310,9 @@ it marks the article read or unread, from the trailing edge it stars or unstars 
 and actions everywhere, named by the context menu's own labels. Each platform presents it its own way:
 iOS and macOS reveal the action as an icon-only button (a title would widen it past other apps'
 swipe buttons; screen readers still hear the label), which a full swipe also runs; Android runs it once the
-row is dragged past a threshold (with a haptic tick) and released, and the row springs back. A swipe
+row is dragged past a threshold (the revealed strip turns the action's color, with a haptic tick) and
+released, and the row springs back; a diagonal drag, or one started just after a vertical scroll, is not
+a row swipe (the reader swipe's own rule). A swipe
 never selects the row — so starring an unread article leaves it unread — and, since it only changes
 reading state, it never asks first. The row stays where it is, as for the same action from the
 context menu (§7's Unread mode). Screen readers get both actions as accessibility actions. Desktop

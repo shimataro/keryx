@@ -177,7 +177,7 @@ clean; the committed test runs 60, comfortably above the old threshold, also 0/5
   need the star icon and unread dot repositioned via manual offsets instead of `Box`/`align()`,
   which was judged too risky for the node it would save.
 - The Android row swipe (`ui/home/ArticleRowSwipe.kt`) is built from modifiers on the row's own node
-  (`draggable`, `drawBehind`, `absoluteOffset`) rather than M3's `SwipeToDismissBox`, which would wrap
+  (`pointerInput`, `drawBehind`, `absoluteOffset`) rather than M3's `SwipeToDismissBox`, which would wrap
   the row in two to three more nodes. Move it to `SwipeToDismissBox` once this defect is fixed upstream
   (see "Standard components over custom drawing" exception 3 in the `ui-guidelines` skill).
 
