@@ -80,3 +80,10 @@ internal fun hostArchitectureFor(archProperty: String): HostArchitecture = when 
 }
 
 actual val hostArchitecture: HostArchitecture = hostArchitectureFor(osArch)
+
+/** The desktop OS's product name, from `os.name` (see the `expect` declaration). */
+actual val platformOsName: String = when {
+    isMacOs -> "macOS"
+    isWindows -> "Windows"
+    else -> "Linux"
+}

@@ -29,10 +29,12 @@ import works.merc.keryx.app.di.presentationModule
 import works.merc.keryx.app.di.sharedModule
 import works.merc.keryx.app.domain.AppForeground
 import works.merc.keryx.app.domain.AuthorizationLauncher
+import works.merc.keryx.app.domain.BrowserLoginPageLauncher
 import works.merc.keryx.app.domain.ArticleRepository
 import works.merc.keryx.app.domain.CloudConnectionService
 import works.merc.keryx.app.domain.CloudSession
 import works.merc.keryx.app.domain.DefaultAuthorizationLauncher
+import works.merc.keryx.app.domain.LoginPageLauncher
 import works.merc.keryx.app.domain.FeedRepository
 import works.merc.keryx.app.domain.NewArticleNotifier
 import works.merc.keryx.app.domain.NotificationCenter
@@ -395,6 +397,12 @@ class KeryxSdk private constructor(private val koin: Koin) {
          *   flow's own redirect URI, e.g. `keryx` or a Google reversed-client-id scheme). `null`
          *   (the default) falls back to opening the system browser, which previews and tests that
          *   never actually connect a provider can safely ignore.
+         * @param openLoginPage Opens a sign-in page that sends nothing back to the app — Nextcloud's
+         *   Login Flow v2, which learns of the sign-in by polling its server. The shipping app shows
+         *   it in an `ASWebAuthenticationSession` with no callback scheme. `null` (with
+         *   [closeLoginPage]) falls back to the system browser, as for [openAuthorization].
+         * @param closeLoginPage Dismisses what [openLoginPage] opened; called once the sign-in ends,
+         *   however it ends. `null` does nothing.
          * @param useDataProtectionKeychain Whether cloud tokens go in the Data Protection Keychain
          *   rather than the ordinary login Keychain — see `data/cloud/KeychainTokenStorage.kt`'s own
          *   doc for why. The shipping app passes `true`; it needs the `keychain-access-groups`
@@ -412,9 +420,12 @@ class KeryxSdk private constructor(private val koin: Koin) {
             postOsNotification: (message: String, count: Int) -> Unit,
             dataDirectory: String?,
             openAuthorization: ((url: String, callbackScheme: String) -> Unit)? = null,
+            openLoginPage: ((url: String) -> Unit)? = null,
+            closeLoginPage: (() -> Unit)? = null,
             useDataProtectionKeychain: Boolean = false,
         ): KeryxSdk = startWithModules(
-            newArticlesText, postOsNotification, dataDirectory, openAuthorization, useDataProtectionKeychain,
+            newArticlesText, postOsNotification, dataDirectory, openAuthorization, openLoginPage, closeLoginPage,
+            useDataProtectionKeychain,
             extraModules = emptyList(),
         )
 
@@ -422,11 +433,32 @@ class KeryxSdk private constructor(private val koin: Koin) {
          * [start] with [extraModules] registered after the production modules, so they override its
          * bindings — a test seam (e.g. a `MockEngine` `HttpClient`). `internal`, so Swift never sees it.
          */
+        /**
+         * The [LoginPageLauncher] [start]'s [openLoginPage] / [closeLoginPage] closures describe: the
+         * Swift app's own when [openLoginPage] is given, else the system browser (with nothing to
+         * close, since a browser tab cannot be closed from here).
+         */
+        internal fun loginPageLauncherOf(
+            openLoginPage: ((url: String) -> Unit)?,
+            closeLoginPage: (() -> Unit)?,
+        ): LoginPageLauncher = if (openLoginPage == null) {
+            BrowserLoginPageLauncher(returnToApp = { closeLoginPage?.invoke() })
+        } else {
+            object : LoginPageLauncher {
+                override fun open(url: String) = openLoginPage(url)
+                override fun close() {
+                    closeLoginPage?.invoke()
+                }
+            }
+        }
+
         internal fun startWithModules(
             newArticlesText: (count: Int) -> String,
             postOsNotification: (message: String, count: Int) -> Unit,
             dataDirectory: String?,
             openAuthorization: ((url: String, callbackScheme: String) -> Unit)? = null,
+            openLoginPage: ((url: String) -> Unit)? = null,
+            closeLoginPage: (() -> Unit)? = null,
             useDataProtectionKeychain: Boolean = false,
             extraModules: List<Module>,
         ): KeryxSdk {
@@ -440,11 +472,12 @@ class KeryxSdk private constructor(private val koin: Koin) {
                     open(authorizeUrl, schemeOf(redirectUri).orEmpty())
                 }
             } ?: DefaultAuthorizationLauncher
+            val loginPageLauncher = loginPageLauncherOf(openLoginPage, closeLoginPage)
             val koin = koinApplication {
                 modules(
                     sharedModule(),
                     presentationModule(),
-                    applePlatformModule(messages, sink, authorizationLauncher, useDataProtectionKeychain),
+                    applePlatformModule(messages, sink, authorizationLauncher, loginPageLauncher, useDataProtectionKeychain),
                 )
                 // Last, so a test's module overrides the production binding of the same type.
                 modules(extraModules)

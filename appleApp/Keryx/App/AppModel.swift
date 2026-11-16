@@ -88,7 +88,8 @@ final class AppModel {
     /// Kotlin calls it off the main thread — see `docs/app-architecture.md`'s "`KeryxSdk`: the Swift
     /// entry point" for the calling convention this satisfies. Every callee below is safe on any
     /// thread (see each type's own doc): `L`/`LF`, `OsNotificationPoster.post`, and
-    /// `OAuthSessionCoordinator.open` (which itself hops to `@MainActor` internally).
+    /// `OAuthSessionCoordinator.open` / `openLoginPage` / `closeLoginPage` (each hops to `@MainActor`
+    /// internally).
     nonisolated private static func startSdk(oauthCoordinator: OAuthSessionCoordinator) throws -> KeryxSdk {
         try KeryxSdk.companion.start(
             newArticlesText: { count in LF("home_new_articles", count.int64Value) },
@@ -100,6 +101,8 @@ final class AppModel {
             openAuthorization: { url, scheme in
                 oauthCoordinator.open(url: url, callbackScheme: scheme)
             },
+            openLoginPage: { url in oauthCoordinator.openLoginPage(url: url) },
+            closeLoginPage: { oauthCoordinator.closeLoginPage() },
             useDataProtectionKeychain: true
         )
     }

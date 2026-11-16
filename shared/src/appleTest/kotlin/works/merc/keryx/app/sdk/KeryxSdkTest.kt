@@ -653,4 +653,29 @@ class KeryxSdkTest {
             sdk.close()
         }
     }
+
+    @Test
+    fun theSwiftLoginPageClosuresBecomeTheLoginPageLauncher() {
+        val events = mutableListOf<String>()
+        val launcher = KeryxSdk.loginPageLauncherOf(
+            openLoginPage = { url -> events += "open $url" },
+            closeLoginPage = { events += "close" },
+        )
+        launcher.open("https://cloud.example.com/login/v2/flow/abc")
+        launcher.close()
+        assertEquals(listOf("open https://cloud.example.com/login/v2/flow/abc", "close"), events)
+    }
+
+    @Test
+    fun startAcceptsTheLoginPageClosures() = runTest {
+        val sdk = KeryxSdk.start(
+            newArticlesText = { count -> "$count new" },
+            postOsNotification = { _, _ -> },
+            dataDirectory = dir,
+            openAuthorization = { _, _ -> },
+            openLoginPage = { },
+            closeLoginPage = { },
+        )
+        sdk.close()
+    }
 }

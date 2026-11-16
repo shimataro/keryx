@@ -14,9 +14,11 @@ import works.merc.keryx.app.data.cloud.KeychainTokenStorage
 import works.merc.keryx.app.data.cloud.googleIosClientRedirectUri
 import works.merc.keryx.app.data.cloud.oauthAccessToken
 import works.merc.keryx.app.domain.AuthorizationLauncher
+import works.merc.keryx.app.domain.BrowserLoginPageLauncher
 import works.merc.keryx.app.domain.CloudSession
 import works.merc.keryx.app.domain.CustomUriRedirectTransport
 import works.merc.keryx.app.domain.DefaultAuthorizationLauncher
+import works.merc.keryx.app.domain.LoginPageLauncher
 import works.merc.keryx.app.domain.NotificationMessages
 import works.merc.keryx.app.domain.OAuthCallbackParams
 import works.merc.keryx.app.domain.OAuthConnectFlow
@@ -33,6 +35,9 @@ import works.merc.keryx.app.domain.OsNotificationSink
  *   to [DefaultAuthorizationLauncher] (a browser) for tests/previews that call this directly; the
  *   shipping app always passes the launcher `KeryxSdk.start`'s `openAuthorization` closure builds,
  *   which hands the URL to Swift for an `ASWebAuthenticationSession`.
+ * @param loginPageLauncher How Nextcloud's Login Flow v2 shows its sign-in page and dismisses it
+ *   afterwards. Defaults to the system browser for tests/previews; the shipping app passes the one
+ *   `KeryxSdk.start`'s `openLoginPage` / `closeLoginPage` closures build.
  * @param useDataProtectionKeychain Passed straight through to every [KeychainTokenStorage] this
  *   builds — see that class's own doc for why the shipping app and tests/previews differ here.
  */
@@ -40,6 +45,7 @@ fun applePlatformModule(
     notificationMessages: NotificationMessages,
     osNotificationSink: OsNotificationSink,
     authorizationLauncher: AuthorizationLauncher = DefaultAuthorizationLauncher,
+    @Suppress("UNUSED_PARAMETER") loginPageLauncher: LoginPageLauncher = BrowserLoginPageLauncher(returnToApp = {}),
     useDataProtectionKeychain: Boolean = false,
 ): Module = module {
     single { keryxHttpClient(Darwin) }

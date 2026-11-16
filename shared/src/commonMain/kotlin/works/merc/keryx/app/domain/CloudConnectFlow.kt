@@ -13,8 +13,9 @@ import works.merc.keryx.app.data.cloud.CloudCredentials
  * redirect transport is provider- and platform-specific — Dropbox uses a custom URI scheme; Google
  * requires a loopback redirect — so this is an interface with a per-provider implementation.
  *
- * No current implementation reads the [CloudConnectRequest] it is handed: neither the OAuth flows
- * nor Android's Play services flow need anything from the user before they start.
+ * Only Nextcloud's Login Flow v2 (`data/cloud/nextcloud/NextcloudLoginFlow.kt`) reads the
+ * [CloudConnectRequest] it is handed — the server the user named. Neither the OAuth flows nor
+ * Android's Play services flow need anything from the user before they start.
  */
 interface CloudConnectFlow {
     /**
@@ -28,10 +29,12 @@ interface CloudConnectFlow {
 }
 
 /**
- * Input the user supplies before a [CloudConnectFlow] starts. Empty for now: no current provider
- * needs any. A provider reached at a user-chosen server will carry that server's URL here.
+ * Input the user supplies before a [CloudConnectFlow] starts.
+ *
+ * @property serverUrl The server to connect to, for a provider reached at a user-chosen server
+ *   (Nextcloud) — already checked by the connect dialog; `null` for every other provider.
  */
-class CloudConnectRequest {
+class CloudConnectRequest(val serverUrl: String? = null) {
     companion object {
         /** The request for a flow that asks the user for nothing before it starts. */
         val NONE: CloudConnectRequest = CloudConnectRequest()
