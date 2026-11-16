@@ -2079,8 +2079,9 @@ edge shows and what it does are decided once in `:shared` (`ArticleSwipeActions.
     `ArticleSwipeController`; `ArticleListPaneContent` remembers one for all its rows, since a run of
     flicks puts a different row under the finger each time.
   - *Dragging and release.* Once armed, moves are consumed (cancelling the row's tap and long press);
-    crossing `ARTICLE_SWIPE_THRESHOLD` (56dp) gives a haptic tick and fills the revealed strip with the
-    action's color (`primary` / `StarredColor`, icon `onPrimary` / `OnStarredColor`). Released past it,
+    crossing `ARTICLE_SWIPE_THRESHOLD` (56dp) gives a haptic tick and turns the revealed strip to a tonal
+    container of the action's color (`primaryContainer` with `onPrimaryContainer`; for star,
+    `StarredColor` at 30% over the strip with `onSurface`, as M3 has no amber container role). Released past it,
     the row runs the action of the side drawn (`showsLeading`) and springs back as a job the next
     armed gesture cancels; until it settles, the strip keeps the state it had at release, so it does
     not flip to the opposite action the moment the row's state changes.

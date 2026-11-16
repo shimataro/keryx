@@ -1985,8 +1985,9 @@ macOS の記事一覧は、SwiftUI の `List` ではなく、行の高さを固�
     `ArticleListPaneContent` がすべての行で共有する 1 つを `remember` する。flick を続けると指の下の行が
     毎回変わるため。
   - *ドラッグと離したとき。* アームしたあとは移動を消費する（行のタップと長押しは取り消される）。
-    `ARTICLE_SWIPE_THRESHOLD`（56dp）を越えると触覚フィードバックが返り、見えている帯が操作の色になる
-    （`primary` / `StarredColor`、アイコンは `onPrimary` / `OnStarredColor`）。越えたまま離すと、描かれて
+    `ARTICLE_SWIPE_THRESHOLD`（56dp）を越えると触覚フィードバックが返り、見えている帯が操作の色の
+    控えめな container の色になる（`primaryContainer` に `onPrimaryContainer` のアイコン。スターは、M3 に
+    琥珀色の container の役割が無いので、`StarredColor` を帯に 30% 重ねた色に `onSurface` のアイコン）。越えたまま離すと、描かれて
     いる側（`showsLeading`）の操作を実行し、行はアニメーションで戻る。この戻りは次にアームした
     ジェスチャーが取り消す job。戻り終わるまでは帯が離した時点の状態を保つので、行の状態が変わった瞬間に
     反対の操作の表示に変わることはない。

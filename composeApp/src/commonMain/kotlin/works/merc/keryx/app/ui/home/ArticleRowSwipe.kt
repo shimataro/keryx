@@ -19,6 +19,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.translate
@@ -53,6 +54,9 @@ import kotlin.math.roundToInt
 internal val ARTICLE_SWIPE_THRESHOLD = 56.dp
 
 private val SWIPE_ICON_SIZE = 24.dp
+
+/** How much of [StarredColor] the armed star strip lays over the neutral strip — a container's tone, not a full fill. */
+private const val STARRED_CONTAINER_ALPHA = 0.3f
 private val SWIPE_ICON_INSET = 20.dp
 
 /**
@@ -80,8 +84,9 @@ private val SWIPE_ICON_INSET = 20.dp
  * animation. The haptic tick comes only from the drag, never from the spring-back.
  *
  * Short of the threshold the revealed strip is neutral with the action's icon in the action's color;
- * past it the strip fills with that color and the icon turns to the color that reads on it, so the
- * armed state shows as well as being felt. From release until the row is back in place the strip
+ * past it the strip turns to a tonal container of that color (M3's container roles: `primaryContainer`,
+ * and for star [StarredColor] laid thinly over the neutral strip) with the icon in the content color
+ * that reads on it, so the armed state shows as well as being felt without a full-strength fill. From release until the row is back in place the strip
  * keeps the actions as they were at release, rather than swapping to the opposite action the moment
  * the one just run flips the row's state.
  *
@@ -135,12 +140,15 @@ internal fun Modifier.articleRowSwipe(
     val leadingStyle = SwipeStyle(
         icon = painterResource(swipeIcon(articleSwipeLeadingAction(shown.isRead))),
         tint = MaterialTheme.colorScheme.primary,
-        armedColor = MaterialTheme.colorScheme.onPrimary,
+        armedFill = MaterialTheme.colorScheme.primaryContainer,
+        armedIcon = MaterialTheme.colorScheme.onPrimaryContainer,
     )
     val trailingStyle = SwipeStyle(
         icon = painterResource(swipeIcon(articleSwipeTrailingAction(shown.isStarred))),
         tint = StarredColor,
-        armedColor = OnStarredColor,
+        // M3 has no amber container role, so one is made the way a container sits on its surface.
+        armedFill = StarredColor.copy(alpha = STARRED_CONTAINER_ALPHA).compositeOver(stripColor),
+        armedIcon = MaterialTheme.colorScheme.onSurface,
     )
     val leadingLabel = swipeLabel(leading, strings)
     val trailingLabel = swipeLabel(trailing, strings)
@@ -292,10 +300,10 @@ private class RowSwipeState {
 
 /**
  * How one edge's action is drawn: [icon] in [tint] on the neutral strip short of the threshold, and
- * once past it ([drawSwipeStrip]'s `armed`) the strip filled with [tint] under [icon] in
- * [armedColor] — so that releasing now will act is visible, not only felt through the haptic tick.
+ * once past it ([drawSwipeStrip]'s `armed`) the strip filled with [armedFill] under [icon] in
+ * [armedIcon] — so that releasing now will act is visible, not only felt through the haptic tick.
  */
-private class SwipeStyle(val icon: Painter, val tint: Color, val armedColor: Color)
+private class SwipeStyle(val icon: Painter, val tint: Color, val armedFill: Color, val armedIcon: Color)
 
 /**
  * Fills the strip a drag of [x] pixels uncovers and draws [style]'s icon near its outer edge, in the
@@ -305,12 +313,12 @@ private fun DrawScope.drawSwipeStrip(x: Float, stripColor: Color, style: SwipeSt
     val left = if (x > 0f) 0f else size.width + x
     val right = if (x > 0f) x else size.width
     clipRect(left = left, right = right) {
-        drawRect(if (armed) style.tint else stripColor, topLeft = Offset(left, 0f), size = Size(right - left, size.height))
+        drawRect(if (armed) style.armedFill else stripColor, topLeft = Offset(left, 0f), size = Size(right - left, size.height))
         val iconPx = SWIPE_ICON_SIZE.toPx()
         val insetPx = SWIPE_ICON_INSET.toPx()
         val iconLeft = if (x > 0f) insetPx else size.width - insetPx - iconPx
         translate(left = iconLeft, top = (size.height - iconPx) / 2f) {
-            with(style.icon) { draw(Size(iconPx, iconPx), colorFilter = ColorFilter.tint(if (armed) style.armedColor else style.tint)) }
+            with(style.icon) { draw(Size(iconPx, iconPx), colorFilter = ColorFilter.tint(if (armed) style.armedIcon else style.tint)) }
         }
     }
 }
