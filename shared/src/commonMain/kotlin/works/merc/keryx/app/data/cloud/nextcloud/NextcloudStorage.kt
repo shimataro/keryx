@@ -18,7 +18,11 @@ import io.ktor.http.content.TextContent
 import io.ktor.http.encodeURLParameter
 import io.ktor.http.isSuccess
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import works.merc.keryx.app.core.APP_NAME
+import works.merc.keryx.app.core.CONNECTION_TIMEOUT_MS
 import works.merc.keryx.app.core.CloudAuthException
 import works.merc.keryx.app.core.CloudStorageException
 import works.merc.keryx.app.core.MAX_SYNC_DB_SIZE_BYTES
@@ -131,31 +135,33 @@ class NextcloudStorage(
         if (!folder.status.isSuccess() && folder.status.value != 405) return@withCredentials mapError(folder)
 
         val tempUrl = "${folderUrl(credentials)}/${newTempName().encodeURLParameter()}"
-        val put = client.request(tempUrl) {
-            method = HttpMethod.Put
-            authorize(credentials)
-            setBody(FileUploadContent(sourcePath))
-        }
-        if (!put.status.isSuccess()) {
-            deleteQuietly(credentials, tempUrl)
-            return@withCredentials mapError(put)
-        }
-        val moved = try {
-            client.request(tempUrl) {
+        // One cleanup guard over both the PUT and the MOVE: a failure or cancellation anywhere
+        // between them deletes the temporary file (bounded, and even while cancelled) and rethrows.
+        try {
+            val put = client.request(tempUrl) {
+                method = HttpMethod.Put
+                authorize(credentials)
+                setBody(FileUploadContent(sourcePath))
+            }
+            if (!put.status.isSuccess()) {
+                deleteQuietly(credentials, tempUrl)
+                return@withCredentials mapError(put)
+            }
+            val moved = client.request(tempUrl) {
                 method = MOVE
                 authorize(credentials)
                 header("Destination", fileUrl(credentials, path))
                 header("Overwrite", "F")
             }
-        } catch (e: CancellationException) {
-            throw e
+            if (!moved.status.isSuccess()) deleteQuietly(credentials, tempUrl)
+            // 412: the destination already exists — another device created it first.
+            moved.headerRevOrConflictOr(PROVIDER_NAME, WRITE_REV_HEADERS, conflictStatuses = setOf(412))
         } catch (e: Throwable) {
-            deleteQuietly(credentials, tempUrl)
+            withContext(NonCancellable) {
+                withTimeoutOrNull(CONNECTION_TIMEOUT_MS) { deleteQuietly(credentials, tempUrl) }
+            }
             throw e
         }
-        if (!moved.status.isSuccess()) deleteQuietly(credentials, tempUrl)
-        // 412: the destination already exists — another device created it first.
-        moved.headerRevOrConflictOr(PROVIDER_NAME, WRITE_REV_HEADERS, conflictStatuses = setOf(412))
     }
 
     override suspend fun delete(path: String): Result<Unit> = withCredentials { credentials ->

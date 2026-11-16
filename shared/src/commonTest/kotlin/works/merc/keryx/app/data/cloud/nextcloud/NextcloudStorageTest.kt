@@ -291,6 +291,20 @@ class NextcloudStorageTest {
     }
 
     @Test
+    fun createRemovesTheTempFileWhenTheUploadThrows() = runTest {
+        val (s, history, verify) = storage(
+            credentials,
+            { respond("", HttpStatusCode.Created) },
+            { throw kotlinx.io.IOException("connection reset") }, // PUT
+            { respond("", HttpStatusCode.NoContent) }, // DELETE temp
+        )
+        runCatching { s.create(CLOUD_DB_GZ_PATH, uploadSourceOf(byteArrayOf(7))) }
+        assertEquals(listOf("MKCOL", "PUT", "DELETE"), history.map { it.method.value })
+        assertEquals("$base/Keryx/.upload-1.tmp", history[2].url.toString())
+        verify()
+    }
+
+    @Test
     fun createStopsWhenTheFolderCannotBeMade() = runTest {
         val (s, history, verify) = storage(credentials, { respond("", HttpStatusCode.Forbidden) })
         val r = s.create(CLOUD_DB_GZ_PATH, uploadSourceOf(byteArrayOf(7)))
