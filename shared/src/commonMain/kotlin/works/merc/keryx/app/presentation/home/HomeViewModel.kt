@@ -1404,6 +1404,23 @@ class HomeViewModel(
     }
 
     /**
+     * Runs a swipe on an article row — the one implementation behind every UI's row swipe
+     * (`ArticleSwipeActions.kt`). The action names the state it sets, so this only routes it to
+     * [setRead] / [setStarred]; like the context menu, it leaves the selection where it was.
+     *
+     * @param article The swiped row's article.
+     * @param action The action the swiped edge showed.
+     */
+    fun performSwipeAction(article: ArticleListRow, action: ArticleSwipeAction) {
+        when (action) {
+            ArticleSwipeAction.MarkRead -> setRead(article, read = true)
+            ArticleSwipeAction.MarkUnread -> setRead(article, read = false)
+            ArticleSwipeAction.Star -> setStarred(article, starred = true)
+            ArticleSwipeAction.Unstar -> setStarred(article, starred = false)
+        }
+    }
+
+    /**
      * Toggles the starred state of the selected article — every route to it (the reader toolbar, the
      * Article menu) on both UIs. Like [toggleReadSelected], the target is the article the cursor points
      * at, even while its body is still loading, and the result is the opposite of the star the toolbar

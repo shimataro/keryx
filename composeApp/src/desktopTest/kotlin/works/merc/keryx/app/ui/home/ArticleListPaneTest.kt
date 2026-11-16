@@ -80,6 +80,7 @@ class ArticleListPaneTest {
             onSetNewestFirst = {},
             onMarkAllRead = {},
             onSelectArticle = {},
+            onSwipeArticle = { _, _ -> },
             modifier = Modifier.size(360.dp, 600.dp),
             onPullRefresh = onPullRefresh,
         )
@@ -139,6 +140,7 @@ class ArticleListPaneTest {
             onSetNewestFirst = {},
             onMarkAllRead = {},
             onSelectArticle = {},
+            onSwipeArticle = { _, _ -> },
             modifier = Modifier.size(360.dp, 600.dp),
             newArticleCount = newArticleCount,
             onNewArticlesClick = onNewArticlesClick,
@@ -285,6 +287,7 @@ class ArticleListPaneTest {
                 onSetNewestFirst = {},
                 onMarkAllRead = {},
                 onSelectArticle = {},
+                onSwipeArticle = { _, _ -> },
                 modifier = Modifier.size(360.dp, 400.dp),
                 listState = state,
             )
@@ -325,6 +328,7 @@ class ArticleListPaneTest {
                 onSetNewestFirst = {},
                 onMarkAllRead = {},
                 onSelectArticle = {},
+                onSwipeArticle = { _, _ -> },
                 modifier = Modifier.size(360.dp, 400.dp),
                 listState = state,
             )
@@ -366,6 +370,7 @@ class ArticleListPaneTest {
                 onSetNewestFirst = {},
                 onMarkAllRead = {},
                 onSelectArticle = {},
+                onSwipeArticle = { _, _ -> },
                 modifier = Modifier.size(360.dp, 400.dp),
                 listState = state,
             )
@@ -394,6 +399,7 @@ class ArticleListPaneTest {
                 onSetNewestFirst = {},
                 onMarkAllRead = {},
                 onSelectArticle = {},
+                onSwipeArticle = { _, _ -> },
                 modifier = Modifier.size(360.dp, 400.dp),
                 listState = state,
             )
@@ -431,6 +437,7 @@ class ArticleListPaneTest {
                 onSetNewestFirst = {},
                 onMarkAllRead = {},
                 onSelectArticle = {},
+                onSwipeArticle = { _, _ -> },
                 modifier = Modifier.size(360.dp, 400.dp),
                 listState = state,
             )
@@ -462,6 +469,7 @@ class ArticleListPaneTest {
                 onSetNewestFirst = {},
                 onMarkAllRead = {},
                 onSelectArticle = {},
+                onSwipeArticle = { _, _ -> },
                 modifier = Modifier.size(360.dp, containerHeight),
                 listState = state,
             )
@@ -510,6 +518,7 @@ class ArticleListPaneTest {
                 onSetNewestFirst = {},
                 onMarkAllRead = {},
                 onSelectArticle = { selectCount++ },
+                onSwipeArticle = { _, _ -> },
                 onActivated = { activateCount++ },
                 modifier = Modifier.size(360.dp, 400.dp),
             )
@@ -537,6 +546,7 @@ class ArticleListPaneTest {
                 onSetNewestFirst = {},
                 onMarkAllRead = {},
                 onSelectArticle = {},
+                onSwipeArticle = { _, _ -> },
                 modifier = Modifier.size(360.dp, 400.dp),
                 hasNoFeeds = true,
                 onAddFeedClick = { addFeedClicked = true },
@@ -564,6 +574,7 @@ class ArticleListPaneTest {
                 onSetNewestFirst = {},
                 onMarkAllRead = {},
                 onSelectArticle = {},
+                onSwipeArticle = { _, _ -> },
                 modifier = Modifier.size(360.dp, 400.dp),
                 hasNoFeeds = false,
                 onAddFeedClick = { error("must not be reachable when hasNoFeeds is false") },
@@ -587,6 +598,7 @@ class ArticleListPaneTest {
                 onSetNewestFirst = {},
                 onMarkAllRead = {},
                 onSelectArticle = {},
+                onSwipeArticle = { _, _ -> },
                 modifier = Modifier.size(360.dp, 400.dp),
                 hasNoFeeds = false,
                 loading = true,
@@ -616,6 +628,7 @@ class ArticleListPaneTest {
                 onSetNewestFirst = {},
                 onMarkAllRead = {},
                 onSelectArticle = { selectCount++ },
+                onSwipeArticle = { _, _ -> },
                 onActivated = { activateCount++ },
                 modifier = Modifier.size(360.dp, 400.dp),
             )
@@ -819,6 +832,7 @@ class ArticleListPaneTest {
                 onSetNewestFirst = {},
                 onMarkAllRead = {},
                 onSelectArticle = {},
+                onSwipeArticle = { _, _ -> },
                 onShowAllArticles = { showAllCount++ },
             )
         }
