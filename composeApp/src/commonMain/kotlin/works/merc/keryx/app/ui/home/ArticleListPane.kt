@@ -777,6 +777,9 @@ internal fun ArticleListPaneContent(
         }
         listState.scrollToIndexIfNeeded(index)
     }
+    // One for every row: a run of flicks moves a different row under the finger each time, so only
+    // a list-wide lockout sees the previous flick (articleRowSwipe).
+    val swipeLockout = remember { VerticalGestureLockout() }
     val searchHighlight = searchHighlightSpanStyle(
         works.merc.keryx.app.platform.isTouchPrimary,
         MaterialTheme.colorScheme,
@@ -862,6 +865,7 @@ internal fun ArticleListPaneContent(
                             onSetStarred = { starred -> onSetStarred(article, starred) },
                             onCopyUrl = { onCopyArticleUrl(article) },
                             onOpenInBrowser = { onOpenArticleInBrowser(article) },
+                            swipeLockout = swipeLockout,
                             onShare = onShareArticle?.let { share -> { share(article) } },
                             onActivate = onActivated,
                             titleOverride = titleOverride,

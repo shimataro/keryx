@@ -70,6 +70,7 @@ private fun MetadataTestRow(article: ArticleListRow, feedTitle: String) {
         onSetStarred = {},
         onCopyUrl = {},
         onOpenInBrowser = {},
+        swipeLockout = VerticalGestureLockout(),
     )
 }
 

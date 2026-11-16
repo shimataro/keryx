@@ -258,6 +258,8 @@ private class ContextMenuOpenSelection {
  * @param onSetStarred Called with the starred state the context menu's star item promises.
  * @param onCopyUrl Called to copy the article URL.
  * @param onOpenInBrowser Called to open the article URL in a browser.
+ * @param swipeLockout The row swipe's after-a-scroll lockout ([articleRowSwipe]). Required, and
+ *   remembered once per list by the caller, so every row of that list shares it.
  * @param onShare Called to share the article URL; `null` (no share sheet on this platform) leaves the
  *   context menu's Share item out.
  * @param onActivate Called when the context menu is opened on the already-selected row, to move
@@ -288,6 +290,7 @@ internal fun ArticleRow(
     onSetStarred: (Boolean) -> Unit,
     onCopyUrl: () -> Unit,
     onOpenInBrowser: () -> Unit,
+    swipeLockout: VerticalGestureLockout,
     onShare: (() -> Unit)? = null,
     onActivate: () -> Unit = {},
     titleOverride: AnnotatedString? = null,
@@ -329,6 +332,7 @@ internal fun ArticleRow(
                 isRead = !unread,
                 isStarred = article.is_starred == 1L,
                 strings = strings,
+                swipeLockout = swipeLockout,
                 onSwipeAction = { action -> onSwipeAction?.invoke(action) },
             )
             .listRowClickable(interactionSource, selected, onClick)

@@ -1,15 +1,15 @@
 package works.merc.keryx.app.ui.home
 
 import androidx.compose.animation.core.animate
-import androidx.compose.foundation.gestures.Orientation
-import androidx.compose.foundation.gestures.draggable
-import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.absoluteOffset
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
@@ -21,7 +21,12 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.hapticfeedback.HapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChangeIgnoreConsumed
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -31,6 +36,9 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.painterResource
 import works.merc.keryx.app.presentation.home.ArticleSwipeAction
 import works.merc.keryx.app.presentation.home.articleSwipeLeadingAction
@@ -52,21 +60,41 @@ private val SWIPE_ICON_INSET = 20.dp
  * never leaves the list and never selects the row. A haptic tick marks crossing the threshold, and
  * both actions are also exposed as accessibility custom actions, since TalkBack cannot drag.
  *
+ * **Which drags swipe the row** follows the reader's page turn (`articleSwipeNavigation`), since the
+ * row sits on a scrolling list the same way the reader's page does. A `pointerInput` gesture loop on
+ * the default [PointerEventPass.Main] pass sees each event before the enclosing `LazyColumn` (and the
+ * narrow layout's `ModalNavigationDrawer`) and consumes nothing until the drag arms, so a scroll
+ * reaches the list untouched. The drag arms only when [swipeArmsHorizontally] holds — past the touch
+ * slop and clearly more horizontal than vertical, so a diagonal flick stays a scroll. A gesture that
+ * passes the touch slop pointing more vertically than horizontally is latched vertical for the rest
+ * of its life, one that an ancestor has already claimed (the list's scroll, the drawer) never arms,
+ * and one that begins inside [swipeLockout]'s window after a vertical gesture never arms at all.
+ * Once armed, every move is consumed — which also cancels the row's tap and long press, as a
+ * consumed move always does.
+ *
+ * Releasing past the threshold runs the action, judged on the offset the row is drawn at; the row
+ * then springs back. A new gesture that arms during that spring-back cancels it and carries on from
+ * the position the row has reached, so a quick second swipe is neither lost nor fought over by the
+ * animation. The haptic tick comes only from the drag, never from the spring-back.
+ *
  * Built from modifiers on the row's own node rather than M3's `SwipeToDismissBox` — "Standard
  * components over custom drawing" exception 3 (`ui-guidelines`): `SwipeToDismissBox` wraps the row in
  * two to three extra `LayoutNode`s, and the article row sits next to the node-count-sensitive
  * `LazyColumn` reuse-pool crash in `docs/known-issues.md` ("Article list crashes the UI thread during
- * heavy scroll + selection churn"). Move to `SwipeToDismissBox` once that upstream defect is fixed.
+ * heavy scroll + selection churn"). `pointerInput` is a modifier node, not a `LayoutNode`. Move to
+ * `SwipeToDismissBox` once that upstream defect is fixed.
  *
  * Modifier order is load-bearing: the drag is detected on the unmoved node, the revealed strip is
  * drawn behind it there, and only what follows [absoluteOffset] (the row's surface and content) moves
  * with the finger. `absoluteOffset` keeps the offset in screen space, so a rightward drag is the
- * leading edge in a left-to-right layout and the trailing one in a right-to-left one.
+ * leading edge in a left-to-right layout and the trailing one in a right-to-left one ([showsLeading]).
  *
  * @param enabled Whether the row swipes at all (touch-primary only); `false` leaves the row unchanged.
  * @param isRead The row's read state, which picks the leading action.
  * @param isStarred The row's starred state, which picks the trailing action.
  * @param strings The labels for the accessibility actions — the context menu's own.
+ * @param swipeLockout The after-a-scroll lockout, shared by every row of one list — a run of flicks
+ *   moves a different row under the finger each time, so a per-row one would never see the last flick.
  * @param onSwipeAction Runs the chosen action ([works.merc.keryx.app.presentation.home.HomeViewModel.performSwipeAction]).
  */
 @Composable
@@ -75,6 +103,7 @@ internal fun Modifier.articleRowSwipe(
     isRead: Boolean,
     isStarred: Boolean,
     strings: ArticleRowStrings,
+    swipeLockout: VerticalGestureLockout,
     onSwipeAction: (ArticleSwipeAction) -> Unit,
 ): Modifier {
     if (!enabled) return this
@@ -83,14 +112,120 @@ internal fun Modifier.articleRowSwipe(
     val currentLeading by rememberUpdatedState(leading)
     val currentTrailing by rememberUpdatedState(trailing)
     val currentOnSwipeAction by rememberUpdatedState(onSwipeAction)
-    val offset = remember { mutableFloatStateOf(0f) }
-    val haptics = LocalHapticFeedback.current
+    val currentHaptics by rememberUpdatedState(LocalHapticFeedback.current)
+    val scope = rememberCoroutineScope()
+    val swipe = remember { RowSwipeState() }
     val thresholdPx = with(LocalDensity.current) { ARTICLE_SWIPE_THRESHOLD.toPx() }
     val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
     val stripColor = MaterialTheme.colorScheme.surfaceContainerHighest
     val leadingStyle = SwipeStyle(painterResource(swipeIcon(leading)), MaterialTheme.colorScheme.primary)
     val trailingStyle = SwipeStyle(painterResource(swipeIcon(trailing)), StarredColor)
-    val draggableState = rememberDraggableState { delta ->
+    val leadingLabel = swipeLabel(leading, strings)
+    val trailingLabel = swipeLabel(trailing, strings)
+    return this
+        .semantics {
+            customActions = listOf(
+                CustomAccessibilityAction(leadingLabel) { currentOnSwipeAction(currentLeading); true },
+                CustomAccessibilityAction(trailingLabel) { currentOnSwipeAction(currentTrailing); true },
+            )
+        }
+        .pointerInput(swipe, swipeLockout, thresholdPx, rtl) {
+            awaitEachGesture {
+                var dragging = false
+                var total = Offset.Zero
+                // Latched for the rest of the gesture once its travel passes the touch slop while
+                // pointing more down/up than sideways: a scroll must not become a swipe by curving
+                // sideways later.
+                var verticalClaimed = false
+                // An ancestor (the list's scroll, the drawer) took the gesture first.
+                var claimedElsewhere = false
+                try {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    // Resolved once, at the down event, so the answer can't change mid-gesture.
+                    val lockedOut = swipeLockout.isLockedOut(down.uptimeMillis)
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                        if (change.changedToUpIgnoreConsumed()) {
+                            if (dragging) {
+                                change.consume()
+                                dragging = false
+                                val released = swipe.offset.floatValue
+                                if (abs(released) >= thresholdPx) {
+                                    currentOnSwipeAction(
+                                        if (showsLeading(released, rtl)) currentLeading else currentTrailing,
+                                    )
+                                }
+                                swipe.springBack(scope)
+                            } else if (verticalClaimed) {
+                                swipeLockout.onVerticalGestureEnd(change.uptimeMillis)
+                            }
+                            break
+                        }
+                        if (dragging) {
+                            change.consume()
+                            swipe.dragBy(change.positionChangeIgnoreConsumed().x, thresholdPx, currentHaptics)
+                            continue
+                        }
+                        total += change.positionChangeIgnoreConsumed()
+                        // Evaluated before the lockout is consulted, so a vertical flick inside the
+                        // window still extends it — see VerticalGestureLockout.
+                        if (!verticalClaimed &&
+                            abs(total.y) > viewConfiguration.touchSlop &&
+                            abs(total.y) > abs(total.x)
+                        ) {
+                            verticalClaimed = true
+                        }
+                        if (lockedOut || verticalClaimed || claimedElsewhere) continue
+                        if (swipeArmsHorizontally(total.x, total.y, viewConfiguration.touchSlop)) {
+                            change.consume()
+                            dragging = true
+                            swipe.arm()
+                            swipe.dragBy(total.x, thresholdPx, currentHaptics)
+                            continue
+                        }
+                        // The same event's Final pass comes after every ancestor's Main pass: a
+                        // consumed change there means the list started scrolling (or the drawer
+                        // started opening) on it, and the row must not then arm as well.
+                        val final = awaitPointerEvent(PointerEventPass.Final)
+                        if (final.changes.firstOrNull { it.id == down.id }?.isConsumed == true) {
+                            claimedElsewhere = true
+                        }
+                    }
+                } finally {
+                    // A cancelled gesture (node detached, pointer lost) runs nothing, but must not
+                    // leave the row stranded off its place either.
+                    if (dragging) swipe.springBack(scope)
+                }
+            }
+        }
+        .drawBehind {
+            val x = swipe.offset.floatValue
+            if (x == 0f) return@drawBehind
+            drawSwipeStrip(x, stripColor, if (showsLeading(x, rtl)) leadingStyle else trailingStyle)
+        }
+        .absoluteOffset { IntOffset(swipe.offset.floatValue.roundToInt(), 0) }
+}
+
+/**
+ * Whether a row drawn at [offset] reveals — and on release runs — its leading action: a rightward
+ * offset is the leading edge unless the layout is right-to-left.
+ */
+private fun showsLeading(offset: Float, rtl: Boolean): Boolean = (offset > 0f) != rtl
+
+/** The row's horizontal offset and the spring-back animating it home, outliving any one gesture. */
+private class RowSwipeState {
+    val offset = mutableFloatStateOf(0f)
+    private var springBack: Job? = null
+
+    /** A new drag took the row: stop the previous spring-back where it is, so the two never both write [offset]. */
+    fun arm() {
+        springBack?.cancel()
+        springBack = null
+    }
+
+    /** Moves the row by [delta], ticking the haptic when the move crosses [thresholdPx] either way. */
+    fun dragBy(delta: Float, thresholdPx: Float, haptics: HapticFeedback) {
         val before = offset.floatValue
         val after = before + delta
         offset.floatValue = after
@@ -98,36 +233,13 @@ internal fun Modifier.articleRowSwipe(
             haptics.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate)
         }
     }
-    val leadingLabel = swipeLabel(leading, strings)
-    val trailingLabel = swipeLabel(trailing, strings)
-    return this
-        .semantics {
-            customActions = listOf(
-                CustomAccessibilityAction(leadingLabel) { onSwipeAction(leading); true },
-                CustomAccessibilityAction(trailingLabel) { onSwipeAction(trailing); true },
-            )
+
+    fun springBack(scope: CoroutineScope) {
+        val from = offset.floatValue
+        springBack = scope.launch {
+            animate(initialValue = from, targetValue = 0f) { value, _ -> offset.floatValue = value }
         }
-        .draggable(
-            state = draggableState,
-            orientation = Orientation.Horizontal,
-            onDragStopped = {
-                val released = offset.floatValue
-                if (abs(released) >= thresholdPx) {
-                    // Rightward is the leading edge unless the layout is right-to-left.
-                    val leadingSide = (released > 0f) != rtl
-                    currentOnSwipeAction(if (leadingSide) currentLeading else currentTrailing)
-                }
-                animate(initialValue = released, targetValue = 0f) { value, _ -> offset.floatValue = value }
-            },
-        )
-        .drawBehind {
-            val x = offset.floatValue
-            if (x == 0f) return@drawBehind
-            // The style of the edge the drag reveals: the left strip on a rightward drag.
-            val style = if ((x > 0f) != rtl) leadingStyle else trailingStyle
-            drawSwipeStrip(x, stripColor, style)
-        }
-        .absoluteOffset { IntOffset(offset.floatValue.roundToInt(), 0) }
+    }
 }
 
 private class SwipeStyle(val icon: Painter, val tint: Color)
