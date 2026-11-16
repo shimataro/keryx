@@ -134,6 +134,29 @@ class ArticleRowSwipeTest {
     }
 
     @Test
+    fun aSwipePastTheThresholdThatIsNeverReleasedRunsNothing() = runDesktopComposeUiTest {
+        val recorded = showRow(isTouchPrimary = true)
+
+        row().performTouchInput {
+            down(center)
+            // Well past ARTICLE_SWIPE_THRESHOLD (56dp), but not released. The desktop test input
+            // cannot deliver a real pointer cancel (its `enqueueCancel` sends nothing), so the
+            // cancelled-gesture path itself — Compose's already-consumed synthetic up — is not
+            // reachable from here; this covers only that no release means no action, and that the
+            // gesture loop still takes the next swipe.
+            moveBy(Offset(100.dp.toPx(), 0f))
+            cancel()
+        }
+        waitForIdle()
+        assertEquals(emptyList(), recorded.actions)
+
+        // The gesture loop is ready for the next swipe after the cancel.
+        row().performTouchInput { swipeRight() }
+        waitForIdle()
+        assertEquals(listOf(ArticleSwipeAction.MarkRead), recorded.actions)
+    }
+
+    @Test
     fun aDiagonalDragRunsNothing() = runDesktopComposeUiTest {
         val recorded = showRow(isTouchPrimary = true)
 

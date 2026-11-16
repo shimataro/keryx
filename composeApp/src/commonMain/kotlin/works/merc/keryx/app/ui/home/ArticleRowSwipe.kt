@@ -81,7 +81,8 @@ private val SWIPE_ICON_INSET = 20.dp
  * Releasing past the threshold runs the action, judged on the offset the row is drawn at; the row
  * then springs back. A new gesture that arms during that spring-back cancels it and carries on from
  * the position the row has reached, so a quick second swipe is neither lost nor fought over by the
- * animation. The haptic tick comes only from the drag, never from the spring-back.
+ * animation. The haptic tick comes only from the drag, never from the spring-back. A gesture that is
+ * cancelled rather than released springs back without acting.
  *
  * Short of the threshold the revealed strip is neutral with the action's icon in the action's color;
  * past it the strip turns to a tonal container of that color (M3's container roles: `primaryContainer`,
@@ -178,8 +179,18 @@ internal fun Modifier.articleRowSwipe(
                         val change = event.changes.firstOrNull { it.id == down.id } ?: break
                         if (change.changedToUpIgnoreConsumed()) {
                             if (dragging) {
+                                // A cancelled gesture (the system taking the pointer away, say) arrives
+                                // as an up Compose has already consumed (`onCancelPointerInput`); the
+                                // finger never lifted, so it springs back without acting. A real up is
+                                // still unconsumed here — every move since arming was consumed by this
+                                // loop, which already cancelled the row's own tap and long press.
+                                val cancelled = change.isConsumed
                                 change.consume()
                                 dragging = false
+                                if (cancelled) {
+                                    swipe.springBack(scope)
+                                    break
+                                }
                                 val released = swipe.offset.floatValue
                                 if (abs(released) >= thresholdPx) {
                                     currentOnSwipeAction(
