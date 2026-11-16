@@ -74,7 +74,7 @@ class KeychainTokenStorage(
     /**
      * Upserts this provider's item: updates the existing one in place, and adds it only when there
      * is none. Never delete-then-add — that would leave a window where a concurrent [load] sees no
-     * token, and a failed add would already have destroyed the previously valid one.
+     * credentials, and a failed add would already have destroyed the previously valid one.
      */
     override fun save(credentials: CloudCredentials): TokenSaveOutcome {
         val payload = json.encodeToString(CloudCredentialsSerializer, credentials).encodeToByteArray()
@@ -121,7 +121,7 @@ class KeychainTokenStorage(
                 }
             }
         } ?: return null
-        // Only the exception's type is logged: the decoder's message would echo the token payload.
+        // Only the exception's type is logged: the decoder's message would echo the credential payload.
         return runCatching { json.decodeFromString(CloudCredentialsSerializer, bytes.decodeToString()) }
             .onFailure { e -> Log.warn(TOKEN_STORAGE_LOG_TAG, "Stored token payload could not be decoded (${e::class.simpleName})") }
             .getOrNull()
@@ -154,7 +154,7 @@ class KeychainTokenStorage(
     }
 
     companion object {
-        /** The Keychain service every Keryx build stores its tokens under. */
+        /** The Keychain service every Keryx build stores its credentials under. */
         const val KEYCHAIN_SERVICE: String = "works.merc.keryx"
     }
 }

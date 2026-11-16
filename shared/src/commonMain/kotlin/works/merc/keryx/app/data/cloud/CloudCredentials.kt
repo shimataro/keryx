@@ -22,6 +22,9 @@ sealed interface CloudCredentials
 /**
  * Credentials for a server reached with an app password over HTTP Basic authentication.
  *
+ * Introduced ahead of the Nextcloud provider, which will store its Login Flow v2 app password as
+ * one; no provider creates them yet.
+ *
  * @property serverUrl The server's normalized base URL.
  * @property userId The account's user id, which may differ from [loginName] (used in DAV paths).
  * @property loginName The name used to authenticate.
@@ -42,7 +45,8 @@ data class AppPasswordCredentials(
 /**
  * Picks the [CloudCredentials] subtype from the JSON object's keys rather than from a
  * discriminator: an `appPassword` key means [AppPasswordCredentials], anything else is decoded as
- * [OAuthTokens] (and fails if it is not one). Encoding delegates to the subtype's own serializer
+ * [OAuthTokens] (and fails if it is not one). The `appPassword` branch was added ahead of the
+ * Nextcloud provider; no provider writes such credentials yet. Encoding delegates to the subtype's own serializer
  * and adds no discriminator, so an [OAuthTokens] is written byte for byte as it was before
  * [CloudCredentials] existed — the stored format stays readable by older builds too.
  */

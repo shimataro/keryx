@@ -764,6 +764,14 @@ Keychain のアカウント名とフォールバックファイル名は `CloudS
 クラスの既定のシリアライザに切り替えてはならない。既定のものは `"type"` キーを必須とするため、保存済みのトークンが
 すべてデコードできなくなり、利用者は気付かないうちにプロバイダーが未接続になってしまう。
 
+**認証情報のライフサイクル。** 各 `CloudSession.Provider` は、保存した認証情報をどう有効に保ち、どう失効させるかを
+`CloudSession.CredentialLifecycle` で示す。`OAuth`（Dropbox、OneDrive、デスクトップと Apple の Google Drive）は、
+期限切れのアクセストークンを保存済みのリフレッシュトークンで更新して保存し直し、切断時にアクセストークンを失効させる。
+`PlatformOwned`（Android の Google Drive）は、リクエストのたびにプラットフォームから新しいアクセストークンをもらい、
+リフレッシュも保存も行わず、切断時に保存済みのアクセストークンを失効させる（「Android での Google Drive」参照）。
+`Static` は、期限のない認証情報（アプリパスワード）を保存したまま渡し、切断時にプロバイダー自身の失効処理を呼ぶ。
+今後の Nextcloud プロバイダーのためのもので、まだどのプロバイダーも使っていない。
+
 `KEYCHAIN_SERVICE`（`works.merc.keryx`、`data/cloud/KeychainCoordinates.kt`）はデスクトップの全 OS で共通。
 
 - Windows/Linux: OS セキュアストレージ（java-keyring — Credential Manager / Secret Service,
@@ -863,6 +871,9 @@ Keychain のアカウント名とフォールバックファイル名は `CloudS
 
 ### 今後の課題（未対応）
 
+- **Nextcloud プロバイダー（実装中）**: 自分で運用する Nextcloud サーバー向けの 4 つ目のプロバイダー。Login Flow v2 で
+  接続し、そこで発行されるアプリパスワードで認証する。認証情報の土台（`AppPasswordCredentials` と
+  `CloudSession.CredentialLifecycle.Static`）は入っているが、まだどのプロバイダーも使っていない。
 - **file → Keychain 移行 heal**: `.dropbox_tokens.json` にトークンがあり Keychain が空の場合、
   `SecurityCliTokenStorage.load()` で file の値を Keychain へ書き戻し、**read-back 検証に成功した時のみ**
   file を削除する予定（検証失敗時は file を保持しデータ損失を防ぐ）。未実装 — 現在の `load()` は file への

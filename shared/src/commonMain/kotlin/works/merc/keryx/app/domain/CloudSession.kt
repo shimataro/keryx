@@ -100,6 +100,8 @@ class CloudSession(
         /**
          * Credentials that do not expire (an app password): handed out as stored, never refreshed.
          * [revoke] is called with them on disconnect.
+         *
+         * Introduced ahead of the Nextcloud provider; no provider uses it yet.
          */
         class Static(val revoke: suspend (CloudCredentials) -> Result<Unit>) : CredentialLifecycle
     }

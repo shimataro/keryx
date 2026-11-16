@@ -432,6 +432,11 @@ drop テーブルとして渡している。
 リフレッシュを担う。ただし Android の Google Drive だけは例外で、トークンを所有するのは本アプリでは
 なく Play 開発者サービスであるため、プロバイダ自身がライフサイクル
 `CloudSession.CredentialLifecycle.PlatformOwned` で供給し、リフレッシュは一切行わない — sync-architecture.ja.md の「Android での Google Drive」参照。
+各プロバイダーの `CloudSession.CredentialLifecycle` は次の 3 つのいずれか。`OAuth` は期限切れのアクセストークンを
+保存済みのリフレッシュトークンで更新し、切断時にアクセストークンを失効させる。`PlatformOwned` はリクエストのたびに
+プラットフォームから新しいアクセストークンをもらい、何もリフレッシュしない。`Static` は期限のない認証情報
+（アプリパスワード）を保存したまま渡すもので、今後の Nextcloud プロバイダーのためにあり、まだどのビルドも使っていない。
+sync-architecture.ja.md の「認証情報のライフサイクル」参照。
 `SyncRepository` はダウンロード → マージ（`DatabaseMerger`）→ 新記事の増分索引（`indexMissing`）→
 `VACUUM INTO` スナップショット生成（`DatabaseSnapshot`、コピー側で `articles_fts` を除外）→ アップロード
 （rev チェック）、のフローとデバウンス（`SyncScheduler`）を実装する。ライブ DB の FTS は触らない。
@@ -2048,7 +2053,7 @@ iOS 27.1 シミュレーターで計測した結果と、そこから決めた�
 ダウンロード待ちで UI が止まることはない。`completeConnect(type, credentials)` と
 `tearDownConnection(type)` は、`domain/CloudConnectionService.kt`
 （どの UI の接続・切断も従うべき順序を保持し、Compose の設定画面・セットアップ画面とも共有している）を包む
-`suspend` 関数：`completeConnect` はトークンを保存し、プロバイダーを選択し、同期を始める前にローカル設定を
+`suspend` 関数：`completeConnect` は認証情報を保存し、プロバイダーを選択し、同期を始める前にローカル設定を
 フラッシュする。`tearDown` は切断（トークンを失効）し、同期失敗状態とプロバイダーごとの同期マーカーを消去し、
 プロバイダーの選択を解除する。対話的な OAuth フローの待機と初回同期の開始は各 UI に残る。
 `CloudConnectionService` 自体の呼び出しは Keychain でブロックしうるので——下記の `prepareSearchIndex()` と同様に

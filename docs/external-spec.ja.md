@@ -36,6 +36,8 @@ RSS 2.0 / Atom 1.0（RSS 1.0/RDF も緩く解釈）。JSON Feed は α 以降。
   利用できる。Android では Google の Play 開発者サービス `AuthorizationClient` を使う。Play 開発者サービスが
   機能しない端末、および F-Droid 版には Google Drive を選択肢として出さない。アカウントと同期ファイルは
   デスクトップ版と共通。詳細は [sync-architecture.ja.md](sync-architecture.ja.md) の「Android での Google Drive」を参照。
+- **Nextcloud での同期を予定している**: 自分で運用する Nextcloud サーバー（HTTPS のみ）を 4 つ目のプロバイダーとして
+  使えるようにする。まだ利用できない。
 - 同期ファイル形式、`VACUUM INTO` スナップショット、除外するローカル専用テーブル/インデックス、OAuth 詳細、
   トークン保存、マージ動作については [sync-architecture.ja.md](sync-architecture.ja.md) を参照。
 - 同期対象: 購読リスト・フォルダー・既読状態・スター・タグ構造・記事本文・グローバル設定。

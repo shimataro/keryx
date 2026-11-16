@@ -442,7 +442,12 @@ the same three on Android, with Google Drive present only where Play services is
 automatic access-token refresh — except for Android's Google Drive, whose tokens belong to Play
 services rather than to this app, so its provider supplies them itself via
 its `CloudSession.CredentialLifecycle.PlatformOwned` lifecycle and nothing is ever refreshed. See
-sync-architecture.md's "Google Drive on Android". `SyncRepository` implements the download → merge (`DatabaseMerger`)
+sync-architecture.md's "Google Drive on Android". Each provider's `CloudSession.CredentialLifecycle` is
+one of three. `OAuth` refreshes an expired access token with the stored refresh token and revokes the
+access token on disconnect. `PlatformOwned` asks the platform for a fresh access token on every request
+and refreshes nothing. `Static` hands out never-expiring credentials (an app password) as stored and is
+for the upcoming Nextcloud provider, which no build uses yet. See "Credential lifecycles" in
+sync-architecture.md. `SyncRepository` implements the download → merge (`DatabaseMerger`)
 → incremental index of new articles (`indexMissing`) → `VACUUM INTO` snapshot generation
 (`DatabaseSnapshot`, excludes `articles_fts` on the copy side) → upload (rev check) flow, along
 with debouncing (`SyncScheduler`). The live DB's FTS is untouched. `SyncRepository`'s `localDbPath`
@@ -2155,7 +2160,7 @@ so waiting for that download never freezes the UI.
 `completeConnect(type, credentials)` and `tearDownConnection(type)` are
 `suspend` wrappers around `domain/CloudConnectionService.kt` — the ordering every UI's
 connect/disconnect must follow, shared with the Compose settings and setup screens:
-`completeConnect` saves the tokens, selects the provider and flushes the local settings before any
+`completeConnect` saves the credentials, selects the provider and flushes the local settings before any
 sync may start, and `tearDown` disconnects (revoking the tokens), clears the sync failure state and
 per-provider sync markers, and clears the provider selection. Awaiting the interactive OAuth flow
 and starting the initial sync stay with each UI. `CloudConnectionService`'s own calls may block on

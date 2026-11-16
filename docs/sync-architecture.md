@@ -559,6 +559,8 @@ opens a browser directly:
 
 **Stored format.** Every store holds the provider's `CloudCredentials` (`data/cloud/CloudCredentials.kt`) as JSON through `CloudCredentialsSerializer`, which picks the shape from the keys (an `appPassword` key means `AppPasswordCredentials`, anything else `OAuthTokens`) and writes no class discriminator. `OAuthTokens` is therefore stored exactly as it was before `CloudCredentials` existed, and tokens saved by an older build keep loading. Do not switch to the default sealed-class serializer: it requires a `"type"` key, so every stored token would fail to decode and the user would silently find the provider disconnected.
 
+**Credential lifecycles.** Each `CloudSession.Provider` says how its stored credentials stay valid and are revoked through a `CloudSession.CredentialLifecycle`. `OAuth` (Dropbox, OneDrive, and Google Drive on desktop and Apple) renews an expired access token with the stored refresh token, saves the renewed tokens, and revokes the access token on disconnect. `PlatformOwned` (Google Drive on Android) asks the platform for a fresh access token on every request, never refreshes or saves anything, and revokes the stored access token on disconnect — see "Google Drive on Android". `Static` hands out credentials that never expire (an app password) exactly as stored and calls the provider's own revoke on disconnect; it is there for the upcoming Nextcloud provider and no provider uses it yet.
+
 `KEYCHAIN_SERVICE` (`works.merc.keryx`, `data/cloud/KeychainCoordinates.kt`) is shared by every desktop OS.
 
 - Windows/Linux: OS secure storage (java-keyring — Credential Manager / Secret Service, `KeyringTokenStorage`).
@@ -651,6 +653,7 @@ opens a browser directly:
 
 ### Future Work (not yet supported)
 
+- **Nextcloud provider (in progress)**: a fourth provider for a self-hosted Nextcloud server, connected through Login Flow v2 and authenticated with the app password it issues. The credential groundwork is already in place — `AppPasswordCredentials` and `CloudSession.CredentialLifecycle.Static` — but no provider uses it yet.
 - **file → Keychain migration heal**: If `.dropbox_tokens.json` exists but Keychain is empty, `SecurityCliTokenStorage.load()` would write the file value back to Keychain and **delete the file only if read-back verification succeeds** (on failure, keep the file to prevent data loss). Not yet implemented — `load()` currently only falls back to the file, without writing back.
 
 ## Sync Target Article Range
