@@ -1607,7 +1607,8 @@ SwiftUI アプリは、共有 Kotlin コードを Kotlin/Native の framework �
 - Swift 側は、共有 state holder の `StateFlow` を薄い `@Observable` アダプタ経由で購読する。
 - **ローカライズ済みテキストは UI 層で解決し、共有コードでは決して解決しない。** 共有コードはメッセージ ID と引数を出力する。
   Compose アプリは Compose Resources で、SwiftUI アプリは同じ `strings.xml` から生成した String Catalog で解決するので、2 つの
-  ロケールのソースは 1 つに保たれる。
+  ロケールのソースは 1 つに保たれる。Info.plist の利用目的の説明文（ローカルネットワーク利用の許可ダイアログの文言）も同じファイルから
+  `InfoPlist.xcstrings` に生成する——[build.ja.md](build.ja.md) の「Apple アプリ用の String Catalog」を参照。
 
 ### `:shared` の Apple ターゲット
 

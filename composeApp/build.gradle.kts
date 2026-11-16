@@ -237,6 +237,9 @@ kotlin {
 // language, as it is here. Android-style positional placeholders become their Apple equivalents
 // (%1$s -> %1$@, %1$d -> %1$lld) and <plurals> become plural variations (or, with several
 // arguments, a substitution — see pluralLocalization).
+// The app's Info.plist usage descriptions come from the same files: an `apple_infoplist_*` key is
+// mapped (infoPlistKeys) to the Info.plist key it localizes and written to InfoPlist.xcstrings
+// instead of Localizable.xcstrings, so Xcode localizes the permission prompt from it.
 abstract class GenerateStringCatalogTask : DefaultTask() {
     @get:InputDirectory
     abstract val resourcesDir: DirectoryProperty
@@ -244,10 +247,20 @@ abstract class GenerateStringCatalogTask : DefaultTask() {
     @get:OutputFile
     abstract val outputFile: RegularFileProperty
 
+    /** The Info.plist strings catalog (`InfoPlist.xcstrings`). */
+    @get:OutputFile
+    abstract val infoPlistOutputFile: RegularFileProperty
+
+    /** strings.xml key (`apple_infoplist_*`) -> the Info.plist key it localizes. */
+    @get:Input
+    abstract val infoPlistKeys: MapProperty<String, String>
+
     @TaskAction
     fun generate() {
         val locales = linkedMapOf("ja" to "values-ja", "en" to "values")
         val strings = sortedMapOf<String, MutableMap<String, Any>>()
+        val infoPlistStrings = sortedMapOf<String, MutableMap<String, Any>>()
+        val plistKeys = infoPlistKeys.get()
         for ((locale, dir) in locales) {
             val file = resourcesDir.get().asFile.resolve("$dir/strings.xml")
             val doc = javax.xml.parsers.DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(file)
@@ -268,14 +281,38 @@ abstract class GenerateStringCatalogTask : DefaultTask() {
                     }
                     else -> continue
                 }
-                val entry = strings.getOrPut(name) { mutableMapOf("extractionState" to "manual", "localizations" to sortedMapOf<String, Any>()) }
+                val entry = if (name.startsWith(INFO_PLIST_PREFIX)) {
+                    val plistKey = plistKeys[name]
+                        ?: throw GradleException("$name has no Info.plist key in generateStringCatalog's infoPlistKeys")
+                    infoPlistStrings.getOrPut(plistKey) {
+                        mutableMapOf(
+                            // Names the strings.xml key it came from, so StringCatalogParityTest can
+                            // check it against the resource without repeating infoPlistKeys.
+                            "comment" to "$INFO_PLIST_COMMENT_PREFIX$name",
+                            "extractionState" to "manual",
+                            "localizations" to sortedMapOf<String, Any>(),
+                        )
+                    }
+                } else {
+                    strings.getOrPut(name) { mutableMapOf("extractionState" to "manual", "localizations" to sortedMapOf<String, Any>()) }
+                }
                 @Suppress("UNCHECKED_CAST")
                 (entry["localizations"] as MutableMap<String, Any>)[locale] = localization
             }
         }
+        writeCatalog(outputFile, strings)
+        writeCatalog(infoPlistOutputFile, infoPlistStrings)
+    }
+
+    private fun writeCatalog(file: RegularFileProperty, strings: Map<String, Any>) {
         val catalog = mapOf("sourceLanguage" to "en", "strings" to strings, "version" to "1.0")
-        outputFile.get().asFile.apply { parentFile.mkdirs() }
+        file.get().asFile.apply { parentFile.mkdirs() }
             .writeText(groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(catalog)) + "\n")
+    }
+
+    private companion object {
+        const val INFO_PLIST_PREFIX = "apple_infoplist_"
+        const val INFO_PLIST_COMMENT_PREFIX = "Generated from strings.xml key "
     }
 
     private fun unit(raw: String) = translated(appleValue(raw))
@@ -328,6 +365,10 @@ abstract class GenerateStringCatalogTask : DefaultTask() {
 val generateStringCatalog = tasks.register<GenerateStringCatalogTask>("generateStringCatalog") {
     resourcesDir.set(layout.projectDirectory.dir("src/commonMain/composeResources"))
     outputFile.set(layout.buildDirectory.file("generated/stringCatalog/Localizable.xcstrings"))
+    infoPlistOutputFile.set(layout.buildDirectory.file("generated/stringCatalog/InfoPlist.xcstrings"))
+    // Shown when the app first reaches a server on the local network (a Nextcloud at home, say) —
+    // iOS, and macOS 15 or later.
+    infoPlistKeys.put("apple_infoplist_local_network_usage", "NSLocalNetworkUsageDescription")
 }
 
 // StringCatalogParityTest checks the generated catalog against strings.xml.

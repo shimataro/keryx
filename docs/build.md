@@ -232,6 +232,7 @@ The SwiftUI app localizes through an Xcode String Catalog generated from the Com
 ```bash
 ./gradlew :composeApp:generateStringCatalog
 # -> composeApp/build/generated/stringCatalog/Localizable.xcstrings
+# -> composeApp/build/generated/stringCatalog/InfoPlist.xcstrings
 ```
 
 The generator resolves Android resource escapes (`\n`, `\'`, …), maps positional placeholders to
@@ -240,10 +241,19 @@ is a build output — never edit or commit it; change `strings.xml` instead.
 `StringCatalogParityTest` (run by `desktopTest`, which generates the catalog first) fails if the
 catalog and the resources disagree on keys, plural forms or placeholders.
 
+The Info.plist usage descriptions are generated the same way. An `apple_infoplist_*` key in
+`strings.xml` (today `apple_infoplist_local_network_usage`, the explanation in the local-network
+permission prompt iOS and macOS 15 or later show when the app first reaches a server on the local
+network, such as a home Nextcloud) is written to `InfoPlist.xcstrings` instead of
+`Localizable.xcstrings`, under the Info.plist key it localizes (`NSLocalNetworkUsageDescription`).
+`generateStringCatalog`'s `infoPlistKeys` maps one to the other, and the build fails on an
+`apple_infoplist_*` key it does not map. `project.yml`'s `info.properties` carries the English text as
+the Info.plist default; `StringCatalogParityTest` checks that it matches `strings.xml`.
+
 `appleApp/project.yml`'s `sources:` list references the generated file directly
-(`../composeApp/build/generated/stringCatalog/Localizable.xcstrings`), so `xcodegen generate` bundles
-whatever `build-shared.sh`'s prebuild step most recently wrote — the file only needs to exist once,
-before the first `xcodegen generate`.
+(`../composeApp/build/generated/stringCatalog/Localizable.xcstrings`, and `InfoPlist.xcstrings` beside
+it), so `xcodegen generate` bundles whatever `build-shared.sh`'s prebuild step most recently wrote —
+the files only need to exist once, before the first `xcodegen generate`.
 
 **A Swift call site never uses a literal English string as the
 key** the way `Text("Some Label")` ordinarily would: the catalog's own top-level keys are exactly the

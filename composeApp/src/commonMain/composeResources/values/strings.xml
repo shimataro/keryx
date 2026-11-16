@@ -443,4 +443,9 @@
     <string name="apple_tag_color_pink">Pink</string>
     <!-- Apple (SwiftUI) app only — VoiceOver label of the Clear button at the end of the name field. -->
     <string name="apple_clear_text">Clear text</string>
+    <!-- Apple (SwiftUI) app only — Info.plist's NSLocalNetworkUsageDescription, the explanation in the
+         permission prompt iOS (and macOS 15 or later) shows when the app first reaches a server on
+         the local network. generateStringCatalog writes apple_infoplist_* keys to InfoPlist.xcstrings,
+         not Localizable.xcstrings. -->
+    <string name="apple_infoplist_local_network_usage">Keryx connects to the Nextcloud server you choose, which may be on your local network, to sync your subscriptions and reading state.</string>
 </resources>

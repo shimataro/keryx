@@ -431,4 +431,9 @@
     <string name="apple_tag_color_pink">ピンク</string>
     <!-- Apple (SwiftUI) app only — VoiceOver label of the Clear button at the end of the name field. -->
     <string name="apple_clear_text">テキストを消去</string>
+    <!-- Apple（SwiftUI）版のみ — Info.plist の NSLocalNetworkUsageDescription。ローカルネットワーク上の
+         サーバーに初めて接続するときに iOS（と macOS 15 以降）が表示する許可ダイアログの説明文。
+         generateStringCatalog は apple_infoplist_* のキーを Localizable.xcstrings ではなく
+         InfoPlist.xcstrings に書き出す。 -->
+    <string name="apple_infoplist_local_network_usage">購読と既読状態を同期するため、Keryx は選択された Nextcloud サーバーに接続します。サーバーはローカルネットワーク上にある場合があります。</string>
 </resources>

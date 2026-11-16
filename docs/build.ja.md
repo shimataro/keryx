@@ -232,6 +232,7 @@ SwiftUI アプリは Xcode の String Catalog でローカライズする。こ�
 ```bash
 ./gradlew :composeApp:generateStringCatalog
 # -> composeApp/build/generated/stringCatalog/Localizable.xcstrings
+# -> composeApp/build/generated/stringCatalog/InfoPlist.xcstrings
 ```
 
 生成処理は Android リソースのエスケープ（`\n`、`\'` など）を解決し、位置指定のプレースホルダを Apple 形式に変換し
@@ -239,10 +240,18 @@ SwiftUI アプリは Xcode の String Catalog でローカライズする。こ�
 編集もコミットもしない——変更は `strings.xml` に対して行う。`StringCatalogParityTest`（`desktopTest` で実行され、その前に
 カタログが生成される）は、カタログとリソースのキー・複数形・プレースホルダが食い違うと失敗する。
 
+Info.plist の利用目的の説明文も同じ方法で生成する。`strings.xml` の `apple_infoplist_*` キー（現在は
+`apple_infoplist_local_network_usage`。家庭内の Nextcloud などローカルネットワーク上のサーバーにアプリが初めて接続するときに、
+iOS と macOS 15 以降が表示するローカルネットワーク利用の許可ダイアログの説明文）は、`Localizable.xcstrings` ではなく
+`InfoPlist.xcstrings` に、対応する Info.plist のキー（`NSLocalNetworkUsageDescription`）で書き出される。対応付けは
+`generateStringCatalog` の `infoPlistKeys` が持ち、対応付けのない `apple_infoplist_*` キーがあるとビルドが失敗する。
+`project.yml` の `info.properties` には英語の文言を Info.plist の既定値として置き、`StringCatalogParityTest` がそれと
+`strings.xml` の一致を確かめる。
+
 `appleApp/project.yml` の `sources:` は生成済みファイル
-（`../composeApp/build/generated/stringCatalog/Localizable.xcstrings`）を直接参照するので、
+（`../composeApp/build/generated/stringCatalog/Localizable.xcstrings` と、その隣の `InfoPlist.xcstrings`）を直接参照するので、
 `xcodegen generate` は `build-shared.sh` の prebuild ステップが最後に書き出した内容をそのまま
-取り込む——このファイルは最初の `xcodegen generate` より前に一度存在してさえいればよい。
+取り込む——これらのファイルは最初の `xcodegen generate` より前に一度存在してさえいればよい。
 
 **Swift の
 呼び出し側は、通常の `Text("Some Label")` のように英語のリテラル文字列をキーとして使うことはない**：

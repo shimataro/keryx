@@ -1665,7 +1665,9 @@ platform:
 - **Localized text is resolved in the UI layer, never in shared code.** Shared code emits
   message IDs plus arguments. The Compose app resolves them through Compose Resources, and the
   SwiftUI app through a String Catalog generated from the same `strings.xml` files, so the two
-  locales keep one source.
+  locales keep one source. The Info.plist usage descriptions (the local-network permission prompt's
+  text) are generated from them too, into `InfoPlist.xcstrings` — see "String Catalog for the Apple
+  app" in [build.md](build.md).
 
 ### Apple targets in `:shared`
 
