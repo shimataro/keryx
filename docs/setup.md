@@ -380,7 +380,10 @@ Nextcloud needs no API key and no redirect, so `./gradlew :composeApp:run` can c
 certificate the OS trusts**: a plain `http://` address is refused, and so is a self-signed
 certificate. To test against the official `nextcloud` Docker image, put it behind a TLS proxy with
 a certificate from a local CA the OS (and, for a device or emulator, the device) trusts — e.g. one
-made with `mkcert`, after `mkcert -install`. Use a test server only, never a real account's.
+made with `mkcert`, after `mkcert -install`. On Android, the app (targetSdk 37, no Network Security
+Config) trusts only the **system** CA store, not CAs the user added in Settings, so installing the
+`mkcert` root as a user certificate on the device is not enough: install it as a system CA on the
+device or emulator (e.g. a rooted emulator image). Use a test server only, never a real account's.
 
 ### `./gradlew :composeApp:run` does not complete Dropbox / OneDrive linking (all desktop OSes)
 
