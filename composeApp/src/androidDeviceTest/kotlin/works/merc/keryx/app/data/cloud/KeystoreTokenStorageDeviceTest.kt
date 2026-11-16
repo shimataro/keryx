@@ -131,6 +131,23 @@ class KeystoreTokenStorageDeviceTest {
         assertEquals(tokens, fixture.storage.load())
     }
 
+    @Test
+    fun appPasswordCredentialsRoundTripThroughRealKeystoreEncryption() {
+        val fixture = newStorage()
+        val credentials = AppPasswordCredentials(
+            serverUrl = "https://cloud.example.com",
+            userId = "alice",
+            loginName = "alice@example.com",
+            appPassword = "app-password",
+        )
+
+        assertEquals(TokenSaveOutcome.SECURE, fixture.storage.save(credentials))
+        // As above: the encrypted file must exist, or load() could be reading the fallback instead.
+        assertTrue(fixture.encryptedFile.exists() && fixture.encryptedFile.length() > 0)
+        assertTrue(!fixture.fallbackFile.exists())
+        assertEquals(credentials, fixture.storage.load())
+    }
+
     /**
      * A successful encrypted save may report [TokenSaveOutcome.SECURE] only once the plaintext
      * copy is actually gone. `clear()` swallows a `File.delete()` that returned false, so a

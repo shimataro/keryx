@@ -721,4 +721,81 @@ class CloudSessionTest {
 
         assertTrue(!revokeCalled)
     }
+
+    @Test
+    fun platformOwnedDisconnectRevokesTheStoredAccessTokenThenClears() = runBlocking {
+        var revokeAuthHeader: String? = null
+        val storage = FakeTokenStorage(OAuthTokens("STORED"))
+        val s = session(
+            storage,
+            authHandler = { request ->
+                if (request.url.encodedPath.contains("token/revoke")) revokeAuthHeader = request.headers["Authorization"]
+                respond("", HttpStatusCode.OK)
+            },
+            // The platform would mint a different token; disconnect revokes the stored one.
+            accessTokenProvider = { "MINTED" },
+        )
+
+        s.disconnect(CloudStorageType.DROPBOX)
+
+        assertEquals("Bearer STORED", revokeAuthHeader)
+        assertNull(storage.stored)
+        assertTrue(!s.isConnected())
+    }
+
+    /**
+     * An OAuth-revocable lifecycle can only revoke an access token. Credentials of another kind in
+     * its store (an app password) send no revoke request, but disconnect still clears them.
+     */
+    private fun assertDisconnectClearsAppPasswordWithoutRevoking(accessTokenProvider: (suspend () -> String?)?) = runBlocking {
+        var httpCalls = 0
+        val storage = FakeTokenStorage(appPassword)
+        val s = session(
+            storage,
+            authHandler = {
+                httpCalls++
+                respond("", HttpStatusCode.OK)
+            },
+            accessTokenProvider = accessTokenProvider,
+        )
+
+        s.disconnect(CloudStorageType.DROPBOX)
+
+        assertEquals(0, httpCalls)
+        assertNull(storage.stored)
+        assertTrue(!s.isConnected())
+    }
+
+    @Test
+    fun oauthDisconnectClearsAppPasswordCredentialsWithoutRevoking() =
+        assertDisconnectClearsAppPasswordWithoutRevoking(accessTokenProvider = null)
+
+    @Test
+    fun platformOwnedDisconnectClearsAppPasswordCredentialsWithoutRevoking() =
+        assertDisconnectClearsAppPasswordWithoutRevoking(accessTokenProvider = { "MINTED" })
+
+    @Test
+    fun oauthLifecycleSuppliesNoCredentialsWhenTheStoreHoldsAnAppPassword() = runBlocking {
+        var httpCalls = 0
+        var supplier: (suspend () -> CloudCredentials?)? = null
+        val client = client {
+            httpCalls++
+            respond("{}", HttpStatusCode.OK)
+        }
+        val s = singleProviderCloudSession(
+            client = client,
+            tokenStorage = FakeTokenStorage(appPassword),
+            authManager = DropboxAuthManager(client),
+            clock = Clock { Long.MAX_VALUE },
+            createStorage = { credentials ->
+                supplier = credentials
+                DropboxStorage(client, oauthAccessToken(credentials))
+            },
+        )
+
+        assertNotNull(s.current())
+
+        assertNull(assertNotNull(supplier).invoke())
+        assertEquals(0, httpCalls)
+    }
 }
