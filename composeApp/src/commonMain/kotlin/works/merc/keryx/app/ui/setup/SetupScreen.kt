@@ -20,6 +20,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -71,7 +72,9 @@ fun SetupScreen(onComplete: () -> Unit) {
     // Confirmation-dialog trigger for aborting an in-flight OAuth wait.
     var confirmingAbortConnect by remember { mutableStateOf(false) }
     // The provider whose server-address dialog is open (one that requiresServerUrl), or null.
-    var askingServerFor by remember { mutableStateOf<CloudStorageType?>(null) }
+    // Kept as the provider's id in saveable state, so the dialog survives an activity recreation.
+    var askingServerForId by rememberSaveable { mutableStateOf<String?>(null) }
+    val askingServerFor = CloudStorageType.fromId(askingServerForId)
     val phase by vm.phase.collectAsState()
     val canCancelConnect by vm.canCancelConnect.collectAsState()
     val connectingType by vm.connectingType.collectAsState()
@@ -147,7 +150,7 @@ fun SetupScreen(onComplete: () -> Unit) {
                             FlatTonalButton(
                                 onClick = {
                                     if (type.requiresServerUrl) {
-                                        askingServerFor = type
+                                        askingServerForId = type.id
                                     } else {
                                         vm.connect(type, onDone = onComplete)
                                     }
@@ -202,9 +205,9 @@ fun SetupScreen(onComplete: () -> Unit) {
     askingServerFor?.let { type ->
         NextcloudServerDialog(
             initialUrl = "",
-            onDismiss = { askingServerFor = null },
+            onDismiss = { askingServerForId = null },
             onConfirmed = { request ->
-                askingServerFor = null
+                askingServerForId = null
                 vm.connect(type, request, onComplete)
             },
         )

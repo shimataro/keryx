@@ -20,6 +20,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -33,7 +36,6 @@ import org.jetbrains.compose.resources.DrawableResource
 import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.stringResource
 import works.merc.keryx.app.core.CloudStorageType
-import works.merc.keryx.app.domain.CloudConnectRequest
 import works.merc.keryx.app.domain.SyncPhase
 import works.merc.keryx.app.platform.isTouchPrimary
 import works.merc.keryx.app.ui.common.FlatButton
@@ -124,7 +126,10 @@ internal fun CloudSyncTabContent(vm: SettingsViewModel) {
     var confirmingResetCloudData by remember { mutableStateOf(false) }
     // The open server-address dialog of a provider that requiresServerUrl (Nextcloud), with what
     // to do once the address passed — connect, switch or reconnect. Cancelling it does nothing.
-    var askingServer by remember { mutableStateOf<ServerDialogRequest?>(null) }
+    // Saveable, so the dialog survives an activity recreation (rotation) on Android.
+    var askingServer by rememberSaveable(stateSaver = ServerDialogRequestSaver) {
+        mutableStateOf<ServerDialogRequest?>(null)
+    }
     val scope = rememberCoroutineScope()
 
     Column(Modifier.fillMaxWidth().padding(16.dp)) {
@@ -185,7 +190,7 @@ internal fun CloudSyncTabContent(vm: SettingsViewModel) {
                     onSelect = {
                         when {
                             connected != null -> confirmingSwitchTo = type
-                            type.requiresServerUrl -> askingServer = ServerDialogRequest("") { vm.connect(type, it) }
+                            type.requiresServerUrl -> askingServer = ServerDialogRequest(type, ServerDialogKind.CONNECT, "")
                             else -> vm.connect(type)
                         }
                     },
@@ -196,7 +201,11 @@ internal fun CloudSyncTabContent(vm: SettingsViewModel) {
                         if (type.requiresServerUrl) {
                             // Read the stored server before the reconnect clears it, to start from it.
                             scope.launch {
-                                askingServer = ServerDialogRequest(vm.reconnectServerUrl().orEmpty()) { vm.reconnect(it) }
+                                askingServer = ServerDialogRequest(
+                                    type,
+                                    ServerDialogKind.RECONNECT,
+                                    vm.reconnectServerUrl().orEmpty(),
+                                )
                             }
                         } else {
                             vm.reconnect()
@@ -243,7 +252,11 @@ internal fun CloudSyncTabContent(vm: SettingsViewModel) {
             onDismiss = { askingServer = null },
             onConfirmed = { connectRequest ->
                 askingServer = null
-                request.onConfirmed(connectRequest)
+                when (request.kind) {
+                    ServerDialogKind.CONNECT -> vm.connect(request.type, connectRequest)
+                    ServerDialogKind.RECONNECT -> vm.reconnect(connectRequest)
+                    ServerDialogKind.SWITCH -> vm.switchTo(request.type, connectRequest)
+                }
             },
         )
     }
@@ -292,7 +305,7 @@ internal fun CloudSyncTabContent(vm: SettingsViewModel) {
                 // The server is asked for only once the switch is confirmed; cancelling that dialog
                 // leaves the current connection alone.
                 if (type.requiresServerUrl) {
-                    askingServer = ServerDialogRequest("") { vm.switchTo(type, it) }
+                    askingServer = ServerDialogRequest(type, ServerDialogKind.SWITCH, "")
                 } else {
                     vm.switchTo(type)
                 }
@@ -302,8 +315,30 @@ internal fun CloudSyncTabContent(vm: SettingsViewModel) {
     }
 }
 
-/** An open server-address dialog: the address it starts from, and the action a checked address runs. */
-private class ServerDialogRequest(val initialUrl: String, val onConfirmed: (CloudConnectRequest) -> Unit)
+/** Which action a checked server address runs. */
+internal enum class ServerDialogKind { CONNECT, RECONNECT, SWITCH }
+
+/**
+ * An open server-address dialog: the provider, the action a checked address runs, and the address it
+ * starts from. Plain data (no lambda) so [ServerDialogRequestSaver] can keep it across an activity
+ * recreation; the action is rebuilt from [kind] when the address is confirmed.
+ */
+internal data class ServerDialogRequest(
+    val type: CloudStorageType,
+    val kind: ServerDialogKind,
+    val initialUrl: String,
+)
+
+/** Saves a [ServerDialogRequest] as `[type id, kind name, initial URL]`. */
+internal val ServerDialogRequestSaver: Saver<ServerDialogRequest?, Any> = listSaver(
+    save = { request -> if (request == null) emptyList() else listOf(request.type.id, request.kind.name, request.initialUrl) },
+    restore = { values ->
+        val type = CloudStorageType.fromId(values.getOrNull(0))
+        val kind = ServerDialogKind.entries.firstOrNull { it.name == values.getOrNull(1) }
+        val url = values.getOrNull(2)
+        if (type == null || kind == null || url == null) null else ServerDialogRequest(type, kind, url)
+    },
+)
 
 /**
  * The destructive "reset cloud sync data" confirmation, shared by this tab's own reset button and
