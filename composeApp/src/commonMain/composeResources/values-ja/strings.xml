@@ -387,6 +387,9 @@
     <string name="error_feed_not_found">フィードが見つかりませんでした</string>
     <string name="error_generic">エラーが発生しました</string>
     <string name="error_update">アップデートに失敗しました</string>
+    <string name="error_nextcloud_https_required">サーバーのアドレスは HTTPS である必要があります。https:// で始まるアドレスを入力してください。</string>
+    <string name="error_nextcloud_not_found">このアドレスに Nextcloud サーバーが見つかりません。URL を確認して、もう一度お試しください。</string>
+    <string name="error_nextcloud_unreachable">サーバーに接続できません。アドレスとインターネット接続を確認して、もう一度お試しください。</string>
 
     <!-- Apple (SwiftUI) app only — a fixed-wording, non-plural counterpart to Compose's own
          two-argument home_add_feed_partial. Formatted via LF, same as every other Apple-only

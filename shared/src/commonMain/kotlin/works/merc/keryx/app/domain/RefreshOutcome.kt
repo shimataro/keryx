@@ -12,6 +12,7 @@ import works.merc.keryx.app.core.FeedNotFoundException
 import works.merc.keryx.app.core.FeedParseException
 import works.merc.keryx.app.core.FeedTimeoutException
 import works.merc.keryx.app.core.InfoDialogText
+import works.merc.keryx.app.core.NextcloudServerException
 import works.merc.keryx.app.core.NotificationText
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.core.SchemaVersionException
@@ -50,6 +51,7 @@ fun isUnreachable(results: Map<String, Result<Int>>): Boolean =
             null, is FeedParseException, is FeedDiscoveryException, is FeedNotFoundException,
             is CloudAuthException, is CloudStorageException, is SyncConflictException,
             is SchemaVersionException, is CloudDataIncompatibleException, is UpdateException,
+            is NextcloudServerException,
             -> false
         }
     }

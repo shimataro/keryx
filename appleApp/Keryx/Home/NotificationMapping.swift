@@ -46,6 +46,9 @@ func errorKindMessage(_ kind: ErrorKind) -> String {
     case .syncConflict: return L("error_sync_conflict")
     case .schemaVersion: return L("error_schema_version")
     case .update: return L("error_update")
+    case .nextcloudHttpsRequired: return L("error_nextcloud_https_required")
+    case .nextcloudNotFound: return L("error_nextcloud_not_found")
+    case .nextcloudUnreachable: return L("error_nextcloud_unreachable")
     case .generic: return L("error_generic")
     }
 }

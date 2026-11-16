@@ -399,6 +399,9 @@
     <string name="error_feed_not_found">Feed not found</string>
     <string name="error_generic">An error occurred</string>
     <string name="error_update">Update failed</string>
+    <string name="error_nextcloud_https_required">The server address must use HTTPS. Enter an address that starts with https://.</string>
+    <string name="error_nextcloud_not_found">No Nextcloud server was found at this address. Check the URL and try again.</string>
+    <string name="error_nextcloud_unreachable">Couldn’t reach the server. Check the address and your internet connection, then try again.</string>
 
     <!-- Apple (SwiftUI) app only — a fixed-wording, non-plural counterpart to Compose's own
          two-argument home_add_feed_partial. Formatted via LF, same as every other Apple-only

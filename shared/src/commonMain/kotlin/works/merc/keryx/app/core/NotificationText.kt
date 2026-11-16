@@ -65,6 +65,9 @@ enum class ErrorKind {
     SYNC_CONFLICT,
     SCHEMA_VERSION,
     UPDATE,
+    NEXTCLOUD_HTTPS_REQUIRED,
+    NEXTCLOUD_NOT_FOUND,
+    NEXTCLOUD_UNREACHABLE,
     GENERIC,
 }
 
@@ -82,6 +85,11 @@ val KeryxException.errorKind: ErrorKind
         is SchemaVersionException -> ErrorKind.SCHEMA_VERSION
         is UpdateException -> ErrorKind.UPDATE
         is FeedDiscoveryException -> ErrorKind.GENERIC
+        is NextcloudServerException -> when (problem) {
+            NextcloudServerProblem.HTTPS_REQUIRED -> ErrorKind.NEXTCLOUD_HTTPS_REQUIRED
+            NextcloudServerProblem.NOT_NEXTCLOUD -> ErrorKind.NEXTCLOUD_NOT_FOUND
+            NextcloudServerProblem.UNREACHABLE -> ErrorKind.NEXTCLOUD_UNREACHABLE
+        }
     }
 
 /**
