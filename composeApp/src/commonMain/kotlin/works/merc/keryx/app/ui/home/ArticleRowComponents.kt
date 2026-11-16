@@ -43,6 +43,7 @@ import works.merc.keryx.app.platform.NativeMenuSeparator
 import works.merc.keryx.app.platform.NativeMenuShortcut
 import works.merc.keryx.app.platform.nativeContextMenu
 import works.merc.keryx.app.presentation.formatTimestamp
+import works.merc.keryx.app.presentation.home.ArticleSwipeAction
 import works.merc.keryx.app.presentation.home.articleReadAfterContextMenuOpen
 import works.merc.keryx.app.presentation.home.canOpenInBrowser
 import works.merc.keryx.app.presentation.home.canShareArticleUrl
@@ -269,7 +270,9 @@ private class ContextMenuOpenSelection {
  *   created internally) so [ripplePulse] can be exercised directly in tests.
  * @param isTouchPrimary Whether to expose the row's unread/starred state as a semantics
  *   `stateDescription` (see [articleRowStateDescription]). Defaults to the platform's own value;
- *   a parameter so the Android path can be exercised in desktop tests.
+ *   a parameter so the Android path can be exercised in desktop tests. Also gates the row's swipe.
+ * @param onSwipeAction Runs the action a swipe on the row chose ([articleRowSwipe]); `null` leaves the
+ *   row without a swipe. Only a touch-primary platform ([isTouchPrimary]) swipes at all.
  */
 @Composable
 internal fun ArticleRow(
@@ -292,6 +295,7 @@ internal fun ArticleRow(
     ripplePulse: Int = 0,
     interactionSource: MutableInteractionSource = remember { MutableInteractionSource() },
     isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
+    onSwipeAction: ((ArticleSwipeAction) -> Unit)? = null,
 ) {
     val unread = article.is_read == 0L
     // Whether the most recent right-click selected this row (desktop only — Android never calls
@@ -319,6 +323,14 @@ internal fun ArticleRow(
                 },
             )
             .fillMaxWidth()
+            // Before everything that draws the row: only what follows its offset moves with the finger.
+            .articleRowSwipe(
+                enabled = isTouchPrimary && onSwipeAction != null,
+                isRead = !unread,
+                isStarred = article.is_starred == 1L,
+                strings = strings,
+                onSwipeAction = { action -> onSwipeAction?.invoke(action) },
+            )
             .listRowClickable(interactionSource, selected, onClick)
             .nativeContextMenu(
                 items = {

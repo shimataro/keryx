@@ -617,6 +617,9 @@ fun HomeScreen() {
                         // Dual and Single's article-detail depth open the drawer via the hamburger
                         // button only. dragOverlay.item == null additionally guards a feed drag in
                         // progress inside the drawer from being misread as this same gesture.
+                        // An article row's own swipe (articleRowSwipe) is a child of this drawer, so
+                        // it claims a horizontal drag that starts on a row first: there the drag acts
+                        // on the row, and only a drag started off the rows opens the drawer.
                         gesturesEnabled = dragOverlay.item == null &&
                             (drawerState.isOpen || HomePane.ArticleDetail !in visible),
                         drawerContent = {

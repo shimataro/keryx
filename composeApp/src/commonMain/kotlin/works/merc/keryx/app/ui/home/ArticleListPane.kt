@@ -75,6 +75,7 @@ import works.merc.keryx.app.platform.WindowDragArea
 import works.merc.keryx.app.platform.nativeContextMenu
 import works.merc.keryx.app.presentation.home.ArticleListBody
 import works.merc.keryx.app.presentation.home.ArticleListMode
+import works.merc.keryx.app.presentation.home.ArticleSwipeAction
 import works.merc.keryx.app.presentation.home.listModeChecked
 import works.merc.keryx.app.presentation.home.HomeViewModel
 import works.merc.keryx.app.presentation.home.articleListCatchingUp
@@ -427,6 +428,7 @@ fun ArticleListPane(
         onSelectArticle = { vm.selectArticle(it); onActivated(); onSelectionAdvance() },
         onSetRead = { article, read -> vm.setRead(article, read) },
         onSetStarred = { article, starred -> vm.setStarred(article, starred) },
+        onSwipeArticle = vm::performSwipeAction,
         onCopyArticleUrl = onCopyArticleUrl,
         onOpenArticleInBrowser = onOpenArticleInBrowser,
         onShareArticle = onShareArticle,
@@ -735,6 +737,7 @@ internal fun ArticleListPaneContent(
     onSelectArticle: (ArticleListRow) -> Unit,
     onSetRead: (ArticleListRow, Boolean) -> Unit = { _, _ -> },
     onSetStarred: (ArticleListRow, Boolean) -> Unit = { _, _ -> },
+    onSwipeArticle: ((ArticleListRow, ArticleSwipeAction) -> Unit)? = null,
     onCopyArticleUrl: (ArticleListRow) -> Unit = rememberPlainArticleUrlCopy(),
     onOpenArticleInBrowser: (ArticleListRow) -> Unit = { openInBrowserIfAllowed(it.url) },
     onShareArticle: ((ArticleListRow) -> Unit)? = null,
@@ -864,6 +867,7 @@ internal fun ArticleListPaneContent(
                             titleOverride = titleOverride,
                             strings = rowStrings,
                             ripplePulse = ripplePulseFor(article.id, selectedId, returnRipplePulse),
+                            onSwipeAction = onSwipeArticle?.let { swipe -> { action -> swipe(article, action) } },
                         )
                     }
                 }
