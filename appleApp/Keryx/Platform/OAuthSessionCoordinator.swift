@@ -28,6 +28,11 @@ final class OAuthSessionCoordinator: NSObject, @unchecked Sendable {
     /// `openLoginPage(url:)`); separate from `activeSession` so closing one never touches the other.
     private var loginPageSession: ASWebAuthenticationSession?
 
+    /// Bumped each time `presentLoginPage` shows a page, so the completion of a page it has since
+    /// replaced (its `cancel()` completes asynchronously) does not clear the newer session.
+    /// Main-actor state, like `loginPageSession`.
+    private var loginPageGeneration = 0
+
     func open(url: String, callbackScheme: String) {
         Task { @MainActor in
             self.presentSession(url: url, callbackScheme: callbackScheme)
@@ -69,11 +74,14 @@ final class OAuthSessionCoordinator: NSObject, @unchecked Sendable {
     private func presentLoginPage(url: String) {
         guard let pageURL = URL(string: url) else { return }
         loginPageSession?.cancel()
+        loginPageGeneration += 1
+        let generation = loginPageGeneration
         // Same `@Sendable` reasoning as `presentSession`'s handler. Nothing to forward: the page has
         // no callback, and the Kotlin flow ends the wait itself (by polling, or by being cancelled).
         let session = ASWebAuthenticationSession(url: pageURL, callbackURLScheme: nil) { @Sendable [weak self] _, _ in
             Task { @MainActor in
-                self?.loginPageSession = nil
+                guard let self, self.loginPageGeneration == generation else { return }
+                self.loginPageSession = nil
             }
         }
         session.presentationContextProvider = self
