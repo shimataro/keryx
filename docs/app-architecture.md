@@ -327,6 +327,7 @@ Examples in the code today:
 | Copy article URL (decision) | `presentation/home/ArticleListModel.kt`'s `articleUrlCopyPlan` → `ArticleUrlCopyPlan` (write the clipboard? flash the reader's ✓? confirm in-app? — the last from the shared `platformShowsOwnCopyConfirmation` and whether the ✓ confirms on this platform: never where the OS confirms, on a desktop only when the ✓ does not flash, on a touch platform every copy) | Compose's `ArticleUrlCopier.copy` and SwiftUI's `ArticleUrlCopy.perform` (`HomeObservable.copyArticleUrl`), which only carry it out |
 | Copy article URL (Compose) | `ui/home/ArticleUrlCopier.kt`'s `ArticleUrlCopier.copy` — clipboard, the reader's ✓ pulse and Android's snackbar | The reader's copy button, ⌘/Ctrl+Shift+C, the menu bar and the article row's context menu |
 | Share an article (Compose, Android) | `ui/home/ArticleSharer.kt`'s `ArticleSharer` — `canShare` / `share`, both on `:shared`'s `canShareArticleUrl`, the latter calling the `platform/ShareSheet` expect (Android: `Intent.createChooser` around `ACTION_SEND`). `rememberArticleSharer` returns `null` where `platformSupportsShare` is `false` (desktop), which leaves every route out | The reader's share button and the article row's long-press menu |
+| Swipe an article row | `presentation/home/ArticleSwipeActions.kt`'s `articleSwipeLeadingAction` / `articleSwipeTrailingAction` (which action each edge shows) and `HomeViewModel.performSwipeAction` (which runs it through `setRead` / `setStarred`) | iOS's `.swipeActions` and macOS's table row actions (both through `ArticleSwipeActionStyle`), and Android's `articleRowSwipe` with its TalkBack custom actions |
 | Pre-fill Add feed from outside the app | `ui/navigation/AddFeedRequests.kt` (`request`; latched until Home shows, released by `HomeScreen` alone) | A link shared to Keryx from another Android app (`AndroidSharedLink.kt`, URL picked by `:shared`'s `extractSharedFeedUrl`) |
 
 **Adding a route to an existing action** means calling its existing handler/predicate. If no shared
@@ -2045,6 +2046,28 @@ The macOS article list is an `NSTableView` with one fixed row height
   hosted row does not inherit SwiftUI's environment, so the context-menu tracker is passed in
   explicitly, and the soft scroll edge effect under the toolbar, which the `List` got for free, is
   asked for with `scrollEdgeEffectStyle`.
+
+### Article row swipe
+
+An article row swipes on iOS, macOS and touch-primary Android (`external-spec.md` §9 "Swipe on
+article rows"): read/unread from the leading edge, star/unstar from the trailing one. Which action each
+edge shows and what it does are decided once in `:shared` (`ArticleSwipeActions.kt`,
+`HomeViewModel.performSwipeAction`); each UI only presents it.
+
+- **iOS.** The `List` row's `.swipeActions(edge:allowsFullSwipe: true)`, one button per edge
+  (`Home/ArticleListView.swift`); `ArticleSwipeActionStyle` supplies the context menu's labels and the
+  reader toolbar's symbols. UIKit exposes the buttons to VoiceOver as actions.
+- **macOS.** The article table's `tableView(_:rowActionsForRow:edge:)` returns one
+  `NSTableViewRowAction` per edge (`Home/ArticleTableView.swift`), as Mail's message list does; AppKit
+  draws them, slides the row and runs a full swipe. `shouldSelectRow` stays `false`, so the row is not
+  selected.
+- **Android.** `ui/home/ArticleRowSwipe.kt`'s `Modifier.articleRowSwipe`, applied by `ArticleRow` only
+  where `isTouchPrimary`: a horizontal `draggable` past `ARTICLE_SWIPE_THRESHOLD` (56dp, with a haptic
+  tick) runs the action on release and animates the row back. It is built from modifiers on the row's
+  own node rather than M3's `SwipeToDismissBox`, which would add nodes to a row that sits next to the
+  `LazyColumn` reuse-pool crash in [known-issues.md](known-issues.md). Both actions are also TalkBack
+  custom actions. Being a child of the narrow layout's `ModalNavigationDrawer`, the row claims a
+  horizontal drag that starts on it first, so only a drag started off the rows opens the drawer.
 
 ### Selection display (iOS)
 

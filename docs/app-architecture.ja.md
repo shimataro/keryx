@@ -310,6 +310,7 @@ Play 開発者サービスの無い端末とまったく同じ状態で、UI は
 | 記事 URL のコピー（判定） | `presentation/home/ArticleListModel.kt` の `articleUrlCopyPlan` → `ArticleUrlCopyPlan`（クリップボードに書き込むか、リーダーの ✓ を光らせるか、アプリ内で確認を出すか。最後のものは共有の `platformShowsOwnCopyConfirmation` と、そのプラットフォームで ✓ が確認になるかどうかから決まる: OS が確認を出すなら出さない、デスクトップでは ✓ が光らないときだけ、タッチ端末では毎回） | Compose の `ArticleUrlCopier.copy` と SwiftUI の `ArticleUrlCopy.perform`（`HomeObservable.copyArticleUrl`）。どちらもその結果を実行するだけ |
 | 記事 URL のコピー（Compose） | `ui/home/ArticleUrlCopier.kt` の `ArticleUrlCopier.copy`（クリップボード、リーダーの ✓ の pulse、Android のスナックバー） | リーダーのコピーボタン、⌘/Ctrl+Shift+C、メニューバー、記事行のコンテキストメニュー |
 | 記事の共有（Compose、Android） | `ui/home/ArticleSharer.kt` の `ArticleSharer`（`canShare` / `share`。どちらも `:shared` の `canShareArticleUrl` に従い、後者は `platform/ShareSheet` の expect を呼ぶ。Android は `ACTION_SEND` を `Intent.createChooser` で包む）。`platformSupportsShare` が `false` のプラットフォーム（デスクトップ）では `rememberArticleSharer` が `null` を返し、どの経路も表示しない | リーダーの共有ボタン、記事行の長押しメニュー |
+| 記事行のスワイプ | `presentation/home/ArticleSwipeActions.kt` の `articleSwipeLeadingAction` / `articleSwipeTrailingAction`（各辺に出す操作）と `HomeViewModel.performSwipeAction`（`setRead` / `setStarred` で実行する） | iOS の `.swipeActions` と macOS のテーブルの行アクション（どちらも `ArticleSwipeActionStyle` 経由）、Android の `articleRowSwipe` と TalkBack のカスタムアクション |
 | アプリ外からのフィード追加の入力済み表示 | `ui/navigation/AddFeedRequests.kt`（`request`。Home が表示されるまで保留し、`HomeScreen` だけが取り出す） | 他の Android アプリから Keryx へ共有されたリンク（`AndroidSharedLink.kt`。URL は `:shared` の `extractSharedFeedUrl` が取り出す） |
 
 **既存の操作に経路を足す**ときは、既存のハンドラ/述語を呼ぶ。共通のものがまだない（操作の処理が 1 つの経路の中に
@@ -1951,6 +1952,27 @@ macOS の記事一覧は、SwiftUI の `List` ではなく、行の高さを固�
   ではなくクリップビューの表示範囲から作る。ホストされた行は SwiftUI の environment を引き継がないので、
   コンテキストメニューのトラッカーは明示的に渡す。`List` なら自動で付いた、ツールバー下のソフトな
   スクロールエッジ効果は `scrollEdgeEffectStyle` で指定する。
+
+### 記事行のスワイプ
+
+記事行は iOS、macOS、タッチが主入力の Android でスワイプできる（`external-spec.ja.md` §9「記事行の
+スワイプ」）。先頭側からは既読/未読、末尾側からはスターの付け外し。各辺に出す操作とその実行は `:shared` で
+1 か所に決め（`ArticleSwipeActions.kt`、`HomeViewModel.performSwipeAction`）、各 UI は見せ方だけを受け持つ。
+
+- **iOS。** `List` の行の `.swipeActions(edge:allowsFullSwipe: true)` で、各辺にボタンを 1 つ出す
+  （`Home/ArticleListView.swift`）。ラベルはコンテキストメニュー、記号はリーダーのツールバーと同じものを
+  `ArticleSwipeActionStyle` が返す。ボタンは UIKit が VoiceOver のアクションとして公開する。
+- **macOS。** 記事テーブルの `tableView(_:rowActionsForRow:edge:)` が各辺に `NSTableViewRowAction` を 1 つ
+  返す（`Home/ArticleTableView.swift`）。Mail のメッセージ一覧と同じ仕組みで、ボタンの描画、行のスライド、
+  フルスワイプは AppKit が行う。`shouldSelectRow` は `false` のままなので、行は選択されない。
+- **Android。** `ui/home/ArticleRowSwipe.kt` の `Modifier.articleRowSwipe` を、`ArticleRow` が
+  `isTouchPrimary` のときだけ付ける。横方向の `draggable` が `ARTICLE_SWIPE_THRESHOLD`（56dp。越えると
+  触覚フィードバック）を越えて離されると操作を実行し、行をアニメーションで戻す。M3 の `SwipeToDismissBox`
+  ではなく行自身のノードに付ける修飾子だけで作る。`SwipeToDismissBox` は、
+  [known-issues.ja.md](known-issues.ja.md) の `LazyColumn` の再利用プールのクラッシュの近くにある行に
+  ノードを増やしてしまうため。両方の操作は TalkBack のカスタムアクションにもなる。行は狭いレイアウトの
+  `ModalNavigationDrawer` の子なので、行の上で始めた横ドラッグは行が先に取り、行以外から始めたドラッグ
+  だけがドロワーを開く。
 
 ### 選択の表示（iOS）
 
