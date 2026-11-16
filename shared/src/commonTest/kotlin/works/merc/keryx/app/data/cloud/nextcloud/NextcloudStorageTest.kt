@@ -276,6 +276,22 @@ class NextcloudStorageTest {
     }
 
     @Test
+    fun createOntoALockedDestinationIsAConflictAndRemovesTheTempFile() = runTest {
+        val (s, history, verify) = storage(
+            credentials,
+            { respond("", HttpStatusCode.Created) },
+            { respond("", HttpStatusCode.Created, headersOf(HttpHeaders.ETag, "\"tmp\"")) },
+            { respond("", HttpStatusCode.Locked) }, // MOVE: destination locked
+            { respond("", HttpStatusCode.NoContent) }, // DELETE temp
+        )
+        val r = s.create(CLOUD_DB_GZ_PATH, uploadSourceOf(byteArrayOf(7)))
+        assertIs<Result.Err>(r)
+        assertIs<SyncConflictException>(r.exception)
+        assertEquals(listOf("MKCOL", "PUT", "MOVE", "DELETE"), history.map { it.method.value })
+        verify()
+    }
+
+    @Test
     fun createRemovesTheTempFileWhenTheUploadFails() = runTest {
         val (s, history, verify) = storage(
             credentials,

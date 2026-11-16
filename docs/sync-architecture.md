@@ -602,6 +602,7 @@ Nextcloud is not reached through OAuth and has no app-only folder; everything ab
   guard the first upload. `create` instead makes sure `/Keryx` exists (`MKCOL`; 405 means it already
   does), uploads to a temporary `/Keryx/.upload-<uuid>.tmp`, then `MOVE`s it onto the real name with
   `Overwrite: F` — an existing destination answers 412 (a conflict) instead of being overwritten, and
+  one another write holds locked answers 423 (likewise a conflict), and
   the window in which two devices can both believe they are creating the file shrinks from the whole
   upload to the move itself. The temporary file is deleted again whenever the move does not happen. One
   whose delete also fails stays in `/Keryx`: `CloudStorage` has no listing API to find it by later,

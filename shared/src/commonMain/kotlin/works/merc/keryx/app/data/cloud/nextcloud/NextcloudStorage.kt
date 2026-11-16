@@ -154,8 +154,9 @@ class NextcloudStorage(
                 header("Overwrite", "F")
             }
             if (!moved.status.isSuccess()) deleteQuietly(credentials, tempUrl)
-            // 412: the destination already exists — another device created it first.
-            moved.headerRevOrConflictOr(PROVIDER_NAME, WRITE_REV_HEADERS, conflictStatuses = setOf(412))
+            // 412: the destination already exists — another device created it first. 423: another
+            // device's write holds the destination's lock right now.
+            moved.headerRevOrConflictOr(PROVIDER_NAME, WRITE_REV_HEADERS, conflictStatuses = CONFLICT_STATUSES)
         } catch (e: Throwable) {
             withContext(NonCancellable) {
                 withTimeoutOrNull(CONNECTION_TIMEOUT_MS) { deleteQuietly(credentials, tempUrl) }
