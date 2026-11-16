@@ -191,4 +191,33 @@ class ArticleSwipeNavTest {
         // value that can't be reasoned about would strand the gesture for no defensible reason.
         assertFalse(swipeLockedOut(nowMillis = 900L, lastVerticalEndMillis = 1_000L, lockoutMs = 400L))
     }
+
+    // --- VerticalGestureLockout ---
+
+    @Test
+    fun verticalGestureLockoutIsOpenBeforeAnyVerticalGesture() {
+        assertFalse(VerticalGestureLockout().isLockedOut(1_000L))
+    }
+
+    @Test
+    fun verticalGestureLockoutRefusesAGestureInsideTheWindowAfterAVerticalOne() {
+        val lockout = VerticalGestureLockout()
+        lockout.onVerticalGestureEnd(1_000L)
+
+        assertTrue(lockout.isLockedOut(1_000L))
+        assertTrue(lockout.isLockedOut(1_399L))
+        // The same 400 ms half-open window swipeLockedOut applies.
+        assertFalse(lockout.isLockedOut(1_400L))
+    }
+
+    @Test
+    fun verticalGestureLockoutIsExtendedByEachVerticalGesture() {
+        val lockout = VerticalGestureLockout()
+        lockout.onVerticalGestureEnd(1_000L)
+        lockout.onVerticalGestureEnd(1_300L)
+
+        // Measured from the latest vertical gesture, not the first.
+        assertTrue(lockout.isLockedOut(1_600L))
+        assertFalse(lockout.isLockedOut(1_700L))
+    }
 }

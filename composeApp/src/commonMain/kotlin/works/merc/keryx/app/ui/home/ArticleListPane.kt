@@ -75,6 +75,7 @@ import works.merc.keryx.app.platform.WindowDragArea
 import works.merc.keryx.app.platform.nativeContextMenu
 import works.merc.keryx.app.presentation.home.ArticleListBody
 import works.merc.keryx.app.presentation.home.ArticleListMode
+import works.merc.keryx.app.presentation.home.ArticleSwipeAction
 import works.merc.keryx.app.presentation.home.listModeChecked
 import works.merc.keryx.app.presentation.home.HomeViewModel
 import works.merc.keryx.app.presentation.home.articleListCatchingUp
@@ -427,6 +428,7 @@ fun ArticleListPane(
         onSelectArticle = { vm.selectArticle(it); onActivated(); onSelectionAdvance() },
         onSetRead = { article, read -> vm.setRead(article, read) },
         onSetStarred = { article, starred -> vm.setStarred(article, starred) },
+        onSwipeArticle = vm::performSwipeAction,
         onCopyArticleUrl = onCopyArticleUrl,
         onOpenArticleInBrowser = onOpenArticleInBrowser,
         onShareArticle = onShareArticle,
@@ -682,6 +684,8 @@ internal fun ripplePulseFor(articleId: String, selectedId: String?, returnRipple
  * @param onSelectListMode Chooses another mode from [ArticleListTopBar]'s mode menu.
  * @param starredModeEnabled Whether [ArticleListMode.Starred] can be chosen (not under the Starred filter).
  * @param newestFirst Whether to sort articles from newest to oldest.
+ * @param onSwipeArticle Runs the action a swipe on an article row chose ([articleRowSwipe]) — on a
+ *   touch-primary platform only, where every row swipes.
  * @param focused Whether the list has focus.
  * @param sortEnabled Whether the sort order items in [ArticleListTopBar]'s mode menu can be chosen —
  *   `false` while search is active, where the result order is fixed to FTS5 relevance rank.
@@ -735,6 +739,7 @@ internal fun ArticleListPaneContent(
     onSelectArticle: (ArticleListRow) -> Unit,
     onSetRead: (ArticleListRow, Boolean) -> Unit = { _, _ -> },
     onSetStarred: (ArticleListRow, Boolean) -> Unit = { _, _ -> },
+    onSwipeArticle: (ArticleListRow, ArticleSwipeAction) -> Unit,
     onCopyArticleUrl: (ArticleListRow) -> Unit = rememberPlainArticleUrlCopy(),
     onOpenArticleInBrowser: (ArticleListRow) -> Unit = { openInBrowserIfAllowed(it.url) },
     onShareArticle: ((ArticleListRow) -> Unit)? = null,
@@ -774,6 +779,9 @@ internal fun ArticleListPaneContent(
         }
         listState.scrollToIndexIfNeeded(index)
     }
+    // One for every row: a run of flicks moves a different row under the finger each time, so only
+    // a list-wide lockout sees the previous flick (articleRowSwipe).
+    val swipeLockout = remember { VerticalGestureLockout() }
     val searchHighlight = searchHighlightSpanStyle(
         works.merc.keryx.app.platform.isTouchPrimary,
         MaterialTheme.colorScheme,
@@ -859,11 +867,13 @@ internal fun ArticleListPaneContent(
                             onSetStarred = { starred -> onSetStarred(article, starred) },
                             onCopyUrl = { onCopyArticleUrl(article) },
                             onOpenInBrowser = { onOpenArticleInBrowser(article) },
+                            swipeLockout = swipeLockout,
                             onShare = onShareArticle?.let { share -> { share(article) } },
                             onActivate = onActivated,
                             titleOverride = titleOverride,
                             strings = rowStrings,
                             ripplePulse = ripplePulseFor(article.id, selectedId, returnRipplePulse),
+                            onSwipeAction = { action -> onSwipeArticle(article, action) },
                         )
                     }
                 }

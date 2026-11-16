@@ -155,6 +155,34 @@ internal fun swipeLockedOut(nowMillis: Long, lastVerticalEndMillis: Long?, locko
 }
 
 /**
+ * Remembers when the last gesture claimed as vertical ended, and refuses a horizontal swipe that
+ * begins inside the [SWIPE_AFTER_VERTICAL_LOCKOUT_MS] window it opens — see [swipeLockedOut].
+ *
+ * Shared by every swipe that sits on a scrolling surface: the reader's page turn
+ * ([ArticleSwipeController]) and the article list's row swipe (`articleRowSwipe`). A list holds one
+ * instance for all of its rows, since a run of flicks moves a different row under the finger each
+ * time and a per-row lockout would never see the previous flick.
+ *
+ * Plain (non-snapshot) state: it is only read and written from pointer-input handlers, never drawn.
+ */
+internal class VerticalGestureLockout {
+    /** When the last vertical gesture ended, on `PointerInputChange.uptimeMillis`'s clock; `null` until one has. */
+    private var lastVerticalEndUptimeMillis: Long? = null
+
+    /**
+     * Records that a gesture ended having been claimed as vertical, opening (or extending) the
+     * lockout window [isLockedOut] then refuses new swipes inside.
+     */
+    fun onVerticalGestureEnd(uptimeMillis: Long) {
+        lastVerticalEndUptimeMillis = uptimeMillis
+    }
+
+    /** Whether a gesture beginning at [uptimeMillis] still falls inside that window. */
+    fun isLockedOut(uptimeMillis: Long): Boolean =
+        swipeLockedOut(uptimeMillis, lastVerticalEndUptimeMillis, SWIPE_AFTER_VERTICAL_LOCKOUT_MS)
+}
+
+/**
  * Maps a raw cumulative drag distance to the content's actual on-screen offset, applying
  * rubber-band resistance once the drag points towards a direction with nothing to move to.
  *
@@ -291,23 +319,16 @@ internal class ArticleSwipeController(
     private var lastAppliedOffsetPx = 0f
 
     /**
-     * When the last gesture that resolved as vertical ended, on `PointerInputChange.uptimeMillis`'s
-     * clock. `null` until one has. Lives on the controller rather than in the gesture loop because
+     * The after-a-scroll lockout. Lives on the controller rather than in the gesture loop because
      * `pointerInput`'s block restarts, and this has to outlive a single gesture to be of any use.
      */
-    private var lastVerticalEndUptimeMillis: Long? = null
+    private val verticalLockout = VerticalGestureLockout()
 
-    /**
-     * Records that a gesture ended having been claimed as vertical, opening the lockout window
-     * [isLockedOut] then refuses new swipes inside.
-     */
-    fun onVerticalGestureEnd(uptimeMillis: Long) {
-        lastVerticalEndUptimeMillis = uptimeMillis
-    }
+    /** See [VerticalGestureLockout.onVerticalGestureEnd]. */
+    fun onVerticalGestureEnd(uptimeMillis: Long) = verticalLockout.onVerticalGestureEnd(uptimeMillis)
 
-    /** Whether a gesture beginning at [uptimeMillis] still falls inside that window. */
-    fun isLockedOut(uptimeMillis: Long): Boolean =
-        swipeLockedOut(uptimeMillis, lastVerticalEndUptimeMillis, SWIPE_AFTER_VERTICAL_LOCKOUT_MS)
+    /** See [VerticalGestureLockout.isLockedOut]. */
+    fun isLockedOut(uptimeMillis: Long): Boolean = verticalLockout.isLockedOut(uptimeMillis)
 
     fun onDragStart(startUptimeMillis: Long) {
         dragTotalPx = 0f
@@ -517,6 +538,7 @@ internal fun rememberArticleSwipeController(
  * a scroll from turning into a page turn by accident: a gesture that passes the touch slop while
  * pointing more vertically than horizontally is latched vertical for its whole remaining life, and
  * a gesture beginning within [SWIPE_AFTER_VERTICAL_LOCKOUT_MS] of a vertical one never arms at all.
+ * A gesture that is cancelled rather than released settles back without turning the page.
  */
 internal fun Modifier.articleSwipeNavigation(controller: ArticleSwipeController): Modifier =
     pointerInput(controller) {
@@ -539,13 +561,22 @@ internal fun Modifier.articleSwipeNavigation(controller: ArticleSwipeController)
                     val change = event.changes.firstOrNull { it.id == down.id } ?: break
                     if (change.changedToUpIgnoreConsumed()) {
                         if (dragging) {
+                            // A cancelled gesture (the system taking the pointer away, say) arrives
+                            // as an up Compose has already consumed (`onCancelPointerInput`); the
+                            // finger never lifted, so it settles back without turning the page. On
+                            // this Initial pass nothing has seen a real up yet, so it is unconsumed.
+                            val cancelled = change.isConsumed
                             change.consume()
+                            dragging = false
+                            if (cancelled) {
+                                controller.onDragCancel()
+                                break
+                            }
                             // Position hasn't moved since the last recorded drag sample, but this
                             // still records the true release time (up can fire later than the
                             // last move) for onDragEnd's low-sample-count velocity fallback.
                             controller.onDrag(0f, change.uptimeMillis)
                             controller.onDragEnd()
-                            dragging = false
                         } else if (verticalClaimed) {
                             controller.onVerticalGestureEnd(change.uptimeMillis)
                         }

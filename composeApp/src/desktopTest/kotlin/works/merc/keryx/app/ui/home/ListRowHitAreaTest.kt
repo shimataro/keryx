@@ -112,6 +112,7 @@ class ListRowHitAreaTest {
                 onSetNewestFirst = {},
                 onMarkAllRead = {},
                 onSelectArticle = { selected = it },
+                onSwipeArticle = { _, _ -> },
                 modifier = Modifier.size(360.dp, 400.dp),
                 listState = state,
             )
@@ -205,6 +206,7 @@ class ListRowHitAreaTest {
                 onSetNewestFirst = {},
                 onMarkAllRead = {},
                 onSelectArticle = { selected = it },
+                onSwipeArticle = { _, _ -> },
                 modifier = Modifier.size(360.dp, 400.dp),
                 listState = state,
             )

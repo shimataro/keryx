@@ -868,6 +868,8 @@ reproduce the same visual gap. `Modifier.padding` attaches to the existing
 element's `LayoutNode` rather than creating a new one, so this costs nothing
 visually while keeping the row's node count down. Do not reintroduce a
 `Spacer` here (or in any other `LazyColumn` row) for a plain fixed gap.
+The same reasoning keeps the row's Android swipe (`ui/home/ArticleRowSwipe.kt`)
+to modifiers on its own node instead of wrapping it in `SwipeToDismissBox`.
 
 This is a workaround for the crash above, not a general style preference — once the upstream
 fix lands and the mitigation in `ArticleRow` is reverted (see known-issues.md's re-check
@@ -944,6 +946,11 @@ action". In practice:
   `ToolbarIconGroup` cluster, so it has no divider and shares only the order. The most-used action
   comes first; related actions sit together (copy and share both hand the URL to something else).
   Adding or moving an item on one route means changing every route.
+- **An article row's swipe** (iOS, macOS, touch-primary Android) is one more route to two of those
+  actions, with the same edges on every platform: read/unread from the leading edge, star/unstar from
+  the trailing one. Which action an edge shows and what it does come from `:shared`
+  (`ArticleSwipeActions.kt`, `HomeViewModel.performSwipeAction`); a UI only presents it. Folders,
+  feeds and tags swipe only on iOS (a Mac source list and an Android drawer have no row swipe).
 - Route every entry point through **one shared handler** rather than re-implementing the effect
   (and forgetting the feedback) at each call site. Example: what one "copy article URL" does is
   decided by the shared `articleUrlCopyPlan` (`:shared`, used by both UIs); in Compose every route —

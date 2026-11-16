@@ -1706,6 +1706,64 @@ class HomeViewModelTest {
 
     private fun dbIsRead(id: String) = db.articlesQueries.getById(id).executeAsOne().is_read
 
+    private fun dbIsStarred(id: String) = db.articlesQueries.getById(id).executeAsOne().is_starred
+
+    // --- Article row swipe (performSwipeAction) ---
+
+    /**
+     * Each swipe action writes the state it names, and a swipe never selects the row. Each action is
+     * run twice: a swipe writes an explicit state rather than toggling, so a row whose snapshot is
+     * already stale (the article read on another device, say) still ends in the state the swipe named.
+     */
+    @Test
+    fun eachSwipeActionWritesItsStateWithoutSelectingTheRow() = runTest {
+        val vm = newViewModelWithHydrationOn(UnconfinedTestDispatcher(testScheduler), "a1")
+
+        vm.performSwipeAction(vm.row("a1"), ArticleSwipeAction.MarkRead)
+        testScheduler.advanceUntilIdle()
+        assertEquals(1L, dbIsRead("a1"))
+        vm.performSwipeAction(vm.row("a1"), ArticleSwipeAction.MarkRead)
+        testScheduler.advanceUntilIdle()
+        assertEquals(1L, dbIsRead("a1"))
+
+        vm.performSwipeAction(vm.row("a1"), ArticleSwipeAction.MarkUnread)
+        testScheduler.advanceUntilIdle()
+        assertEquals(0L, dbIsRead("a1"))
+        vm.performSwipeAction(vm.row("a1"), ArticleSwipeAction.MarkUnread)
+        testScheduler.advanceUntilIdle()
+        assertEquals(0L, dbIsRead("a1"))
+
+        vm.performSwipeAction(vm.row("a1"), ArticleSwipeAction.Star)
+        testScheduler.advanceUntilIdle()
+        assertEquals(1L, dbIsStarred("a1"))
+        vm.performSwipeAction(vm.row("a1"), ArticleSwipeAction.Star)
+        testScheduler.advanceUntilIdle()
+        assertEquals(1L, dbIsStarred("a1"))
+
+        vm.performSwipeAction(vm.row("a1"), ArticleSwipeAction.Unstar)
+        testScheduler.advanceUntilIdle()
+        assertEquals(0L, dbIsStarred("a1"))
+        vm.performSwipeAction(vm.row("a1"), ArticleSwipeAction.Unstar)
+        testScheduler.advanceUntilIdle()
+        assertEquals(0L, dbIsStarred("a1"))
+
+        assertNull(vm.selectedArticleId.value)
+    }
+
+    /** Unread mode keeps a row swiped read in place, as it does for any other read write. */
+    @Test
+    fun aRowSwipedReadInUnreadModeStaysInTheList() = runTest {
+        val vm = newViewModelWithHydrationOn(UnconfinedTestDispatcher(testScheduler), "a1", "a2")
+        vm.setMode(ArticleListMode.Unread)
+        testScheduler.advanceUntilIdle()
+
+        vm.performSwipeAction(vm.row("a1"), ArticleSwipeAction.MarkRead)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(listOf("a1", "a2"), vm.articles.value.map { it.id })
+        assertEquals(1L, vm.row("a1").is_read)
+    }
+
     // --- Header-first reader: selectedArticleId / selectedArticleRow / readerContent ---
 
     /** [newViewModelWithHydrationOn] with [first] already selected and loaded. */

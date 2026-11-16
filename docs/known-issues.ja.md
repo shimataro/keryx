@@ -170,6 +170,10 @@ Compose 自身のレイジーリスト項目再利用における内部不変条
 - gutter `Box`（8dp 幅の star/unread ドット用コンテナ）は**変更していない** — 削除するには
   star アイコンと未読ドットの位置決めを `Box`/`align()` から手動オフセットに置き換える必要が
   あり、削減できるノード数に対してリスクが見合わないと判断した。
+- Android の行スワイプ（`ui/home/ArticleRowSwipe.kt`）は、M3 の `SwipeToDismissBox` ではなく、行自身の
+  ノードに付ける修飾子（`pointerInput`・`drawBehind`・`absoluteOffset`）だけで作っている。
+  `SwipeToDismissBox` は行をさらに 2〜3 個のノードで包んでしまうため。この不具合が上流で直ったら
+  `SwipeToDismissBox` に移す（`ui-guidelines` スキルの「Standard components over custom drawing」の例外 3）。
 
 ### 調査で除外したもの
 

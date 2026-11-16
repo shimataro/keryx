@@ -43,6 +43,7 @@ import works.merc.keryx.app.platform.NativeMenuSeparator
 import works.merc.keryx.app.platform.NativeMenuShortcut
 import works.merc.keryx.app.platform.nativeContextMenu
 import works.merc.keryx.app.presentation.formatTimestamp
+import works.merc.keryx.app.presentation.home.ArticleSwipeAction
 import works.merc.keryx.app.presentation.home.articleReadAfterContextMenuOpen
 import works.merc.keryx.app.presentation.home.canOpenInBrowser
 import works.merc.keryx.app.presentation.home.canShareArticleUrl
@@ -257,6 +258,8 @@ private class ContextMenuOpenSelection {
  * @param onSetStarred Called with the starred state the context menu's star item promises.
  * @param onCopyUrl Called to copy the article URL.
  * @param onOpenInBrowser Called to open the article URL in a browser.
+ * @param swipeLockout The row swipe's after-a-scroll lockout ([articleRowSwipe]). Required, and
+ *   remembered once per list by the caller, so every row of that list shares it.
  * @param onShare Called to share the article URL; `null` (no share sheet on this platform) leaves the
  *   context menu's Share item out.
  * @param onActivate Called when the context menu is opened on the already-selected row, to move
@@ -268,8 +271,12 @@ private class ContextMenuOpenSelection {
  * @param interactionSource The row's press/selection interaction source. Hoisted (rather than
  *   created internally) so [ripplePulse] can be exercised directly in tests.
  * @param isTouchPrimary Whether to expose the row's unread/starred state as a semantics
- *   `stateDescription` (see [articleRowStateDescription]). Defaults to the platform's own value;
- *   a parameter so the Android path can be exercised in desktop tests.
+ *   `stateDescription` (see [articleRowStateDescription]), and — the only thing that decides it —
+ *   whether the row swipes at all (`external-spec.md` §9: only where touch is the primary input).
+ *   Defaults to the platform's own value; a parameter so the Android path can be exercised in
+ *   desktop tests.
+ * @param onSwipeAction Runs the action a swipe on the row chose ([articleRowSwipe]). Required, so a
+ *   caller cannot leave a touch-primary row's swipe silently unwired.
  */
 @Composable
 internal fun ArticleRow(
@@ -285,6 +292,8 @@ internal fun ArticleRow(
     onSetStarred: (Boolean) -> Unit,
     onCopyUrl: () -> Unit,
     onOpenInBrowser: () -> Unit,
+    swipeLockout: VerticalGestureLockout,
+    onSwipeAction: (ArticleSwipeAction) -> Unit,
     onShare: (() -> Unit)? = null,
     onActivate: () -> Unit = {},
     titleOverride: AnnotatedString? = null,
@@ -319,6 +328,15 @@ internal fun ArticleRow(
                 },
             )
             .fillMaxWidth()
+            // Before everything that draws the row: only what follows its offset moves with the finger.
+            .articleRowSwipe(
+                enabled = isTouchPrimary,
+                isRead = !unread,
+                isStarred = article.is_starred == 1L,
+                strings = strings,
+                swipeLockout = swipeLockout,
+                onSwipeAction = onSwipeAction,
+            )
             .listRowClickable(interactionSource, selected, onClick)
             .nativeContextMenu(
                 items = {
