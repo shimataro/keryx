@@ -591,7 +591,10 @@ struct ArticleListView: View {
             contextMenuSelectionTracker: contextMenuSelectionTracker,
             makeRow: { rowView($0, selectedId: selectedId, paneFocused: paneFocused) },
             onBackgroundClick: { focusedPane.wrappedValue = .articleList },
-            onVisibleIdsChanged: { reportVisible($0) }
+            onVisibleIdsChanged: { reportVisible($0) },
+            onSwipeAction: { article, action in
+                home.viewModel.performSwipeAction(article: article.row, action: action)
+            }
         )
         // Rows scroll under the toolbar, as they did in the `List`; the table insets its content by
         // the toolbar's height itself.
@@ -626,6 +629,16 @@ struct ArticleListView: View {
             // Compose's `listRowHorizontalMargin()`); adding 8 on top of it doubled that gap.
             .listRowInsets(EdgeInsets(top: 2, leading: 0, bottom: 2, trailing: 0))
             .listRowSeparator(.hidden)
+            // Read/unread from the leading edge, star from the trailing one — the same edges and
+            // actions as the macOS table and Android (`ArticleSwipeActionStyle`). Neither selects
+            // the row, so a star never marks the article read; both only change reading state, so a
+            // full swipe runs them without asking.
+            .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                swipeButton(ArticleSwipeActionStyle.leading(article), for: article)
+            }
+            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                swipeButton(ArticleSwipeActionStyle.trailing(article), for: article)
+            }
             .onAppear {
                 visibleRows.appearedIds.insert(article.id)
                 scheduleReportVisible()
@@ -634,6 +647,15 @@ struct ArticleListView: View {
                 visibleRows.appearedIds.remove(article.id)
                 scheduleReportVisible()
             }
+    }
+
+    private func swipeButton(_ action: ArticleSwipeAction, for article: ArticleRowModel) -> some View {
+        Button {
+            home.viewModel.performSwipeAction(article: article.row, action: action)
+        } label: {
+            Label(ArticleSwipeActionStyle.title(action), systemImage: ArticleSwipeActionStyle.systemImage(action))
+        }
+        .tint(ArticleSwipeActionStyle.tint(action))
     }
 
     /// Schedules a debounced report of visible article ids. Rapid `onAppear`/`onDisappear` pairs

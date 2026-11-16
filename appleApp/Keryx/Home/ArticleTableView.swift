@@ -41,6 +41,8 @@ struct ArticleTableView: NSViewRepresentable {
     let onBackgroundClick: () -> Void
     /// The ids of the rows on screen, in display order, whenever they change (debounced).
     let onVisibleIdsChanged: ([String]) -> Void
+    /// Runs the action a row's trackpad swipe revealed (`HomeViewModel.performSwipeAction`).
+    let onSwipeAction: (ArticleRowModel, ArticleSwipeAction) -> Void
 
     func makeCoordinator() -> Coordinator {
         Coordinator(resetGeneration: resetGeneration, scrollGeneration: scrollRequest.generation, revealRequest: revealRequest)
@@ -320,6 +322,27 @@ struct ArticleTableView: NSViewRepresentable {
 
         func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {
             false
+        }
+
+        /// A trackpad swipe on a row reveals one action per edge, as Mail's message list does:
+        /// read/unread from the leading edge, star from the trailing one — the same edges and actions
+        /// as iOS and Android (`ArticleSwipeActionStyle`). AppKit draws the buttons, slides the row
+        /// and runs a full swipe; the row is not selected, so a star never marks the article read.
+        func tableView(_ tableView: NSTableView, rowActionsForRow row: Int, edge: NSTableView.RowActionEdge) -> [NSTableViewRowAction] {
+            guard row < rows.rows.count else { return [] }
+            let article = rows.rows[row]
+            let action = edge == .leading ? ArticleSwipeActionStyle.leading(article) : ArticleSwipeActionStyle.trailing(article)
+            let rowAction = NSTableViewRowAction(style: .regular, title: ArticleSwipeActionStyle.title(action)) {
+                [weak self] _, _ in
+                self?.parent?.onSwipeAction(article, action)
+                tableView.rowActionsVisible = false
+            }
+            rowAction.backgroundColor = ArticleSwipeActionStyle.nsColor(action)
+            rowAction.image = NSImage(
+                systemSymbolName: ArticleSwipeActionStyle.systemImage(action),
+                accessibilityDescription: nil
+            )
+            return [rowAction]
         }
     }
 }
