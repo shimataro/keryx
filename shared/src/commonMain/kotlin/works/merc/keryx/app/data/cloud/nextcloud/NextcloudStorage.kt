@@ -5,7 +5,7 @@ import com.fleeksoft.ksoup.parser.Parser
 import io.ktor.client.HttpClient
 import io.ktor.client.request.HttpRequestBuilder
 import io.ktor.client.request.basicAuth
-import io.ktor.client.request.get
+import io.ktor.client.request.prepareGet
 import io.ktor.client.request.header
 import io.ktor.client.request.request
 import io.ktor.client.request.setBody
@@ -82,18 +82,23 @@ class NextcloudStorage(
     }
 
     override suspend fun download(path: String, destPath: String): Result<CloudFileMeta> = withCredentials { credentials ->
-        val response = client.get(fileUrl(credentials, path)) { authorize(credentials) }
-        when {
-            response.status.value == 404 ->
-                Result.Err(CloudStorageException("File not found: ${path.substringAfterLast('/')}"))
-            response.status.value == 200 -> {
-                // The ETag of the very response being saved — the revision this download is based on.
-                val rev = response.headers[HttpHeaders.ETag]
-                    ?: return@withCredentials Result.Err(CloudStorageException("Missing ETag in download response"))
-                response.writeBodyToFile(destPath, MAX_SYNC_DB_SIZE_BYTES)
-                Result.Ok(CloudFileMeta(rev))
+        // `prepareGet` + `execute` streams the body: a plain `get` would read the whole file into
+        // memory before `writeBodyToFile` copies it to disk.
+        client.prepareGet(fileUrl(credentials, path)) { authorize(credentials) }.execute { response ->
+            when (response.status.value) {
+                404 -> Result.Err(CloudStorageException("File not found: ${path.substringAfterLast('/')}"))
+                200 -> {
+                    // The ETag of the very response being saved — the revision this download is based on.
+                    val rev = response.headers[HttpHeaders.ETag]
+                    if (rev == null) {
+                        Result.Err(CloudStorageException("Missing ETag in download response"))
+                    } else {
+                        response.writeBodyToFile(destPath, MAX_SYNC_DB_SIZE_BYTES)
+                        Result.Ok(CloudFileMeta(rev))
+                    }
+                }
+                else -> mapError(response)
             }
-            else -> mapError(response)
         }
     }
 
