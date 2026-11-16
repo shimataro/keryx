@@ -31,7 +31,9 @@ enum ArticleSwipeActionStyle {
         }
     }
 
-    /// The reader toolbar's own symbols for the state the action leaves the article in.
+    /// Read/unread shows the state the action leaves the article in, as the reader toolbar's dot does.
+    /// Star does too (`star.fill`); unstar is `star.slash`, the way Mail's swipe shows unflag
+    /// (`flag.slash`) — an outline star alone on the colored button would not read as "remove".
     static func systemImage(_ action: ArticleSwipeAction) -> String {
         switch action {
         case .markRead: "circle"
@@ -41,21 +43,26 @@ enum ArticleSwipeActionStyle {
         }
     }
 
-    /// Read/unread in the accent color of the row's unread dot; star in the row's own star yellow.
+    /// Read/unread in the accent color of the row's unread dot; star in orange, as Mail's flag
+    /// button is. The button's icon is always white, which the row's own star yellow would leave at
+    /// about 1.5:1; system orange reaches about 2.2:1, and with Increase Contrast its high-contrast
+    /// variant about 5.3:1.
     static func tint(_ action: ArticleSwipeAction) -> Color {
-        switch action {
-        case .markRead, .markUnread: .accentColor
-        case .star, .unstar: .yellow
-        }
+        isStar(action) ? .orange : .accentColor
     }
 
     #if os(macOS)
     /// `tint` as AppKit's row action takes it.
     static func nsColor(_ action: ArticleSwipeAction) -> NSColor {
-        switch action {
-        case .markRead, .markUnread: .controlAccentColor
-        case .star, .unstar: .systemYellow
-        }
+        isStar(action) ? .systemOrange : .controlAccentColor
     }
     #endif
+
+    /// Which of the two color groups an action belongs to — the one place `tint` and `nsColor` decide it.
+    private static func isStar(_ action: ArticleSwipeAction) -> Bool {
+        switch action {
+        case .markRead, .markUnread: false
+        case .star, .unstar: true
+        }
+    }
 }
