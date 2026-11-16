@@ -10,7 +10,8 @@ import kotlin.test.assertEquals
  * Guards Android's backup/device-transfer exclusions against drifting behind [CloudStorageType].
  *
  * `data_extraction_rules.xml` (API 31+) and `backup_rules.xml` (below API 31) must exclude every
- * provider's `.{CloudStorageType.id}_tokens.enc` and `.{CloudStorageType.id}_tokens.json` — both
+ * provider's `.{CloudStorageType.id}_tokens.enc` and `.{CloudStorageType.id}_tokens.json`, plus the
+ * `.tmp` sibling each is written through (`KeystoreTokenStorage.atomicWrite` / `FileTokenStorage.save`) — both
  * files say so in their own comments, but nothing enforced it, and adding Google Drive to Android
  * did in fact leave its pair behind. A missed entry lets an OAuth token ride along in a cloud
  * backup or a device-to-device transfer, which is exactly what those rules exist to prevent.
@@ -26,7 +27,10 @@ class TokenBackupExclusionTest {
 
     /** Every token file that must never be backed up, for every provider the app supports. */
     private val requiredPaths: Set<String> =
-        CloudStorageType.entries.flatMap { listOf(".${it.id}_tokens.enc", ".${it.id}_tokens.json") }.toSet()
+        CloudStorageType.entries
+            .flatMap { listOf(".${it.id}_tokens.enc", ".${it.id}_tokens.json") }
+            .flatMap { listOf(it, "$it.tmp") }
+            .toSet()
 
     /**
      * The `path` attribute of every `<exclude domain="file">` under the [section] element of
