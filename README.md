@@ -76,7 +76,8 @@ Choose **Nextcloud** in the first-run setup or in Settings → Cloud sync, enter
 - Keryx keeps its sync data in a **`Keryx` folder** in your files. The app password Keryx receives can
   reach your whole account, but Keryx only uses that folder. You can revoke it any time under
   Settings → Security → Devices & sessions on your server, and on Nextcloud 36 or later limit it to
-  file access there. Disconnecting in Keryx revokes it too.
+  file access there. Disconnecting in Keryx revokes it too —
+  unless your server can't be reached at that moment, in which case revoke it there yourself.
 - Each sync updates the sync file, so your server may keep **earlier versions** of it and list each
   update in its **Activity** stream.
 - If a Nextcloud desktop client syncs your files to a computer, you may want to exclude the `Keryx`
