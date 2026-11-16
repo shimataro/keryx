@@ -33,7 +33,7 @@ class CloudConnectionService(
      * later sync silently does nothing.
      */
     suspend fun completeConnect(type: CloudStorageType, credentials: CloudCredentials) {
-        cloudSession.saveTokens(type, credentials)
+        cloudSession.saveCredentials(type, credentials)
         settingsRepository.mutateLocalSettings { it.copy(cloudStorageType = type.id) }
         settingsRepository.flush()
     }

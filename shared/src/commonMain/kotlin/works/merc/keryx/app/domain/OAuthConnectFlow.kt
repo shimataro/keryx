@@ -28,7 +28,6 @@ class OAuthConnectFlow(
     private val authorizationLauncher: AuthorizationLauncher = DefaultAuthorizationLauncher,
 ) : CloudConnectFlow {
 
-    /** [request] is ignored: an OAuth flow needs nothing from the user before it opens the browser. */
     override suspend fun connect(request: CloudConnectRequest): Result<CloudCredentials> {
         if (clientId.isEmpty()) {
             Log.warn(TAG, "Cloud provider is not configured (empty client id)")

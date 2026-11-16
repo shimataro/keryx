@@ -131,32 +131,32 @@ class CloudSessionTest {
     }
 
     @Test
-    fun saveTokensPersistsToTokenStorage() = runBlocking {
+    fun saveCredentialsPersistsToTokenStorage() = runBlocking {
         val storage = FakeTokenStorage(null)
         val s = session(storage, clientId = "APPKEY")
 
-        s.saveTokens(CloudStorageType.DROPBOX, OAuthTokens("AT", "RT"))
+        s.saveCredentials(CloudStorageType.DROPBOX, OAuthTokens("AT", "RT"))
 
         assertEquals("AT", (storage.stored as? OAuthTokens)?.accessToken)
         assertEquals("RT", (storage.stored as? OAuthTokens)?.refreshToken)
     }
 
     @Test
-    fun saveTokensRaisesNoNotificationWhenStoredSecurely() = runBlocking {
+    fun saveCredentialsRaisesNoNotificationWhenStoredSecurely() = runBlocking {
         val center = NotificationCenter()
         val s = session(FakeTokenStorage(null, outcome = TokenSaveOutcome.SECURE), notificationCenter = center)
 
-        s.saveTokens(CloudStorageType.DROPBOX, OAuthTokens("AT", "RT"))
+        s.saveCredentials(CloudStorageType.DROPBOX, OAuthTokens("AT", "RT"))
 
         assertEquals(emptyList(), center.items.value)
     }
 
     @Test
-    fun saveTokensWarnsWhenTheTokenOnlyReachedThePlaintextFallback() = runBlocking {
+    fun saveCredentialsWarnsWhenTheTokenOnlyReachedThePlaintextFallback() = runBlocking {
         val center = NotificationCenter()
         val s = session(FakeTokenStorage(null, outcome = TokenSaveOutcome.PLAINTEXT_FILE), notificationCenter = center)
 
-        s.saveTokens(CloudStorageType.DROPBOX, OAuthTokens("AT", "RT"))
+        s.saveCredentials(CloudStorageType.DROPBOX, OAuthTokens("AT", "RT"))
 
         val notification = center.items.value.single()
         assertEquals(AppNotificationLevel.WARNING, notification.level)
@@ -173,11 +173,11 @@ class CloudSessionTest {
      * shared message would tell the user their sign-in is in a file that was never written.
      */
     @Test
-    fun saveTokensWarnsDistinctlyWhenTheTokenCouldNotBePersistedAtAll() = runBlocking {
+    fun saveCredentialsWarnsDistinctlyWhenTheTokenCouldNotBePersistedAtAll() = runBlocking {
         val center = NotificationCenter()
         val s = session(FakeTokenStorage(null, outcome = TokenSaveOutcome.NOT_PERSISTED), notificationCenter = center)
 
-        s.saveTokens(CloudStorageType.DROPBOX, OAuthTokens("AT", "RT"))
+        s.saveCredentials(CloudStorageType.DROPBOX, OAuthTokens("AT", "RT"))
 
         val notification = center.items.value.single()
         assertEquals(AppNotificationLevel.WARNING, notification.level)
@@ -211,7 +211,7 @@ class CloudSessionTest {
         )
 
         // 1st fallback save: the initial connect.
-        s.saveTokens(CloudStorageType.DROPBOX, OAuthTokens("STALE", "RT", expiresAtMillis = 1_000L))
+        s.saveCredentials(CloudStorageType.DROPBOX, OAuthTokens("STALE", "RT", expiresAtMillis = 1_000L))
         // 2nd fallback save: the expired token is refreshed and persisted again.
         val cloudStorage = s.current()
         assertNotNull(cloudStorage)
@@ -236,7 +236,7 @@ class CloudSessionTest {
             respond("{}", HttpStatusCode.OK)
         })
 
-        s.saveTokens(CloudStorageType.DROPBOX, OAuthTokens("AT", "RT"))
+        s.saveCredentials(CloudStorageType.DROPBOX, OAuthTokens("AT", "RT"))
 
         assertNull(storage.stored)
         assertTrue(s.isConnected())
@@ -288,10 +288,10 @@ class CloudSessionTest {
             authHeaderSeen = request.headers["Authorization"]
             respond("{}", HttpStatusCode.OK)
         })
-        s.saveTokens(CloudStorageType.DROPBOX, OAuthTokens("MEMORY", "RT"))
+        s.saveCredentials(CloudStorageType.DROPBOX, OAuthTokens("MEMORY", "RT"))
 
         storage.outcome = TokenSaveOutcome.SECURE
-        s.saveTokens(CloudStorageType.DROPBOX, OAuthTokens("STORED", "RT"))
+        s.saveCredentials(CloudStorageType.DROPBOX, OAuthTokens("STORED", "RT"))
 
         assertNotNull(s.current()).authenticate()
         assertEquals("Bearer STORED", authHeaderSeen)
@@ -305,7 +305,7 @@ class CloudSessionTest {
             authHeaderSeen = request.headers["Authorization"]
             respond("", HttpStatusCode.OK)
         })
-        s.saveTokens(CloudStorageType.DROPBOX, OAuthTokens("AT", "RT"))
+        s.saveCredentials(CloudStorageType.DROPBOX, OAuthTokens("AT", "RT"))
 
         s.disconnect(CloudStorageType.DROPBOX)
 
@@ -354,7 +354,7 @@ class CloudSessionTest {
             CompletableDeferred<Unit>().await() // never answers
             respond("", HttpStatusCode.OK)
         })
-        s.saveTokens(CloudStorageType.DROPBOX, OAuthTokens("AT", "RT"))
+        s.saveCredentials(CloudStorageType.DROPBOX, OAuthTokens("AT", "RT"))
 
         val disconnect = launch { s.disconnect(CloudStorageType.DROPBOX) }
         revokeStarted.await()
@@ -657,7 +657,7 @@ class CloudSessionTest {
         val storage = FakeTokenStorage(null, outcome = TokenSaveOutcome.NOT_PERSISTED)
         val fixture = StaticFixture(storage) { Result.Ok(Unit) }
 
-        fixture.session.saveTokens(CloudStorageType.DROPBOX, appPassword)
+        fixture.session.saveCredentials(CloudStorageType.DROPBOX, appPassword)
 
         assertNull(storage.stored)
         assertTrue(fixture.session.isConnected())

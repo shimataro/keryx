@@ -62,7 +62,7 @@ class OAuthConnectFlowTest {
         val transport = CustomUriRedirectTransport(callbackFlow)
         val flow = OAuthConnectFlow(authManager, clientId = "", transport = transport)
 
-        val result = flow.connect(CloudConnectRequest())
+        val result = flow.connect()
 
         assertIs<Result.Err>(result)
         assertIs<CloudAuthException>(result.exception)
@@ -75,7 +75,7 @@ class OAuthConnectFlowTest {
         val transport = CustomUriRedirectTransport(callbackFlow)
         val flow = OAuthConnectFlow(authManager, clientId = "", transport = transport)
 
-        val records = withCapturedLogRecords { flow.connect(CloudConnectRequest()) }
+        val records = withCapturedLogRecords { flow.connect() }
 
         assertTrue(records.any { it.message.contains("not configured") })
     }
@@ -94,7 +94,7 @@ class OAuthConnectFlowTest {
             authorizationLauncher = launcher,
         )
 
-        val result = flow.connect(CloudConnectRequest())
+        val result = flow.connect()
 
         assertIs<Result.Ok<OAuthTokens>>(result)
         assertEquals("AT", result.value.accessToken)
@@ -117,7 +117,7 @@ class OAuthConnectFlowTest {
             authorizationLauncher = launcher,
         )
 
-        val result = flow.connect(CloudConnectRequest())
+        val result = flow.connect()
 
         assertIs<Result.Err>(result)
         assertIs<CloudAuthException>(result.exception)
@@ -137,7 +137,7 @@ class OAuthConnectFlowTest {
             authorizationLauncher = launcher,
         )
 
-        val result = flow.connect(CloudConnectRequest())
+        val result = flow.connect()
 
         assertIs<Result.Err>(result)
         assertIs<CloudAuthException>(result.exception)
@@ -157,7 +157,7 @@ class OAuthConnectFlowTest {
             authorizationLauncher = launcher,
         )
 
-        val result = flow.connect(CloudConnectRequest())
+        val result = flow.connect()
 
         assertIs<Result.Err>(result)
         assertIs<CloudAuthException>(result.exception)
@@ -177,7 +177,7 @@ class OAuthConnectFlowTest {
             authorizationLauncher = launcher,
         )
 
-        val result = flow.connect(CloudConnectRequest())
+        val result = flow.connect()
 
         assertIs<Result.Err>(result)
         assertIs<CloudAuthException>(result.exception)

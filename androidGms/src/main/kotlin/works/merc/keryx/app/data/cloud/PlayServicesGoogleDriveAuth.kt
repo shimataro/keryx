@@ -182,8 +182,6 @@ class PlayServicesConnectFlow(
      * Costs one extra Play services round trip per explicit connect, and nothing else: if the grant
      * is still good, Play services simply mints a new token and no consent screen appears. This
      * also covers a stale cache arriving by any other route, not just an external revoke.
-     *
-     * [request] is ignored: Play services needs nothing from the user before it asks for consent.
      */
     override suspend fun connect(request: CloudConnectRequest): Result<CloudCredentials> {
         authorization.accessToken(allowUserInteraction = false).valueOrNull

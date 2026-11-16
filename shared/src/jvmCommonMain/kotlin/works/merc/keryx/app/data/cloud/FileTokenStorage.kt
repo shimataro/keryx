@@ -33,7 +33,7 @@ class FileTokenStorage(
     override fun save(credentials: CloudCredentials): TokenSaveOutcome {
         // Persisting must never throw: this is the last-resort store, and a failure here (unwritable
         // data dir, a pre-existing root-owned/read-only token file) would otherwise propagate up
-        // through CloudSession.saveTokens() and abort the connect flow *after* the token is already
+        // through CloudSession.saveCredentials() and abort the connect flow *after* the token is already
         // held in memory — leaving the user unable to link at all. Swallow and log instead; the
         // in-memory session still works, only cross-restart persistence is lost.
         val result = runCatching {
