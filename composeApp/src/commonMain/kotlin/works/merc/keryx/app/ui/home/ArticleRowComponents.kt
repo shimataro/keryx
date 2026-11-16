@@ -271,10 +271,12 @@ private class ContextMenuOpenSelection {
  * @param interactionSource The row's press/selection interaction source. Hoisted (rather than
  *   created internally) so [ripplePulse] can be exercised directly in tests.
  * @param isTouchPrimary Whether to expose the row's unread/starred state as a semantics
- *   `stateDescription` (see [articleRowStateDescription]). Defaults to the platform's own value;
- *   a parameter so the Android path can be exercised in desktop tests. Also gates the row's swipe.
- * @param onSwipeAction Runs the action a swipe on the row chose ([articleRowSwipe]); `null` leaves the
- *   row without a swipe. Only a touch-primary platform ([isTouchPrimary]) swipes at all.
+ *   `stateDescription` (see [articleRowStateDescription]), and — the only thing that decides it —
+ *   whether the row swipes at all (`external-spec.md` §9: only where touch is the primary input).
+ *   Defaults to the platform's own value; a parameter so the Android path can be exercised in
+ *   desktop tests.
+ * @param onSwipeAction Runs the action a swipe on the row chose ([articleRowSwipe]). Required, so a
+ *   caller cannot leave a touch-primary row's swipe silently unwired.
  */
 @Composable
 internal fun ArticleRow(
@@ -291,6 +293,7 @@ internal fun ArticleRow(
     onCopyUrl: () -> Unit,
     onOpenInBrowser: () -> Unit,
     swipeLockout: VerticalGestureLockout,
+    onSwipeAction: (ArticleSwipeAction) -> Unit,
     onShare: (() -> Unit)? = null,
     onActivate: () -> Unit = {},
     titleOverride: AnnotatedString? = null,
@@ -298,7 +301,6 @@ internal fun ArticleRow(
     ripplePulse: Int = 0,
     interactionSource: MutableInteractionSource = remember { MutableInteractionSource() },
     isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
-    onSwipeAction: ((ArticleSwipeAction) -> Unit)? = null,
 ) {
     val unread = article.is_read == 0L
     // Whether the most recent right-click selected this row (desktop only — Android never calls
@@ -328,12 +330,12 @@ internal fun ArticleRow(
             .fillMaxWidth()
             // Before everything that draws the row: only what follows its offset moves with the finger.
             .articleRowSwipe(
-                enabled = isTouchPrimary && onSwipeAction != null,
+                enabled = isTouchPrimary,
                 isRead = !unread,
                 isStarred = article.is_starred == 1L,
                 strings = strings,
                 swipeLockout = swipeLockout,
-                onSwipeAction = { action -> onSwipeAction?.invoke(action) },
+                onSwipeAction = onSwipeAction,
             )
             .listRowClickable(interactionSource, selected, onClick)
             .nativeContextMenu(

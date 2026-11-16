@@ -80,6 +80,7 @@ class ArticleReuseCrashRepro {
                         onSetNewestFirst = {},
                         onMarkAllRead = {},
                         onSelectArticle = {},
+                        onSwipeArticle = { _, _ -> },
                         modifier = Modifier.size(360.dp, 400.dp),
                         listState = state,
                     )

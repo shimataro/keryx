@@ -71,6 +71,7 @@ private fun MetadataTestRow(article: ArticleListRow, feedTitle: String) {
         onCopyUrl = {},
         onOpenInBrowser = {},
         swipeLockout = VerticalGestureLockout(),
+        onSwipeAction = {},
     )
 }
 

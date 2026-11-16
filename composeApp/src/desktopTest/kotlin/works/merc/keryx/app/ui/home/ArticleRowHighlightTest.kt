@@ -53,6 +53,7 @@ class ArticleRowHighlightTest {
                 onCopyUrl = {},
                 onOpenInBrowser = {},
                 swipeLockout = VerticalGestureLockout(),
+                onSwipeAction = {},
                 titleOverride = titleOverride,
             )
         }
@@ -83,6 +84,7 @@ class ArticleRowHighlightTest {
                 onCopyUrl = {},
                 onOpenInBrowser = {},
                 swipeLockout = VerticalGestureLockout(),
+                onSwipeAction = {},
                 titleOverride = markedToAnnotatedString("Clickable Title"),
             )
         }
@@ -119,6 +121,7 @@ class ArticleRowHighlightTest {
                 onCopyUrl = {},
                 onOpenInBrowser = {},
                 swipeLockout = VerticalGestureLockout(),
+                onSwipeAction = {},
                 interactionSource = interactionSource,
                 ripplePulse = pulse,
             )
@@ -158,6 +161,7 @@ class ArticleRowHighlightTest {
                 onCopyUrl = {},
                 onOpenInBrowser = {},
                 swipeLockout = VerticalGestureLockout(),
+                onSwipeAction = {},
                 interactionSource = interactionSource,
                 ripplePulse = 0,
             )
@@ -185,6 +189,7 @@ class ArticleRowHighlightTest {
             onCopyUrl = {},
             onOpenInBrowser = {},
             swipeLockout = VerticalGestureLockout(),
+            onSwipeAction = {},
             // Explicit labels, so the assertion doesn't depend on the test machine's locale.
             strings = rememberArticleRowStrings().copy(stateUnread = "Unread", stateStarred = "Starred"),
             isTouchPrimary = isTouchPrimary,

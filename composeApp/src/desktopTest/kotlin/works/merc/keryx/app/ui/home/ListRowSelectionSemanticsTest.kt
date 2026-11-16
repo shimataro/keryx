@@ -65,6 +65,7 @@ class ListRowSelectionSemanticsTest {
                 onCopyUrl = {},
                 onOpenInBrowser = {},
                 swipeLockout = VerticalGestureLockout(),
+                onSwipeAction = {},
             )
         }
     }

@@ -684,6 +684,8 @@ internal fun ripplePulseFor(articleId: String, selectedId: String?, returnRipple
  * @param onSelectListMode Chooses another mode from [ArticleListTopBar]'s mode menu.
  * @param starredModeEnabled Whether [ArticleListMode.Starred] can be chosen (not under the Starred filter).
  * @param newestFirst Whether to sort articles from newest to oldest.
+ * @param onSwipeArticle Runs the action a swipe on an article row chose ([articleRowSwipe]) — on a
+ *   touch-primary platform only, where every row swipes.
  * @param focused Whether the list has focus.
  * @param sortEnabled Whether the sort order items in [ArticleListTopBar]'s mode menu can be chosen —
  *   `false` while search is active, where the result order is fixed to FTS5 relevance rank.
@@ -737,7 +739,7 @@ internal fun ArticleListPaneContent(
     onSelectArticle: (ArticleListRow) -> Unit,
     onSetRead: (ArticleListRow, Boolean) -> Unit = { _, _ -> },
     onSetStarred: (ArticleListRow, Boolean) -> Unit = { _, _ -> },
-    onSwipeArticle: ((ArticleListRow, ArticleSwipeAction) -> Unit)? = null,
+    onSwipeArticle: (ArticleListRow, ArticleSwipeAction) -> Unit,
     onCopyArticleUrl: (ArticleListRow) -> Unit = rememberPlainArticleUrlCopy(),
     onOpenArticleInBrowser: (ArticleListRow) -> Unit = { openInBrowserIfAllowed(it.url) },
     onShareArticle: ((ArticleListRow) -> Unit)? = null,
@@ -871,7 +873,7 @@ internal fun ArticleListPaneContent(
                             titleOverride = titleOverride,
                             strings = rowStrings,
                             ripplePulse = ripplePulseFor(article.id, selectedId, returnRipplePulse),
-                            onSwipeAction = onSwipeArticle?.let { swipe -> { action -> swipe(article, action) } },
+                            onSwipeAction = { action -> onSwipeArticle(article, action) },
                         )
                     }
                 }
