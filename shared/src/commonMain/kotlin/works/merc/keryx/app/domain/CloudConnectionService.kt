@@ -1,7 +1,7 @@
 package works.merc.keryx.app.domain
 
 import works.merc.keryx.app.core.CloudStorageType
-import works.merc.keryx.app.data.cloud.OAuthTokens
+import works.merc.keryx.app.data.cloud.CloudCredentials
 
 /**
  * The domain/settings side of connecting and disconnecting a cloud provider: which state has to
@@ -11,7 +11,7 @@ import works.merc.keryx.app.data.cloud.OAuthTokens
  *
  * Deliberately *not* here: awaiting the interactive OAuth flow, its cancellation, the per-phase
  * loading state, and triggering the initial sync afterwards. Those are presentation concerns each
- * UI owns (see `awaitCancellableConnect`); this class starts where the tokens are already in hand.
+ * UI owns (see `awaitCancellableConnect`); this class starts where the credentials are already in hand.
  *
  * Both calls may touch the OS secure credential store (on macOS the `security` CLI, which can
  * block on an authorization dialog), so a UI caller runs them off its main thread.
@@ -23,7 +23,7 @@ class CloudConnectionService(
 ) {
 
     /**
-     * Records a successful authorization for [type]: saves [tokens], selects [type] as the active
+     * Records a successful authorization for [type]: saves [credentials], selects [type] as the active
      * provider in the device-local settings, and flushes those settings to disk.
      *
      * The flush is load-bearing and must complete before the caller starts any sync. The tokens
@@ -32,8 +32,8 @@ class CloudConnectionService(
      * present but `cloudStorageType` null, so [CloudSession.current] reports local-only and every
      * later sync silently does nothing.
      */
-    suspend fun completeConnect(type: CloudStorageType, tokens: OAuthTokens) {
-        cloudSession.saveTokens(type, tokens)
+    suspend fun completeConnect(type: CloudStorageType, credentials: CloudCredentials) {
+        cloudSession.saveTokens(type, credentials)
         settingsRepository.mutateLocalSettings { it.copy(cloudStorageType = type.id) }
         settingsRepository.flush()
     }

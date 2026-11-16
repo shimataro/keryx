@@ -11,6 +11,7 @@ import works.merc.keryx.app.data.cloud.DropboxStorage
 import works.merc.keryx.app.data.cloud.OneDriveAuthManager
 import works.merc.keryx.app.data.cloud.OneDriveStorage
 import works.merc.keryx.app.data.cloud.TokenStorage
+import works.merc.keryx.app.data.cloud.oauthAccessToken
 import works.merc.keryx.app.domain.AuthorizationLauncher
 import works.merc.keryx.app.domain.CloudSession
 import works.merc.keryx.app.domain.CustomUriRedirectTransport
@@ -31,16 +32,16 @@ internal fun dropboxProvider(
 ): CloudSession.Provider {
     val auth: CloudAuthManager = DropboxAuthManager(client)
     return CloudSession.Provider(
-        clientId = BuildConfig.DROPBOX_APP_KEY,
+        isConfigured = BuildConfig.DROPBOX_APP_KEY.isNotEmpty(),
         tokenStorage = tokenStorage,
-        authManager = auth,
         connectFlow = OAuthConnectFlow(
             authManager = auth,
             clientId = BuildConfig.DROPBOX_APP_KEY,
             transport = CustomUriRedirectTransport(callbackFlow),
             authorizationLauncher = authorizationLauncher,
         ),
-        createStorage = { tokenProvider -> DropboxStorage(client, tokenProvider) },
+        lifecycle = CloudSession.CredentialLifecycle.OAuth(clientId = BuildConfig.DROPBOX_APP_KEY, authManager = auth),
+        createStorage = { credentials -> DropboxStorage(client, oauthAccessToken(credentials)) },
     )
 }
 
@@ -57,16 +58,16 @@ internal fun oneDriveProvider(
 ): CloudSession.Provider {
     val auth: CloudAuthManager = OneDriveAuthManager(client)
     return CloudSession.Provider(
-        clientId = BuildConfig.ONEDRIVE_CLIENT_ID,
+        isConfigured = BuildConfig.ONEDRIVE_CLIENT_ID.isNotEmpty(),
         tokenStorage = tokenStorage,
-        authManager = auth,
         connectFlow = OAuthConnectFlow(
             authManager = auth,
             clientId = BuildConfig.ONEDRIVE_CLIENT_ID,
             transport = CustomUriRedirectTransport(callbackFlow),
             authorizationLauncher = authorizationLauncher,
         ),
-        createStorage = { tokenProvider -> OneDriveStorage(client, tokenProvider) },
+        lifecycle = CloudSession.CredentialLifecycle.OAuth(clientId = BuildConfig.ONEDRIVE_CLIENT_ID, authManager = auth),
+        createStorage = { credentials -> OneDriveStorage(client, oauthAccessToken(credentials)) },
     )
 }
 

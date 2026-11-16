@@ -6,7 +6,7 @@ import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.OAUTH_CONNECT_TIMEOUT_MS
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.data.cloud.CloudAuthManager
-import works.merc.keryx.app.data.cloud.OAuthTokens
+import works.merc.keryx.app.data.cloud.CloudCredentials
 import works.merc.keryx.app.data.cloud.Pkce
 
 /**
@@ -28,7 +28,8 @@ class OAuthConnectFlow(
     private val authorizationLauncher: AuthorizationLauncher = DefaultAuthorizationLauncher,
 ) : CloudConnectFlow {
 
-    override suspend fun connect(): Result<OAuthTokens> {
+    /** [request] is ignored: an OAuth flow needs nothing from the user before it opens the browser. */
+    override suspend fun connect(request: CloudConnectRequest): Result<CloudCredentials> {
         if (clientId.isEmpty()) {
             Log.warn(TAG, "Cloud provider is not configured (empty client id)")
             return Result.Err(CloudAuthException("Cloud provider is not configured"))

@@ -21,12 +21,12 @@ import works.merc.keryx.app.core.CloudStorageAvailability
 import works.merc.keryx.app.core.CloudStorageType
 import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.runCatchingUnlessCancelled
+import works.merc.keryx.app.data.cloud.CloudCredentials
 import works.merc.keryx.app.data.local.FtsManager
 import works.merc.keryx.app.data.local.findDatabaseTooNew
 import works.merc.keryx.app.di.applePlatformModule
 import works.merc.keryx.app.di.presentationModule
 import works.merc.keryx.app.di.sharedModule
-import works.merc.keryx.app.data.cloud.OAuthTokens
 import works.merc.keryx.app.domain.AppForeground
 import works.merc.keryx.app.domain.AuthorizationLauncher
 import works.merc.keryx.app.domain.ArticleRepository
@@ -356,7 +356,7 @@ class KeryxSdk private constructor(private val koin: Koin) {
     }
 
     /**
-     * Records a successful authorization: saves [tokens], selects [type] as the active provider,
+     * Records a successful authorization: saves [credentials], selects [type] as the active provider,
      * and flushes local settings before any sync may start — see [CloudConnectionService.completeConnect].
      * Runs on the app's background scope, like [prepareSearchIndex]: [CloudConnectionService]'s own
      * KDoc requires its caller to run off the main thread (it may block on the Keychain), and unlike
@@ -365,9 +365,9 @@ class KeryxSdk private constructor(private val koin: Koin) {
      * to invoke this straight from its `@MainActor` call site.
      */
     @Throws(Exception::class, CancellationException::class)
-    suspend fun completeConnect(type: CloudStorageType, tokens: OAuthTokens) {
+    suspend fun completeConnect(type: CloudStorageType, credentials: CloudCredentials) {
         val service = koin.get<CloudConnectionService>()
-        koin.get<CoroutineScope>().async { service.completeConnect(type, tokens) }.await()
+        koin.get<CoroutineScope>().async { service.completeConnect(type, credentials) }.await()
     }
 
     /**

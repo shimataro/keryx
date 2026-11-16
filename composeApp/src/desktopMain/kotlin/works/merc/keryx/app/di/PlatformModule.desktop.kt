@@ -15,6 +15,7 @@ import works.merc.keryx.app.data.cloud.KeyringTokenStorage
 import works.merc.keryx.app.data.cloud.LibSecretTokenStorage
 import works.merc.keryx.app.data.cloud.SecurityCliTokenStorage
 import works.merc.keryx.app.data.cloud.TokenStorage
+import works.merc.keryx.app.data.cloud.oauthAccessToken
 import works.merc.keryx.app.domain.CloudSession
 import works.merc.keryx.app.domain.LoopbackRedirectTransport
 import works.merc.keryx.app.domain.OAuthConnectFlow
@@ -89,9 +90,8 @@ actual val platformModule: Module = module {
 private fun googleDriveProvider(client: HttpClient): CloudSession.Provider {
     val driveAuth: CloudAuthManager = GoogleDriveAuthManager(client, DesktopBuildConfig.GOOGLE_DRIVE_CLIENT_SECRET)
     return CloudSession.Provider(
-        clientId = DesktopBuildConfig.GOOGLE_DRIVE_CLIENT_ID,
+        isConfigured = DesktopBuildConfig.GOOGLE_DRIVE_CLIENT_ID.isNotEmpty(),
         tokenStorage = providerTokenStorage(CloudStorageType.GOOGLE_DRIVE, isMacOs, isSnap),
-        authManager = driveAuth,
         connectFlow = OAuthConnectFlow(
             authManager = driveAuth,
             clientId = DesktopBuildConfig.GOOGLE_DRIVE_CLIENT_ID,
@@ -99,6 +99,10 @@ private fun googleDriveProvider(client: HttpClient): CloudSession.Provider {
                 successMessageProvider = { getString(Res.string.oauth_loopback_success) },
             ),
         ),
-        createStorage = { tokenProvider -> GoogleDriveStorage(client, tokenProvider) },
+        lifecycle = CloudSession.CredentialLifecycle.OAuth(
+            clientId = DesktopBuildConfig.GOOGLE_DRIVE_CLIENT_ID,
+            authManager = driveAuth,
+        ),
+        createStorage = { credentials -> GoogleDriveStorage(client, oauthAccessToken(credentials)) },
     )
 }

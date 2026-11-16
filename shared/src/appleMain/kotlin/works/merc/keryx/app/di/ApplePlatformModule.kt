@@ -12,6 +12,7 @@ import works.merc.keryx.app.data.cloud.GoogleDriveAuthManager
 import works.merc.keryx.app.data.cloud.GoogleDriveStorage
 import works.merc.keryx.app.data.cloud.KeychainTokenStorage
 import works.merc.keryx.app.data.cloud.googleIosClientRedirectUri
+import works.merc.keryx.app.data.cloud.oauthAccessToken
 import works.merc.keryx.app.domain.AuthorizationLauncher
 import works.merc.keryx.app.domain.CloudSession
 import works.merc.keryx.app.domain.CustomUriRedirectTransport
@@ -81,18 +82,18 @@ private fun appleGoogleDriveProvider(
     val clientId = AppleBuildConfig.GOOGLE_DRIVE_CLIENT_ID
     val driveAuth: CloudAuthManager = GoogleDriveAuthManager(client, clientSecret = null)
     return CloudSession.Provider(
-        clientId = clientId,
+        isConfigured = clientId.isNotEmpty(),
         tokenStorage = KeychainTokenStorage(
             account = CloudStorageType.GOOGLE_DRIVE.id,
             useDataProtectionKeychain = useDataProtectionKeychain,
         ),
-        authManager = driveAuth,
         connectFlow = OAuthConnectFlow(
             authManager = driveAuth,
             clientId = clientId,
             transport = CustomUriRedirectTransport(callbackFlow, redirectUri = googleIosClientRedirectUri(clientId)),
             authorizationLauncher = authorizationLauncher,
         ),
-        createStorage = { tokenProvider -> GoogleDriveStorage(client, tokenProvider) },
+        lifecycle = CloudSession.CredentialLifecycle.OAuth(clientId = clientId, authManager = driveAuth),
+        createStorage = { credentials -> GoogleDriveStorage(client, oauthAccessToken(credentials)) },
     )
 }

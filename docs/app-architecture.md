@@ -441,7 +441,7 @@ each actual opens the copy through differs (JDBC vs. requery's bundled SQLite), 
 the same three on Android, with Google Drive present only where Play services is) and handles
 automatic access-token refresh — except for Android's Google Drive, whose tokens belong to Play
 services rather than to this app, so its provider supplies them itself via
-`CloudSession.Provider.accessTokenProvider` and nothing is ever refreshed. See
+its `CloudSession.CredentialLifecycle.PlatformOwned` lifecycle and nothing is ever refreshed. See
 sync-architecture.md's "Google Drive on Android". `SyncRepository` implements the download → merge (`DatabaseMerger`)
 → incremental index of new articles (`indexMissing`) → `VACUUM INTO` snapshot generation
 (`DatabaseSnapshot`, excludes `articles_fts` on the copy side) → upload (rev check) flow, along
@@ -2152,7 +2152,7 @@ once Home shows it. The Apple app opens such a document in place (`LSSupportsOpe
 `AppModel.importOpenedOpml(url:)` reads the original file — which may live in iCloud Drive and not be
 downloaded yet — through `NSFileCoordinator` before handing its text over. The read runs off the main actor,
 so waiting for that download never freezes the UI.
-`completeConnect(type, tokens)` and `tearDownConnection(type)` are
+`completeConnect(type, credentials)` and `tearDownConnection(type)` are
 `suspend` wrappers around `domain/CloudConnectionService.kt` — the ordering every UI's
 connect/disconnect must follow, shared with the Compose settings and setup screens:
 `completeConnect` saves the tokens, selects the provider and flushes the local settings before any

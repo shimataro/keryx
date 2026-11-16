@@ -614,9 +614,9 @@ Google Drive も提供しない。
 - **ビルドにクライアント ID を持たない。** Android OAuth クライアントはパッケージ名 + 署名証明書の
   SHA-1 で照合される（Cloud Console への登録手順は [build.ja.md](build.ja.md) 参照）ため、
   `BuildConfig` から読む値は無い。したがって未登録の署名鍵でビルドした場合、ビルド時ではなく
-  `authorize()` の失敗として現れる。`CloudSession.Provider.clientId` は「このビルドでこのバックエンドが
-  設定済みか」の判定も兼ねるため非空である必要があり、`PlayServicesGoogleDriveBackend` は
-  プレースホルダ `"play-services"` を渡す（OAuth クライアント ID ではない）。
+  `authorize()` の失敗として現れる。確認すべきクライアント ID が無いので、`PlayServicesGoogleDriveBackend`
+  は `CloudSession.Provider.isConfigured` を `true` とする — Google Drive を選択肢に出すかどうかは、次の
+  端末での判定が決める。
 - **配信チャネルではなく端末で判定する。** `CloudStorageAvailability.googleDriveAvailable` は
   登録済みの `AndroidGoogleDriveBackend` に問い合わせる（`:androidGms` の実装は
   `GoogleApiAvailability.isGooglePlayServicesAvailable(...) == SUCCESS` を返す）。これをプロセスごとに
@@ -627,9 +627,9 @@ Google Drive も提供しない。
   APK もサイドロードされうるし、github フレーバーの APK も Play 開発者サービスのある端末で問題なく動く。
   `AndroidUpdateInstaller` が `REQUEST_INSTALL_PACKAGES` に適用しているのと同じ考え方。
 - **`CloudSession` 内でのトークンのライフサイクル。** リフレッシュトークンが無いため、通常の
-  保存トークン経路では `validAccessToken` の「期限切れでリフレッシュトークンが無い」分岐に落ち、
-  すでに失効したトークンを返してしまう。`CloudSession.Provider.accessTokenProvider` はまさにこの
-  ケースのためにトークン供給を上書きする: クラウドリクエストのたびに Play 開発者サービスへ問い合わせる
+  保存トークン経路（`CloudSession.CredentialLifecycle.OAuth`）では「期限切れでリフレッシュトークンが
+  無い」分岐に落ち、すでに失効したトークンを返してしまう。このプロバイダのライフサイクル
+  `CloudSession.CredentialLifecycle.PlatformOwned` は、まさにこのケースのためにトークン供給を置き換える: クラウドリクエストのたびに Play 開発者サービスへ問い合わせる
   （`allowUserInteraction = false`。リクエスト、まして `WorkManager` のバックグラウンド同期が
   独断で同意画面を開いてはならないため）。接続時のトークンは従来どおり `KeystoreTokenStorage` に
   書くが、これは再起動後も `connectedType()` が「接続済み」と報告できるようにするためだけであり、
@@ -721,8 +721,8 @@ Apple 版（`:shared` の appleMain。macOS と iOS が対象）は、Android �
   「ID が空なら選択肢を隠す」という規約に従うので、Apple 用クライアントを設定していないビルドでは
   Google Drive が単純に表示されない（未設定の Dropbox キーで Dropbox が隠れるのと同じ）。
 - **トークンとリフレッシュ。** Android の Play 開発者サービス経路とは異なり、Apple 版は本物のリフレッシュ
-  トークンを持ち、Dropbox・OneDrive と同じく `KeychainTokenStorage` に保存する — Play 開発者サービス風の
-  `accessTokenProvider` による上書きはここには無い。
+  トークンを持ち、Dropbox・OneDrive と同じく `KeychainTokenStorage` に保存する — ライフサイクルは通常の
+  `CloudSession.CredentialLifecycle.OAuth` であり、Play 開発者サービス風の `PlatformOwned` ではない。
 
 ### Apple 版での OAuth 認可（`ASWebAuthenticationSession`）
 

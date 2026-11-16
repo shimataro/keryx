@@ -52,3 +52,11 @@ object CloudCredentialsSerializer : JsonContentPolymorphicSerializer<CloudCreden
 
     private const val APP_PASSWORD_KEY = "appPassword"
 }
+
+/**
+ * Adapts a credentials supplier to the access-token supplier the OAuth storages
+ * ([DropboxStorage], [GoogleDriveStorage], [OneDriveStorage]) take: the supplied [OAuthTokens]'
+ * access token, or null when there are none (or they are not OAuth tokens).
+ */
+fun oauthAccessToken(credentialsProvider: suspend () -> CloudCredentials?): suspend () -> String? =
+    { (credentialsProvider() as? OAuthTokens)?.accessToken }

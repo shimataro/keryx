@@ -430,8 +430,8 @@ drop テーブルとして渡している。
 `CloudSession` が現在の `CloudStorage`（デスクトップは Dropbox / OneDrive / Google Drive、Android も
 同じ 3 つだが Google Drive は Play 開発者サービスのある端末のみ）を提供し、アクセストークンの自動
 リフレッシュを担う。ただし Android の Google Drive だけは例外で、トークンを所有するのは本アプリでは
-なく Play 開発者サービスであるため、プロバイダ自身が `CloudSession.Provider.accessTokenProvider` で
-供給し、リフレッシュは一切行わない — sync-architecture.ja.md の「Android での Google Drive」参照。
+なく Play 開発者サービスであるため、プロバイダ自身がライフサイクル
+`CloudSession.CredentialLifecycle.PlatformOwned` で供給し、リフレッシュは一切行わない — sync-architecture.ja.md の「Android での Google Drive」参照。
 `SyncRepository` はダウンロード → マージ（`DatabaseMerger`）→ 新記事の増分索引（`indexMissing`）→
 `VACUUM INTO` スナップショット生成（`DatabaseSnapshot`、コピー側で `articles_fts` を除外）→ アップロード
 （rev チェック）、のフローとデバウンス（`SyncScheduler`）を実装する。ライブ DB の FTS は触らない。
@@ -2045,7 +2045,7 @@ iOS 27.1 シミュレーターで計測した結果と、そこから決めた�
 インポートを要求するだけで、Home がそれを表示したときに設定 ▸ データが実行する。Apple アプリはこうした文書を
 その場で開く（`LSSupportsOpeningDocumentsInPlace`）ため、`AppModel.importOpenedOpml(url:)` は元のファイル（iCloud Drive 上の
 未ダウンロードのものもありうる）を `NSFileCoordinator` で読んでから、その内容を渡す。この読み取りはメインアクター外で行うため、
-ダウンロード待ちで UI が止まることはない。`completeConnect(type, tokens)` と
+ダウンロード待ちで UI が止まることはない。`completeConnect(type, credentials)` と
 `tearDownConnection(type)` は、`domain/CloudConnectionService.kt`
 （どの UI の接続・切断も従うべき順序を保持し、Compose の設定画面・セットアップ画面とも共有している）を包む
 `suspend` 関数：`completeConnect` はトークンを保存し、プロバイダーを選択し、同期を始める前にローカル設定を

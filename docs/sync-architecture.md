@@ -412,9 +412,9 @@ Google Drive.
 - **No client id in the build.** The Android OAuth client is matched by package name + signing
   certificate SHA-1, registered in the Cloud Console (see [build.md](build.md)); nothing is read
   from `BuildConfig`. A build signed with an unregistered key therefore fails at `authorize()` time
-  rather than at build time. `CloudSession.Provider.clientId` still has to be non-empty (it doubles
-  as "is this backend configured in this build"), so `PlayServicesGoogleDriveBackend` passes the
-  placeholder `"play-services"` — not an OAuth client id.
+  rather than at build time. With no client id to check, `PlayServicesGoogleDriveBackend` reports
+  `CloudSession.Provider.isConfigured` as `true` — whether Google Drive is offered at all is the
+  device gate below.
 - **Gated on the device, not on the distribution channel.** `CloudStorageAvailability.googleDriveAvailable`
   asks the registered `AndroidGoogleDriveBackend` (`:androidGms`'s implementation answers
   `GoogleApiAvailability.isGooglePlayServicesAvailable(...) == SUCCESS`), evaluated once per
@@ -425,9 +425,10 @@ Google Drive.
   a play-flavored APK can be sideloaded and a github-flavored one runs fine where Play services
   exists, the same reasoning `AndroidUpdateInstaller` applies to `REQUEST_INSTALL_PACKAGES`.
 - **Token lifecycle inside `CloudSession`.** Because there is no refresh token, the ordinary
-  stored-token path would fall through to `validAccessToken`'s "expired with no refresh token"
-  branch and hand out a token that is already dead. `CloudSession.Provider.accessTokenProvider`
-  overrides the token supply for exactly this case: each cloud request asks Play services again
+  stored-token path (`CloudSession.CredentialLifecycle.OAuth`) would fall through to its "expired with
+  no refresh token" branch and hand out a token that is already dead. The provider's
+  `CloudSession.CredentialLifecycle.PlatformOwned` lifecycle replaces the token supply for exactly
+  this case: each cloud request asks Play services again
   (with `allowUserInteraction = false`, since a request — least of all the `WorkManager` background
   sync — must never open a consent screen on its own). The connect's token is still written to
   `KeystoreTokenStorage`, but only so `connectedType()` reports the account as connected after a
@@ -523,8 +524,8 @@ desktop's.
   convention as every other provider/platform pair, so a build with no Apple client configured
   simply doesn't offer Google Drive, the same way an unconfigured Dropbox key hides Dropbox.
 - **Tokens and refresh.** Unlike Android's Play-services path, the Apple app owns a real refresh
-  token, stored through `KeychainTokenStorage` like Dropbox/OneDrive — there is no Play-services-style
-  `accessTokenProvider` override here.
+  token, stored through `KeychainTokenStorage` like Dropbox/OneDrive — its lifecycle is the ordinary
+  `CloudSession.CredentialLifecycle.OAuth`, not the Play-services-style `PlatformOwned` one.
 
 ### OAuth authorization on Apple (`ASWebAuthenticationSession`)
 

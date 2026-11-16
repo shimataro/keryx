@@ -7,6 +7,7 @@ import io.ktor.client.engine.mock.respond
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
@@ -16,13 +17,19 @@ import works.merc.keryx.app.FakeTokenStorage
 import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.Clock
+import works.merc.keryx.app.core.CloudAuthException
 import works.merc.keryx.app.core.CloudStorageType
 import works.merc.keryx.app.core.InfoDialogText
 import works.merc.keryx.app.core.NotificationText
 import works.merc.keryx.app.core.Result
+import works.merc.keryx.app.data.cloud.AppPasswordCredentials
+import works.merc.keryx.app.data.cloud.CloudCredentials
+import works.merc.keryx.app.data.cloud.CloudStorage
 import works.merc.keryx.app.data.cloud.DropboxAuthManager
+import works.merc.keryx.app.data.cloud.DropboxStorage
 import works.merc.keryx.app.data.cloud.OAuthTokens
 import works.merc.keryx.app.data.cloud.TokenSaveOutcome
+import works.merc.keryx.app.data.cloud.oauthAccessToken
 import works.merc.keryx.app.singleProviderCloudSession
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -582,5 +589,136 @@ class CloudSessionTest {
 
         // Null access token means withToken() short-circuits with CloudAuthException.
         assertIs<Result.Err>(result)
+    }
+
+    private val appPassword = AppPasswordCredentials(
+        serverUrl = "https://cloud.example.com",
+        userId = "alice",
+        loginName = "alice",
+        appPassword = "pw",
+    )
+
+    /**
+     * A session whose provider has a [CloudSession.CredentialLifecycle.Static] lifecycle. Its
+     * [CloudStorage] factory records the credentials supplier it is handed in [supplier], so a test
+     * can read exactly what the storage would be given. Any HTTP request counts in [httpCalls]: a
+     * static lifecycle must never reach the OAuth refresh or revoke endpoints.
+     */
+    private class StaticFixture(
+        storage: FakeTokenStorage,
+        revoke: suspend (CloudCredentials) -> Result<Unit>,
+    ) {
+        var httpCalls = 0
+        var supplier: (suspend () -> CloudCredentials?)? = null
+        val session: CloudSession
+
+        init {
+            val client = HttpClient(MockEngine { httpCalls++; respond("{}", HttpStatusCode.OK) }) { expectSuccess = false }
+            session = singleProviderCloudSession(
+                client = client,
+                tokenStorage = storage,
+                authManager = DropboxAuthManager(client),
+                clock = Clock { Long.MAX_VALUE },
+                lifecycle = CloudSession.CredentialLifecycle.Static(revoke),
+                createStorage = { credentials ->
+                    supplier = credentials
+                    DropboxStorage(client, oauthAccessToken(credentials))
+                },
+            )
+        }
+
+        suspend fun suppliedCredentials(): CloudCredentials? {
+            assertNotNull(session.current())
+            return assertNotNull(supplier).invoke()
+        }
+    }
+
+    @Test
+    fun staticLifecycleHandsOutTheStoredCredentialsUnchanged() = runBlocking {
+        val fixture = StaticFixture(FakeTokenStorage(appPassword)) { Result.Ok(Unit) }
+
+        assertTrue(fixture.session.isConnected())
+        assertEquals(appPassword, fixture.suppliedCredentials())
+        assertEquals(0, fixture.httpCalls)
+    }
+
+    @Test
+    fun staticLifecycleNeverRefreshesExpiredOAuthTokens() = runBlocking {
+        // Even tokens that look expired are handed out as stored: only the OAuth lifecycle refreshes.
+        val expired = OAuthTokens("AT", "RT", expiresAtMillis = 1_000L)
+        val fixture = StaticFixture(FakeTokenStorage(expired)) { Result.Ok(Unit) }
+
+        assertEquals(expired, fixture.suppliedCredentials())
+        assertEquals(0, fixture.httpCalls)
+    }
+
+    @Test
+    fun staticLifecycleHoldsUnpersistedCredentialsInMemory() = runBlocking {
+        val storage = FakeTokenStorage(null, outcome = TokenSaveOutcome.NOT_PERSISTED)
+        val fixture = StaticFixture(storage) { Result.Ok(Unit) }
+
+        fixture.session.saveTokens(CloudStorageType.DROPBOX, appPassword)
+
+        assertNull(storage.stored)
+        assertTrue(fixture.session.isConnected())
+        assertEquals(appPassword, fixture.suppliedCredentials())
+    }
+
+    @Test
+    fun staticLifecycleDisconnectRevokesTheStoredCredentialsThenClears() = runBlocking {
+        val revoked = mutableListOf<CloudCredentials>()
+        val storage = FakeTokenStorage(appPassword)
+        val fixture = StaticFixture(storage) {
+            revoked += it
+            Result.Ok(Unit)
+        }
+
+        fixture.session.disconnect(CloudStorageType.DROPBOX)
+
+        assertEquals(listOf<CloudCredentials>(appPassword), revoked)
+        assertNull(storage.stored)
+        assertTrue(!fixture.session.isConnected())
+        assertEquals(0, fixture.httpCalls)
+    }
+
+    @Test
+    fun staticLifecycleDisconnectClearsEvenWhenTheRevokeFails() = runBlocking {
+        val storage = FakeTokenStorage(appPassword)
+        val fixture = StaticFixture(storage) { Result.Err(CloudAuthException("revoke failed")) }
+
+        fixture.session.disconnect(CloudStorageType.DROPBOX)
+
+        assertNull(storage.stored)
+        assertTrue(!fixture.session.isConnected())
+    }
+
+    @Test
+    fun staticLifecycleDisconnectCancelledDuringRevokeStillClears() = runBlocking {
+        val revokeStarted = CompletableDeferred<Unit>()
+        val storage = FakeTokenStorage(appPassword)
+        val fixture = StaticFixture(storage) {
+            revokeStarted.complete(Unit)
+            awaitCancellation()
+        }
+
+        val disconnect = launch { fixture.session.disconnect(CloudStorageType.DROPBOX) }
+        revokeStarted.await()
+        disconnect.cancelAndJoin()
+
+        assertNull(storage.stored)
+        assertTrue(!fixture.session.isConnected())
+    }
+
+    @Test
+    fun staticLifecycleDisconnectWithNothingStoredSkipsTheRevoke() = runBlocking {
+        var revokeCalled = false
+        val fixture = StaticFixture(FakeTokenStorage(null)) {
+            revokeCalled = true
+            Result.Ok(Unit)
+        }
+
+        fixture.session.disconnect(CloudStorageType.DROPBOX)
+
+        assertTrue(!revokeCalled)
     }
 }

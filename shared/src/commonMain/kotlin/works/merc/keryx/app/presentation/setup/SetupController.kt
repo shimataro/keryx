@@ -12,6 +12,7 @@ import kotlinx.coroutines.withContext
 import works.merc.keryx.app.core.CloudStorageAvailability
 import works.merc.keryx.app.core.CloudStorageType
 import works.merc.keryx.app.core.Result
+import works.merc.keryx.app.domain.CloudConnectRequest
 import works.merc.keryx.app.domain.CloudConnectionService
 import works.merc.keryx.app.domain.CloudSession
 import works.merc.keryx.app.domain.SettingsRepository
@@ -81,6 +82,7 @@ class SetupController(
             }
             val result = awaitCancellableConnect(
                 flow,
+                CloudConnectRequest(),
                 onJobChange = { authorizationJob = it },
                 onCanCancelChange = { _canCancelConnect.value = it },
             ) ?: run {

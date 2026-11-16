@@ -25,6 +25,7 @@ import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.runCatchingUnlessCancelled
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.domain.ActivityCenter
+import works.merc.keryx.app.domain.CloudConnectRequest
 import works.merc.keryx.app.domain.CloudConnectionService
 import works.merc.keryx.app.domain.CloudSession
 import works.merc.keryx.app.domain.SettingsRepository
@@ -356,6 +357,7 @@ class CloudSyncController(
         val result = coroutineScope {
             awaitCancellableConnect(
                 flow,
+                CloudConnectRequest(),
                 onJobChange = { authorizationJob = it },
                 onCanCancelChange = { _canCancelConnect.value = it },
             )

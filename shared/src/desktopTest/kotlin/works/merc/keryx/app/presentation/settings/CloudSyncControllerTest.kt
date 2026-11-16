@@ -40,6 +40,7 @@ import works.merc.keryx.app.core.CloudStorageType
 import works.merc.keryx.app.core.ErrorKind
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.core.SYNC_STATE_LAST_SYNCED_AT
+import works.merc.keryx.app.data.cloud.CloudCredentials
 import works.merc.keryx.app.data.cloud.CloudFileMeta
 import works.merc.keryx.app.data.cloud.CloudStorage
 import works.merc.keryx.app.data.cloud.DropboxAuthManager
@@ -51,6 +52,7 @@ import works.merc.keryx.app.data.local.LocalSettingsStore
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.domain.ActivityCenter
 import works.merc.keryx.app.domain.CloudConnectFlow
+import works.merc.keryx.app.domain.CloudConnectRequest
 import works.merc.keryx.app.domain.CloudConnectionService
 import works.merc.keryx.app.domain.CloudSession
 import works.merc.keryx.app.domain.NotificationCenter
@@ -971,7 +973,7 @@ class CloudSyncControllerTest {
         // starts on Dropbox, so awaiting Dropbox alone would pass even if reconnect() did nothing.
         val authorization = CompletableDeferred<Result<OAuthTokens>>()
         val connectFlow = object : CloudConnectFlow {
-            override suspend fun connect(): Result<OAuthTokens> = authorization.await()
+            override suspend fun connect(request: CloudConnectRequest): Result<CloudCredentials> = authorization.await()
         }
         val controller = newController(tokenStorage = tokenStorage, connectFlow = connectFlow, syncCloudProvider = { cloud })
         runBlocking { createdSyncRepository.sync() }
