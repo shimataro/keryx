@@ -1709,7 +1709,11 @@ class HomeViewModelTest {
 
     // --- Article row swipe (performSwipeAction) ---
 
-    /** Each swipe action writes the state it names, and a swipe never selects the row. */
+    /**
+     * Each swipe action writes the state it names, and a swipe never selects the row. Each action is
+     * run twice: a swipe writes an explicit state rather than toggling, so a row whose snapshot is
+     * already stale (the article read on another device, say) still ends in the state the swipe named.
+     */
     @Test
     fun eachSwipeActionWritesItsStateWithoutSelectingTheRow() = runTest {
         val vm = newViewModelWithHydrationOn(UnconfinedTestDispatcher(testScheduler), "a1")
@@ -1717,7 +1721,13 @@ class HomeViewModelTest {
         vm.performSwipeAction(vm.row("a1"), ArticleSwipeAction.MarkRead)
         testScheduler.advanceUntilIdle()
         assertEquals(1L, dbIsRead("a1"))
+        vm.performSwipeAction(vm.row("a1"), ArticleSwipeAction.MarkRead)
+        testScheduler.advanceUntilIdle()
+        assertEquals(1L, dbIsRead("a1"))
 
+        vm.performSwipeAction(vm.row("a1"), ArticleSwipeAction.MarkUnread)
+        testScheduler.advanceUntilIdle()
+        assertEquals(0L, dbIsRead("a1"))
         vm.performSwipeAction(vm.row("a1"), ArticleSwipeAction.MarkUnread)
         testScheduler.advanceUntilIdle()
         assertEquals(0L, dbIsRead("a1"))
@@ -1725,7 +1735,13 @@ class HomeViewModelTest {
         vm.performSwipeAction(vm.row("a1"), ArticleSwipeAction.Star)
         testScheduler.advanceUntilIdle()
         assertEquals(1L, dbIsStarred("a1"))
+        vm.performSwipeAction(vm.row("a1"), ArticleSwipeAction.Star)
+        testScheduler.advanceUntilIdle()
+        assertEquals(1L, dbIsStarred("a1"))
 
+        vm.performSwipeAction(vm.row("a1"), ArticleSwipeAction.Unstar)
+        testScheduler.advanceUntilIdle()
+        assertEquals(0L, dbIsStarred("a1"))
         vm.performSwipeAction(vm.row("a1"), ArticleSwipeAction.Unstar)
         testScheduler.advanceUntilIdle()
         assertEquals(0L, dbIsStarred("a1"))
