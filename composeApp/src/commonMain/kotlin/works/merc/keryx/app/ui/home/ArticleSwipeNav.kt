@@ -538,6 +538,7 @@ internal fun rememberArticleSwipeController(
  * a scroll from turning into a page turn by accident: a gesture that passes the touch slop while
  * pointing more vertically than horizontally is latched vertical for its whole remaining life, and
  * a gesture beginning within [SWIPE_AFTER_VERTICAL_LOCKOUT_MS] of a vertical one never arms at all.
+ * A gesture that is cancelled rather than released settles back without turning the page.
  */
 internal fun Modifier.articleSwipeNavigation(controller: ArticleSwipeController): Modifier =
     pointerInput(controller) {
@@ -560,13 +561,22 @@ internal fun Modifier.articleSwipeNavigation(controller: ArticleSwipeController)
                     val change = event.changes.firstOrNull { it.id == down.id } ?: break
                     if (change.changedToUpIgnoreConsumed()) {
                         if (dragging) {
+                            // A cancelled gesture (the system taking the pointer away, say) arrives
+                            // as an up Compose has already consumed (`onCancelPointerInput`); the
+                            // finger never lifted, so it settles back without turning the page. On
+                            // this Initial pass nothing has seen a real up yet, so it is unconsumed.
+                            val cancelled = change.isConsumed
                             change.consume()
+                            dragging = false
+                            if (cancelled) {
+                                controller.onDragCancel()
+                                break
+                            }
                             // Position hasn't moved since the last recorded drag sample, but this
                             // still records the true release time (up can fire later than the
                             // last move) for onDragEnd's low-sample-count velocity fallback.
                             controller.onDrag(0f, change.uptimeMillis)
                             controller.onDragEnd()
-                            dragging = false
                         } else if (verticalClaimed) {
                             controller.onVerticalGestureEnd(change.uptimeMillis)
                         }
