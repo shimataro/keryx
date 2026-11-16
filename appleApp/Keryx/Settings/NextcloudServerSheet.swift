@@ -12,6 +12,9 @@ struct NextcloudServerSheet: View {
 
     @State private var server: NextcloudServerObservable
     @FocusState private var urlFieldFocused: Bool
+    /// The check `submit()` started, kept so closing the sheet can cancel it: a check that finishes
+    /// after the sheet was dismissed must not go on to start the sign-in.
+    @State private var submitTask: Task<Void, Never>?
 
     init(prompt: NextcloudServerPrompt, makeController: (String) -> NextcloudServerController, onClose: @escaping () -> Void) {
         self.prompt = prompt
@@ -46,6 +49,7 @@ struct NextcloudServerSheet: View {
         }
         .presentationDetents([.medium, .large])
         .task { await server.startObserving() }
+        .onDisappear { submitTask?.cancel() }
         #else
         VStack(alignment: .leading, spacing: 12) {
             Text(L("nextcloud_server_title"))
@@ -69,6 +73,7 @@ struct NextcloudServerSheet: View {
         .padding()
         .frame(width: 420)
         .task { await server.startObserving() }
+        .onDisappear { submitTask?.cancel() }
         #endif
     }
 
@@ -106,8 +111,10 @@ struct NextcloudServerSheet: View {
         let controller = server.controller
         let onConfirmed = prompt.onConfirmed
         let close = onClose
-        Task { @MainActor in
+        submitTask?.cancel()
+        submitTask = Task { @MainActor in
             if let request = try? await controller.submit() {
+                guard !Task.isCancelled else { return }
                 close()
                 onConfirmed(request)
             }
