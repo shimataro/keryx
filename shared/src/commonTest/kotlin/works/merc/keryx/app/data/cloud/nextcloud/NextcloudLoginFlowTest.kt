@@ -242,6 +242,20 @@ class NextcloudLoginFlowTest {
     }
 
     @Test
+    fun aUserIdRequestThatThrowsFailsAndRevokesTheIssuedPassword() = runTest {
+        val polls = IntArray(1)
+        val f = flow { request ->
+            if (request.path.endsWith("/ocs/v1.php/cloud/user")) throw IllegalStateException("connection reset")
+            standard(request, pendingPolls = 0, polls = polls)
+        }
+        assertIs<CloudAuthException>(assertIs<Result.Err>(f.connect(request())).exception)
+        val revoke = history.last()
+        assertEquals("DELETE", revoke.method.value)
+        assertEquals("https://cloud.example.com/ocs/v2.php/core/apppassword", revoke.url.toString())
+        assertEquals(1, launcher.closeCount)
+    }
+
+    @Test
     fun aServerWithoutLoginFlowFails() = runTest {
         val f = flow { respond("", HttpStatusCode.NotFound) }
         assertIs<CloudAuthException>(assertIs<Result.Err>(f.connect(request())).exception)

@@ -9,12 +9,15 @@ import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpHeaders
 import io.ktor.http.parameters
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import works.merc.keryx.app.core.APP_NAME
+import works.merc.keryx.app.core.CONNECTION_TIMEOUT_MS
 import works.merc.keryx.app.core.CloudAuthException
 import works.merc.keryx.app.core.NEXTCLOUD_LOGIN_POLL_INTERVAL_MS
 import works.merc.keryx.app.core.NEXTCLOUD_LOGIN_TIMEOUT_MS
@@ -150,7 +153,18 @@ class NextcloudLoginFlow(
             loginName = grant.loginName,
             appPassword = grant.appPassword,
         )
-        val userId = fetchUserId(provisional) ?: run {
+        val userId = try {
+            fetchUserId(provisional)
+        } catch (e: CancellationException) {
+            // Cancelled mid-read: still try to discard the app password, bounded, before giving up.
+            withContext(NonCancellable) {
+                withTimeoutOrNull(CONNECTION_TIMEOUT_MS) { revokeNextcloudAppPassword(client, provisional, userAgent) }
+            }
+            throw e
+        } catch (e: Throwable) {
+            // A transport or parse failure is no different from an unreadable id: revoke and fail.
+            null
+        } ?: run {
             revokeNextcloudAppPassword(client, provisional, userAgent)
             return authError("Could not read the Nextcloud user id")
         }
