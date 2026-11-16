@@ -158,7 +158,8 @@ It works differently from the three providers above, so here is what that means:
 - **What syncs, and what never syncs,** is the same as for the providers above.
 - **Credential storage:** the app password is stored exactly like the other providers' tokens (above),
   and is likewise excluded from Android's automatic backup and device transfer. It is only ever sent to
-  your own server.
+  the server that issued it — the one Nextcloud's login flow names when it hands the app password over,
+  normally the address you entered, and always over HTTPS.
 - **On your server:** every sync upload is a normal file change there, so your server may keep earlier
   versions of the sync file (the Versions app) and list each upload in its Activity stream. If a
   Nextcloud desktop client on one of your computers syncs your files, it downloads the `Keryx` folder
