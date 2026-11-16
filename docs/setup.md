@@ -373,6 +373,15 @@ renders the OAuth page but doesn't handle interaction correctly.
 Recreate the AVD with a **Google Play** system image (not "Google APIs" only — that omits Play
 Store and therefore Chrome), or install a real browser APK on the existing AVD.
 
+### Testing Nextcloud locally
+
+Nextcloud needs no API key and no redirect, so `./gradlew :composeApp:run` can complete its sign-in
+(the app learns of it by polling the server). The server must be reached over **HTTPS with a
+certificate the OS trusts**: a plain `http://` address is refused, and so is a self-signed
+certificate. To test against the official `nextcloud` Docker image, put it behind a TLS proxy with
+a certificate from a local CA the OS (and, for a device or emulator, the device) trusts — e.g. one
+made with `mkcert`, after `mkcert -install`. Use a test server only, never a real account's.
+
 ### `./gradlew :composeApp:run` does not complete Dropbox / OneDrive linking (all desktop OSes)
 
 Their redirect URI uses the custom scheme `keryx://`, which never reaches the `gradlew run`

@@ -65,7 +65,9 @@ sealed class KeryxException(message: String) : Exception(message) {
 `FeedDiscoveryException(candidates)`（"Feed links found on page"）、`FeedTimeoutException`
 （"Feed request timed out"）、`SyncConflictException`（"Sync conflict detected"）、
 `SchemaVersionException(localVersion, cloudVersion)`。`UpdateException(stage, message)` だけは例外的に、
-`message` が他の引数より*後*に来る。
+`message` が他の引数より*後*に来る。`NextcloudServerException(problem, message)`（サインイン前に拒否された
+Nextcloud サーバーのアドレス）も同様に `NextcloudServerProblem` を先に取る。問題ごとに専用の `ErrorKind`
+（`NEXTCLOUD_HTTPS_REQUIRED`・`NEXTCLOUD_NOT_FOUND`・`NEXTCLOUD_UNREACHABLE`）があり、サーバーのダイアログに表示する。
 
 「不正なフィード URL」専用の例外は存在しない——購読処理は URL の構文を検証してからフェッチするわけでは
 ないため、不正または非対応の URL は他のフェッチエラーと同様、フェッチ自体が失敗した際に

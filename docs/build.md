@@ -50,7 +50,9 @@ Specify API keys at build time to enable cloud storage (sync) integration.
 Property values are referenced from [local.properties.example](../local.properties.example).
 Copy this file to `local.properties` and edit it during the build.
 
-Services without an API key will not show integration options. If no service is configured, the integration itself does not appear (e.g., tabs in the settings dialog).
+Services without an API key will not show integration options. Nextcloud is the exception: it needs no key or
+build setting at all (the user names their own server and signs in there), so every build — the F-Droid build
+included — always offers it, and cloud sync therefore always appears.
 **Only one cloud storage can be connected at a time**, and data cannot be distributed across multiple storages.
 
 This is implemented via Gradle custom tasks in `shared/build.gradle.kts` (`generateBuildConfig`, plus `generateDesktopBuildConfig` for the desktop-only Google Drive credentials and `generateAppleBuildConfig` for the Apple app's own, secretless Google Drive client id — see "Apple (macOS / iOS)" below).
@@ -690,7 +692,7 @@ and `fdroid`, same `applicationId`:
   developer-signed APK `release.yml` attaches, publishes with the app's own signature — see
   "Publishing to F-Droid"), and it contains **no Google Play services at all** — F-Droid's inclusion policy forbids them. Everything that needs Play services (Google
   Drive on Android) lives in the `:androidGms` module, which only `github` and `play` depend on;
-  `fdroid` therefore never offers Google Drive (Dropbox, OneDrive and local-only work as usual), the
+  `fdroid` therefore never offers Google Drive (Dropbox, OneDrive, Nextcloud and local-only work as usual), the
   same state as a device without Play services. Its manifest
   (`androidApp/src/fdroid/AndroidManifest.xml`) also carries the `works.merc.keryx.SELF_UPDATE_CHECK`
   meta-data set to `false`, which turns the in-app update check off whichever installer delivered

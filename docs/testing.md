@@ -240,6 +240,7 @@ Project-wide, this is on top of the three Android instrumented suites above:
 - cloud-data corruption/incompatibility recovery (`SyncRepositoryTest.kt`/`SyncMergerTest.kt`: constraint-violating cloud data — a `feeds` row set with a UNIQUE-`url` duplicate or a NOT-NULL-violating NULL only the cloud DB's own laxer schema allowed — classified as `CloudDataIncompatibleException` alongside corrupt-file and foreign-schema cases, `SyncMergerTest.mergeDoesNotClassifyABrokenLocalSchemaAsCloudDataIncompatible` guarding the inverse, and `SyncRepositoryTest.postMergeIndexFailureIsNotClassifiedAsCloudDataIncompatible` guarding that a post-commit `FtsManager.indexMissing()` failure — which shares the same ambiguous SQLite error code as a broken cloud schema — is never misclassified as the cloud's fault; `core/SqliteFileTest.kt` for the downloaded-bytes SQLite-header rejection symmetric with the upload-side check)
 - the cloud-data reset now archiving rather than deleting (`core/CloudBackupPathTest.kt` for the deterministic UTC-formatted backup path; `CloudStorage.rename` exercised per provider in `DropboxStorageTest.kt`/`GoogleDriveStorageTest.kt`/`OneDriveStorageTest.kt` including the destination-conflict and absent-source cases; `SyncRepositoryTest.kt`'s `resetCloudData*` tests for the rename-then-recreate flow and its delete fallback)
 - the file-streamed cloud transfers (`CloudFileTransferTest.kt`: a response body written to its destination verbatim across several read chunks, a shorter payload replacing rather than appending to an existing destination file, and `FileUploadContent` streaming a file — optionally wrapped in the prefix/suffix that make Drive's `multipart/related` envelope possible — while reporting the right `contentLength`; `ContentDigestTest.kt` for the chunked SHA-256 the upload skip is keyed on, including a change in the final chunk still registering and a missing file yielding no digest rather than a false match; `SqliteFileTest.kt` for the path-based header check deciding from the first 16 bytes of a file far larger than any buffer)
+- the Nextcloud provider (`data/cloud/nextcloud/`): `NextcloudUrlTest` (address normalization, table-driven: scheme added, browser URLs cut back to the base, `http://` and other schemes as HTTPS-required, credentials/query/fragment/bad hosts rejected); `NextcloudServerProbeTest` (`status.php` with `installed: true`, a 3xx not followed and counted as not-Nextcloud, no response as unreachable); `NextcloudStorageTest` (every `CloudStorage` method over `MockEngine`: Basic auth and User-Agent on each request, `If-Match` passed through verbatim, 412/423 as conflicts, `create`'s `MKCOL` → temporary `PUT` → `MOVE Overwrite: F` and the temporary file's removal on a 412 or a failed upload, `rename`'s 412 as a storage error, a missing ETag, 401 as auth, cancellation, non-app-password or non-HTTPS credentials refused without a request, `PROPFIND` parsed whatever the namespace prefix); `CloudStorageResponseTest` (`headerRevOrConflictOr`); `NextcloudLoginFlowTest` (404 → 200 polling, about one poll per second, the 20-minute timeout in virtual time — its `MockEngine` runs on the test scheduler, so a request in flight cannot let virtual time skip to the timeout — `LoginPageLauncher.close()` on success, failure and cancellation, non-HTTPS endpoint/page/granted server refused, the user id read from OCS and an unfinished app password revoked); `NextcloudServerControllerTest`; and the registration in `CloudSessionTest` (the Static revoke calls `DELETE core/apppassword`, `serverUrlOf`), `CloudSyncControllerTest`/`SetupControllerTest` (the `CloudConnectRequest` reaching the flow, `reconnectServerUrl`), `CloudStorageAvailabilityTest` (Nextcloud last and offered without any key), `TokenBackupExclusionTest`, `CloudProviderRowTest`/`NextcloudServerDialogContentTest`, `StringCatalogParityTest` (`InfoPlist.xcstrings`) and `KeryxSdkTest` (`openLoginPage`/`closeLoginPage`, `newNextcloudServerController`)
 - the unchanged-transfer skip (`SyncRepositoryTest.kt`):
   - A second sync with nothing changed on either side transfers zero payload bytes and issues only
     its one metadata request; a local edit made after such a skip is still uploaded; a remote
@@ -1548,6 +1549,33 @@ Delete and reinstall the app to bring first-run Setup back, then confirm:
 - (macOS) Shrink the window to its minimum: both option cards are still shown in full, with nothing
   truncated or cut off. At the default window size nothing scrolls until a connection is in progress
   or an error is shown below the cards.
+
+### Nextcloud
+
+Use test servers only (never a real account): the official `nextcloud` Docker image behind HTTPS with a
+certificate the OS trusts (see [setup.md](setup.md)'s "Testing Nextcloud locally"), at the newest stable
+release and the oldest maintained one.
+
+- **Each platform** (Windows, Linux, Android including the F-Droid build, macOS, iOS): connect from Setup and
+  from Settings ▸ Cloud sync; a mistyped address, a `http://` address and a server that is not Nextcloud each
+  show their own message in the dialog; an account with two-factor authentication connects; aborting while
+  the sign-in is pending works (and closes the sign-in page on Apple); switching from another provider (the
+  server dialog appears only after the switch is confirmed, and cancelling it keeps the old connection) and
+  reconnecting (the dialog starts from the stored server) both work.
+- **Two devices** editing and syncing at the same time converge through the conflict retry.
+- **Reset sync data** leaves a `keryx-<date-time>.db.gz.bak` in the `Keryx` folder.
+- **Disconnect** removes the app password from the server's Settings ▸ Security ▸ Devices & sessions.
+- **Only on real devices / servers:**
+  - iOS / macOS: an `ASWebAuthenticationSession` opened with no callback scheme is closed by `cancel()` once the
+    sign-in completes.
+  - Android: the launch intent closes the Custom Tab and brings the app back to the front after the sign-in.
+    If Android's background-activity-start restriction blocks it, returning by hand must still complete the
+    connection (the app learns of the sign-in by polling).
+  - Overwriting `PUT` and `MOVE` responses carry `OC-ETag` / `ETag` (an upload without one fails with
+    "Missing ETag").
+  - iOS and macOS 15 or later: connecting to a LAN server over HTTPS shows the local-network permission prompt
+    with the English and Japanese explanation; the built `.app`'s `Info.plist` has
+    `NSLocalNetworkUsageDescription` and `ja.lproj/InfoPlist.strings` its Japanese text.
 
 ### In-App Update
 

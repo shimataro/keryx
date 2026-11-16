@@ -10,14 +10,14 @@
 
 - シンプル・スタイリッシュ・高速な UI/UX
 - ローカルファースト（アカウント不要、データは手元に）
-- クラウドストレージ（Dropbox / OneDrive / Google Drive）経由でのデバイス間同期
+- クラウドストレージ（Dropbox / OneDrive / Google Drive）またはユーザー自身の Nextcloud サーバー経由でのデバイス間同期
 
 ## 2. 対応プラットフォーム
 
 | プラットフォーム | 対応 |
 | --- | --- |
 | Windows / Linux | ✅ Compose Multiplatform（現行） |
-| Android | ✅（Compose Multiplatform、現行。クラウド同期は Dropbox / OneDrive に対応。Google Play 開発者サービスがインストール済みかつ有効かつ最新の端末では Google Drive も利用可能。§4 および [sync-architecture.ja.md](sync-architecture.ja.md) 参照。F-Droid 版は Play 開発者サービスを含まないため Google Drive が一切無く、アプリ内アップデートも無い — §4 と §7 参照） |
+| Android | ✅（Compose Multiplatform、現行。クラウド同期は Dropbox / OneDrive / Nextcloud に対応。Google Play 開発者サービスがインストール済みかつ有効かつ最新の端末では Google Drive も利用可能。§4 および [sync-architecture.ja.md](sync-architecture.ja.md) 参照。F-Droid 版は Play 開発者サービスを含まないため Google Drive が一切無く、アプリ内アップデートも無い — §4 と §7 参照） |
 | iOS / iPadOS | ✅ ネイティブ SwiftUI アプリ（現行。iOS / iPadOS 17 以降、App Store で配布）。ロジックは `:shared` で他プラットフォームと共有し、Compose 版は挟まない。[app-architecture.ja.md](app-architecture.ja.md) の「Apple ネイティブアプリ（SwiftUI）」参照 |
 | macOS | ✅ ネイティブ SwiftUI アプリ（現行。Apple Silicon、macOS 14 以降、Mac App Store と GitHub Releases（Developer ID 署名）で配布）。ロジックは `:shared` で共有する。Compose 版 macOS ビルドに代わるもので、Compose 版はもうリリースせず内部の確認用としてのみ残す。[app-architecture.ja.md](app-architecture.ja.md) の「Apple ネイティブアプリ（SwiftUI）」参照 |
 
@@ -27,8 +27,8 @@ RSS 2.0 / Atom 1.0（RSS 1.0/RDF も緩く解釈）。JSON Feed は α 以降。
 
 ## 4. 同期方式
 
-- Keryx へのアカウント登録なし。ユーザー自身のクラウドストレージ（Dropbox / OneDrive / Google Drive）を
-  同期バスとして利用する。有効な接続は常に 1 つで、どのプロバイダーを使うかはユーザーが選択・切替する
+- Keryx へのアカウント登録なし。ユーザー自身のクラウドストレージ（Dropbox / OneDrive / Google Drive、
+  またはユーザーが運用している・アカウントを持っている Nextcloud サーバー）を同期バスとして利用する。有効な接続は常に 1 つで、どのプロバイダーを使うかはユーザーが選択・切替する
   （同時接続はしない）。
 - **OneDrive が対応するのは個人用 Microsoft アカウントのみ** — 職場・学校アカウントは連携できない。
   詳細は [sync-architecture.ja.md](sync-architecture.ja.md) の「クラウド認証」を参照。
@@ -36,6 +36,15 @@ RSS 2.0 / Atom 1.0（RSS 1.0/RDF も緩く解釈）。JSON Feed は α 以降。
   利用できる。Android では Google の Play 開発者サービス `AuthorizationClient` を使う。Play 開発者サービスが
   機能しない端末、および F-Droid 版には Google Drive を選択肢として出さない。アカウントと同期ファイルは
   デスクトップ版と共通。詳細は [sync-architecture.ja.md](sync-architecture.ja.md) の「Android での Google Drive」を参照。
+- **Nextcloud** には、ユーザーが入力したサーバーのアドレスに **HTTPS のみ**で接続する（`http://` のアドレスは
+  受け付けない）。証明書は OS が信頼するもののみ。アドレスはサインインを始める前に確認し、そのあとユーザーは
+  ブラウザでサーバー自身のページからサインインする（2 段階認証やシングルサインオンを含む）。これにより Keryx に
+  アプリパスワードが発行される。このアプリパスワードは、他のプロバイダーのアプリ専用フォルダーと違い **Nextcloud
+  アカウント全体**にアクセスできる——接続ダイアログでそのことと、取り消し方、（Nextcloud 36 以降では）ファイルへの
+  アクセスだけに制限する方法を説明する。Keryx 自身が読み書きするのはユーザーのファイルにある `Keryx` フォルダー
+  だけ。連携を解除するとサーバー上のアプリパスワードを取り消す。Nextcloud はすべてのプラットフォーム・すべての
+  ビルド（F-Droid 版を含む）で利用できる。詳細は [sync-architecture.ja.md](sync-architecture.ja.md) の
+  「Nextcloud（Login Flow v2）」を参照。
 - 同期ファイル形式、`VACUUM INTO` スナップショット、除外するローカル専用テーブル/インデックス、OAuth 詳細、
   トークン保存、マージ動作については [sync-architecture.ja.md](sync-architecture.ja.md) を参照。
 - 同期対象: 購読リスト・フォルダー・既読状態・スター・タグ構造・記事本文・グローバル設定。
@@ -69,8 +78,9 @@ RSS 2.0 / Atom 1.0（RSS 1.0/RDF も緩く解釈）。JSON Feed は α 以降。
 
 ## 6. セットアップフロー
 
-初回起動でローカルのみ / クラウド同期（Dropbox・OneDrive・Google Drive。Android では Google Drive は
-Google Play 開発者サービスがインストール済みかつ有効かつ最新の端末でのみ表示される、§4 参照）を選択する。クラウド選択時は OAuth 認証後、クラウドに既存データがあれば初回同期で自動的に
+初回起動でローカルのみ / クラウド同期（Dropbox・OneDrive・Google Drive・Nextcloud。Android では Google Drive は
+Google Play 開発者サービスがインストール済みかつ有効かつ最新の端末でのみ表示される、§4 参照）を選択する。Nextcloud を
+選んだ場合は、まずサーバーのアドレスを尋ねる（§4）。クラウド選択時は認証後、クラウドに既存データがあれば初回同期で自動的に
 マージ（インポート）される。
 
 ## 7. 基本機能
@@ -338,7 +348,7 @@ Android でスワイプできる。先頭側から（左から右へ書くレイ
 - 開発者が運営するサーバーはなく、アカウント登録も不要。Keryx が通信するのは利用中の機能に直接
   関係するサーバーのみ（購読中の各フィードとその favicon、更新チェック/ダウンロード用の GitHub（ストアが
   更新するビルド — App Store・Mac App Store・Google Play・F-Droid — を除く）、接続している場合のみ
-  Dropbox / OneDrive / Google Drive）で、常に端末から直接行う——
+  Dropbox / OneDrive / Google Drive またはユーザー自身の Nextcloud サーバー）で、常に端末から直接行う——
   完全な一覧は [PRIVACY.ja.md](../PRIVACY.ja.md)「アプリが行う通信」を参照。
   Keryx 自身の通信（クラウド同期・更新チェック・
   更新ダウンロード）は常に HTTPS を使用する。購読フィードは、URL が明示的に `http://` である場合
@@ -347,7 +357,7 @@ Android でスワイプできる。先頭側から（左から右へ書くレイ
   出ている記事の両隣をスワイプで移動できるよう用意しておく（§9）ため、それらの本文は——含まれる
   画像や埋め込みコンテンツも含めて——開く前に、開いたときと同じように取得される。それらが既読に
   なることはない。
-- 各クラウドプロバイダー（Dropbox・OneDrive・Google Drive）のトークンはそれぞれ独立してプラットフォームの
+- 各クラウドプロバイダー（Dropbox・OneDrive・Google Drive）のトークン（Nextcloud ではアプリパスワード）はそれぞれ独立してプラットフォームの
   セキュアストレージに保存する。macOS: アプリのデータ保護キーチェーン（ファイルへのフォールバックなし）。Windows/Linux は
   Credential Manager / Secret Service（java-keyring 経由）、Snap 版だけはデスクトップの Secret portal から
   得たアプリ専用の鍵で暗号化されたローカルストア（libsecret 経由。java-keyring は使わない）——利用不可時は
@@ -364,7 +374,7 @@ Android でスワイプできる。先頭側から（左から右へ書くレイ
 | HTTP | Ktor client（desktop は CIO、Android は OkHttp） |
 | RSS/HTML/XML パース | ksoup |
 | シリアライズ / 日時 | kotlinx-serialization / kotlinx-datetime |
-| クラウド同期 | Ktor + Dropbox / OneDrive（Microsoft Graph）/ Google Drive REST API（OAuth PKCE + リフレッシュトークン） |
+| クラウド同期 | Ktor + Dropbox / OneDrive（Microsoft Graph）/ Google Drive REST API（OAuth PKCE + リフレッシュトークン）、Nextcloud WebDAV（Login Flow v2 のアプリパスワード、HTTP Basic） |
 | i18n | Compose Resources |
 | テスト | kotlin-test + kotlinx-coroutines-test + Ktor MockEngine |
 | ビルド | Gradle 9.7.1（Kotlin 2.4.10 / Compose Multiplatform 1.11.1 / JDK 25 toolchain） |

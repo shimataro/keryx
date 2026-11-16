@@ -51,7 +51,9 @@
 プロパティーの値は[local.properties.example](../local.properties.example)を参照。
 ビルド時にはこのファイルを `local.properties` にコピーして編集すること。
 
-APIキーが指定されていないクラウドサービスは連携機能が表示されず、どのサービスにも指定されなければ（設定ダイアログのタブなどに）連携機能自体が表れない。
+APIキーが指定されていないクラウドサービスは連携機能が表示されない。ただし Nextcloud は例外で、キーもビルド設定も
+一切不要（利用者が自分のサーバーを指定してそこでサインインする）なので、F-Droid 版を含むすべてのビルドで常に表示され、
+そのためクラウド同期の機能も常に表れる。
 **連携できるクラウドストレージは同時に1つのみ**であり、複数のストレージに分散保存はできない。
 
 `shared/build.gradle.kts` の Gradle カスタムタスク（`generateBuildConfig`、desktop 専用の Google Drive 認証情報向けの `generateDesktopBuildConfig`、および Apple 版自身の secret 不要な Google Drive クライアント ID 向けの `generateAppleBuildConfig`——後述の「Apple（macOS / iOS）」参照）で実現している。
@@ -688,7 +690,7 @@ JUL のルートロガーに自前の formatter/handler を仕込んでいる。
   **Google Play services を一切含まない** ——
   F-Droid の掲載ポリシーが禁止しているため。Play services を必要とするもの（Android の Google Drive）は
   すべて `:androidGms` モジュールにあり、これに依存するのは `github` と `play` だけ。したがって
-  `fdroid` は Google Drive を提供しない（Dropbox・OneDrive・ローカルのみは通常どおり使える）—— Play
+  `fdroid` は Google Drive を提供しない（Dropbox・OneDrive・Nextcloud・ローカルのみは通常どおり使える）—— Play
   services の無い端末と同じ状態になる。この flavor のマニフェスト
   （`androidApp/src/fdroid/AndroidManifest.xml`）は、`works.merc.keryx.SELF_UPDATE_CHECK` の
   meta-data を `false` にして、どのインストーラーが APK を届けたかに関係なくアプリ内アップデート確認を

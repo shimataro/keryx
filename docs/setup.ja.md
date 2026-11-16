@@ -368,6 +368,14 @@ AVD に実用的なブラウザーが入っておらず、暗黙的な `ACTION_V
 AVD を**Google Play** 搭載のシステムイメージ（"Google APIs" のみのものは Play Store を含まず
 Chrome も無いため不可）で作り直すか、既存の AVD に実ブラウザーの APK を追加インストールする。
 
+### Nextcloud をローカルで試す
+
+Nextcloud は API キーもリダイレクトも使わないので、`./gradlew :composeApp:run` でもサインインを完了できる
+（アプリはサーバーへのポーリングで完了を知る）。サーバーには **OS が信頼する証明書の HTTPS** で接続する必要がある：
+平文の `http://` のアドレスも、自己署名証明書も受け付けない。公式の `nextcloud` Docker イメージで試す場合は、OS
+（実機やエミュレータで試すならその端末）が信頼するローカル CA の証明書——たとえば `mkcert -install` のあと `mkcert`
+で作ったもの——を使う TLS プロキシの後ろに置く。使うのはテスト用のサーバーだけにし、実際のアカウントには接続しないこと。
+
 ### `./gradlew :composeApp:run` で Dropbox / OneDrive 連携が完了しない（全デスクトップ OS 共通）
 
 これらのリダイレクト URI はカスタムスキーム `keryx://` で、`gradlew run` のインスタンスには

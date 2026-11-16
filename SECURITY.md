@@ -67,7 +67,8 @@ Thank you for your patience and for reporting responsibly.
 
 Security issues in Keryx itself are in scope, for example:
 
-- Mishandling or leakage of OAuth tokens or other cloud-storage credentials.
+- Mishandling or leakage of OAuth tokens or other cloud-storage credentials (including a Nextcloud
+  app password).
 - Flaws in the sync / merge logic that could corrupt or expose a user's data.
 - Parsing vulnerabilities in feed (RSS / Atom), OPML, or HTML handling.
 - Unsafe handling of feed content, URLs, or redirects.
@@ -79,7 +80,7 @@ The following are **out of scope**:
 - Vulnerabilities in third-party dependencies — please report those upstream to
   the respective project (see [THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md)).
   You may still let us know so we can bump the dependency.
-- Vulnerabilities in Dropbox, OneDrive, Google Drive, or the operating system's own
+- Vulnerabilities in Dropbox, OneDrive, Google Drive, Nextcloud server software, or the operating system's own
   credential storage (including the Android Keystore) — report those to the respective vendor.
 - Issues that require a device already compromised by an attacker with local
   access or elevated privileges.
@@ -91,10 +92,11 @@ Keryx is designed to minimize its attack surface:
 
 - **No accounts and no developer-operated server.** The app itself contacts only
   the feeds you subscribe to (and their sites, for favicons), an allowlisted GitHub host for
-  update checks/downloads (see below), and, if you opt in, Dropbox, OneDrive, or Google Drive directly.
+  update checks/downloads (see below), and, if you opt in, Dropbox, OneDrive, Google Drive, or the
+  Nextcloud server you name, directly.
   An article you open may additionally load images and other embedded content from the hosts its
   own HTML references, as any web page would — see [PRIVACY.md](PRIVACY.md#network-requests-this-app-makes).
-- **Cloud credentials** (OAuth access / refresh tokens, one per connected provider) are stored in the
+- **Cloud credentials** (OAuth access / refresh tokens, or a Nextcloud app password, one per connected provider) are stored in the
   platform's secure credential storage: on macOS, the app's own data-protection Keychain, with no
   fallback to a file (if a token cannot be saved there, the app tells you, and the account has to be
   connected again after a restart); on Windows, Credential Manager, and on Linux, Secret Service
@@ -106,6 +108,11 @@ Keryx is designed to minimize its attack surface:
   key held in the Android Keystore, per provider.
 - **OAuth** uses the authorization-code flow with PKCE, performed directly between
   your device and the provider — no credentials pass through any developer server.
+- **Nextcloud** is reached over HTTPS only, with a certificate the OS trusts: a `http://` server address is
+  refused, redirects are not followed, and the app password is never sent to a server URL that is not HTTPS.
+  Sign-in uses Nextcloud's Login Flow v2 on the server's own page, so the app never sees the account password.
+  The app password it issues can reach the whole account (Nextcloud has no app-only folder scope); the app
+  itself only uses its `Keryx` folder, and disconnecting revokes the app password on the server.
 - **Local data** (subscriptions, cached articles, settings) stays on your device
   unless you explicitly enable cloud sync.
 - **The macOS app from GitHub Releases is signed with a Developer ID certificate and notarized by

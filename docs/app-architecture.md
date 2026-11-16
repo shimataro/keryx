@@ -41,8 +41,9 @@ actuals — see "Apple targets in `:shared`" below.
     data/remote/  FeedFetcher, FeedParser, FeedDiscovery, FaviconResolver, UrlResolver, FeedModels, UpdateDownloader, ReleaseFeedSource (in-app update — see "In-App Update" below)
     data/cloud/   CloudStorage, CloudAuthManager, DropboxStorage, DropboxAuthManager, GoogleDriveStorage, GoogleDriveAuthManager, OneDriveStorage, OneDriveAuthManager, Pkce, TokenStorage, OAuthTokens, CloudCredentials (+ AppPasswordCredentials, CloudCredentialsSerializer),
                   CloudFileTransfer, SecretStoreTokenStorage
+    data/cloud/nextcloud/  NextcloudStorage (WebDAV), NextcloudLoginFlow (Login Flow v2), NextcloudServerProbe (status.php), normalizeNextcloudUrl, revokeNextcloudAppPassword — see "Nextcloud (Login Flow v2)" in sync-architecture.md
     data/opml/    OpmlCodec
-    domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport (interface + CustomUri), AuthorizationLauncher (interface + schemeOf — how OAuthConnectFlow opens the authorize URL; desktop/Android default to the system browser, the Apple app hands it to Swift instead, see "KeryxSdk" below), OAuthCallbackParams, OAuthUriParser (parseOAuthUri, shared by every `keryx://` and loopback redirect handler), StartupMaintenanceTasks (runStartupMaintenance/checkForUpdateAndNotify/maybeRebuildFtsIndex), BackgroundRefreshLoop (backgroundUpdateLoop — the desktop app's own polling loop, also used by the Apple app's `KeryxSdk.startMaintenance()`; Android has no equivalent, since it schedules through `WorkManager` instead), RefreshCycleRunner (the refresh → notify → sync cycle every refresh path shares), NetworkUsagePolicy (which automatic network work the current network allows — see "Network Gate" in sync-architecture.md), UpdateChecker/UpdateRepository/UpdateAsset/UpdateInstallPolicy/UpdateInstaller(expect-like interface)/AvailableUpdate/UpdateState (in-app update — see "In-App Update" below)
+    domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport (interface + CustomUri), AuthorizationLauncher (interface + schemeOf — how OAuthConnectFlow opens the authorize URL; desktop/Android default to the system browser, the Apple app hands it to Swift instead, see "KeryxSdk" below), LoginPageLauncher (interface + BrowserLoginPageLauncher — how Nextcloud's Login Flow v2 shows its sign-in page and gets back from it), OAuthCallbackParams, OAuthUriParser (parseOAuthUri, shared by every `keryx://` and loopback redirect handler), StartupMaintenanceTasks (runStartupMaintenance/checkForUpdateAndNotify/maybeRebuildFtsIndex), BackgroundRefreshLoop (backgroundUpdateLoop — the desktop app's own polling loop, also used by the Apple app's `KeryxSdk.startMaintenance()`; Android has no equivalent, since it schedules through `WorkManager` instead), RefreshCycleRunner (the refresh → notify → sync cycle every refresh path shares), NetworkUsagePolicy (which automatic network work the current network allows — see "Network Gate" in sync-architecture.md), UpdateChecker/UpdateRepository/UpdateAsset/UpdateInstallPolicy/UpdateInstaller(expect-like interface)/AvailableUpdate/UpdateState (in-app update — see "In-App Update" below)
     di/           SharedModule (sharedModule + updateModule + presentationModule) and HttpClientFactory [:shared]; AppModule (+ expect platformModule) and ImageLoaderSetup [:composeApp]
     presentation/ [:shared] UI-framework-free screen state shared by every UI: home/ (HomeViewModel — the
                   home screen's filter/selection/article list/search/unread-only/new-article state and
@@ -113,9 +114,9 @@ actuals — see "Apple targets in `:shared`" below.
     not SVG — Compose Multiplatform's SVG decoder is desktop/iOS-only and crashes on Android at
     runtime; VectorDrawable XML is the one *vector* format `painterResource` renders on every
     target — bitmap assets (`app_icon.png`, the tray PNGs) are unaffected)
-    The cloud providers (Dropbox, OneDrive, Google Drive) have no icon or logo anywhere — Setup and Settings ▸
+    The cloud providers (Dropbox, OneDrive, Google Drive, Nextcloud) have no icon or logo anywhere — Setup and Settings ▸
     Cloud sync name them in text only, on every platform including the Apple app. Microsoft licenses the OneDrive
-    icon separately (Microsoft 365 Trademark Guidelines), and naming all three in text, which every provider allows
+    icon separately (Microsoft 365 Trademark Guidelines), and naming them all in text, which every provider allows
     without a license, keeps them alike.
   jvmCommonMain/kotlin/…/  actuals shared by desktop and Android, needing no platform API either
     target lacks: Gzip, Sha1, Sha256, SecureRandom (secureRandomBytes), ContentDigest, FileTokenStorage,
@@ -161,9 +162,10 @@ actuals — see "Apple targets in `:shared`" below.
     resumed Activity so BrowserOpener can launch an http(s) link's Custom Tab — androidx.browser —
     from it rather than from the application context; the launch kind itself is commonMain's pure
     `browserLaunchKind`), PlatformModule (Ktor OkHttp
-    engine, CloudSession with Dropbox/OneDrive providers plus Google Drive where the app registered
+    engine, CloudSession with Dropbox/OneDrive/Nextcloud providers plus Google Drive where the app registered
     an `AndroidGoogleDriveBackend` and Play services works — see Provider/DI below — plus AndroidNotificationSink, see [background-update.md](background-update.md)),
-    CloudStorageAvailability (Dropbox/OneDrive read their BuildConfig keys; Google Drive is instead
+    CloudStorageAvailability (Dropbox/OneDrive read their BuildConfig keys; Nextcloud needs none and is
+    always available, F-Droid included; Google Drive is instead
     a once-per-process `AndroidGoogleDriveBackend.isAvailable` check (`:androidGms`'s
     `GoogleApiAvailability`; no backend registered ⇒ unavailable), since it goes through Play
     services rather than a build-time client id — see sync-architecture.md's "Google Drive on Android"), KeryxTextField/KeryxAlertDialog/
@@ -318,6 +320,7 @@ Examples in the code today:
 | Action | The one implementation | Routes that call it |
 | --- | --- | --- |
 | Sync now | `presentation/ManualSync.kt` (`canSyncNow` / `syncNow`, plus `connected` — whether the action is offered — and `disabledByAuth` — the disabled reason a tooltip names), implemented by `CloudSyncController` | Home's toolbar button and Feed menu (through `HomeViewModel`), the SwiftUI `Commands`, and Settings ▸ Cloud sync |
+| Connect Nextcloud (the server address) | `presentation/settings/NextcloudServerController.kt` (normalize + `status.php` probe → a `CloudConnectRequest`), then `SetupController.connect` / `CloudSyncController.connect` / `switchTo` / `reconnect` with that request | Setup and Settings ▸ Cloud sync (connect, switch after its confirmation, reconnect from `reconnectServerUrl`), in Compose (`NextcloudServerDialog`) and SwiftUI (`NextcloudServerSheet`) alike |
 | Open Settings | `ui/navigation/SettingsOpenRequests.kt` (`request` / `requestIfReachable`; latched until Home shows, released by `App.kt` alone; a `null` tab is the default entry — Android's category list, desktop's first tab — while a notification, the update entry and OPML name their tab) | The application menu's Settings… / ⌘, (and Android's feed-list settings row), a notification's `ShowSettingsTab` row, the tray / Help menu update entry, and OPML import/export |
 | Menu item enablement | `presentation/menu/MenuState.kt`'s `computeMenuUiState` → `MenuUiState` flags | The desktop menu bar (`AppMenuBar.kt`) and the SwiftUI `Commands` (`HomeCommands.swift`, via `KeryxSdk.menuState`) |
 | Set read / starred | `HomeViewModel.setRead` / `setStarred` — the explicit-state write plus its optimistic pin | Every route that sets a specific state, e.g. the article row's context menu |
@@ -438,16 +441,18 @@ each actual opens the copy through differs (JDBC vs. requery's bundled SQLite), 
 
 ### CloudSession / SyncRepository
 
-`CloudSession` provides the current `CloudStorage` (Dropbox / OneDrive / Google Drive on desktop;
-the same three on Android, with Google Drive present only where Play services is) and handles
+`CloudSession` provides the current `CloudStorage` (Dropbox / OneDrive / Google Drive / Nextcloud on
+desktop; the same four on Android and Apple, with Google Drive present only where Play services is on
+Android and only where its client id is configured on Apple) and handles
 automatic access-token refresh — except for Android's Google Drive, whose tokens belong to Play
 services rather than to this app, so its provider supplies them itself via
 its `CloudSession.CredentialLifecycle.PlatformOwned` lifecycle and nothing is ever refreshed. See
 sync-architecture.md's "Google Drive on Android". Each provider's `CloudSession.CredentialLifecycle` is
 one of three. `OAuth` refreshes an expired access token with the stored refresh token and revokes the
 access token on disconnect. `PlatformOwned` asks the platform for a fresh access token on every request
-and refreshes nothing. `Static` hands out never-expiring credentials (an app password) as stored and is
-for the upcoming Nextcloud provider, which no build uses yet. See "Credential lifecycles" in
+and refreshes nothing. `Static` (Nextcloud) hands out never-expiring credentials (an app password) as stored and
+calls the provider's own revoke on disconnect. `CloudSession.serverUrlOf` reads the server an
+app-password provider is connected to, which a Nextcloud reconnect offers again. See "Credential lifecycles" in
 sync-architecture.md. `SyncRepository` implements the download → merge (`DatabaseMerger`)
 → incremental index of new articles (`indexMissing`) → `VACUUM INTO` snapshot generation
 (`DatabaseSnapshot`, excludes `articles_fts` on the copy side) → upload (rev check) flow, along
@@ -513,8 +518,13 @@ presentation) and `SECURITY.md` for the integrity-verification trust model.
 `appModule` (`commonMain`) registers repositories, services, and ViewModels — used by both desktop and Android.
 Each platform has its own `platformModule`: desktop's registers HttpClient, TokenStorage, CloudSession,
 CloudConnectFlow, `OsNotificationSink`, and `UpdateInstaller`; Android's registers the Android-specific
-equivalents (OkHttp-backed HttpClient, `KeystoreTokenStorage`, a `CloudSession` carrying Dropbox and OneDrive
-plus — only where Play services is available — Google Drive, etc. — see "Android" sections above).
+equivalents (OkHttp-backed HttpClient, `KeystoreTokenStorage`, a `CloudSession` carrying Dropbox, OneDrive and
+Nextcloud plus — only where Play services is available — Google Drive, etc. — see "Android" sections above).
+Every platform's `platformModule` hands `cloudSessionSingles` its own `LoginPageLauncher` for Nextcloud: desktop's
+opens the browser and brings the main window back to the front afterwards (`main.kt`'s `activationRequests`),
+Android's opens a Custom Tab and brings the app's task back over it (`bringAppTaskToFront`), and the Apple app's
+wraps the `openLoginPage` / `closeLoginPage` closures Swift passes to `KeryxSdk.start` (an
+`ASWebAuthenticationSession` with no callback scheme).
 ViewModels are registered as app-scope `single` and obtained via `koinInject()`.
 
 ### Article Reader (native WebView)
