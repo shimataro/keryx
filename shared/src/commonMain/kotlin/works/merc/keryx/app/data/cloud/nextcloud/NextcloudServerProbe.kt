@@ -65,7 +65,15 @@ class NextcloudServerProbe(
 
     private suspend fun isInstalledNextcloud(response: HttpResponse): Boolean {
         if (response.status.value != 200) return false
-        val body = response.bodyAsText()
+        // bodyAsText() parses Content-Type (for the charset) after the request has returned, so a
+        // malformed header throws here, outside probe()'s request guard: that is no Nextcloud either.
+        val body = try {
+            response.bodyAsText()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            return false
+        }
         val status = runCatching { json.parseToJsonElement(body) }.getOrNull() as? JsonObject ?: return false
         return (status["installed"] as? JsonPrimitive)?.booleanOrNull == true
     }

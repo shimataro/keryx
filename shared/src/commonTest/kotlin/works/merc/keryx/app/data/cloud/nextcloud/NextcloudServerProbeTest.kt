@@ -64,6 +64,13 @@ class NextcloudServerProbeTest {
     }
 
     @Test
+    fun anUnparsableContentTypeIsNotNextcloud() = runTest {
+        // bodyAsText() parses Content-Type after the request has returned; a malformed one throws there.
+        val p = probe { respond("""{"installed":true}""", HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "invalid")) }
+        assertProblem(NextcloudServerProblem.NOT_NEXTCLOUD, p.probe("https://example.com"))
+    }
+
+    @Test
     fun a404IsNotNextcloud() = runTest {
         val p = probe { respond("not found", HttpStatusCode.NotFound) }
         assertProblem(NextcloudServerProblem.NOT_NEXTCLOUD, p.probe("https://example.com"))
