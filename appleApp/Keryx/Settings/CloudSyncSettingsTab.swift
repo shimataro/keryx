@@ -16,6 +16,9 @@ struct CloudSyncSettingsTab: View {
     @State private var confirmReset = false
     @State private var confirmAbort: CloudStorageType?
     @State private var confirmSwitch: CloudStorageType?
+    /// The open server sheet of a provider that `requiresServerUrl` (Nextcloud), with what to do
+    /// once the address passed — connect, switch or reconnect. Cancelling it does nothing.
+    @State private var serverPrompt: NextcloudServerPrompt?
 
     /// Gates "reset"/"switch provider"/"reconnect" — each would race a connect/initial-sync/
     /// disconnect still in flight. See `CloudProviderRow`'s own KDoc (`CloudSyncTab.kt`).
@@ -116,7 +119,16 @@ struct CloudSyncSettingsTab: View {
             isPresented: Binding(get: { confirmSwitch != nil }, set: { if !$0 { confirmSwitch = nil } })
         ) {
             Button(L("settings_cloud_switch_confirm_action")) {
-                if let type = confirmSwitch { cloudSync.controller.switchTo(newType: type) }
+                guard let type = confirmSwitch else { return }
+                // The server is asked for only once the switch is confirmed; cancelling the sheet
+                // leaves the current connection alone.
+                if type.requiresServerUrl {
+                    serverPrompt = NextcloudServerPrompt(initialUrl: "") { request in
+                        cloudSync.controller.switchTo(newType: type, request: request)
+                    }
+                } else {
+                    cloudSync.controller.switchTo(newType: type, request: CloudConnectRequest.companion.NONE)
+                }
             }
             Button(L("common_cancel"), role: .cancel) {}
         } message: {
@@ -125,6 +137,9 @@ struct CloudSyncSettingsTab: View {
             // `connectedType` live rather than the tapped row's own type
             // (`CloudSyncTab.kt`'s `confirmingSwitchTo` dialog).
             Text(cloudSync.connectedType.map { LF("settings_cloud_switch_confirm_body", $0.brandLabel) } ?? "")
+        }
+        .sheet(item: $serverPrompt) { prompt in
+            NextcloudServerSheet(prompt: prompt, makeController: cloudSync.makeServerController) { serverPrompt = nil }
         }
     }
 
@@ -199,7 +214,7 @@ struct CloudSyncSettingsTab: View {
             HStack(spacing: CloudSyncRowMetrics.actionSpacing) {
                 if cloudSync.lastSyncAuthFailed {
                     actionButton(L("settings_cloud_reconnect"), systemImage: "arrow.clockwise") {
-                        cloudSync.controller.reconnect()
+                        reconnect(type)
                     }
                     .disabled(!recoveryEnabled)
                 } else {
@@ -223,8 +238,12 @@ struct CloudSyncSettingsTab: View {
             Button {
                 if cloudSync.connectedType != nil {
                     confirmSwitch = type
+                } else if type.requiresServerUrl {
+                    serverPrompt = NextcloudServerPrompt(initialUrl: "") { request in
+                        cloudSync.controller.connect(type: type, request: request)
+                    }
                 } else {
-                    cloudSync.controller.connect(type: type)
+                    cloudSync.controller.connect(type: type, request: CloudConnectRequest.companion.NONE)
                 }
             } label: {
                 #if os(iOS)
@@ -264,7 +283,14 @@ struct CloudSyncSettingsTab: View {
     /// Compose's own `cloudProviderRowStatusText` (`CloudSyncTab.kt`).
     @ViewBuilder
     private func statusLine(for type: CloudStorageType) -> some View {
-        if cloudSync.connectedType == type {
+        if cloudSync.connectingType == type && type.requiresServerUrl {
+            // A browser sign-in the app only learns of by polling (up to 20 minutes) — say what the
+            // connect waits for, as Compose's own `cloudProviderRowStatusText` does.
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text(L("nextcloud_login_waiting")).font(.caption).foregroundStyle(.secondary)
+            }
+        } else if cloudSync.connectedType == type {
             if cloudSync.disconnecting {
                 Text(L("settings_cloud_disconnecting")).font(.caption).foregroundStyle(.secondary)
             } else if cloudSync.syncing {
@@ -332,11 +358,28 @@ struct CloudSyncSettingsTab: View {
         }
     }
 
+    /// Reconnects the connected provider — for one that `requiresServerUrl`, after asking for the
+    /// server again, starting from the stored one (read before the reconnect clears it).
+    private func reconnect(_ type: CloudStorageType) {
+        guard type.requiresServerUrl else {
+            cloudSync.controller.reconnect(request: CloudConnectRequest.companion.NONE)
+            return
+        }
+        let controller = cloudSync.controller
+        Task { @MainActor in
+            let stored = try? await controller.reconnectServerUrl()
+            serverPrompt = NextcloudServerPrompt(initialUrl: stored ?? "") { request in
+                controller.reconnect(request: request)
+            }
+        }
+    }
+
     private func connectKey(_ type: CloudStorageType) -> String {
         switch type {
         case .dropbox: return "settings_dropbox_connect"
         case .googleDrive: return "settings_google_drive_connect"
         case .onedrive: return "settings_onedrive_connect"
+        case .nextcloud: return "settings_nextcloud_connect"
         }
     }
 
@@ -345,6 +388,7 @@ struct CloudSyncSettingsTab: View {
         case .dropbox: return "settings_dropbox_disconnect"
         case .googleDrive: return "settings_google_drive_disconnect"
         case .onedrive: return "settings_onedrive_disconnect"
+        case .nextcloud: return "settings_nextcloud_disconnect"
         }
     }
 }

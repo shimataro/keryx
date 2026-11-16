@@ -19,6 +19,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -27,10 +28,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.DrawableResource
 import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.stringResource
 import works.merc.keryx.app.core.CloudStorageType
+import works.merc.keryx.app.domain.CloudConnectRequest
 import works.merc.keryx.app.domain.SyncPhase
 import works.merc.keryx.app.platform.isTouchPrimary
 import works.merc.keryx.app.ui.common.FlatButton
@@ -47,6 +50,7 @@ import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.common_abort
 import works.merc.keryx.app.resources.common_cancel
 import works.merc.keryx.app.resources.menu_feed_sync_now
+import works.merc.keryx.app.resources.nextcloud_login_waiting
 import works.merc.keryx.app.resources.settings_cloud_abort_connect_confirm_body
 import works.merc.keryx.app.resources.settings_cloud_abort_connect_confirm_title
 import works.merc.keryx.app.resources.settings_cloud_disconnect_confirm_body
@@ -76,6 +80,8 @@ import works.merc.keryx.app.resources.settings_dropbox_connect
 import works.merc.keryx.app.resources.settings_dropbox_disconnect
 import works.merc.keryx.app.resources.settings_google_drive_connect
 import works.merc.keryx.app.resources.settings_google_drive_disconnect
+import works.merc.keryx.app.resources.settings_nextcloud_connect
+import works.merc.keryx.app.resources.settings_nextcloud_disconnect
 import works.merc.keryx.app.resources.settings_onedrive_connect
 import works.merc.keryx.app.resources.settings_onedrive_disconnect
 import works.merc.keryx.app.resources.settings_last_synced
@@ -116,6 +122,10 @@ internal fun CloudSyncTabContent(vm: SettingsViewModel) {
     // Unlike the other confirm-triggers, the dialog's title/body/action carry no provider name, so
     // there's nothing to hold onto beyond "is it showing".
     var confirmingResetCloudData by remember { mutableStateOf(false) }
+    // The open server-address dialog of a provider that requiresServerUrl (Nextcloud), with what
+    // to do once the address passed — connect, switch or reconnect. Cancelling it does nothing.
+    var askingServer by remember { mutableStateOf<ServerDialogRequest?>(null) }
+    val scope = rememberCoroutineScope()
 
     Column(Modifier.fillMaxWidth().padding(16.dp)) {
         val connected = connectedType
@@ -167,16 +177,31 @@ internal fun CloudSyncTabContent(vm: SettingsViewModel) {
                         disconnecting = disconnecting,
                         syncing = syncing,
                         syncPhase = syncPhase,
+                        connectingType = connectingType,
                     ),
-                    // No provider connected yet: a fresh connect is low-risk, so do it directly. A
-                    // different provider connected: confirm the switch first.
+                    // No provider connected yet: a fresh connect is low-risk, so do it directly
+                    // (after asking for the server, for a self-hosted provider). A different
+                    // provider connected: confirm the switch first.
                     onSelect = {
-                        if (connected == null) vm.connect(type) else confirmingSwitchTo = type
+                        when {
+                            connected != null -> confirmingSwitchTo = type
+                            type.requiresServerUrl -> askingServer = ServerDialogRequest("") { vm.connect(type, it) }
+                            else -> vm.connect(type)
+                        }
                     },
                     onCancel = { confirmingAbortConnect = type },
                     onDisconnect = { confirmingDisconnect = type },
                     onResetCloudData = { confirmingResetCloudData = true },
-                    onReconnect = { vm.reconnect() },
+                    onReconnect = {
+                        if (type.requiresServerUrl) {
+                            // Read the stored server before the reconnect clears it, to start from it.
+                            scope.launch {
+                                askingServer = ServerDialogRequest(vm.reconnectServerUrl().orEmpty()) { vm.reconnect(it) }
+                            }
+                        } else {
+                            vm.reconnect()
+                        }
+                    },
                 )
             }
         }
@@ -212,6 +237,16 @@ internal fun CloudSyncTabContent(vm: SettingsViewModel) {
         )
     }
 
+    askingServer?.let { request ->
+        NextcloudServerDialog(
+            initialUrl = request.initialUrl,
+            onDismiss = { askingServer = null },
+            onConfirmed = { connectRequest ->
+                askingServer = null
+                request.onConfirmed(connectRequest)
+            },
+        )
+    }
     confirmingDisconnect?.let { type ->
         KeryxAlertDialog(
             onDismissRequest = { confirmingDisconnect = null },
@@ -252,11 +287,23 @@ internal fun CloudSyncTabContent(vm: SettingsViewModel) {
                 )
             },
             confirmText = stringResource(Res.string.settings_cloud_switch_confirm_action),
-            onConfirm = { vm.switchTo(type); confirmingSwitchTo = null },
+            onConfirm = {
+                confirmingSwitchTo = null
+                // The server is asked for only once the switch is confirmed; cancelling that dialog
+                // leaves the current connection alone.
+                if (type.requiresServerUrl) {
+                    askingServer = ServerDialogRequest("") { vm.switchTo(type, it) }
+                } else {
+                    vm.switchTo(type)
+                }
+            },
             dismissText = stringResource(Res.string.common_cancel),
         )
     }
 }
+
+/** An open server-address dialog: the address it starts from, and the action a checked address runs. */
+private class ServerDialogRequest(val initialUrl: String, val onConfirmed: (CloudConnectRequest) -> Unit)
 
 /**
  * The destructive "reset cloud sync data" confirmation, shared by this tab's own reset button and
@@ -283,6 +330,7 @@ private fun CloudStorageType.brandLabel(): String = when (this) {
     CloudStorageType.DROPBOX -> "Dropbox"
     CloudStorageType.GOOGLE_DRIVE -> "Google Drive"
     CloudStorageType.ONEDRIVE -> "OneDrive"
+    CloudStorageType.NEXTCLOUD -> "Nextcloud"
 }
 
 /**
@@ -294,6 +342,7 @@ private fun CloudStorageType.connectLabel(): StringResource = when (this) {
     CloudStorageType.DROPBOX -> Res.string.settings_dropbox_connect
     CloudStorageType.GOOGLE_DRIVE -> Res.string.settings_google_drive_connect
     CloudStorageType.ONEDRIVE -> Res.string.settings_onedrive_connect
+    CloudStorageType.NEXTCLOUD -> Res.string.settings_nextcloud_connect
 }
 
 /**
@@ -305,6 +354,7 @@ private fun CloudStorageType.disconnectLabel(): StringResource = when (this) {
     CloudStorageType.DROPBOX -> Res.string.settings_dropbox_disconnect
     CloudStorageType.GOOGLE_DRIVE -> Res.string.settings_google_drive_disconnect
     CloudStorageType.ONEDRIVE -> Res.string.settings_onedrive_disconnect
+    CloudStorageType.NEXTCLOUD -> Res.string.settings_nextcloud_disconnect
 }
 
 /**
@@ -393,7 +443,11 @@ private fun SyncPhase.statusText(): String = when (this) {
     SyncPhase.ARCHIVING -> stringResource(Res.string.settings_cloud_phase_archiving)
 }
 
-/** Resolves the live status text for a single cloud-provider row from ViewModel state. */
+/**
+ * Resolves the live status text for a single cloud-provider row from ViewModel state. Besides the
+ * connected row's progress, a provider whose connect waits on a browser sign-in it only learns of by
+ * polling (Nextcloud — up to 20 minutes) says so while it connects.
+ */
 @Composable
 internal fun cloudProviderRowStatusText(
     type: CloudStorageType,
@@ -401,7 +455,9 @@ internal fun cloudProviderRowStatusText(
     disconnecting: Boolean,
     syncing: Boolean,
     syncPhase: SyncPhase,
+    connectingType: CloudStorageType? = null,
 ): String? = when {
+    connectingType == type && type.requiresServerUrl -> stringResource(Res.string.nextcloud_login_waiting)
     connectedType != type -> null
     disconnecting -> stringResource(Res.string.settings_cloud_disconnecting)
     syncing -> syncPhase.statusText()

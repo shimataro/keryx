@@ -35,6 +35,7 @@ import works.merc.keryx.app.presentation.setup.SetupPhase
 import works.merc.keryx.app.ui.common.FlatTonalButton
 import works.merc.keryx.app.ui.common.KeryxAlertDialog
 import works.merc.keryx.app.ui.common.KeryxRaisedSurface
+import works.merc.keryx.app.ui.settings.NextcloudServerDialog
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.common_abort
 import works.merc.keryx.app.resources.common_cancel
@@ -50,6 +51,8 @@ import works.merc.keryx.app.resources.setup_google_drive
 import works.merc.keryx.app.resources.setup_local_action
 import works.merc.keryx.app.resources.setup_local_desc
 import works.merc.keryx.app.resources.setup_local_only
+import works.merc.keryx.app.resources.nextcloud_login_waiting
+import works.merc.keryx.app.resources.setup_nextcloud
 import works.merc.keryx.app.resources.setup_onedrive
 import works.merc.keryx.app.resources.setup_title
 
@@ -58,6 +61,7 @@ private fun CloudStorageType.setupTitle(): StringResource = when (this) {
     CloudStorageType.DROPBOX -> Res.string.setup_dropbox
     CloudStorageType.GOOGLE_DRIVE -> Res.string.setup_google_drive
     CloudStorageType.ONEDRIVE -> Res.string.setup_onedrive
+    CloudStorageType.NEXTCLOUD -> Res.string.setup_nextcloud
 }
 
 @Composable
@@ -66,8 +70,11 @@ fun SetupScreen(onComplete: () -> Unit) {
 
     // Confirmation-dialog trigger for aborting an in-flight OAuth wait.
     var confirmingAbortConnect by remember { mutableStateOf(false) }
+    // The provider whose server-address dialog is open (one that requiresServerUrl), or null.
+    var askingServerFor by remember { mutableStateOf<CloudStorageType?>(null) }
     val phase by vm.phase.collectAsState()
     val canCancelConnect by vm.canCancelConnect.collectAsState()
+    val connectingType by vm.connectingType.collectAsState()
 
     val scrollState = rememberScrollState()
     // safeDrawingPadding() keeps this content clear of the status/navigation bars on Android
@@ -138,7 +145,13 @@ fun SetupScreen(onComplete: () -> Unit) {
                         Spacer(Modifier.height(12.dp))
                         vm.availableCloudTypes.forEachIndexed { index, type ->
                             FlatTonalButton(
-                                onClick = { vm.connect(type, onComplete) },
+                                onClick = {
+                                    if (type.requiresServerUrl) {
+                                        askingServerFor = type
+                                    } else {
+                                        vm.connect(type, onDone = onComplete)
+                                    }
+                                },
                                 enabled = enabled,
                                 modifier = Modifier.fillMaxWidth(),
                             ) {
@@ -157,7 +170,18 @@ fun SetupScreen(onComplete: () -> Unit) {
                 SetupPhase.CONNECTING -> {
                     CircularProgressIndicator()
                     Spacer(Modifier.height(8.dp))
-                    Text(stringResource(Res.string.setup_connecting))
+                    // A browser sign-in that the app only learns of by polling can take a while, so
+                    // say what it is waiting for rather than only that it is connecting.
+                    Text(
+                        stringResource(
+                            if (connectingType?.requiresServerUrl == true) {
+                                Res.string.nextcloud_login_waiting
+                            } else {
+                                Res.string.setup_connecting
+                            },
+                        ),
+                        textAlign = TextAlign.Center,
+                    )
                     if (canCancelConnect) {
                         Spacer(Modifier.height(12.dp))
                         FlatTonalButton(onClick = { confirmingAbortConnect = true }) {
@@ -173,6 +197,17 @@ fun SetupScreen(onComplete: () -> Unit) {
             }
         }
         VerticalScrollbarIfNeeded(scrollState)
+    }
+
+    askingServerFor?.let { type ->
+        NextcloudServerDialog(
+            initialUrl = "",
+            onDismiss = { askingServerFor = null },
+            onConfirmed = { request ->
+                askingServerFor = null
+                vm.connect(type, request, onComplete)
+            },
+        )
     }
 
     if (confirmingAbortConnect) {

@@ -27,6 +27,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.koin.dsl.module
 import platform.posix.usleep
+import works.merc.keryx.app.core.CloudStorageType
 import works.merc.keryx.app.core.DB_FILE_NAME
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.data.local.DatabaseTooNewException
@@ -677,5 +678,17 @@ class KeryxSdkTest {
             closeLoginPage = { },
         )
         sdk.close()
+    }
+
+    @Test
+    fun aNextcloudServerControllerStartsFromTheGivenAddress() = runTest {
+        val sdk = start()
+        try {
+            val controller = sdk.newNextcloudServerController("https://cloud.example.com")
+            assertEquals("https://cloud.example.com", controller.state.value.url)
+            assertTrue(CloudStorageType.NEXTCLOUD in sdk.cloudSyncController.availableCloudTypes)
+        } finally {
+            sdk.close()
+        }
     }
 }

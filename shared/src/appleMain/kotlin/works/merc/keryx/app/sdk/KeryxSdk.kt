@@ -28,6 +28,7 @@ import works.merc.keryx.app.di.applePlatformModule
 import works.merc.keryx.app.di.presentationModule
 import works.merc.keryx.app.di.sharedModule
 import works.merc.keryx.app.domain.AppForeground
+import works.merc.keryx.app.data.cloud.nextcloud.NextcloudServerProbe
 import works.merc.keryx.app.domain.AuthorizationLauncher
 import works.merc.keryx.app.domain.BrowserLoginPageLauncher
 import works.merc.keryx.app.domain.ArticleRepository
@@ -56,6 +57,7 @@ import works.merc.keryx.app.presentation.home.HomeViewModel
 import works.merc.keryx.app.presentation.home.NotificationAlerts
 import works.merc.keryx.app.presentation.menu.MenuUiState
 import works.merc.keryx.app.presentation.menu.computeMenuUiState
+import works.merc.keryx.app.presentation.settings.NextcloudServerController
 import works.merc.keryx.app.presentation.settings.CloudSyncController
 import works.merc.keryx.app.presentation.settings.OpmlTransfer
 import works.merc.keryx.app.presentation.settings.OpmlTransferController
@@ -175,6 +177,17 @@ class KeryxSdk private constructor(private val koin: Koin) {
     fun newAddFeedController(): AddFeedController {
         val home = homeViewModel
         return AddFeedController(home::resolvePreview, home::subscribeFeeds)
+    }
+
+    /**
+     * A fresh Nextcloud server-address state machine, one per server sheet.
+     *
+     * @param initialUrl The address the field starts with — `cloudSyncController.reconnectServerUrl()`
+     *   on a reconnect, empty otherwise.
+     */
+    fun newNextcloudServerController(initialUrl: String): NextcloudServerController {
+        val probe = koin.get<NextcloudServerProbe>()
+        return NextcloudServerController(probe::probe, initialUrl)
     }
 
     private var startupJob: Job? = null

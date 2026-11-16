@@ -30,6 +30,7 @@
     <string name="setup_dropbox">Dropbox で同期する</string>
     <string name="setup_google_drive">Google Drive で同期する</string>
     <string name="setup_onedrive">OneDrive で同期する</string>
+    <string name="setup_nextcloud">Nextcloud で同期する</string>
     <string name="setup_connecting">クラウドストレージに接続中...</string>
     <string name="setup_abort_connect_confirm_title">接続を中止しますか？</string>
     <string name="setup_abort_connect_confirm_body">まだ何も保存されていません。</string>
@@ -216,6 +217,14 @@
     <string name="settings_google_drive_disconnect">連携を解除</string>
     <string name="settings_onedrive_connect">連携する</string>
     <string name="settings_onedrive_disconnect">連携を解除</string>
+    <string name="settings_nextcloud_connect">連携する</string>
+    <string name="settings_nextcloud_disconnect">連携を解除</string>
+    <string name="nextcloud_server_title">Nextcloud に接続</string>
+    <string name="nextcloud_server_hint">サーバーのアドレス（例: cloud.example.com）</string>
+    <string name="nextcloud_server_scope">Keryx は同期データを Nextcloud のファイルにある「Keryx」フォルダーに保存します。サインインするとアカウント全体にアクセスできるアプリパスワードが作成されますが、Keryx が使うのはこのフォルダーだけです。アプリパスワードはサーバーの「設定 ▸ セキュリティ ▸ デバイスとセッション」からいつでも取り消せます。Nextcloud 36 以降では、そこでファイルへのアクセスだけに制限することもできます。</string>
+    <string name="nextcloud_server_checking">サーバーを確認しています…</string>
+    <string name="nextcloud_server_continue">続ける</string>
+    <string name="nextcloud_login_waiting">ブラウザで Nextcloud へのサインインを完了してください。</string>
     <string name="settings_cloud_disconnect_confirm_title">%1$sとの連携を解除しますか？</string>
     <string name="settings_cloud_disconnect_confirm_body">ローカルのデータはそのまま残ります。</string>
     <string name="settings_cloud_abort_connect_confirm_title">%1$sへの接続を中止しますか？</string>

@@ -45,7 +45,7 @@ fun applePlatformModule(
     notificationMessages: NotificationMessages,
     osNotificationSink: OsNotificationSink,
     authorizationLauncher: AuthorizationLauncher = DefaultAuthorizationLauncher,
-    @Suppress("UNUSED_PARAMETER") loginPageLauncher: LoginPageLauncher = BrowserLoginPageLauncher(returnToApp = {}),
+    loginPageLauncher: LoginPageLauncher = BrowserLoginPageLauncher(returnToApp = {}),
     useDataProtectionKeychain: Boolean = false,
 ): Module = module {
     single { keryxHttpClient(Darwin) }
@@ -67,6 +67,7 @@ fun applePlatformModule(
                 emptyMap()
             }
         },
+        loginPageLauncher = loginPageLauncher,
         authorizationLauncher = authorizationLauncher,
     )
 }

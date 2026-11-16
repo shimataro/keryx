@@ -3,6 +3,7 @@ package works.merc.keryx.app.presentation.setup
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -12,6 +13,7 @@ import kotlinx.coroutines.withContext
 import works.merc.keryx.app.core.CloudStorageAvailability
 import works.merc.keryx.app.core.CloudStorageType
 import works.merc.keryx.app.core.Result
+import works.merc.keryx.app.domain.CloudConnectRequest
 import works.merc.keryx.app.domain.CloudConnectionService
 import works.merc.keryx.app.domain.CloudSession
 import works.merc.keryx.app.domain.SettingsRepository
@@ -44,6 +46,13 @@ class SetupController(
     private val _phase = MutableStateFlow(SetupPhase.IDLE)
     val phase = _phase.asStateFlow()
 
+    /**
+     * The provider whose connect is running, or null — lets the UI say what it is waiting for (for
+     * Nextcloud, the user finishing the sign-in in the browser, which can take up to 20 minutes).
+     */
+    private val _connectingType = MutableStateFlow<CloudStorageType?>(null)
+    val connectingType = _connectingType.asStateFlow()
+
     private var authorizationJob: Job? = null
 
     /** True only while actively waiting on the OAuth browser redirect — the window [cancelConnect] can interrupt. */
@@ -69,36 +78,49 @@ class SetupController(
      * Connects to the selected cloud storage provider and synchronizes its data.
      *
      * @param type The cloud storage provider to connect to.
+     * @param request What the user supplied first — the checked server address for a provider that
+     *   [CloudStorageType.requiresServerUrl]; [CloudConnectRequest.NONE] otherwise.
      * @param onDone Called after the connection succeeds and synchronization completes.
      */
-    fun connect(type: CloudStorageType, onDone: () -> Unit) {
+    fun connect(type: CloudStorageType, request: CloudConnectRequest = CloudConnectRequest.NONE, onDone: () -> Unit) {
         viewModelScope.launch {
-            _phase.value = SetupPhase.CONNECTING
-            val flow = cloudSession.connectFlow(type)
-            if (flow == null) {
-                _phase.value = SetupPhase.ERROR
-                return@launch
+            try {
+                _connectingType.value = type
+                runConnect(type, request, onDone)
+            } finally {
+                _connectingType.value = null
             }
-            val result = awaitCancellableConnect(
-                flow,
-                onJobChange = { authorizationJob = it },
-                onCanCancelChange = { _canCancelConnect.value = it },
-            ) ?: run {
+        }
+    }
+
+    /** [connect]'s body: the connect flow, then the credentials' save and the initial sync. */
+    private suspend fun CoroutineScope.runConnect(type: CloudStorageType, request: CloudConnectRequest, onDone: () -> Unit) {
+        _phase.value = SetupPhase.CONNECTING
+        val flow = cloudSession.connectFlow(type)
+        if (flow == null) {
+            _phase.value = SetupPhase.ERROR
+            return
+        }
+        val result = awaitCancellableConnect(
+            flow,
+            request,
+            onJobChange = { authorizationJob = it },
+            onCanCancelChange = { _canCancelConnect.value = it },
+        ) ?: run {
+            _phase.value = SetupPhase.IDLE
+            return
+        }
+        when (result) {
+            is Result.Ok -> {
+                // Saves the tokens and flushes the provider selection to disk before the sync
+                // below starts — see CloudConnectionService.completeConnect.
+                withContext(dispatcher) { cloudConnectionService.completeConnect(type, result.value) }
+                // Merge whatever already exists in the cloud (imports on first sync).
+                withContext(dispatcher) { syncRepository.sync() }
                 _phase.value = SetupPhase.IDLE
-                return@launch
+                onDone()
             }
-            when (result) {
-                is Result.Ok -> {
-                    // Saves the tokens and flushes the provider selection to disk before the sync
-                    // below starts — see CloudConnectionService.completeConnect.
-                    withContext(dispatcher) { cloudConnectionService.completeConnect(type, result.value) }
-                    // Merge whatever already exists in the cloud (imports on first sync).
-                    withContext(dispatcher) { syncRepository.sync() }
-                    _phase.value = SetupPhase.IDLE
-                    onDone()
-                }
-                is Result.Err -> _phase.value = SetupPhase.ERROR
-            }
+            is Result.Err -> _phase.value = SetupPhase.ERROR
         }
     }
 

@@ -11,4 +11,6 @@
     <exclude domain="file" path=".google_drive_tokens.json" />
     <exclude domain="file" path=".onedrive_tokens.enc" />
     <exclude domain="file" path=".onedrive_tokens.json" />
+    <exclude domain="file" path=".nextcloud_tokens.enc" />
+    <exclude domain="file" path=".nextcloud_tokens.json" />
 </full-backup-content>

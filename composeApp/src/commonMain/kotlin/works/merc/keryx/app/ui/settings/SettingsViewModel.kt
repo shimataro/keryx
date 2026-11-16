@@ -11,6 +11,7 @@ import kotlinx.coroutines.withContext
 import works.merc.keryx.app.core.CloudStorageType
 import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.runCatchingUnlessCancelled
+import works.merc.keryx.app.domain.CloudConnectRequest
 import works.merc.keryx.app.domain.UpdateRepository
 import works.merc.keryx.app.domain.UpdateState
 import works.merc.keryx.app.platform.FileSelector
@@ -82,12 +83,15 @@ class SettingsViewModel(
     val syncDeferredForNetwork = cloudSyncController.syncDeferredForNetwork
 
     fun syncNow() = cloudSyncController.syncNow()
-    fun connect(type: CloudStorageType) = cloudSyncController.connect(type)
+    fun connect(type: CloudStorageType, request: CloudConnectRequest = CloudConnectRequest.NONE) =
+        cloudSyncController.connect(type, request)
     fun cancelConnect() = cloudSyncController.cancelConnect()
     fun disconnect() = cloudSyncController.disconnect()
-    fun reconnect() = cloudSyncController.reconnect()
+    fun reconnect(request: CloudConnectRequest = CloudConnectRequest.NONE) = cloudSyncController.reconnect(request)
+    suspend fun reconnectServerUrl(): String? = cloudSyncController.reconnectServerUrl()
     fun resetCloudData() = cloudSyncController.resetCloudData()
-    fun switchTo(newType: CloudStorageType) = cloudSyncController.switchTo(newType)
+    fun switchTo(newType: CloudStorageType, request: CloudConnectRequest = CloudConnectRequest.NONE) =
+        cloudSyncController.switchTo(newType, request)
 
     // --- In-app update (Compose/desktop-only; the SwiftUI app updates via the App Store/Sparkle) ---
 

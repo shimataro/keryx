@@ -12,6 +12,7 @@ import works.merc.keryx.app.core.InfoDialogText
 import works.merc.keryx.app.core.NotificationText
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.core.fold
+import works.merc.keryx.app.data.cloud.AppPasswordCredentials
 import works.merc.keryx.app.data.cloud.CloudAuthManager
 import works.merc.keryx.app.data.cloud.CloudCredentials
 import works.merc.keryx.app.data.cloud.CloudStorage
@@ -99,9 +100,8 @@ class CloudSession(
 
         /**
          * Credentials that do not expire (an app password): handed out as stored, never refreshed.
-         * [revoke] is called with them on disconnect.
-         *
-         * Introduced ahead of the Nextcloud provider; no provider uses it yet.
+         * [revoke] is called with them on disconnect. Nextcloud's lifecycle: its revoke deletes the
+         * app password on the server.
          */
         class Static(val revoke: suspend (CloudCredentials) -> Result<Unit>) : CredentialLifecycle
     }
@@ -137,6 +137,16 @@ class CloudSession(
         val type = selectedType() ?: return null
         val provider = providers[type] ?: return null
         return if (provider.isConfigured && credentialsOf(provider) != null) type else null
+    }
+
+    /**
+     * The server [type]'s stored credentials point at — the base URL of an app-password provider
+     * (Nextcloud), or null when there are none or they carry no server (OAuth tokens). Lets a
+     * reconnect offer the server the user last connected to.
+     */
+    fun serverUrlOf(type: CloudStorageType): String? {
+        val provider = providers[type] ?: return null
+        return (credentialsOf(provider) as? AppPasswordCredentials)?.serverUrl
     }
 
     /** The interactive connect flow for [type], or null if that provider isn't configured. */

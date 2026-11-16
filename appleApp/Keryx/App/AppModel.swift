@@ -57,7 +57,10 @@ final class AppModel {
             // Settings window both need it with or without the main window open (see
             // `PreferencesObservable.startObserving`).
             Task { await preferences.startObserving() }
-            self.cloudSync = CloudSyncObservable(controller: sdk.cloudSyncController)
+            self.cloudSync = CloudSyncObservable(
+                controller: sdk.cloudSyncController,
+                makeServerController: { sdk.doNewNextcloudServerController(initialUrl: $0) }
+            )
             let opmlTransfer = OpmlTransferObservable(controller: sdk.opmlController)
             self.opmlTransfer = opmlTransfer
             // The one observation of the shared OPML state, for the app's lifetime: the File menu,
