@@ -593,7 +593,8 @@ Nextcloud is not reached through OAuth and has no app-only folder; everything ab
   the namespace prefix; 404 → absent), `download` a `GET` whose `ETag` is the revision, `upload` a
   `PUT` with the expected revision passed through verbatim as `If-Match`.
 - **Revisions.** The revision is the file's ETag, which Nextcloud compares byte for byte, quotes
-  included. A mismatched (or missing) `If-Match` answers 412, and a concurrent overwrite holding the
+  included. An `If-Match` that does not match (or names a file that is not there) answers 412 — with no expected
+  revision the `PUT` sends no `If-Match` at all and writes unconditionally — and a concurrent overwrite holding the
   file's lock 423 — both are `SyncConflictException`. The written revision is read from the write's
   own `OC-ETag` / `ETag` header (`headerRevOrConflictOr` in `CloudStorage.kt`), never from a follow-up
   request.
