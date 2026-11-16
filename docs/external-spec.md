@@ -36,8 +36,6 @@ RSS 2.0 / Atom 1.0 (RSS 1.0/RDF parsed loosely). JSON Feed will come after α.
   up to date. Android uses Google's Play services `AuthorizationClient`; devices without working Play
   services, and the F-Droid build, are not offered Google Drive. The same account and sync file are
   shared with desktop. See "Google Drive on Android" in [sync-architecture.md](sync-architecture.md).
-- **Nextcloud sync is planned**: a self-hosted Nextcloud server, reached over HTTPS only, as a fourth
-  provider. It is not available yet.
 - The sync file format, `VACUUM INTO` snapshot, excluded local-only tables/indexes, OAuth details,
   token storage, and merge behavior are described in [sync-architecture.md](sync-architecture.md).
 - Sync targets: subscription list, folders, read state, stars, tag structure, article body, global
