@@ -8,6 +8,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
@@ -77,6 +79,12 @@ private val SWIPE_ICON_INSET = 20.dp
  * the position the row has reached, so a quick second swipe is neither lost nor fought over by the
  * animation. The haptic tick comes only from the drag, never from the spring-back.
  *
+ * Short of the threshold the revealed strip is neutral with the action's icon in the action's color;
+ * past it the strip fills with that color and the icon turns to the color that reads on it, so the
+ * armed state shows as well as being felt. From release until the row is back in place the strip
+ * keeps the actions as they were at release, rather than swapping to the opposite action the moment
+ * the one just run flips the row's state.
+ *
  * Built from modifiers on the row's own node rather than M3's `SwipeToDismissBox` — "Standard
  * components over custom drawing" exception 3 (`ui-guidelines`): `SwipeToDismissBox` wraps the row in
  * two to three extra `LayoutNode`s, and the article row sits next to the node-count-sensitive
@@ -117,9 +125,23 @@ internal fun Modifier.articleRowSwipe(
     val swipe = remember { RowSwipeState() }
     val thresholdPx = with(LocalDensity.current) { ARTICLE_SWIPE_THRESHOLD.toPx() }
     val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
+    val currentIsRead by rememberUpdatedState(isRead)
+    val currentIsStarred by rememberUpdatedState(isStarred)
     val stripColor = MaterialTheme.colorScheme.surfaceContainerHighest
-    val leadingStyle = SwipeStyle(painterResource(swipeIcon(leading)), MaterialTheme.colorScheme.primary)
-    val trailingStyle = SwipeStyle(painterResource(swipeIcon(trailing)), StarredColor)
+    // The strip shows the actions as they were at release until the row is back in place: the
+    // action just run flips the row's state, and the strip must not swap to the opposite action
+    // while it slides away.
+    val shown = swipe.frozen ?: SwipeShownState(isRead, isStarred)
+    val leadingStyle = SwipeStyle(
+        icon = painterResource(swipeIcon(articleSwipeLeadingAction(shown.isRead))),
+        tint = MaterialTheme.colorScheme.primary,
+        armedColor = MaterialTheme.colorScheme.onPrimary,
+    )
+    val trailingStyle = SwipeStyle(
+        icon = painterResource(swipeIcon(articleSwipeTrailingAction(shown.isStarred))),
+        tint = StarredColor,
+        armedColor = OnStarredColor,
+    )
     val leadingLabel = swipeLabel(leading, strings)
     val trailingLabel = swipeLabel(trailing, strings)
     return this
@@ -156,6 +178,7 @@ internal fun Modifier.articleRowSwipe(
                                         if (showsLeading(released, rtl)) currentLeading else currentTrailing,
                                     )
                                 }
+                                swipe.freeze(SwipeShownState(currentIsRead, currentIsStarred))
                                 swipe.springBack(scope)
                             } else if (verticalClaimed) {
                                 swipeLockout.onVerticalGestureEnd(change.uptimeMillis)
@@ -202,7 +225,12 @@ internal fun Modifier.articleRowSwipe(
         .drawBehind {
             val x = swipe.offset.floatValue
             if (x == 0f) return@drawBehind
-            drawSwipeStrip(x, stripColor, if (showsLeading(x, rtl)) leadingStyle else trailingStyle)
+            drawSwipeStrip(
+                x = x,
+                stripColor = stripColor,
+                style = if (showsLeading(x, rtl)) leadingStyle else trailingStyle,
+                armed = abs(x) >= thresholdPx,
+            )
         }
         .absoluteOffset { IntOffset(swipe.offset.floatValue.roundToInt(), 0) }
 }
@@ -213,15 +241,34 @@ internal fun Modifier.articleRowSwipe(
  */
 private fun showsLeading(offset: Float, rtl: Boolean): Boolean = (offset > 0f) != rtl
 
-/** The row's horizontal offset and the spring-back animating it home, outliving any one gesture. */
+/** The read and starred state the strip draws its actions from. */
+private data class SwipeShownState(val isRead: Boolean, val isStarred: Boolean)
+
+/**
+ * The row's horizontal offset, the spring-back animating it home and the state the strip is frozen
+ * at meanwhile — all outliving any one gesture.
+ */
 private class RowSwipeState {
     val offset = mutableFloatStateOf(0f)
+
+    /** The state at the last release, drawn until the spring-back ends or a new drag arms; `null` otherwise. */
+    var frozen by mutableStateOf<SwipeShownState?>(null)
+        private set
+
     private var springBack: Job? = null
 
-    /** A new drag took the row: stop the previous spring-back where it is, so the two never both write [offset]. */
+    /**
+     * A new drag took the row: stop the previous spring-back where it is, so the two never both
+     * write [offset], and draw the row's live state again — the new drag acts on it.
+     */
     fun arm() {
         springBack?.cancel()
         springBack = null
+        frozen = null
+    }
+
+    fun freeze(state: SwipeShownState) {
+        frozen = state
     }
 
     /** Moves the row by [delta], ticking the haptic when the move crosses [thresholdPx] either way. */
@@ -238,23 +285,32 @@ private class RowSwipeState {
         val from = offset.floatValue
         springBack = scope.launch {
             animate(initialValue = from, targetValue = 0f) { value, _ -> offset.floatValue = value }
+            frozen = null
         }
     }
 }
 
-private class SwipeStyle(val icon: Painter, val tint: Color)
+/**
+ * How one edge's action is drawn: [icon] in [tint] on the neutral strip short of the threshold, and
+ * once past it ([drawSwipeStrip]'s `armed`) the strip filled with [tint] under [icon] in
+ * [armedColor] — so that releasing now will act is visible, not only felt through the haptic tick.
+ */
+private class SwipeStyle(val icon: Painter, val tint: Color, val armedColor: Color)
 
-/** Fills the strip a drag of [x] pixels uncovers and draws [style]'s icon near its outer edge. */
-private fun DrawScope.drawSwipeStrip(x: Float, stripColor: Color, style: SwipeStyle) {
+/**
+ * Fills the strip a drag of [x] pixels uncovers and draws [style]'s icon near its outer edge, in the
+ * armed colors while [armed] (the row is past [ARTICLE_SWIPE_THRESHOLD]).
+ */
+private fun DrawScope.drawSwipeStrip(x: Float, stripColor: Color, style: SwipeStyle, armed: Boolean) {
     val left = if (x > 0f) 0f else size.width + x
     val right = if (x > 0f) x else size.width
     clipRect(left = left, right = right) {
-        drawRect(stripColor, topLeft = Offset(left, 0f), size = Size(right - left, size.height))
+        drawRect(if (armed) style.tint else stripColor, topLeft = Offset(left, 0f), size = Size(right - left, size.height))
         val iconPx = SWIPE_ICON_SIZE.toPx()
         val insetPx = SWIPE_ICON_INSET.toPx()
         val iconLeft = if (x > 0f) insetPx else size.width - insetPx - iconPx
         translate(left = iconLeft, top = (size.height - iconPx) / 2f) {
-            with(style.icon) { draw(Size(iconPx, iconPx), colorFilter = ColorFilter.tint(style.tint)) }
+            with(style.icon) { draw(Size(iconPx, iconPx), colorFilter = ColorFilter.tint(if (armed) style.armedColor else style.tint)) }
         }
     }
 }

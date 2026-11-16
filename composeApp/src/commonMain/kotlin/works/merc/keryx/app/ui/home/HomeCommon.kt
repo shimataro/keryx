@@ -203,6 +203,9 @@ internal fun ExpandCollapseChevron(
 /** Shared tint for the starred-article indicator (article list row badge, detail-view toggle). */
 val StarredColor = Color(0xFFFFC107)
 
+/** Content drawn on a [StarredColor] fill (the article row swipe's armed star strip) — 12.9:1 against it. */
+val OnStarredColor = Color.Black
+
 /**
  * Whether the article list's "refresh this list" action — the pull-to-refresh gesture, its
  * accessibility action, and the hardware-keyboard shortcut — is available: only on a touch-primary
