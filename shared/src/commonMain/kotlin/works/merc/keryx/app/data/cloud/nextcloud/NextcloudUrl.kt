@@ -63,12 +63,27 @@ fun normalizeNextcloudUrl(input: String): Result<String> {
 private fun basePath(rawPath: String): String {
     var path = rawPath
     ENTRY_POINT_SEGMENTS
-        .mapNotNull { segment -> path.indexOf(segment).takeIf { it >= 0 } }
+        .mapNotNull { segment -> path.indexOfWholeSegment(segment) }
         .minOrNull()
         ?.let { path = path.substring(0, it) }
     path = path.trimEnd('/')
     TRAILING_PAGES.firstOrNull { path.endsWith(it) }?.let { path = path.removeSuffix(it) }
     return path.trimEnd('/')
+}
+
+/**
+ * Where [segment] first occurs in this path as a whole segment — followed by `/` or the end of the
+ * path (`/index.php-backup` is not `/index.php`) — or `null`. A [segment] that already ends in `/`
+ * (`/ocs/`) carries its own boundary.
+ */
+private fun String.indexOfWholeSegment(segment: String): Int? {
+    var from = 0
+    while (true) {
+        val at = indexOf(segment, from).takeIf { it >= 0 } ?: return null
+        val end = at + segment.length
+        if (segment.endsWith('/') || end == length || this[end] == '/') return at
+        from = at + 1
+    }
 }
 
 private fun notNextcloud(message: String): Result.Err =

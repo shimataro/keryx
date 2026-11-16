@@ -23,6 +23,8 @@ class NextcloudUrlTest {
             "https://example.com/nextcloud/index.php" to "https://example.com/nextcloud",
             "https://example.com/nextcloud/index.php/apps/files/" to "https://example.com/nextcloud",
             "https://cloud.example.com/index.php/login" to "https://cloud.example.com",
+            "https://host.example.com/index.php-backup" to "https://host.example.com/index.php-backup",
+            "https://host.example.com/status.phpx/index.php/apps" to "https://host.example.com/status.phpx",
             "https://cloud.example.com/login" to "https://cloud.example.com",
             "https://cloud.example.com/remote.php/dav/files/alice/" to "https://cloud.example.com",
             "https://cloud.example.com/status.php" to "https://cloud.example.com",
