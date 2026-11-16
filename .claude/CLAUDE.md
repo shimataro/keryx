@@ -230,7 +230,9 @@ The package root is `works.merc.keryx.app` (reverse-DNS of `keryx.merc.works`).
    hardcoded *English* literal is now as much a violation as a Japanese one, so
    grepping for Japanese characters no longer finds every case. The Apple app's
    String Catalog is **generated** from these same files
-   (`./gradlew :composeApp:generateStringCatalog`); never hand-edit a
+   (`./gradlew :composeApp:generateStringCatalog`) — and so are its localized
+   Info.plist usage descriptions (`apple_infoplist_*` keys → `InfoPlist.xcstrings`,
+   mapped to their Info.plist key in that task's `infoPlistKeys`); never hand-edit a
    `.xcstrings`, and never let shared (`:shared`) code produce user-facing text —
    it emits `NotificationText`/`ErrorKind` data that each UI localizes.
 4. **Platform-specific code stays behind `commonMain` `expect` declarations** —
