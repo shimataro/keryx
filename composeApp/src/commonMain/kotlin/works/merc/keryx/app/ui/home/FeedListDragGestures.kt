@@ -21,8 +21,9 @@ private const val MOUSE_DRAG_THRESHOLD_DP = 4f
  * Adds feed-row reordering gestures to a non-virtualized drag host.
  *
  * Secondary and tertiary presses are ignored, and dragging begins only after the pointer moves
- * beyond the applicable drag threshold. Active drags consume pointer events and are ended or
- * cancelled when the gesture finishes.
+ * beyond the applicable drag threshold. Active drags consume pointer events; releasing the pointer
+ * drops the row, while a gesture that is cancelled (or torn down) instead aborts the drag without
+ * applying anything.
  *
  * When [isTouchPrimary], a press must additionally land within [TOUCH_TARGET_MIN_SIZE] (the M3 48dp minimum
  * touch target, wider than the handle icon's own footprint) of the
@@ -72,9 +73,14 @@ internal fun Modifier.feedListReorderDrag(
                     val change = event.changes.firstOrNull { it.id == down.id } ?: break
                     if (change.changedToUpIgnoreConsumed()) {
                         if (dragging) {
+                            // A cancelled gesture (the system taking the pointer away, say) arrives
+                            // as an up Compose has already consumed (`onCancelPointerInput`); the
+                            // pointer never lifted, so nothing is dropped. On this Initial pass
+                            // nothing has seen a real up yet, so it is unconsumed.
+                            val cancelled = change.isConsumed
                             change.consume()
-                            controller.end(change.position)
                             dragging = false
+                            if (cancelled) controller.cancel() else controller.end(change.position)
                         }
                         break
                     }
