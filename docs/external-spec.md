@@ -43,7 +43,8 @@ RSS 2.0 / Atom 1.0 (RSS 1.0/RDF parsed loosely). JSON Feed will come after α.
   can reach the **whole Nextcloud account**, unlike the other providers' app-only folders — the
   connect dialog says so, and how to revoke it or (on Nextcloud 36 or later) limit it to file access.
   Keryx itself only ever reads and writes the `Keryx` folder in the user's files. Disconnecting
-  revokes the app password on the server. Nextcloud is offered on every platform and in every build,
+  asks the server to revoke the app password, on a best-effort basis: if the server cannot be reached
+  the app password stays valid there, and the user revokes it under the server's Devices & sessions. Nextcloud is offered on every platform and in every build,
   the F-Droid build included. See "Nextcloud (Login Flow v2)" in [sync-architecture.md](sync-architecture.md).
 - The sync file format, `VACUUM INTO` snapshot, excluded local-only tables/indexes, OAuth details,
   token storage, and merge behavior are described in [sync-architecture.md](sync-architecture.md).
