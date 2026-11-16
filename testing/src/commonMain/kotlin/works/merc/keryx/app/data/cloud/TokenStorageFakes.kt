@@ -12,14 +12,14 @@ class RecordingTokenStorage(
     private val outcome: TokenSaveOutcome = TokenSaveOutcome.PLAINTEXT_FILE,
     private val clearOutcome: TokenClearOutcome = TokenClearOutcome.CLEARED,
 ) : TokenStorage {
-    var stored: OAuthTokens? = null
+    var stored: CloudCredentials? = null
 
-    override fun save(tokens: OAuthTokens): TokenSaveOutcome {
-        stored = tokens
+    override fun save(credentials: CloudCredentials): TokenSaveOutcome {
+        stored = credentials
         return outcome
     }
 
-    override fun load(): OAuthTokens? = stored
+    override fun load(): CloudCredentials? = stored
 
     override fun clear(): TokenClearOutcome {
         if (clearOutcome == TokenClearOutcome.CLEARED) stored = null

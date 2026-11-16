@@ -88,21 +88,21 @@ class SecurityCliTokenStorage private constructor(
         json: Json = Json { ignoreUnknownKeys = true },
     ) : this(fallback, RealCommandRunner(), json, account)
 
-    private var cached: OAuthTokens? = null
+    private var cached: CloudCredentials? = null
     private var loaded: Boolean = false
 
     @Synchronized
-    override fun save(tokens: OAuthTokens): TokenSaveOutcome {
-        val outcome = store.save(tokens)
-        // The cache is updated either way — this session must use the tokens it was just handed
-        // even when nothing could be persisted.
-        cached = tokens
+    override fun save(credentials: CloudCredentials): TokenSaveOutcome {
+        val outcome = store.save(credentials)
+        // The cache is updated either way — this session must use the credentials it was just
+        // handed even when nothing could be persisted.
+        cached = credentials
         loaded = true
         return outcome
     }
 
     @Synchronized
-    override fun load(): OAuthTokens? {
+    override fun load(): CloudCredentials? {
         if (loaded) return cached
         cached = store.load()
         loaded = true

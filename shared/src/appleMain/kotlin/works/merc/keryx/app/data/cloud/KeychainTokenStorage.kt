@@ -76,8 +76,8 @@ class KeychainTokenStorage(
      * is none. Never delete-then-add — that would leave a window where a concurrent [load] sees no
      * token, and a failed add would already have destroyed the previously valid one.
      */
-    override fun save(tokens: OAuthTokens): TokenSaveOutcome {
-        val payload = json.encodeToString(tokens).encodeToByteArray()
+    override fun save(credentials: CloudCredentials): TokenSaveOutcome {
+        val payload = json.encodeToString(CloudCredentialsSerializer, credentials).encodeToByteArray()
         val data = payload.usePinned { CFDataCreate(null, it.addressOf(0).reinterpret(), payload.size.convert()) }
         val status = try {
             val updateStatus = withItemQuery { query ->
@@ -106,7 +106,7 @@ class KeychainTokenStorage(
         return if (status == errSecSuccess) TokenSaveOutcome.SECURE else TokenSaveOutcome.NOT_PERSISTED
     }
 
-    override fun load(): OAuthTokens? {
+    override fun load(): CloudCredentials? {
         val bytes = withItemQuery { query ->
             CFDictionaryAddValue(query, kSecReturnData, kCFBooleanTrue)
             CFDictionaryAddValue(query, kSecMatchLimit, kSecMatchLimitOne)
@@ -122,7 +122,7 @@ class KeychainTokenStorage(
             }
         } ?: return null
         // Only the exception's type is logged: the decoder's message would echo the token payload.
-        return runCatching { json.decodeFromString<OAuthTokens>(bytes.decodeToString()) }
+        return runCatching { json.decodeFromString(CloudCredentialsSerializer, bytes.decodeToString()) }
             .onFailure { e -> Log.warn(TOKEN_STORAGE_LOG_TAG, "Stored token payload could not be decoded (${e::class.simpleName})") }
             .getOrNull()
     }

@@ -255,14 +255,14 @@ class SecurityCliTokenStorageTest {
     private class StubFileFallback(
         private val clearOutcome: TokenClearOutcome,
     ) : TokenStorage {
-        var stored: OAuthTokens? = null
+        var stored: CloudCredentials? = null
 
-        override fun save(tokens: OAuthTokens): TokenSaveOutcome {
-            stored = tokens
+        override fun save(credentials: CloudCredentials): TokenSaveOutcome {
+            stored = credentials
             return TokenSaveOutcome.PLAINTEXT_FILE
         }
 
-        override fun load(): OAuthTokens? = stored
+        override fun load(): CloudCredentials? = stored
 
         override fun clear(): TokenClearOutcome {
             if (clearOutcome == TokenClearOutcome.CLEARED) stored = null

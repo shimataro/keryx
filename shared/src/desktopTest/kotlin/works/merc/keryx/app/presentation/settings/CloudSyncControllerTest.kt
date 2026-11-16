@@ -287,7 +287,7 @@ class CloudSyncControllerTest {
         assertEquals(CloudStorageType.DROPBOX, controller.connectedType.value)
         assertNull(controller.connectingType.value)
         assertFalse(controller.canCancelConnect.value)
-        assertEquals("AT", tokenStorage.load()?.accessToken)
+        assertEquals("AT", (tokenStorage.load() as? OAuthTokens)?.accessToken)
     }
 
     @Test
@@ -564,7 +564,7 @@ class CloudSyncControllerTest {
         assertEquals(CloudStorageType.GOOGLE_DRIVE, controller.connectedType.value)
         assertNull(controller.connectingType.value)
         assertNull(dropboxTokenStorage.load())
-        assertEquals("AT2", googleDriveTokenStorage.load()?.accessToken)
+        assertEquals("AT2", (googleDriveTokenStorage.load() as? OAuthTokens)?.accessToken)
     }
 
     @Test

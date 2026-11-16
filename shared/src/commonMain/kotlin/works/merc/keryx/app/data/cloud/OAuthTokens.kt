@@ -21,6 +21,9 @@ import works.merc.keryx.app.core.TOKEN_EXPIRY_SKEW_MS
  * request offline access and keep the refresh token so the access token can be
  * renewed silently. The shape is provider-agnostic — every supported provider
  * issues an access token, an optional refresh token, and an expiry.
+ *
+ * One of the [CloudCredentials] shapes; [CloudCredentialsSerializer] stores it in exactly the
+ * JSON this class's own serializer produces, so tokens saved by older builds keep decoding.
  */
 @Serializable
 data class OAuthTokens(
@@ -28,7 +31,7 @@ data class OAuthTokens(
     val refreshToken: String? = null,
     /** Unix ms when the access token expires; null if unknown. */
     val expiresAtMillis: Long? = null,
-) {
+) : CloudCredentials {
     /**
      * Determines whether the token has expired, accounting for the configured clock skew.
      *

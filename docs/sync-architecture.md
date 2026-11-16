@@ -556,6 +556,8 @@ opens a browser directly:
 
 **Per-provider separate `TokenStorage` instances** are constructed in DI (`platformModule`) (do not share a single instance across providers; `SecurityCliTokenStorage`/`KeystoreTokenStorage` cache results per instance, so sharing would break). Keychain account name and fallback file name are derived from `CloudStorageType.id` (`"dropbox"`, `"google_drive"`, `"onedrive"`).
 
+**Stored format.** Every store holds the provider's `CloudCredentials` (`data/cloud/CloudCredentials.kt`) as JSON through `CloudCredentialsSerializer`, which picks the shape from the keys (an `appPassword` key means `AppPasswordCredentials`, anything else `OAuthTokens`) and writes no class discriminator. `OAuthTokens` is therefore stored exactly as it was before `CloudCredentials` existed, and tokens saved by an older build keep loading. Do not switch to the default sealed-class serializer: it requires a `"type"` key, so every stored token would fail to decode and the user would silently find the provider disconnected.
+
 `KEYCHAIN_SERVICE` (`works.merc.keryx`, `data/cloud/KeychainCoordinates.kt`) is shared by every desktop OS.
 
 - Windows/Linux: OS secure storage (java-keyring — Credential Manager / Secret Service, `KeyringTokenStorage`).

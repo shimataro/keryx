@@ -30,7 +30,7 @@ class KeychainTokenStorageTest {
         storage.save(OAuthTokens(accessToken = "old"))
         storage.save(OAuthTokens(accessToken = "new"))
 
-        assertEquals("new", storage.load()?.accessToken)
+        assertEquals("new", (storage.load() as? OAuthTokens)?.accessToken)
     }
 
     @Test
@@ -63,8 +63,8 @@ class KeychainTokenStorageTest {
         storage.save(OAuthTokens(accessToken = "dropbox-token"))
         other.save(OAuthTokens(accessToken = "onedrive-token"))
         try {
-            assertEquals("dropbox-token", storage.load()?.accessToken)
-            assertEquals("onedrive-token", other.load()?.accessToken)
+            assertEquals("dropbox-token", (storage.load() as? OAuthTokens)?.accessToken)
+            assertEquals("onedrive-token", (other.load() as? OAuthTokens)?.accessToken)
         } finally {
             other.clear()
         }

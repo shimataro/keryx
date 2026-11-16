@@ -757,6 +757,13 @@ URI スキームを OS に登録せず、ブラウザも自分では開かない
 Keychain のアカウント名とフォールバックファイル名は `CloudStorageType.id` から導出する（Dropbox は `"dropbox"` で
 従来のハードコード値と一致するため既存トークンの移行は不要。Google Drive は `"google_drive"`、OneDrive は `"onedrive"`）。
 
+**保存形式。** どの保存先も、プロバイダーの `CloudCredentials`（`data/cloud/CloudCredentials.kt`）を
+`CloudCredentialsSerializer` で JSON にして保存する。このシリアライザはキーで種類を判定し（`appPassword` キーが
+あれば `AppPasswordCredentials`、なければ `OAuthTokens`）、クラスの discriminator を書かない。そのため `OAuthTokens`
+は `CloudCredentials` 導入前とまったく同じ形で保存され、古いビルドが保存したトークンもそのまま読める。sealed
+クラスの既定のシリアライザに切り替えてはならない。既定のものは `"type"` キーを必須とするため、保存済みのトークンが
+すべてデコードできなくなり、利用者は気付かないうちにプロバイダーが未接続になってしまう。
+
 `KEYCHAIN_SERVICE`（`works.merc.keryx`、`data/cloud/KeychainCoordinates.kt`）はデスクトップの全 OS で共通。
 
 - Windows/Linux: OS セキュアストレージ（java-keyring — Credential Manager / Secret Service,

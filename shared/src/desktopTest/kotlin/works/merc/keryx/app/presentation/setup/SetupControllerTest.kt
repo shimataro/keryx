@@ -176,7 +176,7 @@ class SetupControllerTest {
         assertEquals(SetupPhase.IDLE, vm.phase.value)
         assertFalse(vm.canCancelConnect.value)
         assertTrue(onDoneCalled)
-        assertEquals("AT", tokenStorage.load()?.accessToken)
+        assertEquals("AT", (tokenStorage.load() as? OAuthTokens)?.accessToken)
         assertEquals("dropbox", store.load().cloudStorageType)
     }
 

@@ -7,6 +7,7 @@ import works.merc.keryx.app.core.CloudAuthException
 import works.merc.keryx.app.core.CloudStorageType
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.data.cloud.CloudAuthManager
+import works.merc.keryx.app.data.cloud.CloudCredentials
 import works.merc.keryx.app.data.cloud.CloudStorage
 import works.merc.keryx.app.data.cloud.DropboxAuthManager
 import works.merc.keryx.app.data.cloud.DropboxStorage
@@ -28,18 +29,18 @@ import works.merc.keryx.app.domain.NotificationCenter
  * store that starts working again.
  */
 class FakeTokenStorage(
-    initial: OAuthTokens? = null,
+    initial: CloudCredentials? = null,
     var outcome: TokenSaveOutcome = TokenSaveOutcome.SECURE,
 ) : TokenStorage {
-    var stored: OAuthTokens? = initial
+    var stored: CloudCredentials? = initial
         private set
 
-    override fun save(tokens: OAuthTokens): TokenSaveOutcome {
-        if (outcome != TokenSaveOutcome.NOT_PERSISTED) stored = tokens
+    override fun save(credentials: CloudCredentials): TokenSaveOutcome {
+        if (outcome != TokenSaveOutcome.NOT_PERSISTED) stored = credentials
         return outcome
     }
 
-    override fun load(): OAuthTokens? = stored
+    override fun load(): CloudCredentials? = stored
 
     override fun clear(): TokenClearOutcome {
         stored = null

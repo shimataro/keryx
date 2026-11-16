@@ -130,8 +130,8 @@ class CloudSessionTest {
 
         s.saveTokens(CloudStorageType.DROPBOX, OAuthTokens("AT", "RT"))
 
-        assertEquals("AT", storage.stored?.accessToken)
-        assertEquals("RT", storage.stored?.refreshToken)
+        assertEquals("AT", (storage.stored as? OAuthTokens)?.accessToken)
+        assertEquals("RT", (storage.stored as? OAuthTokens)?.refreshToken)
     }
 
     @Test
@@ -210,7 +210,7 @@ class CloudSessionTest {
         assertNotNull(cloudStorage)
         cloudStorage.authenticate()
 
-        assertEquals("FRESH", storage.stored?.accessToken) // the refresh really did save again
+        assertEquals("FRESH", (storage.stored as? OAuthTokens)?.accessToken) // the refresh really did save again
         assertEquals(1, center.items.value.size)
         assertEquals(AppNotificationLevel.WARNING, center.items.value.single().level)
     }
@@ -267,7 +267,7 @@ class CloudSessionTest {
         assertNotNull(s.current()).authenticate()
         assertNotNull(s.current()).authenticate()
 
-        assertEquals("STALE", storage.stored?.accessToken) // the refresh never reached the store
+        assertEquals("STALE", (storage.stored as? OAuthTokens)?.accessToken) // the refresh never reached the store
         assertEquals(listOf<String?>("Bearer FRESH", "Bearer FRESH"), authHeaders)
         assertEquals(1, refreshCalls) // the second call used the in-memory token, no second refresh
     }
@@ -471,8 +471,8 @@ class CloudSessionTest {
         val result = cloudStorage.authenticate()
 
         assertIs<Result.Ok<Unit>>(result)
-        assertEquals("FRESH", storage.stored?.accessToken)
-        assertEquals("RT", storage.stored?.refreshToken)
+        assertEquals("FRESH", (storage.stored as? OAuthTokens)?.accessToken)
+        assertEquals("RT", (storage.stored as? OAuthTokens)?.refreshToken)
     }
 
     @Test
@@ -534,7 +534,7 @@ class CloudSessionTest {
         assertEquals("Bearer FRESH", authHeaderSeen)
         assertEquals(0, refreshCalls)
         // Nothing was re-persisted: the override's token lives only for the call it was fetched for.
-        assertEquals("STALE", storage.stored?.accessToken)
+        assertEquals("STALE", (storage.stored as? OAuthTokens)?.accessToken)
     }
 
     /**

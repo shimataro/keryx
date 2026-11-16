@@ -1,7 +1,8 @@
 package works.merc.keryx.app.data.cloud
 
 /**
- * Persists a cloud provider's OAuth tokens in the OS secure store (Keychain /
+ * Persists a cloud provider's credentials ([CloudCredentials] — OAuth tokens or an app password)
+ * in the OS secure store (Keychain /
  * Credential Manager / Secret Service). One instance is created per provider —
  * they must not be shared, since some implementations cache the loaded value.
  * The provider is distinguished by a per-instance account/file name derived from
@@ -9,7 +10,7 @@ package works.merc.keryx.app.data.cloud
  */
 interface TokenStorage {
     /**
-     * Persists [tokens]. Implementations never throw — a backend failure degrades to the
+     * Persists [credentials]. Implementations never throw — a backend failure degrades to the
      * plaintext-file fallback instead (see `SECURITY.md`), so the connect flow can never be
      * aborted by a storage problem.
      *
@@ -17,8 +18,10 @@ interface TokenStorage {
      * outcomes only [TokenSaveOutcome.NOT_PERSISTED] means nothing was written, and even then the
      * caller's in-memory session keeps working until the app exits.
      */
-    fun save(tokens: OAuthTokens): TokenSaveOutcome
-    fun load(): OAuthTokens?
+    fun save(credentials: CloudCredentials): TokenSaveOutcome
+
+    /** The stored credentials, or null when nothing (decodable) is stored. Never throws. */
+    fun load(): CloudCredentials?
 
     /**
      * Removes the tokens from every store this instance manages — its own, plus the plaintext

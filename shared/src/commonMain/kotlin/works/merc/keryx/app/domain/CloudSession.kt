@@ -86,7 +86,8 @@ class CloudSession(
     private val tokenLifecycleMutex = Mutex()
 
     /** [provider]'s current tokens: the in-memory copy of an unpersisted save, else the store's. */
-    private fun tokensOf(provider: Provider): OAuthTokens? = unpersisted.value[provider] ?: provider.tokenStorage.load()
+    private fun tokensOf(provider: Provider): OAuthTokens? =
+        unpersisted.value[provider] ?: provider.tokenStorage.load() as? OAuthTokens
 
     /** True when a provider is selected, configured in this build, and has stored tokens. */
     fun isConnected(): Boolean = connectedType() != null
