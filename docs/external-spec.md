@@ -307,8 +307,9 @@ reader is keyboard-driven (J/K) and the swipe does not apply. See "Home's adapti
 **Swipe on article rows.** An article row swipes on iOS / iPadOS, on macOS (a two-finger trackpad
 swipe, as in Mail), and on Android: from the leading edge (left to right in a left-to-right layout)
 it marks the article read or unread, from the trailing edge it stars or unstars it — the same edges
-and actions everywhere, with the context menu's own labels. Each platform presents it its own way:
-iOS and macOS reveal the action as a button, which a full swipe also runs; Android runs it once the
+and actions everywhere, named by the context menu's own labels. Each platform presents it its own way:
+iOS and macOS reveal the action as an icon-only button (a title would widen it past other apps'
+swipe buttons; screen readers still hear the label), which a full swipe also runs; Android runs it once the
 row is dragged past a threshold (with a haptic tick) and released, and the row springs back. A swipe
 never selects the row — so starring an unread article leaves it unread — and, since it only changes
 reading state, it never asks first. The row stays where it is, as for the same action from the

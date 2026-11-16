@@ -1960,11 +1960,15 @@ macOS の記事一覧は、SwiftUI の `List` ではなく、行の高さを固�
 1 か所に決め（`ArticleSwipeActions.kt`、`HomeViewModel.performSwipeAction`）、各 UI は見せ方だけを受け持つ。
 
 - **iOS。** `List` の行の `.swipeActions(edge:allowsFullSwipe: true)` で、各辺にボタンを 1 つ出す
-  （`Home/ArticleListView.swift`）。ラベルはコンテキストメニュー、記号はリーダーのツールバーと同じものを
-  `ArticleSwipeActionStyle` が返す。ボタンは UIKit が VoiceOver のアクションとして公開する。
+  （`Home/ArticleListView.swift`）。記号はリーダーのツールバー、ラベルはコンテキストメニューと同じものを
+  `ArticleSwipeActionStyle` が返す。ボタンはアイコンだけ（`.labelStyle(.iconOnly)`）で、ラベルは
+  VoiceOver 用に残す。ボタンは UIKit が VoiceOver のアクションとして公開する。
 - **macOS。** 記事テーブルの `tableView(_:rowActionsForRow:edge:)` が各辺に `NSTableViewRowAction` を 1 つ
   返す（`Home/ArticleTableView.swift`）。Mail のメッセージ一覧と同じ仕組みで、ボタンの描画、行のスライド、
-  フルスワイプは AppKit が行う。`shouldSelectRow` は `false` のままなので、行は選択されない。
+  フルスワイプは AppKit が行う。AppKit は行アクションのボタンをタイトルの幅まで広げる（「既読にする」で
+  約 125pt、「Mark as read」で 157pt。Mail は 85〜105pt）ので、タイトルは空にし、ラベルは画像の
+  アクセシビリティ説明に入れて VoiceOver に読ませる。これでボタンは 48pt になる。`shouldSelectRow` は
+  `false` のままなので、行は選択されない。
 - **Android。** `ui/home/ArticleRowSwipe.kt` の `Modifier.articleRowSwipe` を、`ArticleRow` が
   `isTouchPrimary` のときだけ付ける。横方向の `draggable` が `ARTICLE_SWIPE_THRESHOLD`（56dp。越えると
   触覚フィードバック）を越えて離されると操作を実行し、行をアニメーションで戻す。M3 の `SwipeToDismissBox`

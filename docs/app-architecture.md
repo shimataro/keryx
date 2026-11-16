@@ -2055,12 +2055,15 @@ edge shows and what it does are decided once in `:shared` (`ArticleSwipeActions.
 `HomeViewModel.performSwipeAction`); each UI only presents it.
 
 - **iOS.** The `List` row's `.swipeActions(edge:allowsFullSwipe: true)`, one button per edge
-  (`Home/ArticleListView.swift`); `ArticleSwipeActionStyle` supplies the context menu's labels and the
-  reader toolbar's symbols. UIKit exposes the buttons to VoiceOver as actions.
+  (`Home/ArticleListView.swift`); `ArticleSwipeActionStyle` supplies the reader toolbar's symbols and
+  the context menu's labels. The buttons are icon-only (`.labelStyle(.iconOnly)`), the label left to
+  VoiceOver, which UIKit exposes the buttons to as actions.
 - **macOS.** The article table's `tableView(_:rowActionsForRow:edge:)` returns one
   `NSTableViewRowAction` per edge (`Home/ArticleTableView.swift`), as Mail's message list does; AppKit
-  draws them, slides the row and runs a full swipe. `shouldSelectRow` stays `false`, so the row is not
-  selected.
+  draws them, slides the row and runs a full swipe. AppKit widens a row action's button to fit its
+  title (about 125pt for "既読にする", 157pt for "Mark as read", against Mail's 85–105pt), so the title
+  is empty and the label goes in the image's accessibility description, which VoiceOver reads; the
+  button is then 48pt. `shouldSelectRow` stays `false`, so the row is not selected.
 - **Android.** `ui/home/ArticleRowSwipe.kt`'s `Modifier.articleRowSwipe`, applied by `ArticleRow` only
   where `isTouchPrimary`: a horizontal `draggable` past `ARTICLE_SWIPE_THRESHOLD` (56dp, with a haptic
   tick) runs the action on release and animates the row back. It is built from modifiers on the row's

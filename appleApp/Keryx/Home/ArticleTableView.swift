@@ -332,7 +332,11 @@ struct ArticleTableView: NSViewRepresentable {
             guard row < rows.rows.count else { return [] }
             let article = rows.rows[row]
             let action = edge == .leading ? ArticleSwipeActionStyle.leading(article) : ArticleSwipeActionStyle.trailing(article)
-            let rowAction = NSTableViewRowAction(style: .regular, title: ArticleSwipeActionStyle.title(action)) {
+            // Icon only: AppKit widens the button to fit its title, and the context menu's labels
+            // ("Mark as read", "既読にする") made it wider than other apps' swipe buttons. With an
+            // empty title the button is the icon's own width, and VoiceOver reads the image's
+            // accessibility description instead.
+            let rowAction = NSTableViewRowAction(style: .regular, title: "") {
                 [weak self] _, _ in
                 self?.parent?.onSwipeAction(article, action)
                 tableView.rowActionsVisible = false
@@ -340,7 +344,7 @@ struct ArticleTableView: NSViewRepresentable {
             rowAction.backgroundColor = ArticleSwipeActionStyle.nsColor(action)
             rowAction.image = NSImage(
                 systemSymbolName: ArticleSwipeActionStyle.systemImage(action),
-                accessibilityDescription: nil
+                accessibilityDescription: ArticleSwipeActionStyle.title(action)
             )
             return [rowAction]
         }

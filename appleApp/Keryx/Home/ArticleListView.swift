@@ -653,7 +653,10 @@ struct ArticleListView: View {
         Button {
             home.viewModel.performSwipeAction(article: article.row, action: action)
         } label: {
+            // Icon only, as on macOS (`ArticleTableView`): the context menu's labels would widen the
+            // button. The title stays the button's VoiceOver label.
             Label(ArticleSwipeActionStyle.title(action), systemImage: ArticleSwipeActionStyle.systemImage(action))
+                .labelStyle(.iconOnly)
         }
         .tint(ArticleSwipeActionStyle.tint(action))
     }
