@@ -8,12 +8,12 @@ import Testing
 struct ArticleRowModelTests {
     private let utc = Kotlinx_datetimeTimeZone.Companion.shared.of(zoneId: "UTC")
 
-    private func row(id: String = "a1", title: String = "Title", publishedAt: Int64? = 0, isRead: Int64 = 0, isStarred: Int64 = 0) -> ArticleListRow {
+    private func row(id: String = "a1", title: String = "Title", url: String? = nil, publishedAt: Int64? = 0, isRead: Int64 = 0, isStarred: Int64 = 0) -> ArticleListRow {
         ArticleListRow(
             id: id,
             feed_id: "f1",
             title: title,
-            url: "https://example.com/\(id)",
+            url: url ?? "https://example.com/\(id)",
             published_at: publishedAt.map { KotlinLong(value: $0) },
             created_at: 0,
             is_read: isRead,
@@ -264,5 +264,48 @@ struct ArticleRowModelTests {
         #else
         #expect(!readAfterOpen)
         #endif
+    }
+
+    // MARK: - ArticleRowMenuState.items
+
+    /// The menu every UI draws: star, read, a separator, Open in Browser, Copy URL — the Article
+    /// menu's order (`HomeCommands.swift`).
+    @Test
+    func itemsFollowTheArticleMenusOrderAndGrouping() {
+        let items = ArticleRowMenuState.items(for: model(row()), selectedByOpen: false)
+        #expect(items.map(\.action) == [.setStarred(true), .setRead(true), .openInBrowser, .copyUrl])
+        #expect(items.map(\.startsGroup) == [false, false, true, false])
+        #expect(items.map(\.title) == [
+            L("article_star"), L("article_mark_as_read"), L("article_open_in_browser"), L("article_copy_url"),
+        ])
+    }
+
+    /// A starred, read row offers to unstar it and mark it unread, each as an explicit state.
+    @Test
+    func aStarredReadRowOffersToUnstarAndMarkUnread() {
+        let items = ArticleRowMenuState.items(for: model(row(isRead: 1, isStarred: 1)), selectedByOpen: false)
+        #expect(items[0] == ArticleRowMenuItem(action: .setStarred(false), title: L("article_unstar"), isEnabled: true, startsGroup: false))
+        #expect(items[1] == ArticleRowMenuItem(action: .setRead(false), title: L("article_mark_as_unread"), isEnabled: true, startsGroup: false))
+    }
+
+    /// An open that selects an unread row marks it read, so the read item already offers "Mark as
+    /// unread" — and requests unread rather than toggling.
+    @Test
+    func aSelectingOpenLabelsTheReadItemFromTheStateAfterIt() {
+        let items = ArticleRowMenuState.items(for: model(row(isRead: 0)), selectedByOpen: true)
+        #expect(items[1].action == .setRead(false))
+        #expect(items[1].title == L("article_mark_as_unread"))
+    }
+
+    /// Open in Browser takes only an http(s) link; Copy URL any non-empty one; neither an empty one.
+    @Test(arguments: [
+        ("https://example.com/a", true, true),
+        ("mailto:a@example.com", false, true),
+        ("", false, false),
+    ])
+    func urlItemsAreEnabledByTheirOwnRules(url: String, opens: Bool, copies: Bool) {
+        let items = ArticleRowMenuState.items(for: model(row(url: url)), selectedByOpen: false)
+        #expect(items[2].isEnabled == opens)
+        #expect(items[3].isEnabled == copies)
     }
 }

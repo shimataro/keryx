@@ -118,6 +118,77 @@ enum ArticleRowMenuState {
         false
         #endif
     }
+
+    /// The row menu's items, in the Article menu's order and grouping (`HomeCommands.swift`), like
+    /// Compose's `articleRowMenuEntries`. Every UI's row menu — macOS's SwiftUI `.contextMenu` and the
+    /// iOS cell's `UIMenu` (`ArticleRowContextMenu`) — draws exactly this list, and runs each item
+    /// through `ArticleRowMenu.perform`.
+    ///
+    /// The read item is labelled from the state after the open (`articleReadAfterContextMenuOpen`), and
+    /// each item requests the explicit state its label promises rather than toggling — otherwise "Mark as
+    /// read" on a row the right-click just marked read would mark it unread.
+    ///
+    /// - Parameter selectedByOpen: whether opening the menu selects the row (`opensBySelecting`).
+    static func items(for model: ArticleRowModel, selectedByOpen: Bool) -> [ArticleRowMenuItem] {
+        let readAfterOpen = ArticleListModelKt.articleReadAfterContextMenuOpen(
+            isRead: model.isRead,
+            selectedByOpen: selectedByOpen
+        )
+        return [
+            ArticleRowMenuItem(
+                action: .setStarred(!model.isStarred),
+                title: model.isStarred ? Labels.unstar : Labels.star,
+                isEnabled: true,
+                startsGroup: false
+            ),
+            ArticleRowMenuItem(
+                action: .setRead(!readAfterOpen),
+                title: readAfterOpen ? Labels.markUnread : Labels.markRead,
+                isEnabled: true,
+                startsGroup: false
+            ),
+            ArticleRowMenuItem(
+                action: .openInBrowser,
+                title: Labels.openInBrowser,
+                isEnabled: model.canOpenInBrowser,
+                startsGroup: true
+            ),
+            ArticleRowMenuItem(
+                action: .copyUrl,
+                title: Labels.copyUrl,
+                isEnabled: model.hasUsableUrl,
+                startsGroup: false
+            ),
+        ]
+    }
+
+    /// Looked up once rather than on every menu build; the app's language cannot change while it runs.
+    private enum Labels {
+        static let star = L("article_star")
+        static let unstar = L("article_unstar")
+        static let markRead = L("article_mark_as_read")
+        static let markUnread = L("article_mark_as_unread")
+        static let openInBrowser = L("article_open_in_browser")
+        static let copyUrl = L("article_copy_url")
+    }
+}
+
+/// One item of an article row's menu (`ArticleRowMenuState.items`).
+struct ArticleRowMenuItem: Equatable {
+    enum Action: Equatable {
+        /// Sets the star to this state.
+        case setStarred(Bool)
+        /// Sets the read state to this.
+        case setRead(Bool)
+        case openInBrowser
+        case copyUrl
+    }
+
+    let action: Action
+    let title: String
+    let isEnabled: Bool
+    /// Whether a separator comes before this item.
+    let startsGroup: Bool
 }
 
 /// What an article row shows of its feed.

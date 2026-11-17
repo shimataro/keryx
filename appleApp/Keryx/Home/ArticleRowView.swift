@@ -28,30 +28,8 @@ struct ArticleRowView: View, Equatable {
     /// when it changes; it is deliberately not part of `==`, which a `@State` change bypasses anyway.
     @State private var pointerIsOver = false
 
-    #if os(macOS)
-    private static let strongSelectionFill = Color(nsColor: .selectedContentBackgroundColor)
-    private static let dimmedSelectionFill = Color(nsColor: .unemphasizedSelectedContentBackgroundColor)
-    #else
-    /// UIKit has no content-selection colors, so the selection is Keryx's own teal — darker than
-    /// `AccentColor` in dark mode, so white text on it stays readable.
-    private static let strongSelectionFill = Color("SelectionColor")
-    #endif
-    /// The neutral gray a UIKit list cell highlights in, for the return flash.
-    #if os(iOS)
-    private static let returnFlashFill = Color(uiColor: .systemGray4)
-    #else
-    private static let returnFlashFill = Color(nsColor: .unemphasizedSelectedContentBackgroundColor)
-    #endif
-
     // Looked up once rather than on every body evaluation of every row; the app's language cannot
     // change while it runs.
-    private static let starLabel = L("article_star")
-    private static let unstarLabel = L("article_unstar")
-    private static let markReadLabel = L("article_mark_as_read")
-    private static let markUnreadLabel = L("article_mark_as_unread")
-    private static let copyUrlLabel = L("article_copy_url")
-    private static let openInBrowserLabel = L("article_open_in_browser")
-    private static let noTitleLabel = L("article_no_title")
     private static let unreadStateLabel = L("article_state_unread")
     private static let starredStateLabel = L("article_state_starred")
 
@@ -66,61 +44,7 @@ struct ArticleRowView: View, Equatable {
 
     var body: some View {
         Button(action: onSelect) {
-            // Same treatment as Compose's `onPrimary`: on the strong (focused) selection fill the
-            // text turns light; on the dimmed (unfocused) one it keeps its ordinary colors.
-            let onStrongSelection = showsStrongSelection
-            HStack(alignment: .center, spacing: 0) {
-                // Fixed slot, always reserved, so the title never shifts when the dot or star appears.
-                ZStack {
-                    if !model.isRead {
-                        Circle().fill(onStrongSelection ? Color.white : Color.accentColor).frame(width: 8, height: 8)
-                    }
-                    if model.isStarred {
-                        Image(systemName: "star.fill")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.yellow)
-                            .frame(maxHeight: .infinity, alignment: .top)
-                    }
-                }
-                .frame(width: 14)
-                // Announced as the row's accessibility value instead (see `stateAccessibilityValue`).
-                .accessibilityHidden(true)
-                FaviconView(url: model.faviconUrl, letter: model.title?.first, blankWithoutUrl: true)
-                    .faviconFrame(32)
-                    .padding(.leading, 6)
-                VStack(alignment: .leading, spacing: 2) {
-                    titleText
-                        .font(model.isRead ? .body : .body.bold())
-                        .foregroundStyle(onStrongSelection ? AnyShapeStyle(Color.white) : AnyShapeStyle(model.isRead ? HierarchicalShapeStyle.secondary : HierarchicalShapeStyle.primary))
-                        .lineLimit(2, reservesSpace: true)
-                    HStack(spacing: 6) {
-                        if let feedTitle = model.feedTitle {
-                            Text(feedTitle).lineLimit(1)
-                        }
-                        Spacer(minLength: 8)
-                        Text(model.timestamp).lineLimit(1)
-                    }
-                    .font(.caption)
-                    .foregroundStyle(onStrongSelection ? AnyShapeStyle(Color.white.opacity(0.8)) : AnyShapeStyle(HierarchicalShapeStyle.secondary))
-                }
-                .padding(.leading, 10)
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 10)
-            // A plain-style button only hit-tests what it draws; without this the Spacer and the
-            // padding are dead zones.
-            .contentShape(Rectangle())
-            .background {
-                if showsStrongSelection {
-                    RoundedRectangle(cornerRadius: 6).fill(Self.strongSelectionFill)
-                } else if isSelected {
-                    #if os(macOS)
-                    RoundedRectangle(cornerRadius: 6).fill(Self.dimmedSelectionFill)
-                    #endif
-                } else if isReturnFlashing {
-                    RoundedRectangle(cornerRadius: 6).fill(Self.returnFlashFill)
-                }
-            }
+            ArticleRowLabel(model: model, isSelected: isSelected, isReturnFlashing: isReturnFlashing, paneFocused: paneFocused)
         }
         .buttonStyle(.plain)
         .accessibilityValue(stateAccessibilityValue)
@@ -131,48 +55,17 @@ struct ArticleRowView: View, Equatable {
             // A right-click on a hovered, unselected row selects it first, matching Compose's own
             // `articleRowContextMenuOpen` (`ArticleRowComponents.kt`) — the actual selection runs via
             // `.selectsOnContextMenu` above, not as a side effect of this builder (see
-            // `ContextMenuSelectionTracker`'s own doc for why). That selection marks an unread
-            // article read, so the read item is labelled from the state after it, and each item
-            // requests the explicit state its label promises rather than toggling — otherwise
-            // "Mark as read" on a row the right-click just marked read would mark it unread. A menu
-            // opened with the pointer elsewhere (keyboard, VoiceOver) selects nothing, so its label
-            // is the row's current state. The items follow the Article menu's order and separator
-            // (`HomeCommands.swift`), like Compose's `articleRowMenuEntries`.
+            // `ContextMenuSelectionTracker`'s own doc for why). A menu opened with the pointer elsewhere
+            // (keyboard, VoiceOver) selects nothing, so its labels are the row's current state.
             let selectedByOpen = ArticleRowMenuState.opensBySelecting(isSelected: isSelected, pointerIsOver: pointerIsOver)
-            let readAfterOpen = ArticleListModelKt.articleReadAfterContextMenuOpen(
-                isRead: model.isRead,
-                selectedByOpen: selectedByOpen
-            )
-            Button(model.isStarred ? Self.unstarLabel : Self.starLabel) {
-                viewModel.setStarred(article: model.row, starred: !model.isStarred)
+            ForEach(Array(ArticleRowMenuState.items(for: model, selectedByOpen: selectedByOpen).enumerated()), id: \.offset) { _, item in
+                if item.startsGroup { Divider() }
+                Button(item.title) {
+                    ArticleRowMenu.perform(item.action, on: model, viewModel: viewModel, onCopyUrl: onCopyUrl)
+                }
+                .disabled(!item.isEnabled)
             }
-            Button(readAfterOpen ? Self.markUnreadLabel : Self.markReadLabel) {
-                viewModel.setRead(article: model.row, read: !readAfterOpen)
-            }
-            Divider()
-            Button(Self.openInBrowserLabel) {
-                openInBrowserIfAllowed(model.url)
-            }
-            .disabled(!model.canOpenInBrowser)
-            Button(Self.copyUrlLabel, action: onCopyUrl)
-            .disabled(!model.hasUsableUrl)
         }
-    }
-
-    private var showsStrongSelection: Bool {
-        #if os(macOS)
-        isSelected && paneFocused
-        #else
-        isSelected
-        #endif
-    }
-
-    /// Only a search result's highlighted title needs an `AttributedString`; a plain title is set
-    /// verbatim, skipping both the attributed copy and a localization lookup of the title text.
-    private var titleText: Text {
-        guard let title = model.title else { return Text(verbatim: Self.noTitleLabel) }
-        if let highlighted = model.highlightedTitle { return Text(highlighted) }
-        return Text(verbatim: title)
     }
 
     /// What the unread dot and the star show, for VoiceOver: empty for a read, unstarred article.
