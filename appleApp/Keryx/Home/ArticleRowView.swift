@@ -50,6 +50,9 @@ struct ArticleRowView: View, Equatable {
         .accessibilityValue(stateAccessibilityValue)
         // The selection is otherwise only a background fill, which VoiceOver cannot see.
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+        // iOS puts the same menu on the list's cell instead (`ArticleRowContextMenu`): a SwiftUI
+        // `.contextMenu` there makes a swipe start with the row standing still, then jumping.
+        #if os(macOS)
         .selectsOnContextMenu(id: model.id, pointerIsOver: $pointerIsOver, perform: onContextMenuSelect)
         .contextMenu {
             // A right-click on a hovered, unselected row selects it first, matching Compose's own
@@ -66,6 +69,7 @@ struct ArticleRowView: View, Equatable {
                 .disabled(!item.isEnabled)
             }
         }
+        #endif
     }
 
     /// What the unread dot and the star show, for VoiceOver: empty for a read, unstarred article.
