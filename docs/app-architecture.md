@@ -323,7 +323,8 @@ Examples in the code today:
 | Set read / starred | `HomeViewModel.setRead` / `setStarred` — the explicit-state write plus its optimistic pin | Every route that sets a specific state, e.g. the article row's context menu |
 | Finish an OPML import | `presentation/settings/OpmlTransferController.kt`'s `importBegun` (run an import already held by `tryBegin`; always `finish` it, with no result when cancelled) | `OpmlTransferController.importDocument`, Compose's `SettingsViewModel.importOpml` (after the picker) and SwiftUI's `OpmlTransferObservable` (the panel's `importOpml(from:)` and an opened file's `importDocument(_:)`, which puts a request the controller refuses back rather than dropping it) |
 | Open Settings ▸ Data for a waiting OPML request | `presentation/settings/OpmlTransferController.kt`'s `shouldPresentOpmlRequest` (a request is waiting and nothing runs) | Compose's `App.kt` and SwiftUI's `OpmlRequestPresenter` (through `OpmlTransferObservable.shouldPresentRequest`) |
-| Article row menu's read label | `presentation/home/ArticleListModel.kt`'s `articleReadAfterContextMenuOpen` (read once the menu is open: already read, or the open selected the row) | Compose's `articleRowMenuEntries` and SwiftUI's `ArticleRowView` (calling it directly); each UI only works out whether its own open selected the row (SwiftUI on macOS: `ArticleRowMenuState.opensBySelecting`, from the same pointer hover `.selectsOnContextMenu` selects on) |
+| Article row menu's read label | `presentation/home/ArticleListModel.kt`'s `articleReadAfterContextMenuOpen` (read once the menu is open: already read, or the open selected the row) | Compose's `articleRowMenuEntries` and SwiftUI's `ArticleRowMenuState.items` (calling it directly); each UI only works out whether its own open selected the row (SwiftUI on macOS: `ArticleRowMenuState.opensBySelecting`, from the same pointer hover `.selectsOnContextMenu` selects on; on iOS a long press never selects) |
+| Article row menu (SwiftUI) | `Bridge/ArticleRowModel.swift`'s `ArticleRowMenuState.items` (the items, their order, labels, enablement and groups) and `Home/ArticleRowMenu.swift`'s `ArticleRowMenu.perform` (what an item does) | macOS's `.contextMenu` in `ArticleRowView` and iOS's `UIMenu` in `ArticleRowContextMenu` |
 | Copy article URL (decision) | `presentation/home/ArticleListModel.kt`'s `articleUrlCopyPlan` → `ArticleUrlCopyPlan` (write the clipboard? flash the reader's ✓? confirm in-app? — the last from the shared `platformShowsOwnCopyConfirmation` and whether the ✓ confirms on this platform: never where the OS confirms, on a desktop only when the ✓ does not flash, on a touch platform every copy) | Compose's `ArticleUrlCopier.copy` and SwiftUI's `ArticleUrlCopy.perform` (`HomeObservable.copyArticleUrl`), which only carry it out |
 | Copy article URL (Compose) | `ui/home/ArticleUrlCopier.kt`'s `ArticleUrlCopier.copy` — clipboard, the reader's ✓ pulse and Android's snackbar | The reader's copy button, ⌘/Ctrl+Shift+C, the menu bar and the article row's context menu |
 | Share an article (Compose, Android) | `ui/home/ArticleSharer.kt`'s `ArticleSharer` — `canShare` / `share`, both on `:shared`'s `canShareArticleUrl`, the latter calling the `platform/ShareSheet` expect (Android: `Intent.createChooser` around `ACTION_SEND`). `rememberArticleSharer` returns `null` where `platformSupportsShare` is `false` (desktop), which leaves every route out | The reader's share button and the article row's long-press menu |
@@ -1937,7 +1938,10 @@ list forward (`CompactSearchNavigation`).
   drag. Opening a menu does not select its row (as in the system apps, and Android's long-press menu): the
   menu is built from the pressed row itself, so its actions land on that row whatever is selected. An erroring
   feed's menu is titled with the reason (gone, or a fetch error) — the row's warning icon has no hover tooltip
-  on touch.
+  on touch. The menu's press highlight and dismissal target `ContextMenuPressHighlight`'s clear view, and its
+  preview is an image of the row, taken as the press begins; UIKit's default, highlighting the row itself,
+  makes a swipe recognized late in the press start with a jump ("iOS: a row jumps when a swipe starts" in
+  [known-issues.md](known-issues.md)). The pressed cell is hidden while the menu is up.
 - **Renaming** a folder, tag or feed opens the same form sheet that creates one (`NamePromptSheet`, Cancel /
   Save in the navigation bar, a Clear button at the end of the name field), not an in-row editor: an
   Escape-driven editor inside a cell does not suit touch, and the HIG's cancel is the sheet's Cancel. It is
@@ -2060,6 +2064,14 @@ edge shows and what it does are decided once in `:shared` (`ArticleSwipeActions.
   colors (the accent color, and orange for star as Mail's flag: the button's icon is always white, and
   the row's star yellow left it at about 1.5:1) and the context menu's labels. The buttons are icon-only (`.labelStyle(.iconOnly)`), the label left to
   VoiceOver, which UIKit exposes the buttons to as actions.
+  - *The row's long-press menu is UIKit, not SwiftUI's `.contextMenu`.* A menu that highlights the row
+    itself while the finger is down makes a swipe recognized late in the press start with a jump
+    ("iOS: a row jumps when a swipe starts" in [known-issues.md](known-issues.md)), and `.contextMenu`
+    cannot be told to highlight anything else. So `ArticleRowContextMenu`, a view behind the row, finds
+    the `List`'s own `UICollectionViewCell` and gives it a `UIContextMenuInteraction` whose highlight is
+    `ContextMenuPressHighlight`'s clear view and whose preview is the row's look (`ArticleRowLabel`).
+    The items and their actions are the same as macOS's (`ArticleRowMenuState.items`,
+    `ArticleRowMenu.perform`).
 - **macOS.** The article table's `tableView(_:rowActionsForRow:edge:)` returns one
   `NSTableViewRowAction` per edge (`Home/ArticleTableView.swift`), as Mail's message list does; AppKit
   draws them, slides the row and runs a full swipe. AppKit widens a row action's button to fit its

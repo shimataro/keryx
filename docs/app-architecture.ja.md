@@ -306,7 +306,8 @@ Play 開発者サービスの無い端末とまったく同じ状態で、UI は
 | 既読 / スターの設定 | `HomeViewModel.setRead` / `setStarred`（指定した状態の書き込みと、その楽観的なピン留め） | 特定の状態を設定するすべての経路（例: 記事行のコンテキストメニュー） |
 | OPML のインポートを終える | `presentation/settings/OpmlTransferController.kt` の `importBegun`（`tryBegin` で確保済みのインポートを実行し、必ず `finish` する。キャンセル時は結果なし） | `OpmlTransferController.importDocument`、Compose の `SettingsViewModel.importOpml`（ファイル選択の後）、SwiftUI の `OpmlTransferObservable`（パネルの `importOpml(from:)` と、開かれたファイルの `importDocument(_:)`。コントローラが断った要求は捨てずに戻す） |
 | 待っている OPML の要求で設定 ▸ データを開く | `presentation/settings/OpmlTransferController.kt` の `shouldPresentOpmlRequest`（要求が待っていて、何も実行中でない） | Compose の `App.kt` と SwiftUI の `OpmlRequestPresenter`（`OpmlTransferObservable.shouldPresentRequest` 経由） |
-| 記事行メニューの既読ラベル | `presentation/home/ArticleListModel.kt` の `articleReadAfterContextMenuOpen`（メニューを開いた時点で既読か: もともと既読か、開いたときに行が選択された） | Compose の `articleRowMenuEntries` と SwiftUI の `ArticleRowView`（直接呼ぶ）。各 UI は、自分の開き方で行が選択されたかどうかだけを求める（macOS の SwiftUI は `ArticleRowMenuState.opensBySelecting` で、`.selectsOnContextMenu` が選択に使うのと同じポインタのホバーから求める） |
+| 記事行メニューの既読ラベル | `presentation/home/ArticleListModel.kt` の `articleReadAfterContextMenuOpen`（メニューを開いた時点で既読か: もともと既読か、開いたときに行が選択された） | Compose の `articleRowMenuEntries` と SwiftUI の `ArticleRowMenuState.items`（直接呼ぶ）。各 UI は、自分の開き方で行が選択されたかどうかだけを求める（macOS の SwiftUI は `ArticleRowMenuState.opensBySelecting` で、`.selectsOnContextMenu` が選択に使うのと同じポインタのホバーから求める。iOS の長押しは行を選択しない） |
+| 記事行メニュー（SwiftUI） | `Bridge/ArticleRowModel.swift` の `ArticleRowMenuState.items`（項目、順序、ラベル、有効・無効、区切り）と `Home/ArticleRowMenu.swift` の `ArticleRowMenu.perform`（項目の動作） | macOS の `ArticleRowView` の `.contextMenu` と、iOS の `ArticleRowContextMenu` の `UIMenu` |
 | 記事 URL のコピー（判定） | `presentation/home/ArticleListModel.kt` の `articleUrlCopyPlan` → `ArticleUrlCopyPlan`（クリップボードに書き込むか、リーダーの ✓ を光らせるか、アプリ内で確認を出すか。最後のものは共有の `platformShowsOwnCopyConfirmation` と、そのプラットフォームで ✓ が確認になるかどうかから決まる: OS が確認を出すなら出さない、デスクトップでは ✓ が光らないときだけ、タッチ端末では毎回） | Compose の `ArticleUrlCopier.copy` と SwiftUI の `ArticleUrlCopy.perform`（`HomeObservable.copyArticleUrl`）。どちらもその結果を実行するだけ |
 | 記事 URL のコピー（Compose） | `ui/home/ArticleUrlCopier.kt` の `ArticleUrlCopier.copy`（クリップボード、リーダーの ✓ の pulse、Android のスナックバー） | リーダーのコピーボタン、⌘/Ctrl+Shift+C、メニューバー、記事行のコンテキストメニュー |
 | 記事の共有（Compose、Android） | `ui/home/ArticleSharer.kt` の `ArticleSharer`（`canShare` / `share`。どちらも `:shared` の `canShareArticleUrl` に従い、後者は `platform/ShareSheet` の expect を呼ぶ。Android は `ACTION_SEND` を `Intent.createChooser` で包む）。`platformSupportsShare` が `false` のプラットフォーム（デスクトップ）では `rememberArticleSharer` が `null` を返し、どの経路も表示しない | リーダーの共有ボタン、記事行の長押しメニュー |
@@ -1856,6 +1857,11 @@ HIG が「表示中のビューの検索」に勧める位置であり、メー�
   メニューを開いてもその行は選択しない（システムアプリや Android の長押しメニューと同じ）。メニューは長押しした行そのものから
   組み立てるので、選択中の行が何であっても、操作は長押しした行に対して行われる。エラー中のフィードのメニューには、
   理由（見つからない、または取得エラー）をタイトルとして付ける（行の警告アイコンには、タッチではホバーのツールチップがない）。
+  メニューの押下ハイライトと閉じるときの対象は `ContextMenuPressHighlight` の透明なビューにし、プレビューには
+  押し始めに描いた行の画像を使う。UIKit の既定どおり行そのものをハイライトすると、押してから遅れて認識された
+  スワイプがジャンプして始まる
+  （[known-issues.ja.md](known-issues.ja.md) の「iOS: スワイプを始めると行がジャンプする」）。
+  メニューを出している間、押したセルは隠す。
 - **名前変更**は、フォルダー・タグ・フィードのいずれも、作成と同じフォームシート（`NamePromptSheet`。ナビゲーション
   バーに「キャンセル」と「保存」、名前欄の末尾にクリアボタン）で行い、行の中での編集にはしない。セル内の Esc 前提の
   エディターはタッチに合わず、取り消しは HIG どおりシートの「キャンセル」とするためである。シートは
@@ -1965,6 +1971,13 @@ macOS の記事一覧は、SwiftUI の `List` ではなく、行の高さを固�
   カラーと、スターは Mail の旗と同じオレンジ（ボタンのアイコンは常に白で、行の星の黄色ではコントラストが
   約 1.5:1 しかないため）。ラベルはコンテキストメニューと同じもの。ボタンはアイコンだけ（`.labelStyle(.iconOnly)`）で、ラベルは
   VoiceOver 用に残す。ボタンは UIKit が VoiceOver のアクションとして公開する。
+  - *行の長押しメニューは、SwiftUI の `.contextMenu` ではなく UIKit。* 指を置いている間に行そのものを
+    ハイライトするメニューでは、押してから遅れて認識されたスワイプが、ジャンプして始まる
+    （[known-issues.ja.md](known-issues.ja.md) の「iOS: スワイプを始めると行がジャンプする」）。
+    `.contextMenu` には、ほかのものをハイライトさせる指定がない。そこで、行の背後に置いた
+    `ArticleRowContextMenu` が `List` 自身の `UICollectionViewCell` を見つけ、`UIContextMenuInteraction` を
+    付ける。ハイライトは `ContextMenuPressHighlight` の透明なビュー、プレビューは行の見た目
+    （`ArticleRowLabel`）。項目と動作は macOS と同じ（`ArticleRowMenuState.items`、`ArticleRowMenu.perform`）。
 - **macOS。** 記事テーブルの `tableView(_:rowActionsForRow:edge:)` が各辺に `NSTableViewRowAction` を 1 つ
   返す（`Home/ArticleTableView.swift`）。Mail のメッセージ一覧と同じ仕組みで、ボタンの描画、行のスライド、
   フルスワイプは AppKit が行う。AppKit は行アクションのボタンをタイトルの幅まで広げる（「既読にする」で

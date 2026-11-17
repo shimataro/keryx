@@ -8,7 +8,7 @@ import UIKit
 /// jumping to the finger: the press highlight keeps the row drawn where it was while the swipe moves the
 /// cell. This happens on a SwiftUI `List` and on a plain `UICollectionView` list alike. So the highlight
 /// (and the dismissal) targets a clear view the size of the cell, which has nothing to leave behind, and
-/// the menu's own preview shows the row instead. See "iOS: an article row jumps when a swipe starts" in
+/// the menu's own preview shows the row instead. See "iOS: a row jumps when a swipe starts" in
 /// `docs/known-issues.md`.
 ///
 /// One instance per owner: it holds the clear view and moves it to whichever cell is pressed.

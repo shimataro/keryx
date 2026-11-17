@@ -1059,49 +1059,56 @@ drops as described above. Driving the outline directly instead (an `NSOutlineVie
 `NSViewRepresentable`, as the iOS sidebar does with a `UICollectionView`) would remove the reliance on
 SwiftUI's internals, at the cost of drawing the rows, selection and metrics the `List` now provides.
 
-## iOS: an article row jumps when a swipe starts
+## iOS: a row jumps when a swipe starts
 
-**Status**: not fixed — external (UIKit/SwiftUI) defect. The row's context menu and its swipe actions
-are both part of the spec (`external-spec.md` §9), and the jump comes from the two together.
+**Status**: worked around, not fixed — external (UIKit/SwiftUI) defect. A row with a context menu
+and swipe actions (both part of the spec, `external-spec.md` §9) jumps when a swipe starts. Keryx
+avoids it on the article list and the sidebar by pointing each menu's press highlight at a clear view
+(see "Workaround" below); the defect itself is still there.
 
 ### Symptom
 
-Swiping an article row on iOS, the row does not follow the finger at first. Its leading edge is cut
-away (the unread dot is shaved off from the left) while the rest stays still, and a few frames later
-the whole row jumps to catch up with the finger and follows it normally from there. Swiping left, it
-reads as "the left side disappears, then the row slides". The swipe still works; only its first
-frames are wrong.
+Swiping an article row on iOS, the row did not follow the finger at first. Its leading edge was cut
+away (the unread dot shaved off from the left) while the rest stayed still, and a few frames later
+the whole row jumped to catch up with the finger and followed it normally from there. Swiping left, it
+read as "the left side disappears, then the row slides". The swipe still worked; only its first
+frames were wrong. Sidebar rows (feeds, folders, tags) did the same.
 
 Measured with a slow (60 pt/s) XCUITest drag, recorded with `simctl io recordVideo` and read frame by
-frame at 60 fps: the row stays put for about 200 ms, then moves about 30 pt in one frame on the
-iOS 17.0 simulator (iPhone 15 Pro), and about 17 pt on the iOS 26.5 simulator (iPhone 17 Pro). It
-happened on every swipe measured, right after launch, after coming back from the reader or the
-sidebar, and after the list had been left alone, so those moments are not what triggers it. It is
-smaller on iOS 26, which is likely why it was first noticed on iOS 17.
+frame at 60 fps: the row stayed put for about 200 ms, then moved about 30 pt in one frame on the
+iOS 17.0 simulator (iPhone 15 Pro), and about 17 pt on the iOS 26.5 simulator (iPhone 17 Pro); a
+sidebar row moved 27 pt and 17–18 pt. It was smaller on iOS 26, which is likely why it was first
+noticed on iOS 17.
 
 ### Diagnosis
 
 Temporary logging of the cell's view tree showed what UIKit does as the swipe starts: it puts a mask
-on the `ListCollectionViewCell` and moves the cell, the mask counter-moving so that it stays at the
-screen's leading edge. The positions read in the app moved smoothly, about one point per frame, from
-the first frame. The recording did not: the mask was drawn at its new place while the cell's content
-was still drawn where it started, so the strip between them was cut away, until the content caught up
-in one frame. While the finger is down the row is dimmed by the context menu's press highlight, which
-is removed in the same frame as the mask appears.
+on the cell and moves the cell, the mask counter-moving so that it stays at the screen's leading edge.
+The positions read in the app moved smoothly, about one point per frame, from the first frame. The
+recording did not: the mask was drawn at its new place while the cell's content was still drawn where
+it started, so the strip between them was cut away, until the content caught up in one frame.
 
-Each element was then taken away in turn, four swipes each on iOS 17.0, measuring the largest move in
-one frame at the start of the drag:
+**The cause is the context menu's press highlight.** While the finger is down, the menu highlights
+the row (the view its highlight preview targets), and that highlight keeps the row drawn in place
+while the swipe moves the cell under its mask. A touch probe showed that it depends only on when the
+swipe is recognized: a swipe recognized more than about 375 ms after the finger landed jumps, and an
+earlier one does not. How long the row had been left alone beforehand does not matter; swipes made in
+quick succession only looked fine because the finger moved sooner.
+
+Each element was taken away in turn, four swipes each on iOS 17.0, measuring the largest move in one
+frame at the start of the drag:
 
 | Variant | Largest move in one frame |
 | --- | --- |
-| The app as shipped | 31–35 pt |
+| The app before the workaround | 31–35 pt |
 | Without the row's context menu | 2–3 pt |
 | The row as a tap gesture instead of a `Button`, context menu kept | 30–35 pt |
 | The menu on the `List` (`contextMenu(forSelectionType:)`) with a selection, so it opens | 15–31 pt |
 
 A minimal SwiftUI app with none of Keryx's code (a plain `List` of rows with `.swipeActions` on
 both edges and a one-item `.contextMenu`) does the same: with the menu, 20–31 pt on iOS 17.0
-(three swipes in four) and 15–16 pt on iOS 26.5 (all four); without it, 2.3 pt at most on both.
+(three swipes in four) and 15–16 pt on iOS 26.5 (all four); without it, 2.3 pt at most on both. The
+sidebar, a plain `UICollectionView` list with UIKit's own context menu, did it too.
 
 ### Ruled out
 
@@ -1114,19 +1121,62 @@ both edges and a one-item `.contextMenu`) does the same: with the menu, 20–31 
 - **Moving the menu from the row to the `List`.** The jump went away only while the menu could not
   open (the list had no selection); once it could, the jump came back.
 - **SwiftUI redrawing the row during the swipe.** No row was redrawn during any swipe measured.
+- **Other ways of attaching the menu**, tried in the minimal app with four swipes each. In the same
+  runs, the plain menu measured 30 pt on iOS 17.0 and 11–15 pt on iOS 26.5.
+
+  | Variant | iOS 17.0 | iOS 26.5 |
+  | --- | --- | --- |
+  | `.contextMenu` before `.swipeActions` instead of after | 7–30 pt | 6–15 pt |
+  | A `.contextMenu(menuItems:preview:)` preview | 7–30 pt | 9–15 pt |
+  | `.contentShape(.contextMenuPreview, …)` | 30–31 pt | 10–16 pt |
+  | A UIKit `UIContextMenuInteraction` on the cell, highlighting the cell (UIKit's default) | 30 pt | 2–15 pt |
+
+- **Moving to a `UICollectionView`.** The sidebar already is one, using UIKit's own context menu, and
+  it jumped just the same.
+
+### Workaround
+
+Each row's menu points its press highlight, and its dismissal, at a clear view the size of the cell
+(`ContextMenuPressHighlight`). The clear view leaves nothing behind when the cell moves, and the menu's
+own preview shows the row instead. Since nothing visible is highlighted, the row itself is hidden
+while the menu is up and comes back as the menu closes. Otherwise it would show beside the preview
+where the background is only dimmed, not blurred (iPad).
+
+- **Article list** (`ArticleRowContextMenu`): SwiftUI's `.contextMenu` cannot be told where to point
+  its highlight, so on iOS the row's menu is a `UIContextMenuInteraction` on the `List`'s own cell.
+  - The cell is found by walking up the view tree from a view behind the row, and `ArticleRowLabel` is
+    hosted as the menu's preview.
+  - This relies on SwiftUI's `List` being backed by a `UICollectionView` whose cells are
+    `UICollectionViewCell`s. If no cell is found, the row has no menu and a fault is logged once.
+  - macOS keeps SwiftUI's `.contextMenu`.
+- **Sidebar** (`SidebarCollectionViewController`): the collection view's own menu, with the highlight
+  and dismissal previews returned from its delegate, and an image of the cell as the preview.
+
+The one visible difference is the press itself: the row no longer swells slightly while the finger is
+down, before the menu opens.
+
+With the workaround, a slow swipe moved at most 3 pt in one frame on every swipe measured:
+
+| Row | iOS 17.0 | iOS 26.5 |
+| --- | --- | --- |
+| Article list | 2.0–3.0 pt | 1.3–2.3 pt |
+| Sidebar | 2.3–2.7 pt | 1.3–1.7 pt |
 
 ### What a real fix would need
 
 A fix in UIKit or SwiftUI, so that a swipe that starts on a row with a context menu moves the row from
-its first frame. Driving the article list with a `UICollectionView` (the move "iOS: going back to the
-article list crashed in `UICollectionView`" also calls for) gives no way out on its own: the
-`List`-level menu tried above already goes through the collection view's own context menu. The
-only change in the app that removes the jump is dropping the row's context menu on iOS, which would
-take "Open in browser" and "Copy URL" off the article list, so it is not done.
+its first frame, whatever the menu highlights. The workaround could then go, and the article list's
+menu could go back to SwiftUI's `.contextMenu`.
 
 ### Re-checking after an iOS or Xcode update
 
-On each new iOS release, swipe an article row slowly on a simulator (or record it with
-`xcrun simctl io <device> recordVideo` and step through the frames): if the row follows the finger
-from the start, with no part of its leading edge cut away first, the defect is fixed for that version.
-Once it is fixed on every supported iOS version, delete this entry.
+On each new iOS release, check on a simulator whether the workaround is still needed:
+
+1. Take out the highlight and dismissal previews: put the article row back on SwiftUI's
+   `.contextMenu`, and remove the sidebar's `highlightPreviewForItemAt` / `dismissalPreviewForItemAt`.
+2. Swipe a row slowly, starting the move about half a second after touching it. Or record it with
+   `xcrun simctl io <device> recordVideo` and step through the frames.
+3. If the row follows the finger from the start, with no part of its leading edge cut away first, the
+   defect is fixed for that version.
+
+Once it is fixed on every supported iOS version, remove the workaround and delete this entry.
