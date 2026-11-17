@@ -1058,3 +1058,75 @@ A fix in SwiftUI. Even then, the guard stays as long as SwiftUI's drop handling 
 drops as described above. Driving the outline directly instead (an `NSOutlineView` wrapped in
 `NSViewRepresentable`, as the iOS sidebar does with a `UICollectionView`) would remove the reliance on
 SwiftUI's internals, at the cost of drawing the rows, selection and metrics the `List` now provides.
+
+## iOS: an article row jumps when a swipe starts
+
+**Status**: not fixed — external (UIKit/SwiftUI) defect. The row's context menu and its swipe actions
+are both part of the spec (`external-spec.md` §9), and the jump comes from the two together.
+
+### Symptom
+
+Swiping an article row on iOS, the row does not follow the finger at first. Its leading edge is cut
+away (the unread dot is shaved off from the left) while the rest stays still, and a few frames later
+the whole row jumps to catch up with the finger and follows it normally from there. Swiping left, it
+reads as "the left side disappears, then the row slides". The swipe still works; only its first
+frames are wrong.
+
+Measured with a slow (60 pt/s) XCUITest drag, recorded with `simctl io recordVideo` and read frame by
+frame at 60 fps: the row stays put for about 200 ms, then moves about 30 pt in one frame on the
+iOS 17.0 simulator (iPhone 15 Pro), and about 17 pt on the iOS 26.5 simulator (iPhone 17 Pro). It
+happened on every swipe measured, right after launch, after coming back from the reader or the
+sidebar, and after the list had been left alone, so those moments are not what triggers it. It is
+smaller on iOS 26, which is likely why it was first noticed on iOS 17.
+
+### Diagnosis
+
+Temporary logging of the cell's view tree showed what UIKit does as the swipe starts: it puts a mask
+on the `ListCollectionViewCell` and moves the cell, the mask counter-moving so that it stays at the
+screen's leading edge. The positions read in the app moved smoothly, about one point per frame, from
+the first frame. The recording did not: the mask was drawn at its new place while the cell's content
+was still drawn where it started, so the strip between them was cut away, until the content caught up
+in one frame. While the finger is down the row is dimmed by the context menu's press highlight, which
+is removed in the same frame as the mask appears.
+
+Each element was then taken away in turn, four swipes each on iOS 17.0, measuring the largest move in
+one frame at the start of the drag:
+
+| Variant | Largest move in one frame |
+| --- | --- |
+| The app as shipped | 31–35 pt |
+| Without the row's context menu | 2–3 pt |
+| The row as a tap gesture instead of a `Button`, context menu kept | 30–35 pt |
+| The menu on the `List` (`contextMenu(forSelectionType:)`) with a selection, so it opens | 15–31 pt |
+
+A minimal SwiftUI app with none of Keryx's code (a plain `List` of rows with `.swipeActions` on
+both edges and a one-item `.contextMenu`) does the same: with the menu, 20–31 pt on iOS 17.0
+(three swipes in four) and 15–16 pt on iOS 26.5 (all four); without it, 2.3 pt at most on both.
+
+### Ruled out
+
+- **This app's own code.** The minimal app above has the jump, and taking out the measuring code
+  changed nothing.
+- **The row's `Button`.** Replacing it with a tap gesture kept the jump.
+- **Rebuilding the list or a scroll made just before** (`ArticleListView.attachedToWindow`,
+  `remountGeneration`, `ArticleListScrollGate`), and the return flash. The jump happened just as often
+  long after any of them.
+- **Moving the menu from the row to the `List`.** The jump went away only while the menu could not
+  open (the list had no selection); once it could, the jump came back.
+- **SwiftUI redrawing the row during the swipe.** No row was redrawn during any swipe measured.
+
+### What a real fix would need
+
+A fix in UIKit or SwiftUI, so that a swipe that starts on a row with a context menu moves the row from
+its first frame. Driving the article list with a `UICollectionView` (the move "iOS: going back to the
+article list crashed in `UICollectionView`" also calls for) gives no way out on its own: the
+`List`-level menu tried above already goes through the collection view's own context menu. The
+only change in the app that removes the jump is dropping the row's context menu on iOS, which would
+take "Open in browser" and "Copy URL" off the article list, so it is not done.
+
+### Re-checking after an iOS or Xcode update
+
+On each new iOS release, swipe an article row slowly on a simulator (or record it with
+`xcrun simctl io <device> recordVideo` and step through the frames): if the row follows the finger
+from the start, with no part of its leading edge cut away first, the defect is fixed for that version.
+Once it is fixed on every supported iOS version, delete this entry.
