@@ -98,4 +98,39 @@ class NextcloudServerControllerTest {
         assertFalse(c.state.value.checking)
         assertEquals(1, probed.size)
     }
+
+    @Test
+    fun aCancelledCheckEndsSoTheAddressCanBeConfirmedAgain() = runTest {
+        val gate = CompletableDeferred<Result<Unit>>()
+        val c = controller(initialUrl = "cloud.example.com") { gate.await() }
+
+        val first = async { c.submit() }
+        runCurrent()
+        assertTrue(c.state.value.checking)
+
+        first.cancel()
+        runCurrent()
+
+        assertTrue(first.isCancelled)
+        assertFalse(c.state.value.checking)
+        assertTrue(c.state.value.confirmEnabled)
+        assertNull(c.state.value.error)
+        assertEquals("cloud.example.com", c.state.value.url)
+    }
+
+    @Test
+    fun aCheckCancelledAfterAnEditKeepsTheEditedAddress() = runTest {
+        val gate = CompletableDeferred<Result<Unit>>()
+        val c = controller(initialUrl = "cloud.example.com") { gate.await() }
+
+        val first = async { c.submit() }
+        runCurrent()
+        c.setUrl("other.example.com")
+        first.cancel()
+        runCurrent()
+
+        assertFalse(c.state.value.checking)
+        assertEquals("other.example.com", c.state.value.url)
+        assertTrue(c.state.value.confirmEnabled)
+    }
 }

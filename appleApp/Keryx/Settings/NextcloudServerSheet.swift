@@ -109,6 +109,9 @@ struct NextcloudServerSheet: View {
 
     private func submit() {
         let controller = server.controller
+        // Return still fires onSubmit while Continue is disabled: leave a check in flight running
+        // rather than cancelling it for a submit the controller would refuse anyway.
+        guard controller.state.value.confirmEnabled else { return }
         let onConfirmed = prompt.onConfirmed
         let close = onClose
         submitTask?.cancel()

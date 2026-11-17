@@ -1,5 +1,6 @@
 package works.merc.keryx.app.presentation.settings
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -57,12 +58,20 @@ class NextcloudServerController(
         val started = s.copy(checking = true, error = null)
         if (!_state.compareAndSet(s, started)) return null
 
-        val result: Result<String> = when (val normalized = normalizeNextcloudUrl(s.url)) {
-            is Result.Ok -> when (val probed = probe(normalized.value)) {
-                is Result.Ok -> normalized
-                is Result.Err -> probed
+        val result: Result<String> = try {
+            when (val normalized = normalizeNextcloudUrl(s.url)) {
+                is Result.Ok -> when (val probed = probe(normalized.value)) {
+                    is Result.Ok -> normalized
+                    is Result.Err -> probed
+                }
+                is Result.Err -> normalized
             }
-            is Result.Err -> normalized
+        } catch (e: CancellationException) {
+            // Cancelled mid-check (the dialog closed, the caller's task was cancelled): end the
+            // check so the confirm action comes back. Only one check ever runs at a time (see the
+            // compareAndSet above), so `checking` is this call's even if the address was edited.
+            _state.update { it.copy(checking = false) }
+            throw e
         }
         var request: CloudConnectRequest? = null
         _state.update { current ->
