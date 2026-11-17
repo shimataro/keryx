@@ -7,13 +7,9 @@ import UIKit
 /// The iOS article row's long-press menu: a `UIContextMenuInteraction` on the `List`'s own cell, in
 /// place of SwiftUI's `.contextMenu`.
 ///
-/// With `.contextMenu` (or a UIKit menu whose press highlight is the row), a swipe recognized more than
-/// about 375 ms after the finger landed starts with the row's leading edge cut away and the row
-/// standing still, then jumping to the finger — the press highlight keeps the row drawn where it was
-/// while the swipe moves the cell. So the press highlight here is a clear view the size of the cell,
-/// which has nothing to leave behind, and the menu's preview shows the row itself
-/// (`ArticleRowLabel`). See "iOS: an article row jumps when a swipe starts" in
-/// `docs/known-issues.md`.
+/// SwiftUI's `.contextMenu` highlights the row itself, which makes a swipe start with a jump; this
+/// menu's highlight is `ContextMenuPressHighlight`'s clear view instead, and its preview shows the row
+/// (`ArticleRowLabel`).
 ///
 /// The cell is found by walking up from this view, which relies on SwiftUI's `List` being backed by a
 /// `UICollectionView`. If no cell is found, the row has no menu and a fault is logged once.
@@ -94,16 +90,7 @@ final class ArticleRowMenuInteraction: UIContextMenuInteraction {
 final class ArticleRowMenuDelegate: NSObject, UIContextMenuInteractionDelegate {
     private weak var cell: UICollectionViewCell?
     var source: ArticleRowMenuSource?
-
-    /// The press highlight's target: clear, the size of the cell, and moving with it, so a press that
-    /// turns into a swipe leaves nothing behind (see `ArticleRowContextMenu`).
-    private lazy var highlightView: UIView = {
-        let view = UIView()
-        view.backgroundColor = .clear
-        view.isUserInteractionEnabled = false
-        view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        return view
-    }()
+    private let pressHighlight = ContextMenuPressHighlight()
 
     init(cell: UICollectionViewCell) {
         self.cell = cell
@@ -140,7 +127,7 @@ final class ArticleRowMenuDelegate: NSObject, UIContextMenuInteractionDelegate {
         configuration: UIContextMenuConfiguration,
         highlightPreviewForItemWithIdentifier identifier: any NSCopying
     ) -> UITargetedPreview? {
-        clearPreview()
+        cell.flatMap(pressHighlight.preview(in:))
     }
 
     func contextMenuInteraction(
@@ -148,48 +135,26 @@ final class ArticleRowMenuDelegate: NSObject, UIContextMenuInteractionDelegate {
         configuration: UIContextMenuConfiguration,
         dismissalPreviewForItemWithIdentifier identifier: any NSCopying
     ) -> UITargetedPreview? {
-        clearPreview()
+        cell.flatMap(pressHighlight.preview(in:))
     }
 
-    /// UIKit hides the view a menu's highlight targets while the menu is up; here that is the clear
-    /// view, so the row itself is hidden instead — otherwise it shows beside the preview where the
-    /// background is only dimmed, not blurred (iPad).
+    /// The row is drawn entirely in the cell's content view (the selection fill included).
     func contextMenuInteraction(
         _ interaction: UIContextMenuInteraction,
         willDisplayMenuFor configuration: UIContextMenuConfiguration,
         animator: (any UIContextMenuInteractionAnimating)?
     ) {
         guard let content = cell?.contentView else { return }
-        if let animator {
-            animator.addAnimations { content.alpha = 0 }
-        } else {
-            content.alpha = 0
-        }
+        ContextMenuPressHighlight.hideRow(content, animator: animator)
     }
 
-    /// Shows the row again once the preview has gone back into its place.
     func contextMenuInteraction(
         _ interaction: UIContextMenuInteraction,
         willEndFor configuration: UIContextMenuConfiguration,
         animator: (any UIContextMenuInteractionAnimating)?
     ) {
         guard let content = cell?.contentView else { return }
-        if let animator {
-            animator.addCompletion { content.alpha = 1 }
-        } else {
-            content.alpha = 1
-        }
-    }
-
-    private func clearPreview() -> UITargetedPreview? {
-        guard let cell, cell.window != nil else { return nil }
-        if highlightView.superview !== cell {
-            cell.addSubview(highlightView)
-        }
-        highlightView.frame = cell.bounds
-        let parameters = UIPreviewParameters()
-        parameters.backgroundColor = .clear
-        return UITargetedPreview(view: highlightView, parameters: parameters)
+        ContextMenuPressHighlight.showRow(content, animator: animator)
     }
 
     /// The items as a `UIMenu`, each group (`ArticleRowMenuItem.startsGroup`) an inline section so the
