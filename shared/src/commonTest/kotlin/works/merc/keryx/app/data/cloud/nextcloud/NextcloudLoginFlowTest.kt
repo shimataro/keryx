@@ -1,20 +1,25 @@
 package works.merc.keryx.app.data.cloud.nextcloud
 
 import io.ktor.client.HttpClient
+import io.ktor.client.plugins.api.createClientPlugin
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.MockEngineConfig
 import io.ktor.client.engine.mock.MockRequestHandleScope
 import io.ktor.client.engine.mock.respond
+import io.ktor.client.request.HttpRequestBuilder
 import io.ktor.client.request.HttpRequestData
 import io.ktor.client.request.HttpResponseData
 import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.content.OutgoingContent
 import io.ktor.http.headersOf
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.currentTime
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
@@ -59,7 +64,10 @@ class NextcloudLoginFlowTest {
      * timeout advance in virtual time without a request in flight on another thread letting the
      * scheduler skip ahead to the timeout.
      */
-    private fun TestScope.client(handler: suspend MockRequestHandleScope.(HttpRequestData) -> HttpResponseData): HttpClient {
+    private fun TestScope.client(
+        onRequest: (HttpRequestBuilder) -> Unit = {},
+        handler: suspend MockRequestHandleScope.(HttpRequestData) -> HttpResponseData,
+    ): HttpClient {
         val config = MockEngineConfig().apply {
             dispatcher = StandardTestDispatcher(testScheduler)
             addHandler { request ->
@@ -70,11 +78,15 @@ class NextcloudLoginFlowTest {
         return HttpClient(MockEngine(config)) {
             expectSuccess = false
             followRedirects = false
+            install(createClientPlugin("RequestObserver") { onRequest { request, _ -> onRequest(request) } })
         }
     }
 
-    private fun TestScope.flow(handler: suspend MockRequestHandleScope.(HttpRequestData) -> HttpResponseData): NextcloudLoginFlow =
-        NextcloudLoginFlow(client(handler), launcher, userAgent = "Keryx (Test)", pollIntervalMs = 1_000)
+    private fun TestScope.flow(
+        onRequest: (HttpRequestBuilder) -> Unit = {},
+        handler: suspend MockRequestHandleScope.(HttpRequestData) -> HttpResponseData,
+    ): NextcloudLoginFlow =
+        NextcloudLoginFlow(client(onRequest, handler), launcher, userAgent = "Keryx (Test)", pollIntervalMs = 1_000)
 
     private fun initiateBody(
         login: String = "https://cloud.example.com/login/v2/flow/abc",
@@ -253,6 +265,24 @@ class NextcloudLoginFlowTest {
         assertEquals("DELETE", revoke.method.value)
         assertEquals("https://cloud.example.com/ocs/v2.php/core/apppassword", revoke.url.toString())
         assertEquals(1, launcher.closeCount)
+    }
+
+    @Test
+    fun aRevokeAfterAnUnreadableUserIdIsStillSentWhenSignInIsCancelledMeanwhile() = runTest {
+        val polls = IntArray(1)
+        lateinit var connecting: Job
+        // Cancels the sign-in the moment the revoke starts, before it reaches the server.
+        val f = flow(onRequest = { if (it.method == HttpMethod.Delete) connecting.cancel() }) {
+            standard(it, pendingPolls = 0, polls = polls, userStatus = HttpStatusCode.InternalServerError)
+        }
+        val result = async { f.connect(request()) }
+        connecting = result
+        advanceUntilIdle()
+
+        assertTrue(result.isCancelled)
+        val revoke = history.last()
+        assertEquals("DELETE", revoke.method.value)
+        assertEquals("https://cloud.example.com/ocs/v2.php/core/apppassword", revoke.url.toString())
     }
 
     @Test

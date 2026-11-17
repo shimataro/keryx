@@ -156,19 +156,27 @@ class NextcloudLoginFlow(
         val userId = try {
             fetchUserId(provisional)
         } catch (e: CancellationException) {
-            // Cancelled mid-read: still try to discard the app password, bounded, before giving up.
-            withContext(NonCancellable) {
-                withTimeoutOrNull(CONNECTION_TIMEOUT_MS) { revokeNextcloudAppPassword(client, provisional, userAgent) }
-            }
+            // Cancelled mid-read: still try to discard the app password before giving up.
+            revokeBestEffort(provisional)
             throw e
         } catch (e: Throwable) {
             // A transport or parse failure is no different from an unreadable id: revoke and fail.
             null
         } ?: run {
-            revokeNextcloudAppPassword(client, provisional, userAgent)
+            revokeBestEffort(provisional)
             return authError("Could not read the Nextcloud user id")
         }
         return Result.Ok(provisional.copy(userId = userId))
+    }
+
+    /**
+     * Revokes an app password the flow cannot finish with — bounded, and run even if the sign-in is
+     * cancelled meanwhile, so a cancellation cannot leave the password valid with nobody holding it.
+     */
+    private suspend fun revokeBestEffort(credentials: AppPasswordCredentials) {
+        withContext(NonCancellable) {
+            withTimeoutOrNull(CONNECTION_TIMEOUT_MS) { revokeNextcloudAppPassword(client, credentials, userAgent) }
+        }
     }
 
     /** The account's user id from OCS `cloud/user` (`ocs.data.id`), or `null` when it cannot be read. */
