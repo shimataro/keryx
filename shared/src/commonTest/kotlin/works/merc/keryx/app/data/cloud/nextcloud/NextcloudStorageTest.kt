@@ -12,10 +12,9 @@ import io.ktor.http.headersOf
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runCurrent
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.runTest
-import kotlinx.coroutines.withContext
 import works.merc.keryx.app.core.CLOUD_DB_GZ_PATH
 import works.merc.keryx.app.core.CloudAuthException
 import works.merc.keryx.app.core.CloudStorageException
@@ -309,18 +308,16 @@ class NextcloudStorageTest {
     }
 
     @Test
-    fun createRemovesTheTempFileWhenTheUploadThrows() = runTest {
+    fun createRemovesTheTempFileWhenTheUploadThrows() = runBlocking {
         val (s, history, verify) = storage(
             credentials,
             { respond("", HttpStatusCode.Created) },
             { throw kotlinx.io.IOException("connection reset") }, // PUT
             { respond("", HttpStatusCode.NoContent) }, // DELETE temp
         )
-        // On a real dispatcher: the cleanup's withTimeoutOrNull would otherwise run on runTest's
-        // virtual clock, which skips straight past the timeout while the engine answers on another thread.
-        withContext(Dispatchers.Default) {
-            runCatching { s.create(CLOUD_DB_GZ_PATH, uploadSourceOf(byteArrayOf(7))) }
-        }
+        // In real time: the cleanup's withTimeoutOrNull would otherwise run on runTest's virtual
+        // clock, which skips straight past the timeout while the engine answers on another thread.
+        runCatching { s.create(CLOUD_DB_GZ_PATH, uploadSourceOf(byteArrayOf(7))) }
         assertEquals(listOf("MKCOL", "PUT", "DELETE"), history.map { it.method.value })
         assertEquals("$base/Keryx/.upload-1.tmp", history[2].url.toString())
         verify()
