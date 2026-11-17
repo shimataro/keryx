@@ -29,7 +29,6 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.koinInject
 import works.merc.keryx.app.core.ErrorKind
@@ -72,10 +71,21 @@ internal fun NextcloudServerDialog(
     val state by controller.state.collectAsState()
     LaunchedEffect(state.url) { savedUrl = state.url }
     val scope = rememberCoroutineScope()
-    val submit: () -> Unit = { scope.launch { controller.submit()?.let(onConfirmed) } }
+    val checkGate = remember(scope) { NextcloudServerCheckGate(scope) }
+    // Closing the gate on a pass too keeps a second Continue in the same frame from connecting twice.
+    val submit: () -> Unit = {
+        checkGate.start(controller::submit) { request ->
+            checkGate.close()
+            onConfirmed(request)
+        }
+    }
 
     KeryxAlertDialog(
-        onDismissRequest = onDismiss,
+        // Cancel, Escape, Back and an outside click all land here.
+        onDismissRequest = {
+            checkGate.close()
+            onDismiss()
+        },
         title = stringResource(Res.string.nextcloud_server_title),
         text = {
             NextcloudServerDialogContent(
