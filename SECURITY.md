@@ -112,7 +112,9 @@ Keryx is designed to minimize its attack surface:
   refused, redirects are not followed, and the app password is never sent to a server URL that is not HTTPS.
   Sign-in uses Nextcloud's Login Flow v2 on the server's own page, so the app never sees the account password.
   The app password it issues can reach the whole account (Nextcloud has no app-only folder scope); the app
-  itself only uses its `Keryx` folder, and disconnecting revokes the app password on the server.
+  itself only uses its `Keryx` folder. Disconnecting asks the server to revoke the app password, on a
+  best-effort basis: if the server cannot be reached at that moment, the app password stays valid there
+  until you revoke it under the server's Settings ▸ Security ▸ Devices & sessions.
 - **Local data** (subscriptions, cached articles, settings) stays on your device
   unless you explicitly enable cloud sync.
 - **The macOS app from GitHub Releases is signed with a Developer ID certificate and notarized by
