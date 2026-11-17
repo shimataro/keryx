@@ -12,9 +12,9 @@ struct NextcloudServerSheet: View {
 
     @State private var server: NextcloudServerObservable
     @FocusState private var urlFieldFocused: Bool
-    /// The check `submit()` started, kept so closing the sheet can cancel it: a check that finishes
-    /// after the sheet was dismissed must not go on to start the sign-in.
-    @State private var submitTask: Task<Void, Never>?
+    /// The check `submit()` started. Closed the moment the sheet is closed, so a check that finishes
+    /// after that must not go on to start the sign-in.
+    @State private var checkGate = NextcloudServerCheckGate<CloudConnectRequest>()
 
     init(prompt: NextcloudServerPrompt, makeController: (String) -> NextcloudServerController, onClose: @escaping () -> Void) {
         self.prompt = prompt
@@ -40,16 +40,18 @@ struct NextcloudServerSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button(L("common_cancel"), role: .cancel) { onClose() }
+                    Button(L("common_cancel"), role: .cancel) { close() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     confirmButton
                 }
             }
         }
+        // While a check runs, Cancel is the only way out, so closing always goes through close().
+        .interactiveDismissDisabled(server.state.checking)
         .presentationDetents([.medium, .large])
         .task { await server.startObserving() }
-        .onDisappear { submitTask?.cancel() }
+        .onDisappear { checkGate.close() }
         #else
         VStack(alignment: .leading, spacing: 12) {
             Text(L("nextcloud_server_title"))
@@ -64,7 +66,7 @@ struct NextcloudServerSheet: View {
             statusLine
             HStack {
                 Spacer()
-                Button(L("common_cancel"), role: .cancel) { onClose() }
+                Button(L("common_cancel"), role: .cancel) { close() }
                     .keyboardShortcut(.cancelAction)
                 confirmButton
                     .keyboardShortcut(.defaultAction)
@@ -73,7 +75,7 @@ struct NextcloudServerSheet: View {
         .padding()
         .frame(width: 420)
         .task { await server.startObserving() }
-        .onDisappear { submitTask?.cancel() }
+        .onDisappear { checkGate.close() }
         #endif
     }
 
@@ -113,14 +115,15 @@ struct NextcloudServerSheet: View {
         // rather than cancelling it for a submit the controller would refuse anyway.
         guard controller.state.value.confirmEnabled else { return }
         let onConfirmed = prompt.onConfirmed
-        let close = onClose
-        submitTask?.cancel()
-        submitTask = Task { @MainActor in
-            if let request = try? await controller.submit() {
-                guard !Task.isCancelled else { return }
-                close()
-                onConfirmed(request)
-            }
+        checkGate.start(check: { try? await controller.submit() }) { request in
+            close()
+            onConfirmed(request)
         }
+    }
+
+    /// Every way of closing the sheet from inside it: stops the check before the sheet goes away.
+    private func close() {
+        checkGate.close()
+        onClose()
     }
 }
