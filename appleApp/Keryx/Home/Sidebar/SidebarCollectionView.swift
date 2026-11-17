@@ -95,6 +95,12 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
     /// The latest state handed over mid-drag, applied when the drag ends.
     private(set) var deferredState: SidebarRenderState?
 
+    /// The long-press menu's clear highlight, so a press that turns into a swipe does not make the row
+    /// jump (see `ContextMenuPressHighlight`).
+    private let pressHighlight = ContextMenuPressHighlight()
+    /// The cell whose menu is opening or open, hidden behind the menu's preview.
+    private weak var contextMenuCell: UICollectionViewCell?
+
     init(home: HomeObservable, actions: SidebarCollectionActions) {
         self.home = home
         self.actions = actions
@@ -546,6 +552,11 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
 
     /// A long press opens the menu; moving the finger instead lifts the row for a drag. Opening the
     /// menu does not select the row, as in the system apps (and Android's own long-press menu).
+    ///
+    /// The menu's highlight is `ContextMenuPressHighlight`'s clear view rather than the row, and its
+    /// preview is an image of the row: the row's selection fill, unread count and disclosure are
+    /// drawn by the cell's background and accessories, so an image matches it where a rebuilt view
+    /// might not.
     func collectionView(
         _ collectionView: UICollectionView,
         contextMenuConfigurationForItemsAt indexPaths: [IndexPath],
@@ -555,7 +566,70 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
               let item = dataSource.itemIdentifier(for: indexPaths[0]),
               let key = item.selectionKey,
               let menu = actions.menu(item) else { return nil }
-        return UIContextMenuConfiguration(identifier: key as NSString, previewProvider: nil) { _ in menu }
+        let cell = collectionView.cellForItem(at: indexPaths[0])
+        contextMenuCell = cell
+        // Drawn now: by the time the preview is asked for, the cell is already hidden.
+        let image = cell.flatMap(Self.image(of:))
+        return UIContextMenuConfiguration(identifier: key as NSString, previewProvider: {
+            image.map(Self.menuPreview(showing:))
+        }) { _ in menu }
+    }
+
+    func collectionView(
+        _ collectionView: UICollectionView,
+        contextMenuConfiguration configuration: UIContextMenuConfiguration,
+        highlightPreviewForItemAt indexPath: IndexPath
+    ) -> UITargetedPreview? {
+        collectionView.cellForItem(at: indexPath).flatMap(pressHighlight.preview(in:))
+    }
+
+    func collectionView(
+        _ collectionView: UICollectionView,
+        contextMenuConfiguration configuration: UIContextMenuConfiguration,
+        dismissalPreviewForItemAt indexPath: IndexPath
+    ) -> UITargetedPreview? {
+        (collectionView.cellForItem(at: indexPath) ?? contextMenuCell).flatMap(pressHighlight.preview(in:))
+    }
+
+    /// The whole cell is hidden, since its background and accessories are outside its content view.
+    func collectionView(
+        _ collectionView: UICollectionView,
+        willDisplayContextMenu configuration: UIContextMenuConfiguration,
+        animator: (any UIContextMenuInteractionAnimating)?
+    ) {
+        guard let contextMenuCell else { return }
+        ContextMenuPressHighlight.hideRow(contextMenuCell, animator: animator)
+    }
+
+    func collectionView(
+        _ collectionView: UICollectionView,
+        willEndContextMenuInteraction configuration: UIContextMenuConfiguration,
+        animator: (any UIContextMenuInteractionAnimating)?
+    ) {
+        guard let contextMenuCell else { return }
+        ContextMenuPressHighlight.showRow(contextMenuCell, animator: animator)
+    }
+
+    /// An image of `cell` for the menu's preview. An image rather than
+    /// `snapshotView(afterScreenUpdates:)`, which mirrors the cell live and so would go blank with it
+    /// once the cell is hidden behind the menu.
+    private static func image(of cell: UIView) -> UIImage? {
+        guard cell.bounds.width > 0, cell.bounds.height > 0 else { return nil }
+        return UIGraphicsImageRenderer(bounds: cell.bounds).image { _ in
+            cell.drawHierarchy(in: cell.bounds, afterScreenUpdates: false)
+        }
+    }
+
+    private static func menuPreview(showing image: UIImage) -> UIViewController {
+        let controller = UIViewController()
+        // Sized before the image goes in, so resizing the view to the preview size does not shrink it.
+        controller.view.frame = CGRect(origin: .zero, size: image.size)
+        let imageView = UIImageView(image: image)
+        imageView.frame = controller.view.bounds
+        imageView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        controller.view.addSubview(imageView)
+        controller.preferredContentSize = image.size
+        return controller
     }
 }
 
