@@ -71,7 +71,9 @@ private val WRITE_REV_HEADERS = listOf("OC-ETag", HttpHeaders.ETag)
  * [upload] sends it back as `If-Match`, and a mismatch (412) or a concurrent write holding the file's
  * lock (423) is a [SyncConflictException]. [create] cannot rely on `If-None-Match: *`, which
  * Nextcloud does not apply atomically, so it uploads to a temporary name and moves it into place with
- * `Overwrite: F` — an existing file then fails the move with 412 instead of being overwritten.
+ * `Overwrite: F` — an existing file then fails the move with 412 instead of being overwritten. A 423
+ * at any step of [create] (another write holding a lock on `/Keryx` or the path) is likewise a
+ * [SyncConflictException], left to the sync's retry.
  */
 class NextcloudStorage(
     private val client: HttpClient,
@@ -124,7 +126,8 @@ class NextcloudStorage(
      * Creates [path] without ever overwriting it: makes sure `/Keryx` exists, uploads to a temporary
      * name in it, then moves that onto [path] with `Overwrite: F`. The temporary file is deleted again
      * (best effort) whenever the move does not happen; one whose delete also fails stays in `/Keryx`,
-     * since [CloudStorage] has no listing to find it by later.
+     * since [CloudStorage] has no listing to find it by later. A 423 from any step is a
+     * [SyncConflictException] (see [createStepError]).
      */
     override suspend fun create(path: String, sourcePath: String): Result<CloudFileMeta> = withCredentials { credentials ->
         val folder = client.request(folderUrl(credentials)) {
@@ -132,7 +135,7 @@ class NextcloudStorage(
             authorize(credentials)
         }
         // 405: the folder already exists.
-        if (!folder.status.isSuccess() && folder.status.value != 405) return@withCredentials mapError(folder)
+        if (!folder.status.isSuccess() && folder.status.value != 405) return@withCredentials createStepError(folder)
 
         val tempUrl = "${folderUrl(credentials)}/${newTempName().encodeURLParameter()}"
         // One cleanup guard over both the PUT and the MOVE: a failure or cancellation anywhere
@@ -145,7 +148,7 @@ class NextcloudStorage(
             }
             if (!put.status.isSuccess()) {
                 deleteQuietly(credentials, tempUrl)
-                return@withCredentials mapError(put)
+                return@withCredentials createStepError(put)
             }
             val moved = client.request(tempUrl) {
                 method = MOVE
@@ -222,6 +225,14 @@ class NextcloudStorage(
 
     private suspend fun mapError(response: HttpResponse): Result.Err =
         cloudStorageError(PROVIDER_NAME, response.status.value, response.bodyAsText())
+
+    /**
+     * A failed [create] step before the move (the `MKCOL` or the temporary `PUT`): 423 means another
+     * write holds a lock on `/Keryx` or the path right now, a conflict for the sync to retry, as in
+     * [upload]; anything else is a storage error.
+     */
+    private suspend fun createStepError(response: HttpResponse): Result.Err =
+        if (response.status.value == 423) Result.Err(SyncConflictException()) else mapError(response)
 
     private fun HttpRequestBuilder.authorize(credentials: AppPasswordCredentials) {
         basicAuth(credentials.loginName, credentials.appPassword)

@@ -293,6 +293,32 @@ class NextcloudStorageTest {
     }
 
     @Test
+    fun createWhenTheFolderIsLockedIsAConflict() = runTest {
+        val (s, history, verify) = storage(credentials, { respond("", HttpStatusCode.Locked) }) // MKCOL
+        val r = s.create(CLOUD_DB_GZ_PATH, uploadSourceOf(byteArrayOf(7)))
+        assertIs<Result.Err>(r)
+        assertIs<SyncConflictException>(r.exception)
+        assertEquals(listOf("MKCOL"), history.map { it.method.value })
+        verify()
+    }
+
+    @Test
+    fun createWhenTheTempUploadIsLockedIsAConflictAndRemovesTheTempFile() = runTest {
+        val (s, history, verify) = storage(
+            credentials,
+            { respond("", HttpStatusCode.Created) },
+            { respond("", HttpStatusCode.Locked) }, // PUT temp: locked
+            { respond("", HttpStatusCode.NoContent) }, // DELETE temp
+        )
+        val r = s.create(CLOUD_DB_GZ_PATH, uploadSourceOf(byteArrayOf(7)))
+        assertIs<Result.Err>(r)
+        assertIs<SyncConflictException>(r.exception)
+        assertEquals(listOf("MKCOL", "PUT", "DELETE"), history.map { it.method.value })
+        assertEquals("$base/Keryx/.upload-1.tmp", history[2].url.toString())
+        verify()
+    }
+
+    @Test
     fun createRemovesTheTempFileWhenTheUploadFails() = runTest {
         val (s, history, verify) = storage(
             credentials,

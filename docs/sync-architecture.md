@@ -604,7 +604,9 @@ Nextcloud is not reached through OAuth and has no app-only folder; everything ab
   `Overwrite: F` — an existing destination answers 412 (a conflict) instead of being overwritten, and
   one another write holds locked answers 423 (likewise a conflict), and
   the window in which two devices can both believe they are creating the file shrinks from the whole
-  upload to the move itself. The temporary file is deleted again whenever the move does not happen. One
+  upload to the move itself. A 423 from the `MKCOL` or the temporary upload (another write holding a
+  lock on `/Keryx` or that path) is a conflict too, left to the sync's retry rather than reported as a
+  storage error. The temporary file is deleted again whenever the move does not happen. One
   whose delete also fails stays in `/Keryx`: `CloudStorage` has no listing API to find it by later,
   which is accepted.
 - **Rename.** `MOVE` with `Overwrite: F` and a full-URL `Destination`: a missing source (404) counts as
