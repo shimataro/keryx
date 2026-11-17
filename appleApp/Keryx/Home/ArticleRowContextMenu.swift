@@ -151,6 +151,36 @@ final class ArticleRowMenuDelegate: NSObject, UIContextMenuInteractionDelegate {
         clearPreview()
     }
 
+    /// UIKit hides the view a menu's highlight targets while the menu is up; here that is the clear
+    /// view, so the row itself is hidden instead — otherwise it shows beside the preview where the
+    /// background is only dimmed, not blurred (iPad).
+    func contextMenuInteraction(
+        _ interaction: UIContextMenuInteraction,
+        willDisplayMenuFor configuration: UIContextMenuConfiguration,
+        animator: (any UIContextMenuInteractionAnimating)?
+    ) {
+        guard let content = cell?.contentView else { return }
+        if let animator {
+            animator.addAnimations { content.alpha = 0 }
+        } else {
+            content.alpha = 0
+        }
+    }
+
+    /// Shows the row again once the preview has gone back into its place.
+    func contextMenuInteraction(
+        _ interaction: UIContextMenuInteraction,
+        willEndFor configuration: UIContextMenuConfiguration,
+        animator: (any UIContextMenuInteractionAnimating)?
+    ) {
+        guard let content = cell?.contentView else { return }
+        if let animator {
+            animator.addCompletion { content.alpha = 1 }
+        } else {
+            content.alpha = 1
+        }
+    }
+
     private func clearPreview() -> UITargetedPreview? {
         guard let cell, cell.window != nil else { return nil }
         if highlightView.superview !== cell {
