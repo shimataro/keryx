@@ -629,17 +629,6 @@ struct ArticleListView: View {
             // Compose's `listRowHorizontalMargin()`); adding 8 on top of it doubled that gap.
             .listRowInsets(EdgeInsets(top: 2, leading: 0, bottom: 2, trailing: 0))
             .listRowSeparator(.hidden)
-            // The long-press menu, on the cell itself rather than SwiftUI's `.contextMenu`, so a swipe
-            // starts moving the row from its first frame (see `ArticleRowContextMenu`).
-            .background {
-                ArticleRowContextMenu(source: ArticleRowMenuSource(
-                    model: article,
-                    isSelected: article.id == selectedId,
-                    paneFocused: paneFocused,
-                    viewModel: home.viewModel,
-                    onCopyUrl: { home.copyArticleUrl(url: article.url, articleId: article.id) }
-                ))
-            }
             // Read/unread from the leading edge, star from the trailing one — the same edges and
             // actions as the macOS table and Android (`ArticleSwipeActionStyle`). Neither selects
             // the row, so a star never marks the article read; both only change reading state, so a
