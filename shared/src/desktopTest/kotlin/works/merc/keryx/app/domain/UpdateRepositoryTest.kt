@@ -1173,6 +1173,9 @@ class UpdateRepositoryTest {
         runBlocking { repo.check() }
         repo.startDownload()
         awaitState(repo) { it is UpdateState.Downloading }
+        // Downloading is set before the request is sent, so wait for it to reach the (gated) engine
+        // before snapshotting the count; otherwise the first request can land after the snapshot.
+        await(describe = { "Timed out; download requests: $downloadRequestCount" }) { downloadRequestCount == 1 }
         val requestsWhileDownloading = downloadRequestCount
         repo.performPrimaryAction()
         assertEquals(requestsWhileDownloading, downloadRequestCount, "Downloading must be a no-op, not a second download")
