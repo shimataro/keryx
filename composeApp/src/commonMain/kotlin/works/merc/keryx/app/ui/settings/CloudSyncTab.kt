@@ -31,6 +31,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.DrawableResource
 import org.jetbrains.compose.resources.StringResource
@@ -131,6 +132,9 @@ internal fun CloudSyncTabContent(vm: SettingsViewModel) {
         mutableStateOf<ServerDialogRequest?>(null)
     }
     val scope = rememberCoroutineScope()
+    // The Reconnect action's read of the stored server, while it runs. A second click meanwhile is
+    // ignored, so a lookup can never open the dialog again after the user cancelled it.
+    var reconnectLookup by remember { mutableStateOf<Job?>(null) }
 
     Column(Modifier.fillMaxWidth().padding(16.dp)) {
         val connected = connectedType
@@ -198,17 +202,17 @@ internal fun CloudSyncTabContent(vm: SettingsViewModel) {
                     onDisconnect = { confirmingDisconnect = type },
                     onResetCloudData = { confirmingResetCloudData = true },
                     onReconnect = {
-                        if (type.requiresServerUrl) {
+                        when {
+                            !type.requiresServerUrl -> vm.reconnect()
+                            reconnectLookup?.isActive == true -> Unit
                             // Read the stored server before the reconnect clears it, to start from it.
-                            scope.launch {
+                            else -> reconnectLookup = scope.launch {
                                 askingServer = ServerDialogRequest(
                                     type,
                                     ServerDialogKind.RECONNECT,
                                     vm.reconnectServerUrl().orEmpty(),
                                 )
                             }
-                        } else {
-                            vm.reconnect()
                         }
                     },
                 )

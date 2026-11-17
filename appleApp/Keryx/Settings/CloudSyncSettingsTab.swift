@@ -19,6 +19,8 @@ struct CloudSyncSettingsTab: View {
     /// The open server sheet of a provider that `requiresServerUrl` (Nextcloud), with what to do
     /// once the address passed — connect, switch or reconnect. Cancelling it does nothing.
     @State private var serverPrompt: NextcloudServerPrompt?
+    /// Reconnect's read of the stored server, while it runs (see `reconnect(_:)`).
+    @State private var reconnectLookup: Task<Void, Never>?
 
     /// Gates "reset"/"switch provider"/"reconnect" — each would race a connect/initial-sync/
     /// disconnect still in flight. See `CloudProviderRow`'s own KDoc (`CloudSyncTab.kt`).
@@ -365,8 +367,12 @@ struct CloudSyncSettingsTab: View {
             cloudSync.controller.reconnect(request: CloudConnectRequest.companion.NONE)
             return
         }
+        // A second tap while the stored server is still being read is ignored, so a lookup can never
+        // open the sheet again after the user cancelled it.
+        guard reconnectLookup == nil else { return }
         let controller = cloudSync.controller
-        Task { @MainActor in
+        reconnectLookup = Task { @MainActor in
+            defer { reconnectLookup = nil }
             let stored = try? await controller.reconnectServerUrl()
             serverPrompt = NextcloudServerPrompt(initialUrl: stored ?? "") { request in
                 controller.reconnect(request: request)
