@@ -96,8 +96,8 @@ struct ArticleRowModel: Identifiable, Equatable, Sendable {
 
 /// What an article row's context menu offers, decided from the state the row will be in once the
 /// menu is open rather than from the snapshot it was drawn with. The read state itself is the shared
-/// `articleReadAfterContextMenuOpen` (`ArticleListModel.kt`), which `ArticleRowView` calls directly;
-/// only how this UI's own open selects the row is Swift-specific.
+/// `articleReadAfterContextMenuOpen` (`ArticleListModel.kt`), which `items` calls directly; only how
+/// this UI's own open selects the row is Swift-specific.
 enum ArticleRowMenuState {
     /// Whether opening a row's context menu selects the row first. On macOS the only thing that
     /// selects a row on a right-click/Control-click is `ContextMenuSelectionTracker`, which holds a

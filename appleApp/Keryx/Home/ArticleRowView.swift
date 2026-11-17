@@ -16,10 +16,10 @@ struct ArticleRowView: View, Equatable {
     /// Not observed, only called — actions reach `HomeViewModel` directly.
     let viewModel: HomeViewModel
     let onSelect: () -> Void
+    /// Selects the row for a right-click's menu (macOS; an iOS long press never selects).
     let onContextMenuSelect: () -> Void
-    /// The shared article-URL copy handler (`HomeObservable.copyArticleUrl`), so the context menu's
-    /// Copy URL flashes the reader's ✓ — or, for a row the reader does not show, gets the in-app
-    /// confirmation — exactly like the menu bar's command and the reader's button.
+    /// The shared article-URL copy handler (`HomeObservable.copyArticleUrl`), for the menu's Copy URL
+    /// (see `ArticleRowMenu.perform`).
     let onCopyUrl: () -> Void
     /// Whether the pointer is over this row (macOS) — what `ArticleRowMenuState.opensBySelecting`
     /// predicts a right-click's selection from. Written only by `.selectsOnContextMenu`, from the same
