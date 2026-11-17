@@ -101,25 +101,14 @@ final class ArticleRowMenuDelegate: NSObject, UIContextMenuInteractionDelegate {
         configurationForMenuAtLocation location: CGPoint
     ) -> UIContextMenuConfiguration? {
         guard let source else { return nil }
-        let model = source.model
-        // An iOS long-press never selects the row, so the menu is the row's current state.
-        let selectedByOpen = ArticleRowMenuState.opensBySelecting(isSelected: source.isSelected, pointerIsOver: false)
-        let items = ArticleRowMenuState.items(for: model, selectedByOpen: selectedByOpen)
-        let size = cell?.bounds.size ?? .zero
-        return UIContextMenuConfiguration(identifier: nil, previewProvider: {
-            let preview = UIHostingController(rootView: ArticleRowLabel(
-                model: model,
-                isSelected: source.isSelected,
-                isReturnFlashing: false,
-                paneFocused: source.paneFocused
-            ))
-            preview.preferredContentSize = size
-            return preview
-        }, actionProvider: { _ in
-            Self.menu(items) { action in
-                ArticleRowMenu.perform(action, on: model, viewModel: source.viewModel, onCopyUrl: source.onCopyUrl)
-            }
-        })
+        return ArticleRowMenu.configuration(
+            for: source.model,
+            isSelected: source.isSelected,
+            paneFocused: source.paneFocused,
+            previewSize: cell?.bounds.size ?? .zero,
+            viewModel: source.viewModel,
+            onCopyUrl: source.onCopyUrl
+        )
     }
 
     func contextMenuInteraction(
@@ -155,23 +144,6 @@ final class ArticleRowMenuDelegate: NSObject, UIContextMenuInteractionDelegate {
     ) {
         guard let content = cell?.contentView else { return }
         ContextMenuPressHighlight.showRow(content, animator: animator)
-    }
-
-    /// The items as a `UIMenu`, each group (`ArticleRowMenuItem.startsGroup`) an inline section so the
-    /// menu draws the same separators as the SwiftUI menu.
-    private static func menu(
-        _ items: [ArticleRowMenuItem],
-        perform: @escaping (ArticleRowMenuItem.Action) -> Void
-    ) -> UIMenu {
-        var groups: [[UIAction]] = []
-        for item in items {
-            if item.startsGroup || groups.isEmpty { groups.append([]) }
-            groups[groups.count - 1].append(UIAction(
-                title: item.title,
-                attributes: item.isEnabled ? [] : .disabled
-            ) { _ in perform(item.action) })
-        }
-        return UIMenu(children: groups.map { UIMenu(options: .displayInline, children: $0) })
     }
 }
 #endif

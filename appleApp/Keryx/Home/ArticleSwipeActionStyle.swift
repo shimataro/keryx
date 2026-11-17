@@ -56,6 +56,11 @@ enum ArticleSwipeActionStyle {
     static func nsColor(_ action: ArticleSwipeAction) -> NSColor {
         isStar(action) ? .systemOrange : .controlAccentColor
     }
+    #else
+    /// `tint` as UIKit's contextual action takes it.
+    static func uiColor(_ action: ArticleSwipeAction) -> UIColor {
+        isStar(action) ? .systemOrange : UIColor(named: "AccentColor") ?? .tintColor
+    }
     #endif
 
     /// Which of the two color groups an action belongs to — the one place `tint` and `nsColor` decide it.
