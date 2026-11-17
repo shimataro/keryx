@@ -28,22 +28,17 @@ struct NextcloudServerCheckGateTests {
         }
     }
 
-    /// Lets the gate's task run up to its next suspension point once the check has returned.
-    private func settle() async {
-        for _ in 0..<10 { await Task.yield() }
-    }
-
     @Test
     func closingWhileTheCheckRunsDropsItsResult() async {
         let gate = NextcloudServerCheckGate<Int>()
         let check = PendingCheck()
         var passed: [Int] = []
-        gate.start(check: { await check.run() }) { passed.append($0) }
+        let task = gate.start(check: { await check.run() }) { passed.append($0) }
         await check.awaitStarted()
 
         gate.close()
         check.finish(with: 1)
-        await settle()
+        await task?.value
 
         #expect(check.finished)
         #expect(passed.isEmpty)
@@ -54,11 +49,11 @@ struct NextcloudServerCheckGateTests {
         let gate = NextcloudServerCheckGate<Int>()
         let check = PendingCheck()
         var passed: [Int] = []
-        gate.start(check: { await check.run() }) { passed.append($0) }
+        let task = gate.start(check: { await check.run() }) { passed.append($0) }
         await check.awaitStarted()
 
         check.finish(with: 7)
-        await settle()
+        await task?.value
 
         #expect(passed == [7])
     }
@@ -68,11 +63,11 @@ struct NextcloudServerCheckGateTests {
         let gate = NextcloudServerCheckGate<Int>()
         let check = PendingCheck()
         var passed: [Int] = []
-        gate.start(check: { await check.run() }) { passed.append($0) }
+        let task = gate.start(check: { await check.run() }) { passed.append($0) }
         await check.awaitStarted()
 
         check.finish(with: nil)
-        await settle()
+        await task?.value
 
         #expect(check.finished)
         #expect(passed.isEmpty)
@@ -85,9 +80,9 @@ struct NextcloudServerCheckGateTests {
         var passed: [Int] = []
         gate.close()
 
-        gate.start(check: { ran = true; return 1 }) { passed.append($0) }
-        await settle()
+        let task = gate.start(check: { ran = true; return 1 }) { passed.append($0) }
 
+        #expect(task == nil)
         #expect(!ran)
         #expect(passed.isEmpty)
     }
@@ -98,14 +93,15 @@ struct NextcloudServerCheckGateTests {
         let first = PendingCheck()
         let second = PendingCheck()
         var passed: [Int] = []
-        gate.start(check: { await first.run() }) { passed.append($0) }
+        let firstTask = gate.start(check: { await first.run() }) { passed.append($0) }
         await first.awaitStarted()
-        gate.start(check: { await second.run() }) { passed.append($0) }
+        let secondTask = gate.start(check: { await second.run() }) { passed.append($0) }
         await second.awaitStarted()
 
         first.finish(with: 1)
         second.finish(with: 2)
-        await settle()
+        await firstTask?.value
+        await secondTask?.value
 
         #expect(first.finished)
         #expect(passed == [2])

@@ -13,15 +13,21 @@ final class NextcloudServerCheckGate<Value> {
     /// Starts `check`, cancelling any check still running, and calls `onPassed` with its result unless
     /// the gate was closed (or the check replaced) in the meantime, or the check produced nothing.
     /// Does nothing once the gate is closed.
-    func start(check: @escaping @MainActor () async -> Value?, onPassed: @escaping @MainActor (Value) -> Void) {
-        guard !isClosed else { return }
+    ///
+    /// - Returns: The task running the check and the decision after it, for a caller (a test) to await;
+    ///   nil when the gate was already closed and nothing started.
+    @discardableResult
+    func start(check: @escaping @MainActor () async -> Value?, onPassed: @escaping @MainActor (Value) -> Void) -> Task<Void, Never>? {
+        guard !isClosed else { return nil }
         task?.cancel()
-        task = Task { @MainActor [weak self] in
+        let started = Task { @MainActor [weak self] in
             let value = await check()
             guard let self, !self.isClosed, !Task.isCancelled, let value else { return }
             self.task = nil
             onPassed(value)
         }
+        task = started
+        return started
     }
 
     /// Drops the running check, if any, and every result still to come. Idempotent.
