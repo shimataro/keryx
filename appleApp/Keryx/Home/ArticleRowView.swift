@@ -67,18 +67,6 @@ struct ArticleRowView: View, Equatable {
                 .disabled(!item.isEnabled)
             }
         }
-        #else
-        // The same menu, put on the list's cell instead (`ArticleRowContextMenu`): a SwiftUI
-        // `.contextMenu` here makes a swipe start with the row standing still, then jumping.
-        .background {
-            ArticleRowContextMenu(source: ArticleRowMenuSource(
-                model: model,
-                isSelected: isSelected,
-                paneFocused: paneFocused,
-                viewModel: viewModel,
-                onCopyUrl: onCopyUrl
-            ))
-        }
         #endif
     }
 
