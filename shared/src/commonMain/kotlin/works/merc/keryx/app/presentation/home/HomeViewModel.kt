@@ -815,6 +815,17 @@ class HomeViewModel(
 
     private val expansion = FeedListExpansion(settingsRepository)
 
+    // Tag/folder structure actions live in their own class; this ViewModel only delegates to it.
+    private val feedListActions = FeedListActions(
+        feedRepository = feedRepository,
+        tagRepository = tagRepository,
+        folderRepository = folderRepository,
+        expansion = expansion,
+        selectedRowInstance = _selectedRowInstance,
+        currentFilter = { _filter.value },
+        selectFilter = { selectFilter(it) },
+    )
+
     /** The feed list's collapsed folders — see [FeedListExpansion.collapsedFolderIds]. */
     val collapsedFolderIds: StateFlow<Set<String>> get() = expansion.collapsedFolderIds
 
@@ -833,12 +844,7 @@ class HomeViewModel(
      *
      * @param tagId The identifier of the tag to toggle.
      */
-    fun toggleTagExpanded(tagId: String) {
-        val expanded = expansion.toggleTag(tagId)
-        // A collapsed tag no longer renders its nested feed rows, so a selection on one of them
-        // falls back to that feed's canonical row.
-        if (!expanded) fallBackFromTagRow(tagId)
-    }
+    fun toggleTagExpanded(tagId: String) = feedListActions.toggleTagExpanded(tagId)
 
     /**
      * Expands whatever collapsed folder or tag hides the exact row [instance] (see
@@ -1826,10 +1832,7 @@ class HomeViewModel(
 
     // --- Tag actions ---
 
-    fun createTag(name: String, color: String? = null): String? {
-        if (name.isBlank()) return null
-        return tagRepository.createTag(name.trim(), color)
-    }
+    fun createTag(name: String, color: String? = null): String? = feedListActions.createTag(name, color)
 
     /**
      * Updates a tag with the specified name and color.
@@ -1840,32 +1843,14 @@ class HomeViewModel(
      * @param name The tag's new name.
      * @param color The tag's new color, or `null` to remove the color.
      */
-    fun updateTag(id: String, name: String, color: String?) {
-        if (name.isBlank()) return
-        tagRepository.updateTag(id, name.trim(), color)
-    }
+    fun updateTag(id: String, name: String, color: String?) = feedListActions.updateTag(id, name, color)
 
     /**
      * Deletes a tag and resets the active filter if it references the deleted tag.
      *
      * @param id The identifier of the tag to delete.
      */
-    fun deleteTag(id: String) {
-        tagRepository.deleteTag(id)
-        if (_filter.value == ArticleFilter.Tag(id)) selectFilter(ArticleFilter.All)
-        // A deleted tag no longer renders its nested feed rows, so a selection on one of them
-        // falls back to that feed's canonical row (a no-op if the branch above already reset it).
-        fallBackFromTagRow(id)
-        expansion.forgetTag(id)
-    }
-
-    /** Moves a selection on a feed row nested under [tagId] to that feed's canonical row. */
-    private fun fallBackFromTagRow(tagId: String) {
-        val instance = _selectedRowInstance.value
-        if (instance is FeedListRowSelection.FeedInTag && instance.tagId == tagId) {
-            _selectedRowInstance.value = FeedListRowSelection.FeedInFolderGroup(instance.feedId)
-        }
-    }
+    fun deleteTag(id: String) = feedListActions.deleteTag(id)
 
     /**
      * Updates whether a feed is associated with a tag.
@@ -1875,30 +1860,20 @@ class HomeViewModel(
      * @param attached Whether the tag should be associated with the feed.
      */
     fun setFeedTag(feedId: String, tagId: String, attached: Boolean) =
-        tagRepository.setFeedTag(feedId, tagId, attached)
+        feedListActions.setFeedTag(feedId, tagId, attached)
 
     // --- Folder actions ---
 
-    fun createFolder(name: String): String? {
-        if (name.isBlank()) return null
-        return folderRepository.createFolder(name.trim())
-    }
+    fun createFolder(name: String): String? = feedListActions.createFolder(name)
 
-    fun updateFolder(id: String, name: String) {
-        if (name.isBlank()) return
-        folderRepository.updateFolder(id, name.trim())
-    }
+    fun updateFolder(id: String, name: String) = feedListActions.updateFolder(id, name)
 
     /**
      * Deletes a folder and removes it from the collapsed-folder state.
      *
      * @param id The identifier of the folder to delete.
      */
-    fun deleteFolder(id: String) {
-        folderRepository.deleteFolder(id)
-        if (_filter.value == ArticleFilter.Folder(id)) selectFilter(ArticleFilter.All)
-        expansion.forgetFolder(id)
-    }
+    fun deleteFolder(id: String) = feedListActions.deleteFolder(id)
 
     /**
      * Moves a feed into a folder and optionally positions it relative to another feed.
@@ -1908,7 +1883,7 @@ class HomeViewModel(
      * @param targetFeedId The identifier of the feed to position the moved feed relative to, or `null` to use the default position.
      */
     fun moveFeed(feedId: String, folderId: String?, targetFeedId: String? = null) =
-        feedRepository.moveFeed(feedId, folderId, targetFeedId)
+        feedListActions.moveFeed(feedId, folderId, targetFeedId)
 
     /**
      * Reorders a folder relative to the specified target folder.
@@ -1917,6 +1892,6 @@ class HomeViewModel(
      * @param targetFolderId The identifier of the folder to move before, or `null` to move to the end.
      */
     fun reorderFolders(draggedFolderId: String, targetFolderId: String?) =
-        folderRepository.reorderFolders(draggedFolderId, targetFolderId)
+        feedListActions.reorderFolders(draggedFolderId, targetFolderId)
 }
 
