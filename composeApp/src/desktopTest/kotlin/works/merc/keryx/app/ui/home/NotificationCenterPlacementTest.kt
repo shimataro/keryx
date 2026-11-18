@@ -406,14 +406,16 @@ class NotificationCenterPlacementTest {
 
     @Test
     fun theBellIsTintedByTheMostSevereNotification() = runDesktopComposeUiTest {
-        // Same count, different levels: only the bell's tint tells the rows apart.
+        // Same count, different levels: only the bell's tint tells the rows apart. The empty row is
+        // drawn with the same count too, so it differs from the others in the bell alone.
+        val empty = NotificationCenter()
         val info = centerOf(AppNotificationLevel.INFO, AppNotificationLevel.INFO)
         val warning = centerOf(AppNotificationLevel.INFO, AppNotificationLevel.WARNING)
         val error = centerOf(AppNotificationLevel.ERROR, AppNotificationLevel.INFO)
         setContent {
             KoinIsolatedContext(context = remember { isolatedKoin() }) {
                 Column {
-                    for ((tag, center) in listOf("info" to info, "warning" to warning, "error" to error)) {
+                    for ((tag, center) in listOf("empty" to empty, "info" to info, "warning" to warning, "error" to error)) {
                         Box(Modifier.testTag(tag)) {
                             NotificationCenterRow(notifVm = NotificationCenterViewModel(center, NotificationAlerts(center)), count = 2)
                         }
@@ -424,6 +426,8 @@ class NotificationCenterPlacementTest {
         waitForIdle()
         fun capture(tag: String) = pixelsOf(onNodeWithTag(tag).captureToImage().toPixelMap())
 
+        assertNotEquals(capture("empty"), capture("info"), "new-version notices tint the bell unlike an empty center")
+        assertNotEquals(capture("empty"), capture("warning"), "a warning tints the bell unlike an empty center")
         assertNotEquals(capture("info"), capture("warning"), "a warning tints the bell unlike new-version notices alone")
         assertEquals(capture("warning"), capture("error"), "warnings and errors share the error color")
     }
