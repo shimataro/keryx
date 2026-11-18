@@ -225,35 +225,22 @@ class HomeViewModel(
 
     // --- Search ---
     //
-    // Search is orthogonal to `_filter`, not a variant of it: the query narrows whatever filter is
-    // already selected (see `searchActive`/`searchResults` below), rather than displacing it. This
-    // means there is nothing to restore when search ends — the filter, its row selection, and the
-    // browsing context (pins/selection/cursor) were never touched in the first place.
-    private val _searchQuery = MutableStateFlow("")
-    val searchQuery: StateFlow<String> = _searchQuery
+    // The search input state (query, bar visibility, focus latch) lives in its own class; see
+    // HomeSearchState for why search is orthogonal to `_filter`.
+    private val searchState = HomeSearchState()
+    val searchQuery: StateFlow<String> = searchState.query
 
-    // Whether the expanded search bar/field is open. At PaneLayout.Triple this is always true —
-    // FeedListPane's own field is permanent there — kept true by HomeScreen's own
-    // LaunchedEffect(layout); at a narrow layout it starts false and is toggled by the search
-    // icon/back arrow (see ArticleListPane's own KDoc). The SwiftUI app's iOS search field (on its
-    // article list) binds this to `.searchable`'s `isPresented`. searchActive (below) additionally requires
-    // a non-empty query, so opening the bar alone never disturbs the article list underneath it.
-    private val _searchBarVisible = MutableStateFlow(false)
-    val searchBarVisible: StateFlow<Boolean> = _searchBarVisible.asStateFlow()
+    val searchBarVisible: StateFlow<Boolean> = searchState.barVisible
 
-    fun setSearchBarVisible(visible: Boolean) {
-        _searchBarVisible.value = visible
-        // Drops a focus request no field ever consumed (e.g. Cmd+F, then navigating elsewhere
-        // before the bar composed), so it can't steal focus at whatever field appears next.
-        if (!visible) _pendingSearchFocus.value = false
-    }
+    /** @see HomeSearchState.setBarVisible */
+    fun setSearchBarVisible(visible: Boolean) = searchState.setBarVisible(visible)
 
     // Whether the article list is currently showing search results rather than `_filter`'s own
     // list. Deliberately keyed on the query being non-empty (not on `searchTerms` having any valid
     // ones) — a single short character still needs to show the "too short" hint instead of the
     // filter's own list; see ArticleListPane's own 4-state body.
     val searchActive: StateFlow<Boolean> =
-        combine(_searchBarVisible, _searchQuery) { visible, query -> visible && query.isNotEmpty() }
+        combine(searchState.barVisible, searchState.query) { visible, query -> visible && query.isNotEmpty() }
             .stateIn(viewModelScope, started, false)
 
     private val _unreadOnly = MutableStateFlow(
@@ -677,7 +664,7 @@ class HomeViewModel(
     // keystrokes, so it re-searches immediately.
     private val _rawSearchResults: StateFlow<SearchSnapshot> =
         combine(
-            _searchQuery.debounce(SEARCH_DEBOUNCE_MS),
+            searchState.query.debounce(SEARCH_DEBOUNCE_MS),
             _filter,
             _searchRefreshTrigger,
             // Re-run search whenever the articles table changes (read/star toggles, refresh, sync
@@ -698,7 +685,7 @@ class HomeViewModel(
     // moved on since the snapshot was taken. Lets the search pane hold instead of flashing "no
     // results" between keystrokes (or right after switching filters) before the real results land.
     val searching: StateFlow<Boolean> =
-        combine(_searchQuery, _filter, _rawSearchResults) { live, filter, snapshot ->
+        combine(searchState.query, _filter, _rawSearchResults) { live, filter, snapshot ->
             searchTerms(live).isNotEmpty() && (live != snapshot.query || filter != snapshot.filter)
         }.stateIn(viewModelScope, started, false)
 
@@ -791,27 +778,14 @@ class HomeViewModel(
         if (canHideRead.value) retrimPinnedReadStates()
     }
 
-    // Requests to move keyboard focus into whichever composable currently owns the search field —
-    // FeedListPane's own KeryxTextField at PaneLayout.Triple, or ArticleListPane's
-    // KeryxExpandedSearchBar at a narrow layout (Cmd+F, or tapping the search icon, both call
-    // requestSearchFocus()). Deliberately a *latched* StateFlow rather than a one-shot SharedFlow:
-    // at a narrow layout the request is raised in the same click that opens the bar, so the
-    // composable that will own the field has not composed yet — a SharedFlow emission (as this used
-    // to be) is dropped silently when no collector exists yet, which is exactly what happened here.
-    // The latch stays set until the field that actually gains focus consumes it
-    // (consumeSearchFocusRequest()), and setSearchBarVisible(false) clears it when the bar closes
-    // without any field ever consuming it, so a stale request can never steal focus from an
-    // unrelated field later.
-    private val _pendingSearchFocus = MutableStateFlow(false)
-    val pendingSearchFocus: StateFlow<Boolean> = _pendingSearchFocus.asStateFlow()
+    /** @see HomeSearchState.pendingFocus */
+    val pendingSearchFocus: StateFlow<Boolean> = searchState.pendingFocus
 
-    fun requestSearchFocus() {
-        _pendingSearchFocus.value = true
-    }
+    /** @see HomeSearchState.requestFocus */
+    fun requestSearchFocus() = searchState.requestFocus()
 
-    fun consumeSearchFocusRequest() {
-        _pendingSearchFocus.value = false
-    }
+    /** @see HomeSearchState.consumeFocusRequest */
+    fun consumeSearchFocusRequest() = searchState.consumeFocusRequest()
 
     private val expansion = FeedListExpansion(settingsRepository)
 
@@ -1681,9 +1655,7 @@ class HomeViewModel(
      *
      * @param query The new search query.
      */
-    fun setSearchQuery(query: String) {
-        _searchQuery.value = query
-    }
+    fun setSearchQuery(query: String) = searchState.setQuery(query)
 
     private val addFeedPreviewResolver = AddFeedPreviewResolver(feedRepository, tagRepository)
 

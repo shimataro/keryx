@@ -1259,7 +1259,7 @@ WebView をホストするペインを含む3ペインすべてがアプリの�
 **検索は `ArticleFilter` から独立しており、そのバリアントではない。** `core/ArticleFilter.kt` が
 持つのは `All`/`Starred`/`Feed`/`Tag`/`Folder` のみで、`Search` というケースは存在しない。クエリ
 （`HomeViewModel.searchQuery`）は、選択中のフィルタを置き換えるのではなく、それを絞り込む。
-`HomeViewModel.searchActive`（`_searchBarVisible && searchQuery.value.isNotEmpty()`）が、記事一覧
+`HomeViewModel.searchActive`（`searchBarVisible.value && searchQuery.value.isNotEmpty()`）が、記事一覧
 が今表示しているのが検索結果（`HomeViewModel.searchResults`。これ自体が現在のフィルタでスコープ
 されている——下記 `FtsSearch.articleScopeSql` 参照）かフィルタ自身の一覧（`HomeViewModel.articles`）
 かを示す唯一の派生フラグであり、`ArticleListPane` はこれを読んで、どちらを1つの
@@ -1269,7 +1269,7 @@ WebView をホストするペインを含む3ペインすべてがアプリの�
 入力欄が開いていれば（`PaneLayout.Triple` では常に開いている）`searchActive` はクエリから導かれるため、
 タップ・入力欄に乗ったキーボードカーソル・矢印キーによるナビゲーションのどれでも、検索は同じように始まる。
 
-**`_searchBarVisible` は検索欄が開いているかどうかを表し**、意味を持つのは狭いレイアウトだけである:
+**`HomeViewModel.searchBarVisible` は検索欄が開いているかどうかを表し**、意味を持つのは狭いレイアウトだけである:
 `PaneLayout.Triple` では `FeedListPane` 自身のクエリ欄が常設なので、`HomeScreen` 自身の
 `LaunchedEffect(layout)` がそこでは常に `true` に保つ。狭いレイアウトに切り替わったときは、同じ effect が
 クエリに文字があるときだけ開いたままにし、それ以外は `ArticleListTopBar` の検索アイコン

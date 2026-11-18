@@ -1278,7 +1278,7 @@ where the "+" button that would otherwise fix that lives inside a drawer closed 
 **Search is orthogonal to `ArticleFilter`, not a variant of it.** `core/ArticleFilter.kt` only has
 `All`/`Starred`/`Feed`/`Tag`/`Folder` — there is no `Search` case. The query
 (`HomeViewModel.searchQuery`) narrows whichever filter is already selected instead of displacing it:
-`HomeViewModel.searchActive` (`_searchBarVisible && searchQuery.value.isNotEmpty()`) is the single
+`HomeViewModel.searchActive` (`searchBarVisible.value && searchQuery.value.isNotEmpty()`) is the single
 derived flag that says whether the article list is currently showing search results
 (`HomeViewModel.searchResults`, itself scoped to the current filter — see `FtsSearch.articleScopeSql`
 below) or the filter's own list (`HomeViewModel.articles`); `ArticleListPane` reads it to pick which
@@ -1289,7 +1289,7 @@ entry point: once the field is open — always, at `PaneLayout.Triple` — `sear
 query, so a tap, a keyboard cursor landing on the field, and arrow-key navigation all start a search
 the same way.
 
-**`_searchBarVisible` says whether the search field is open**, which matters only at narrow layouts:
+**`HomeViewModel.searchBarVisible` says whether the search field is open**, which matters only at narrow layouts:
 at `PaneLayout.Triple`, `FeedListPane`'s own query field is permanent, so `HomeScreen`'s own
 `LaunchedEffect(layout)` keeps it `true` there the whole time; on dropping to a narrow layout the same
 effect keeps it open only while the query has text, and otherwise it is toggled by `ArticleListTopBar`'s
