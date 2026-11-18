@@ -6,6 +6,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
@@ -53,6 +56,7 @@ import works.merc.keryx.app.domain.NotificationCenter
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.presentation.home.HomeViewModel
 import works.merc.keryx.app.presentation.home.NotificationAlerts
+import works.merc.keryx.app.presentation.home.NotificationBellTone
 import works.merc.keryx.app.ui.i18n.resolveNotificationText
 
 /**
@@ -455,5 +459,27 @@ class NotificationCenterPlacementTest {
         rowIn("warning").assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, listOf("警告")))
         rowIn("error").assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, listOf("エラー")))
         rowIn("info").assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.ContentDescription))
+    }
+
+    @Test
+    fun eachBellToneMapsToItsOwnThemeColor() = runDesktopComposeUiTest {
+        // Distinct colors per role, so swapping the notice and alert colors (or falling back to the
+        // content color) fails.
+        val primary = Color(0xFF1E88E5)
+        val error = Color(0xFFD81B60)
+        val content = Color(0xFF43A047)
+        val tints = mutableMapOf<NotificationBellTone, Color>()
+        setContent {
+            MaterialTheme(colorScheme = lightColorScheme(primary = primary, error = error)) {
+                CompositionLocalProvider(LocalContentColor provides content) {
+                    NotificationBellTone.entries.forEach { tints[it] = bellTint(it) }
+                }
+            }
+        }
+        waitForIdle()
+
+        assertEquals(content, tints[NotificationBellTone.QUIET])
+        assertEquals(primary, tints[NotificationBellTone.NOTICE])
+        assertEquals(error, tints[NotificationBellTone.ALERT])
     }
 }

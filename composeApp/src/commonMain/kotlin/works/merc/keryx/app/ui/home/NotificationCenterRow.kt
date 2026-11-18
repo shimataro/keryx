@@ -41,7 +41,7 @@ import works.merc.keryx.app.ui.common.KeryxIcons
  * empty.
  */
 @Composable
-private fun bellTint(tone: NotificationBellTone): Color = when (tone) {
+internal fun bellTint(tone: NotificationBellTone): Color = when (tone) {
     NotificationBellTone.ALERT -> MaterialTheme.colorScheme.error
     NotificationBellTone.NOTICE -> MaterialTheme.colorScheme.primary
     NotificationBellTone.QUIET -> LocalContentColor.current
