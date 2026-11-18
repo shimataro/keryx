@@ -571,6 +571,10 @@ struct ArticleListView: View {
             makeRow: { rowView($0, selectedId: selectedId, paneFocused: paneFocused) },
             onVisibleIdsChanged: { reportVisible($0) }
         )
+        // Under the bars, as a UIKit list in a navigation stack is. Laid out below them instead, the
+        // navigation bar's search drawer (iOS 17 and 18) and the refresh control kept resetting each
+        // other's top inset, and the pull's spinner flickered.
+        .ignoresSafeArea()
     }
     #endif
 
