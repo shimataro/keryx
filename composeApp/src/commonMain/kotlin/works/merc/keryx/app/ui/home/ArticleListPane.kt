@@ -187,7 +187,7 @@ fun ArticleListPane(
     onSearchClick: (() -> Unit)? = null,
     returnRipplePulse: Int = 0,
     onCopyArticleUrl: (ArticleListRow) -> Unit = rememberPlainArticleUrlCopy(),
-    onOpenArticleInBrowser: (ArticleListRow) -> Unit = { openInBrowserIfAllowed(it.url) },
+    onOpenArticleInBrowser: (ArticleListRow) -> Unit = openArticleRowInBrowser,
     onShareArticle: ((ArticleListRow) -> Unit)? = null,
     // Overridable only so a desktopTest can exercise the touch-primary pull-to-refresh path without
     // a real touch-primary platform to run on; every real call site relies on the default.
@@ -741,7 +741,7 @@ internal fun ArticleListPaneContent(
     onSetStarred: (ArticleListRow, Boolean) -> Unit = { _, _ -> },
     onSwipeArticle: (ArticleListRow, ArticleSwipeAction) -> Unit,
     onCopyArticleUrl: (ArticleListRow) -> Unit = rememberPlainArticleUrlCopy(),
-    onOpenArticleInBrowser: (ArticleListRow) -> Unit = { openInBrowserIfAllowed(it.url) },
+    onOpenArticleInBrowser: (ArticleListRow) -> Unit = openArticleRowInBrowser,
     onShareArticle: ((ArticleListRow) -> Unit)? = null,
     modifier: Modifier = Modifier,
     listState: LazyListState = rememberLazyListState(),
@@ -917,12 +917,12 @@ private fun ArticleListEmptyState(
     onAddFeedClick: (() -> Unit)?,
     onShowAllArticles: (() -> Unit)?,
 ) {
-    if (emptyContent != null) {
-        emptyContent()
-    } else if (loading) {
-        // Nothing yet — see ArticleListPaneContent's `loading`.
-    } else if (hasNoFeeds) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+    when {
+        emptyContent != null -> emptyContent()
+        loading -> {
+            // Nothing yet — see ArticleListPaneContent's `loading`.
+        }
+        hasNoFeeds -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             // A narrow layout's "+" button lives inside the feed-list drawer (closed by
             // default), so this is the one reachable entry point to add a first feed —
             // without it a phone-width user with no feeds yet would have no visible way
@@ -934,28 +934,29 @@ private fun ArticleListEmptyState(
                 }
             }
         }
-    } else {
-        // Scrollable (though it never overflows) only so a pull here still reaches
-        // pullToRefresh, which listens through nested scroll: an empty unread-only list
-        // must stay pullable. The min height keeps the message centered in the pane.
-        BoxWithConstraints(Modifier.fillMaxSize()) {
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState())
-                    .heightIn(min = maxHeight),
-                contentAlignment = Alignment.Center,
-            ) {
-                if (onShowAllArticles != null) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        Text(stringResource(Res.string.home_no_starred_articles), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        FlatTonalButton(onClick = onShowAllArticles) { Text(stringResource(Res.string.home_show_all_articles)) }
+        else -> {
+            // Scrollable (though it never overflows) only so a pull here still reaches
+            // pullToRefresh, which listens through nested scroll: an empty unread-only list
+            // must stay pullable. The min height keeps the message centered in the pane.
+            BoxWithConstraints(Modifier.fillMaxSize()) {
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState())
+                        .heightIn(min = maxHeight),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (onShowAllArticles != null) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            Text(stringResource(Res.string.home_no_starred_articles), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            FlatTonalButton(onClick = onShowAllArticles) { Text(stringResource(Res.string.home_show_all_articles)) }
+                        }
+                    } else {
+                        Text(stringResource(Res.string.home_no_articles), color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                } else {
-                    Text(stringResource(Res.string.home_no_articles), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }

@@ -116,9 +116,10 @@ internal fun ApplicationScope.KeryxTray(
     val toggleLabel = if (windowShown) hideLabel else showLabel
     val updateEntry = updateMenuEntry(updateState, settingsReachable)
 
-    when {
-        isMacOs -> {
-            if (!isTraySupported) return
+    when (chooseTrayImplementation(isMacOs, sniConnection != null, isWindows, isTraySupported)) {
+        TrayImplementation.NONE -> Unit
+
+        TrayImplementation.MAC -> {
             val trayBadgedImage = rememberUnreadDotImage(trayBaseImage, unreadCount)
             MacTray(
                 image = trayBadgedImage,
@@ -134,11 +135,11 @@ internal fun ApplicationScope.KeryxTray(
             )
         }
 
-        sniConnection != null -> {
+        TrayImplementation.LINUX_SNI -> {
             // Deliberately not gated on `isTraySupported` (i.e. AWT's SystemTray.isSupported):
             // SNI does not go through AWT at all.
             LinuxTray(
-                connection = sniConnection,
+                connection = checkNotNull(sniConnection),
                 trayBaseImage = trayBaseImage,
                 notificationIcon = notificationIcon,
                 unreadCount = unreadCount,
@@ -155,7 +156,7 @@ internal fun ApplicationScope.KeryxTray(
             )
         }
 
-        isWindows -> {
+        TrayImplementation.WINDOWS -> {
             val trayBadgedImage = rememberUnreadDotImage(trayBaseImage, unreadCount)
             WindowsTray(
                 image = trayBadgedImage,
@@ -171,7 +172,7 @@ internal fun ApplicationScope.KeryxTray(
             )
         }
 
-        isTraySupported -> {
+        TrayImplementation.COMPOSE_AWT -> {
             val trayState = rememberTrayState()
             val trayBadgedImage = rememberUnreadDotImage(trayBaseImage, unreadCount)
             val trayBadgedPainter = rememberBitmapPainter(trayBadgedImage)
@@ -200,6 +201,27 @@ internal fun ApplicationScope.KeryxTray(
             }
         }
     }
+}
+
+/** Which tray implementation [KeryxTray] renders. */
+internal enum class TrayImplementation { NONE, MAC, LINUX_SNI, WINDOWS, COMPOSE_AWT }
+
+/**
+ * The tray-implementation choice behind [KeryxTray], in priority order: macOS (nothing at all when
+ * AWT reports no tray support), then Linux SNI whenever a connection exists (deliberately not gated
+ * on [isTraySupported]), then Windows, then Compose's own `Tray()` where AWT supports it.
+ */
+internal fun chooseTrayImplementation(
+    isMacOs: Boolean,
+    hasSniConnection: Boolean,
+    isWindows: Boolean,
+    isTraySupported: Boolean,
+): TrayImplementation = when {
+    isMacOs -> if (isTraySupported) TrayImplementation.MAC else TrayImplementation.NONE
+    hasSniConnection -> TrayImplementation.LINUX_SNI
+    isWindows -> TrayImplementation.WINDOWS
+    isTraySupported -> TrayImplementation.COMPOSE_AWT
+    else -> TrayImplementation.NONE
 }
 
 /**

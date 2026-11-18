@@ -32,7 +32,6 @@ import works.merc.keryx.app.domain.update
 import works.merc.keryx.app.ui.common.FlatButton
 import works.merc.keryx.app.ui.common.FlatTextButton
 import works.merc.keryx.app.ui.common.FlatTonalButton
-import works.merc.keryx.app.ui.common.KeryxIcon
 import works.merc.keryx.app.ui.common.KeryxIcons
 import works.merc.keryx.app.ui.common.KeryxLinearProgressBar
 import works.merc.keryx.app.ui.common.SegmentedControl
@@ -157,14 +156,9 @@ private fun CheckNowButton(vm: SettingsViewModel) {
     val state = vm.updateState.collectAsState()
     val checking by remember { derivedStateOf { state.value is UpdateState.Checking } }
     FlatTonalButton(onClick = { vm.checkForUpdate() }, enabled = !checking) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            if (checking) {
-                SmallSpinner()
-            } else {
-                KeryxIcon(KeryxIcons.Update, contentDescription = null, modifier = Modifier.size(18.dp))
-            }
-            Spacer(Modifier.width(8.dp))
-            Text(stringResource(Res.string.settings_update_check_now))
+        GlyphLabel(stringResource(Res.string.settings_update_check_now)) {
+            // SmallSpinner's own 16dp default, not the icon's 18dp.
+            BusyGlyph(busy = checking, icon = KeryxIcons.Update, size = 18.dp, spinnerSize = 16.dp)
         }
     }
 }

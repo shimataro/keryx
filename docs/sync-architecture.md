@@ -343,8 +343,8 @@ Redirect reception method is chosen per provider (see the `.claude/rules/cloud-o
 - **Dropbox / OneDrive — Custom URI scheme** (`CustomUriRedirectTransport`):
   - **Mechanism.** Redirect URI is `keryx://oauth2/callback`, shared by both providers and
     disambiguated by `state`. On desktop/Android the authorization URL is opened in the default
-    browser, and the OS delivers the URL to the running instance (`main.kt` parses via
-    `parseOAuthUri` and feeds a shared `MutableSharedFlow<OAuthCallbackParams>`); the Apple app
+    browser, and the OS delivers the URL to the running instance (desktop's `LaunchArgDispatcher`
+    parses it via `parseOAuthUri` and feeds a shared `MutableSharedFlow<OAuthCallbackParams>`); the Apple app
     instead uses an `ASWebAuthenticationSession` — see "OAuth authorization on Apple" below.
   - **OneDrive specifics.** Uses the Microsoft Identity platform (`consumers` tenant) and Microsoft
     Graph; it is a **PKCE public client with no client secret** (unlike Google), and stores the sync

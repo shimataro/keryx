@@ -6,6 +6,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.FlowCollector
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 
 /**
  * A read-only [StateFlow] whose [value] is [compute]d from other state flows on every read, and
@@ -30,6 +31,15 @@ internal class DerivedStateFlow<T>(
         awaitCancellation()
     }
 }
+
+/**
+ * A [DerivedStateFlow] of [transform] applied to this flow: [transform] of the current value on
+ * every read, and of each emission for collectors (deduplicated by [areEquivalent]).
+ */
+internal fun <S, T> StateFlow<S>.derived(
+    areEquivalent: (T, T) -> Boolean = { old, new -> old == new },
+    transform: (S) -> T,
+): StateFlow<T> = DerivedStateFlow({ transform(value) }, map(transform), areEquivalent)
 
 /**
  * [DerivedStateFlow]'s `areEquivalent` for a list derived from a `StateFlow` of it: that flow has

@@ -185,7 +185,7 @@ class RefreshCycleRunner(
         filter: ArticleFilter = ArticleFilter.All,
         order: CycleOrder = CycleOrder.REFRESH_THEN_SYNC,
         trigger: SyncTrigger,
-        step: suspend (name: String, block: suspend () -> Unit) -> Unit = { _, block -> block() },
+        step: suspend (name: String, block: suspend () -> Unit) -> Unit = runStageAsIs,
     ): Result<Unit>? = reportingRefresh(trigger) { claimed, cycle ->
         // Published before the claim, so a busy check that sees this cycle can always join it.
         claimed()
@@ -234,7 +234,7 @@ class RefreshCycleRunner(
                     claimed()
                     onStarted(cycle.refreshEnded)
                     CycleOutcome.Ran(
-                        runStages(CycleOrder.REFRESH_THEN_SYNC, trigger, cycle, { _, block -> block() }) {
+                        runStages(CycleOrder.REFRESH_THEN_SYNC, trigger, cycle, runStageAsIs) {
                             targets
                         },
                     )
@@ -373,5 +373,8 @@ class RefreshCycleRunner(
 
     private companion object {
         const val TAG = "RefreshCycleRunner"
+
+        /** The stage wrapper that runs a stage as-is, isolating nothing. */
+        val runStageAsIs: suspend (String, suspend () -> Unit) -> Unit = { _, block -> block() }
     }
 }

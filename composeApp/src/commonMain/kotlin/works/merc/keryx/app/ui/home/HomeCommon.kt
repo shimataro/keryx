@@ -21,6 +21,7 @@ import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.data.local.db.Folders
 import works.merc.keryx.app.data.local.db.Tags
+import works.merc.keryx.app.domain.ArticleListRow
 import works.merc.keryx.app.platform.BrowserOpener
 import works.merc.keryx.app.platform.NativeMenuShortcut
 import works.merc.keryx.app.platform.isMacOs
@@ -106,6 +107,9 @@ internal val LocalSnackbarHostState = staticCompositionLocalOf<SnackbarHostState
 internal fun openInBrowserIfAllowed(url: String?) {
     url?.takeIf(::canOpenInBrowser)?.let(BrowserOpener::open)
 }
+
+/** [openInBrowserIfAllowed] for an article row's own URL — the default "Open in browser" handler. */
+internal val openArticleRowInBrowser: (ArticleListRow) -> Unit = { openInBrowserIfAllowed(it.url) }
 
 /**
  * Click-to-focus for a pane's background — on a mouse+keyboard platform there is no OS-level

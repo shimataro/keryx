@@ -54,7 +54,6 @@ class SettingsViewModel(
     fun setThemeMode(mode: String) = preferencesController.setThemeMode(mode)
     fun setFontScale(scale: Double) = preferencesController.setFontScale(scale)
     fun setRefreshIntervalMinutes(minutes: Int) = preferencesController.setRefreshIntervalMinutes(minutes)
-    fun setNotificationEnabled(enabled: Boolean) = preferencesController.setNotificationEnabled(enabled)
     fun setStartMinimized(enabled: Boolean) = preferencesController.setStartMinimized(enabled)
     fun setUpdateCheckIntervalHours(hours: Int) = preferencesController.setUpdateCheckIntervalHours(hours)
     fun setSyncOnMeteredNetwork(enabled: Boolean) = preferencesController.setSyncOnMeteredNetwork(enabled)
@@ -76,7 +75,6 @@ class SettingsViewModel(
     val syncing = cloudSyncController.syncing
     val syncPhase = cloudSyncController.syncPhase
     val disconnecting = cloudSyncController.disconnecting
-    val idle = cloudSyncController.idle
     val canSyncNow = cloudSyncController.canSyncNow
     val meteredSettingSupported = cloudSyncController.meteredSettingSupported
     val syncOnMeteredNetwork = cloudSyncController.syncOnMeteredNetwork

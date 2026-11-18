@@ -2,10 +2,13 @@ package works.merc.keryx.app.ui.home
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -25,6 +28,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import org.jetbrains.compose.resources.stringResource
 import works.merc.keryx.app.platform.isTouchPrimary
@@ -162,4 +166,46 @@ internal fun InlineRenameField(
             },
     )
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
+}
+
+/**
+ * A feed-list row's name slot: [InlineRenameField] while [editing], otherwise the plain one-line
+ * [label]. Both occupy the same `weight(1f)` slot of the row, so nothing beside the name moves when
+ * editing starts or ends (see "Inline row editing" in the `ui-guidelines` skill).
+ *
+ * @param label The name shown while not editing.
+ * @param editValue The name the editor starts from.
+ * @param wrapLabel Wraps the non-editing [label] `Text` (e.g. in a `CompositionLocalProvider`);
+ *   the editor is never wrapped.
+ * @see InlineRenameField for [onCommit], [onCancel], [placeholder], [allowBlank] and [blockingError].
+ */
+@Composable
+internal fun RowScope.EditableRowName(
+    editing: Boolean,
+    label: String,
+    editValue: String,
+    onCommit: (String) -> Unit,
+    onCancel: () -> Unit,
+    placeholder: String? = null,
+    allowBlank: Boolean = false,
+    blockingError: (String) -> String? = { null },
+    wrapLabel: @Composable (content: @Composable () -> Unit) -> Unit = { it() },
+) {
+    if (editing) {
+        Box(Modifier.weight(1f)) {
+            InlineRenameField(
+                value = editValue,
+                onCommit = onCommit,
+                onCancel = onCancel,
+                placeholder = placeholder,
+                allowBlank = allowBlank,
+                blockingError = blockingError,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    } else {
+        wrapLabel {
+            Text(label, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+    }
 }

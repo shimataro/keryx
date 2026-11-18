@@ -5,13 +5,17 @@ import io.ktor.client.request.forms.submitForm
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.Parameters
+import io.ktor.http.ParametersBuilder
+import io.ktor.http.URLBuilder
 import io.ktor.http.isSuccess
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import works.merc.keryx.app.core.CLOUD_ERROR_BODY_PREVIEW_LENGTH
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.CloudAuthException
+import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.MILLIS_PER_SECOND
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.core.TOKEN_EXPIRY_SKEW_MS
@@ -49,6 +53,39 @@ private data class OAuthTokenResponseDto(
     @SerialName("refresh_token") val refreshToken: String? = null,
     @SerialName("expires_in") val expiresInSeconds: Long? = null,
 )
+
+/**
+ * Builds an authorization-code-with-PKCE (S256) authorize URL on [endpoint]. [extraParameters]
+ * appends provider-specific parameters (e.g. offline access) between the PKCE parameters and
+ * `scope`/`state`.
+ */
+internal fun buildPkceAuthorizeUrl(
+    endpoint: String,
+    clientId: String,
+    redirectUri: String,
+    codeChallenge: String,
+    state: String,
+    scope: String,
+    extraParameters: ParametersBuilder.() -> Unit = {},
+): String = URLBuilder(endpoint).apply {
+    parameters.append("client_id", clientId)
+    parameters.append("response_type", "code")
+    parameters.append("redirect_uri", redirectUri)
+    parameters.append("code_challenge", codeChallenge)
+    parameters.append("code_challenge_method", "S256")
+    parameters.extraParameters()
+    parameters.append("scope", scope)
+    parameters.append("state", state)
+}.buildString()
+
+/**
+ * A [requestOAuthTokens] `onFailure` callback that logs the failed token request under [tag],
+ * labelled with [providerLabel], with a bounded preview of the response body.
+ */
+internal fun tokenRequestFailureLogger(tag: String, providerLabel: String): (status: Int, body: String) -> Unit =
+    { status, body ->
+        Log.warn(tag, "$providerLabel token request failed (HTTP $status): ${body.take(CLOUD_ERROR_BODY_PREVIEW_LENGTH)}")
+    }
 
 /**
  * Exchanges an OAuth form request for token data.

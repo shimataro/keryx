@@ -111,7 +111,7 @@
     ZipExtractor（アプリ内アップデート——下記「アプリ内アップデート」参照）,
     di/CloudPlatformModule.kt（両プラットフォームの platformModule が呼ぶ共有クラウドプロバイダー DI 配線
     ——cloudSessionSingles, dropboxProvider, oneDriveProvider）
-  desktopMain/kotlin/…/  main.kt + StartupTasks.kt（runStartupTasks/handleOpenedOpmlFile というデスクトップ固有のオーケストレーションのみ。実際のメンテナンス処理と定期ループはどちらも commonMain の StartupMaintenanceTasks/BackgroundRefreshLoop にある）+ jvmCommonMain がカバーしない `platform/` expect の actual（例: AppDirs, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, PlatformModule, InstallLocation, PlatformScrollbar, BackHandler, ClipboardEntries, CursorIcons, NotificationPermission, NativeMenu, SelfUpdateCheck, WindowChrome、および WebView をホストする一群 NativeWebViewSupport/NativeWebViewScrollbar/NativeWebViewAccessibility/NativeWebViewVisibility/NativeWebViewScroll/ReaderWebViewFactory。最後の 2 つはデスクトップでは何もしない／ライブラリ既定の factory を使う。下記「Article Reader」を参照）+ LoopbackRedirectTransport, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage 実装（KeyringTokenStorage/SecurityCliTokenStorage/LibSecretTokenStorage——3つとも commonMain の SecretStoreTokenStorage の outcome 合成ロジックを使う。SecurityCliTokenStorage は、そのバックエンド SecurityKeychainStore をメモリ内キャッシュで包む形で使う）, DesktopOs（isMacOs/isWindows/isLinux/isSnap/isTouchPrimary=false/hasNativeAppMenu=true/hasSystemTray=true）, DesktopLookAndFeel（Swing L&F: Linux は FlatLaf。テキストアンチエイリアスヒントの正規化も担う——hint が存在しない場合、DEFAULT、OFF のいずれでもグレースケールアンチエイリアスに解決され、Swing 面のテキストが Compose 描画部と並んだ際にジャギーにならない）。さらに、`expect` を持たないパッケージルート直下のデスクトップ専用クラスとして: IconBadge（Dock/タスクバー/ウインドウアイコンの未読件数バッジ——external-spec.ja.md §7 参照）、MacActivationPolicy（生の `objc_msgSend` 呼び出し——known-issues.ja.md の「macOS: 通知バナーをクリックしてもトレイに収納中のウインドウが復元されない」内「本当の修正に必要なこと」参照）、WindowStatePersistence、UpdateMenuActions（onUpdateMenuItemClicked——トレイとメニューバーの更新項目に共通のクリックハンドラ）、DesktopShell（main.kt が使うウインドウの前面化・フォーカス、Dock アイコン、`java.awt.Desktop` ハンドラの補助関数）
+  desktopMain/kotlin/…/  main.kt（起動処理の各段階は DesktopStartup・LaunchArgDispatcher・ActivationRequests・MainWindowSupport に分けてある）+ StartupTasks.kt（runStartupTasks/handleOpenedOpmlFile というデスクトップ固有のオーケストレーションのみ。実際のメンテナンス処理と定期ループはどちらも commonMain の StartupMaintenanceTasks/BackgroundRefreshLoop にある）+ jvmCommonMain がカバーしない `platform/` expect の actual（例: AppDirs, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, PlatformModule, InstallLocation, PlatformScrollbar, BackHandler, ClipboardEntries, CursorIcons, NotificationPermission, NativeMenu, SelfUpdateCheck, WindowChrome、および WebView をホストする一群 NativeWebViewSupport/NativeWebViewScrollbar/NativeWebViewAccessibility/NativeWebViewVisibility/NativeWebViewScroll/ReaderWebViewFactory。最後の 2 つはデスクトップでは何もしない／ライブラリ既定の factory を使う。下記「Article Reader」を参照）+ LoopbackRedirectTransport, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage 実装（KeyringTokenStorage/SecurityCliTokenStorage/LibSecretTokenStorage——3つとも commonMain の SecretStoreTokenStorage の outcome 合成ロジックを使う。SecurityCliTokenStorage は、そのバックエンド SecurityKeychainStore をメモリ内キャッシュで包む形で使う）, DesktopOs（isMacOs/isWindows/isLinux/isSnap/isTouchPrimary=false/hasNativeAppMenu=true/hasSystemTray=true）, DesktopLookAndFeel（Swing L&F: Linux は FlatLaf。テキストアンチエイリアスヒントの正規化も担う——hint が存在しない場合、DEFAULT、OFF のいずれでもグレースケールアンチエイリアスに解決され、Swing 面のテキストが Compose 描画部と並んだ際にジャギーにならない）。さらに、`expect` を持たないパッケージルート直下のデスクトップ専用クラスとして: IconBadge（Dock/タスクバー/ウインドウアイコンの未読件数バッジ——external-spec.ja.md §7 参照）、MacActivationPolicy（生の `objc_msgSend` 呼び出し——known-issues.ja.md の「macOS: 通知バナーをクリックしてもトレイに収納中のウインドウが復元されない」内「本当の修正に必要なこと」参照）、WindowStatePersistence、UpdateMenuActions（onUpdateMenuItemClicked——トレイとメニューバーの更新項目に共通のクリックハンドラ）、DesktopShell（main.kt が使うウインドウの前面化・フォーカス、Dock アイコン、`java.awt.Desktop` ハンドラの補助関数）
     tray/      KeryxTray（プラットフォーム分岐）, MacTray, LinuxTray, WindowsTray +
                StatusNotifierItem/dbusmenu の D-Bus オブジェクト、TrayActionPolicy（トレイのアイコン/
                メニューのクリックと更新項目が何をするかの純粋な判定）、TrayMenuModel（トレイメニューの
@@ -512,7 +512,7 @@ CloudConnectFlow・`OsNotificationSink`・`UpdateInstaller` を登録し、Andro
 （OkHttp ベースの HttpClient、`KeystoreTokenStorage`、Dropbox・OneDrive・Nextcloud に加え、Play 開発者サービスが
 利用できる環境でのみ Google Drive も持つ `CloudSession` 等——上記「Android」各節参照）を登録する。
 各プラットフォームの `platformModule` は、Nextcloud 用に自分の `LoginPageLauncher` を `cloudSessionSingles` に渡す：
-デスクトップはブラウザで開き、終わったらメインウィンドウを前面に戻す（`main.kt` の `activationRequests`）。Android は
+デスクトップはブラウザで開き、終わったらメインウィンドウを前面に戻す（`main.kt` が collect する `activationRequests`）。Android は
 Custom Tab で開き、アプリのタスクをその上に戻す（`bringAppTaskToFront`）。Apple は、Swift が `KeryxSdk.start` に渡す
 `openLoginPage` / `closeLoginPage` クロージャ（コールバックスキームなしの `ASWebAuthenticationSession`）を包む。
 ViewModel はアプリスコープの `single` として登録し、`koinInject()` で取得する。
@@ -965,7 +965,7 @@ Repository は触れず、Linux のパネルプロトコルにモバイル側の
 打ち切るため、行の上で始まったゆっくりしたドラッグ（`LazyColumn` のスクロール）が長押しと
 誤認されることもない。
 
-`platform/NativeMenu.desktop.kt` の `defaultPopupHandle` は、同じ呼び出し箇所をデスクトップでは
+`platform/NativePopupHandles.desktop.kt` の `defaultPopupHandle` は、同じ呼び出し箇所をデスクトップでは
 長押しではなく右クリックで開き、2 つの実装のどちらかで裏打ちする。
 
 | プラットフォーム | 実装 | 理由 |
@@ -985,7 +985,7 @@ Repository は触れず、Linux のパネルプロトコルにモバイル側の
 ### ネイティブファイルダイアログ（プラットフォーム分岐）
 
 `platform/FilePicker.desktop.kt` の `defaultFilePickerBackend` は 2 つの実装のどちらかを選ぶ。
-`NativeMenu.desktop.kt` の `defaultPopupHandle` と同じ Linux は Swing・他は AWT という分岐だが、
+`NativePopupHandles.desktop.kt` の `defaultPopupHandle` と同じ Linux は Swing・他は AWT という分岐だが、
 ファイルダイアログは Windows を AWT 側に残す点だけが異なる。Windows の `java.awt.FileDialog` は本物の
 `GetOpenFileName` パネルであり、メニューピアのようなスケーリングの問題が無いためである。
 
@@ -1259,7 +1259,7 @@ WebView をホストするペインを含む3ペインすべてがアプリの�
 **検索は `ArticleFilter` から独立しており、そのバリアントではない。** `core/ArticleFilter.kt` が
 持つのは `All`/`Starred`/`Feed`/`Tag`/`Folder` のみで、`Search` というケースは存在しない。クエリ
 （`HomeViewModel.searchQuery`）は、選択中のフィルタを置き換えるのではなく、それを絞り込む。
-`HomeViewModel.searchActive`（`_searchBarVisible && searchQuery.value.isNotEmpty()`）が、記事一覧
+`HomeViewModel.searchActive`（`searchBarVisible.value && searchQuery.value.isNotEmpty()`）が、記事一覧
 が今表示しているのが検索結果（`HomeViewModel.searchResults`。これ自体が現在のフィルタでスコープ
 されている——下記 `FtsSearch.articleScopeSql` 参照）かフィルタ自身の一覧（`HomeViewModel.articles`）
 かを示す唯一の派生フラグであり、`ArticleListPane` はこれを読んで、どちらを1つの
@@ -1269,7 +1269,7 @@ WebView をホストするペインを含む3ペインすべてがアプリの�
 入力欄が開いていれば（`PaneLayout.Triple` では常に開いている）`searchActive` はクエリから導かれるため、
 タップ・入力欄に乗ったキーボードカーソル・矢印キーによるナビゲーションのどれでも、検索は同じように始まる。
 
-**`_searchBarVisible` は検索欄が開いているかどうかを表し**、意味を持つのは狭いレイアウトだけである:
+**`HomeViewModel.searchBarVisible` は検索欄が開いているかどうかを表し**、意味を持つのは狭いレイアウトだけである:
 `PaneLayout.Triple` では `FeedListPane` 自身のクエリ欄が常設なので、`HomeScreen` 自身の
 `LaunchedEffect(layout)` がそこでは常に `true` に保つ。狭いレイアウトに切り替わったときは、同じ effect が
 クエリに文字があるときだけ開いたままにし、それ以外は `ArticleListTopBar` の検索アイコン

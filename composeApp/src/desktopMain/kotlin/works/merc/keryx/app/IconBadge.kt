@@ -136,22 +136,10 @@ fun unreadBadgeRoute(
  * @param count The unread-item count used to determine the badge label.
  * @return A new image containing [base] and, when applicable, the unread badge.
  */
-fun drawUnreadBadge(base: BufferedImage, count: Long): BufferedImage {
-    val result = BufferedImage(base.width, base.height, BufferedImage.TYPE_INT_ARGB)
-    val graphics = result.createGraphics()
-    graphics.drawImage(base, 0, 0, null)
-
-    val label = unreadBadgeLabel(count)
-    if (label == null) {
-        graphics.dispose()
-        return result
-    }
-
+fun drawUnreadBadge(base: BufferedImage, count: Long): BufferedImage = decoratedCopy(base) { graphics ->
+    val label = unreadBadgeLabel(count) ?: return@decoratedCopy
     val badgeHeight = base.height * BADGE_HEIGHT_RATIO
     paintBadge(graphics, anchorRightX = base.width.toFloat(), anchorTopY = 0f, badgeHeight = badgeHeight, label = label)
-
-    graphics.dispose()
-    return result
 }
 
 /**
@@ -162,21 +150,23 @@ fun drawUnreadBadge(base: BufferedImage, count: Long): BufferedImage {
  * illegible). Returns an unmodified copy (never [base] itself) when [count]
  * &lt;= 0.
  */
-fun drawUnreadDot(base: BufferedImage, count: Long): BufferedImage {
-    val result = BufferedImage(base.width, base.height, BufferedImage.TYPE_INT_ARGB)
-    val graphics = result.createGraphics()
-    graphics.drawImage(base, 0, 0, null)
-
-    if (unreadBadgeLabel(count) == null) {
-        graphics.dispose()
-        return result
-    }
-
+fun drawUnreadDot(base: BufferedImage, count: Long): BufferedImage = decoratedCopy(base) { graphics ->
+    if (unreadBadgeLabel(count) == null) return@decoratedCopy
     graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
     val dotSize = base.height * DOT_SIZE_RATIO
     graphics.color = BADGE_COLOR
     graphics.fill(Ellipse2D.Float(base.width - dotSize, 0f, dotSize, dotSize))
+}
 
+/**
+ * An ARGB copy of [base] with [decorate] drawn over it; the graphics context is disposed once
+ * [decorate] returns, so it may simply return to leave the copy undecorated.
+ */
+private inline fun decoratedCopy(base: BufferedImage, decorate: (Graphics2D) -> Unit): BufferedImage {
+    val result = BufferedImage(base.width, base.height, BufferedImage.TYPE_INT_ARGB)
+    val graphics = result.createGraphics()
+    graphics.drawImage(base, 0, 0, null)
+    decorate(graphics)
     graphics.dispose()
     return result
 }

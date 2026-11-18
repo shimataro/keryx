@@ -43,15 +43,13 @@ import works.merc.keryx.app.ui.common.FlatButton
 import works.merc.keryx.app.ui.common.FlatSwitch
 import works.merc.keryx.app.ui.common.FlatTonalButton
 import works.merc.keryx.app.ui.common.IconButtonKind
-import works.merc.keryx.app.ui.common.KeryxAlertDialog
-import works.merc.keryx.app.ui.common.KeryxIcon
+import works.merc.keryx.app.ui.common.KeryxConfirmDialog
 import works.merc.keryx.app.ui.common.KeryxIcons
 import works.merc.keryx.app.ui.common.KeryxSettingRow
 import works.merc.keryx.app.ui.common.SmallSpinner
 import works.merc.keryx.app.ui.common.TooltipIconButton
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.common_abort
-import works.merc.keryx.app.resources.common_cancel
 import works.merc.keryx.app.resources.menu_feed_sync_now
 import works.merc.keryx.app.resources.nextcloud_login_waiting
 import works.merc.keryx.app.resources.settings_cloud_abort_connect_confirm_body
@@ -250,12 +248,48 @@ internal fun CloudSyncTabContent(vm: SettingsViewModel) {
         )
     }
 
+    CloudSyncDialogs(
+        vm = vm,
+        connectedType = connectedType,
+        askingServer = askingServer,
+        setAskingServer = { askingServer = it },
+        confirmingDisconnect = confirmingDisconnect,
+        setConfirmingDisconnect = { confirmingDisconnect = it },
+        confirmingAbortConnect = confirmingAbortConnect,
+        setConfirmingAbortConnect = { confirmingAbortConnect = it },
+        confirmingResetCloudData = confirmingResetCloudData,
+        setConfirmingResetCloudData = { confirmingResetCloudData = it },
+        confirmingSwitchTo = confirmingSwitchTo,
+        setConfirmingSwitchTo = { confirmingSwitchTo = it },
+    )
+}
+
+/**
+ * [CloudSyncTabContent]'s dialogs: the server-address dialog and the confirmations for disconnect,
+ * abort-connect, reset and switch. Each shows while its value is set; the state stays owned by
+ * [CloudSyncTabContent] and is written back through the setters.
+ */
+@Composable
+private fun CloudSyncDialogs(
+    vm: SettingsViewModel,
+    connectedType: CloudStorageType?,
+    askingServer: ServerDialogRequest?,
+    setAskingServer: (ServerDialogRequest?) -> Unit,
+    confirmingDisconnect: CloudStorageType?,
+    setConfirmingDisconnect: (CloudStorageType?) -> Unit,
+    confirmingAbortConnect: CloudStorageType?,
+    setConfirmingAbortConnect: (CloudStorageType?) -> Unit,
+    confirmingResetCloudData: Boolean,
+    setConfirmingResetCloudData: (Boolean) -> Unit,
+    confirmingSwitchTo: CloudStorageType?,
+    setConfirmingSwitchTo: (CloudStorageType?) -> Unit,
+) {
     askingServer?.let { request ->
         NextcloudServerDialog(
             initialUrl = request.initialUrl,
-            onDismiss = { askingServer = null },
+            onDismiss = { setAskingServer(null) },
             onConfirmed = { connectRequest ->
-                askingServer = null
+                setAskingServer(null)
                 when (request.kind) {
                     ServerDialogKind.CONNECT -> vm.connect(request.type, connectRequest)
                     ServerDialogKind.RECONNECT -> vm.reconnect(connectRequest)
@@ -265,56 +299,49 @@ internal fun CloudSyncTabContent(vm: SettingsViewModel) {
         )
     }
     confirmingDisconnect?.let { type ->
-        KeryxAlertDialog(
-            onDismissRequest = { confirmingDisconnect = null },
+        KeryxConfirmDialog(
             title = stringResource(Res.string.settings_cloud_disconnect_confirm_title, type.brandLabel()),
-            text = { Text(stringResource(Res.string.settings_cloud_disconnect_confirm_body)) },
+            body = stringResource(Res.string.settings_cloud_disconnect_confirm_body),
             confirmText = stringResource(type.disconnectLabel()),
-            onConfirm = { vm.disconnect(); confirmingDisconnect = null },
-            dismissText = stringResource(Res.string.common_cancel),
+            onConfirm = { vm.disconnect(); setConfirmingDisconnect(null) },
+            onDismiss = { setConfirmingDisconnect(null) },
         )
     }
     confirmingAbortConnect?.let { type ->
-        KeryxAlertDialog(
-            onDismissRequest = { confirmingAbortConnect = null },
+        KeryxConfirmDialog(
             title = stringResource(Res.string.settings_cloud_abort_connect_confirm_title, type.brandLabel()),
-            text = { Text(stringResource(Res.string.settings_cloud_abort_connect_confirm_body)) },
+            body = stringResource(Res.string.settings_cloud_abort_connect_confirm_body),
             confirmText = stringResource(Res.string.common_abort),
-            onConfirm = { vm.cancelConnect(); confirmingAbortConnect = null },
-            dismissText = stringResource(Res.string.common_cancel),
+            onConfirm = { vm.cancelConnect(); setConfirmingAbortConnect(null) },
+            onDismiss = { setConfirmingAbortConnect(null) },
         )
     }
     if (confirmingResetCloudData) {
         ResetCloudDataConfirmDialog(
-            onConfirm = { vm.resetCloudData(); confirmingResetCloudData = false },
-            onDismiss = { confirmingResetCloudData = false },
+            onConfirm = { vm.resetCloudData(); setConfirmingResetCloudData(false) },
+            onDismiss = { setConfirmingResetCloudData(false) },
         )
     }
     confirmingSwitchTo?.let { type ->
-        KeryxAlertDialog(
-            onDismissRequest = { confirmingSwitchTo = null },
+        KeryxConfirmDialog(
             title = stringResource(Res.string.settings_cloud_switch_confirm_title, type.brandLabel()),
             // Read the current provider live — nothing else can mutate it while this modal is open.
-            text = {
-                Text(
-                    stringResource(
-                        Res.string.settings_cloud_switch_confirm_body,
-                        connectedType?.brandLabel().orEmpty(),
-                    ),
-                )
-            },
+            body = stringResource(
+                Res.string.settings_cloud_switch_confirm_body,
+                connectedType?.brandLabel().orEmpty(),
+            ),
             confirmText = stringResource(Res.string.settings_cloud_switch_confirm_action),
             onConfirm = {
-                confirmingSwitchTo = null
+                setConfirmingSwitchTo(null)
                 // The server is asked for only once the switch is confirmed; cancelling that dialog
                 // leaves the current connection alone.
                 if (type.requiresServerUrl) {
-                    askingServer = ServerDialogRequest(type, ServerDialogKind.SWITCH, "")
+                    setAskingServer(ServerDialogRequest(type, ServerDialogKind.SWITCH, ""))
                 } else {
                     vm.switchTo(type)
                 }
             },
-            dismissText = stringResource(Res.string.common_cancel),
+            onDismiss = { setConfirmingSwitchTo(null) },
         )
     }
 }
@@ -350,13 +377,12 @@ internal val ServerDialogRequestSaver: Saver<ServerDialogRequest?, Any> = listSa
  */
 @Composable
 internal fun ResetCloudDataConfirmDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
-    KeryxAlertDialog(
-        onDismissRequest = onDismiss,
+    KeryxConfirmDialog(
         title = stringResource(Res.string.settings_cloud_reset_confirm_title),
-        text = { Text(stringResource(Res.string.settings_cloud_reset_confirm_body)) },
+        body = stringResource(Res.string.settings_cloud_reset_confirm_body),
         confirmText = stringResource(Res.string.settings_cloud_reset_confirm_action),
         onConfirm = onConfirm,
-        dismissText = stringResource(Res.string.common_cancel),
+        onDismiss = onDismiss,
         destructive = true,
     )
 }
@@ -423,28 +449,24 @@ private fun ProviderActionButton(
     // 18dp for desktop's labelled buttons; CLOUD_ROW_ICON_SIZE for icon-only buttons.
     val glyphSize = if (iconOnly) CLOUD_ROW_ICON_SIZE else 18.dp
     val glyph: @Composable () -> Unit = {
-        if (busy) {
+        BusyGlyph(
+            busy = busy,
+            icon = icon,
+            size = glyphSize,
             // Follow the container's content color: a primary-filled container would otherwise
             // hide SmallSpinner's own `primary` default entirely.
-            SmallSpinner(size = glyphSize, color = LocalContentColor.current)
-        } else {
+            spinnerColor = LocalContentColor.current,
             // Icon-only: the glyph is the sole carrier of the label (as at every other
             // TooltipIconButton call site — neither actual sets an onClickLabel). Labelled: the
             // Text beside it announces the action, so the glyph is decorative.
-            KeryxIcon(icon, contentDescription = label.takeIf { iconOnly }, modifier = Modifier.size(glyphSize))
-        }
+            contentDescription = label.takeIf { iconOnly },
+        )
     }
     if (iconOnly) {
         TooltipIconButton(tooltip = label, onClick = onClick, enabled = enabled, kind = kind, content = glyph)
         return
     }
-    val labelled: @Composable () -> Unit = {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            glyph()
-            Spacer(Modifier.width(8.dp))
-            Text(label)
-        }
-    }
+    val labelled: @Composable () -> Unit = { GlyphLabel(label, glyph) }
     when (kind) {
         IconButtonKind.Primary -> FlatButton(onClick = onClick, enabled = enabled, content = labelled)
         IconButtonKind.Destructive ->

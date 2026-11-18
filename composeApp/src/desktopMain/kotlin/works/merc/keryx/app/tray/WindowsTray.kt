@@ -8,7 +8,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.window.isTraySupported
 import kotlinx.coroutines.flow.SharedFlow
-import works.merc.keryx.app.core.APP_NAME
 import java.awt.Component
 import java.awt.Image
 import java.awt.MouseInfo
@@ -44,7 +43,7 @@ internal class WindowsTrayMenu(
     onToggle: () -> Unit,
     onQuit: () -> Unit,
     onUpdateAction: () -> Unit = {},
-) {
+) : AwtTrayMenuLabels {
     private val toggleItem = JMenuItem().apply { addActionListener { onToggle() } }
     private val quitItem = JMenuItem().apply { addActionListener { onQuit() } }
     private val updateItem = JMenuItem().apply { addActionListener { onUpdateAction() } }
@@ -68,7 +67,7 @@ internal class WindowsTrayMenu(
      * @param toggle The label for the show/hide entry, which flips with the window's visibility.
      * @param quit The label for the quit entry.
      */
-    fun setLabels(toggle: String, quit: String) {
+    override fun setLabels(toggle: String, quit: String) {
         toggleItem.text = toggle
         quitItem.text = quit
     }
@@ -79,7 +78,7 @@ internal class WindowsTrayMenu(
      * `UpdateState` maps to a label, and one with nothing to act on is shown disabled rather than
      * removed.
      */
-    fun setUpdateEntry(entry: TrayUpdateEntry) {
+    override fun setUpdateEntry(entry: TrayUpdateEntry) {
         updateItem.text = entry.label
         updateItem.isEnabled = entry.enabled
     }
@@ -137,8 +136,10 @@ internal fun trayMenuAnchor(pointerLocation: Point?, eventX: Int, eventY: Int): 
  * @param toggleLabel The toggle item's label: Hide while the window is shown (visible and not
  * minimized — see [trayWindowShown]), Show otherwise.
  * @param quitLabel The menu label for quitting the application.
+ * @param updateEntry The in-app update menu entry's label and enabled state (see [updateMenuEntry]).
  * @param onToggle Called when the toggle menu item is activated.
  * @param onQuit Called when the quit menu item is activated.
+ * @param onUpdateAction Called when the in-app update menu item is activated.
  * @param onTrayAction Called for the `TrayIcon` action event — a double click on the icon or a
  * click on a notification balloon, which Windows cannot tell apart. Kept wired exactly as
  * Compose's `Tray()` `onAction` was, so `main.kt`'s [shouldHideOnTrayAction] heuristic still sees
@@ -211,15 +212,7 @@ internal fun WindowsTray(
     LaunchedEffect(trayIcon, image) {
         trayIcon.image = image
     }
-    LaunchedEffect(trayIcon, tooltip) {
-        trayIcon.toolTip = tooltip
-    }
-    LaunchedEffect(menu, toggleLabel, quitLabel) {
-        menu.setLabels(toggle = toggleLabel, quit = quitLabel)
-    }
-    LaunchedEffect(menu, updateEntry) {
-        menu.setUpdateEntry(updateEntry)
-    }
+    AwtTrayMenuTextEffects(trayIcon, menu, tooltip, toggleLabel, quitLabel, updateEntry)
 
     DisposableEffect(trayIcon, menu, invokerFrame) {
         val mouseListener = object : MouseAdapter() {
@@ -249,12 +242,5 @@ internal fun WindowsTray(
         }
     }
 
-    // Tray()'s own composable body is what turns a queued TrayState notification into an actual
-    // TrayIcon.displayMessage(...) call; since this replaces Tray() entirely on Windows, it must
-    // consume newArticleNotifications itself — exactly as MacTray and LinuxTray do.
-    LaunchedEffect(trayIcon) {
-        newArticleNotifications.collect { message ->
-            trayIcon.displayMessage(APP_NAME, message, TrayIcon.MessageType.NONE)
-        }
-    }
+    AwtTrayNotificationsEffect(trayIcon, newArticleNotifications)
 }

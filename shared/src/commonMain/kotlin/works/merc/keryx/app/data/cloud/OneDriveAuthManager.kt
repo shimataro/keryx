@@ -2,12 +2,9 @@ package works.merc.keryx.app.data.cloud
 
 import io.ktor.client.HttpClient
 import io.ktor.http.Parameters
-import io.ktor.http.URLBuilder
 import io.ktor.http.parameters
 import kotlinx.serialization.json.Json
-import works.merc.keryx.app.core.CLOUD_ERROR_BODY_PREVIEW_LENGTH
 import works.merc.keryx.app.core.Clock
-import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.ONEDRIVE_AUTHORIZE_ENDPOINT
 import works.merc.keryx.app.core.ONEDRIVE_SCOPES
 import works.merc.keryx.app.core.ONEDRIVE_TOKEN_ENDPOINT
@@ -29,22 +26,12 @@ class OneDriveAuthManager(
     private val json: Json = Json { ignoreUnknownKeys = true },
     private val clock: Clock = SystemClock,
 ) : CloudAuthManager {
-    private val scopes = ONEDRIVE_SCOPES
-
     override fun buildAuthorizeUrl(
         clientId: String,
         redirectUri: String,
         codeChallenge: String,
         state: String,
-    ): String = URLBuilder(ONEDRIVE_AUTHORIZE_ENDPOINT).apply {
-        parameters.append("client_id", clientId)
-        parameters.append("response_type", "code")
-        parameters.append("redirect_uri", redirectUri)
-        parameters.append("code_challenge", codeChallenge)
-        parameters.append("code_challenge_method", "S256")
-        parameters.append("scope", scopes)
-        parameters.append("state", state)
-    }.buildString()
+    ): String = buildPkceAuthorizeUrl(ONEDRIVE_AUTHORIZE_ENDPOINT, clientId, redirectUri, codeChallenge, state, ONEDRIVE_SCOPES)
 
     override suspend fun exchangeCode(
         clientId: String,
@@ -58,7 +45,7 @@ class OneDriveAuthManager(
             append("client_id", clientId)
             append("redirect_uri", redirectUri)
             append("code_verifier", codeVerifier)
-            append("scope", scopes)
+            append("scope", ONEDRIVE_SCOPES)
         },
     )
 
@@ -67,7 +54,7 @@ class OneDriveAuthManager(
             append("grant_type", "refresh_token")
             append("refresh_token", refreshToken)
             append("client_id", clientId)
-            append("scope", scopes)
+            append("scope", ONEDRIVE_SCOPES)
         },
         keepRefreshToken = refreshToken,
     )
@@ -90,9 +77,10 @@ class OneDriveAuthManager(
     private suspend fun tokenRequest(
         form: Parameters,
         keepRefreshToken: String? = null,
-    ): Result<OAuthTokens> = requestOAuthTokens(client, json, clock, ONEDRIVE_TOKEN_ENDPOINT, form, keepRefreshToken) { status, body ->
-        Log.warn(TAG, "OneDrive token request failed (HTTP $status): ${body.take(CLOUD_ERROR_BODY_PREVIEW_LENGTH)}")
-    }
+    ): Result<OAuthTokens> = requestOAuthTokens(
+        client, json, clock, ONEDRIVE_TOKEN_ENDPOINT, form, keepRefreshToken,
+        onFailure = tokenRequestFailureLogger(TAG, "OneDrive"),
+    )
 
     private companion object {
         const val TAG = "OneDriveAuth"

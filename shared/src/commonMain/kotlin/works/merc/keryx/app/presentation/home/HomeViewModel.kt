@@ -62,6 +62,7 @@ import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.TagRepository
 import works.merc.keryx.app.presentation.DerivedStateFlow
 import works.merc.keryx.app.presentation.ManualSync
+import works.merc.keryx.app.presentation.derived
 import works.merc.keryx.app.presentation.sameListOrBothEmpty
 
 /**
@@ -72,60 +73,6 @@ import works.merc.keryx.app.presentation.sameListOrBothEmpty
 internal const val SEARCH_ARTICLE_CHANGE_DEBOUNCE_MS = 100L
 
 private const val TAG = "HomeViewModel"
-
-/**
- * Debounced FTS results tagged with the query/filter that produced them (see
- * [HomeViewModel.searching]).
- */
-private data class SearchSnapshot(
-    val query: String,
-    val filter: ArticleFilter,
-    val results: List<ArticleSearchResult>,
-)
-
-/**
- * The filter and narrowing a displayed list was produced from. The list's flows catch up with a
- * filter or mode change asynchronously, so for a moment the rows on screen can still belong to the
- * previous one — [HomeViewModel.markAllRead] waits until this matches the current selection.
- */
-private data class ListScope(val filter: ArticleFilter, val narrowing: ListNarrowing)
-
-/** Rows tagged with the [ListScope] that produced them. */
-private data class ScopedRows<T>(val rows: List<T>, val scope: ListScope)
-
-/**
- * [HomeViewModel.articles] together with the filter its rows were produced from (null before the
- * list first loads). `filter` and `articles` are separate flows whose emissions can reach a UI in
- * either order, so a UI that acts on a filter switch against the rows — the iOS list scrolling back
- * to the top — waits for rows whose [filter] is the new one rather than acting on the previous
- * filter's rows.
- */
-class FilteredArticleRows internal constructor(val filter: ArticleFilter?, val rows: List<ArticleListRow>)
-
-/** [HomeViewModel.searchResults] together with the filter the search was scoped to — see [FilteredArticleRows]. */
-class FilteredSearchResults internal constructor(val filter: ArticleFilter, val rows: List<ArticleSearchResult>)
-
-/**
- * What the article list shows for a search — its rows and their title highlights — built from one
- * snapshot so the two never disagree. Compared by identity: a new instance is a new snapshot.
- */
-class SearchListDisplay internal constructor(results: List<ArticleSearchResult>) {
-    val rows: List<ArticleListRow> = results.map { it.article }
-    val titleMarkedById: Map<String, String> = results.associate { it.article.id to it.titleMarked }
-}
-
-/**
- * Search results tagged with the [ListScope] that produced them, plus what the article list shows
- * for them. The [display] is built once here, when the snapshot is produced, rather than on every
- * read of the list on screen — the reader's swipe asks for its rows on every drag event. [display]
- * is a body property, so it stays out of [equals]: it is derived from [rows] alone.
- */
-private data class ScopedSearchResults(val rows: List<ArticleSearchResult>, val scope: ListScope) {
-    val display: SearchListDisplay = SearchListDisplay(rows)
-}
-
-private fun narrowingFor(mode: ArticleListMode) =
-    ListNarrowing(unreadOnly = mode == ArticleListMode.Unread, starredOnly = mode == ArticleListMode.Starred)
 
 @OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
 class HomeViewModel(
@@ -171,11 +118,7 @@ class HomeViewModel(
             .flowOn(dispatcher)
             .stateIn(viewModelScope, started, null)
 
-    val feeds: StateFlow<List<Feeds>> = DerivedStateFlow(
-        { feedsSnapshot.value.orEmpty() },
-        feedsSnapshot.map { it.orEmpty() },
-        areEquivalent = ::sameListOrBothEmpty,
-    )
+    val feeds: StateFlow<List<Feeds>> = feedsSnapshot.derived(::sameListOrBothEmpty) { it.orEmpty() }
 
     /**
      * [feeds], minus the emissions that change only `etag` / `last_modified` / `updated_at`
@@ -282,35 +225,22 @@ class HomeViewModel(
 
     // --- Search ---
     //
-    // Search is orthogonal to `_filter`, not a variant of it: the query narrows whatever filter is
-    // already selected (see `searchActive`/`searchResults` below), rather than displacing it. This
-    // means there is nothing to restore when search ends — the filter, its row selection, and the
-    // browsing context (pins/selection/cursor) were never touched in the first place.
-    private val _searchQuery = MutableStateFlow("")
-    val searchQuery: StateFlow<String> = _searchQuery
+    // The search input state (query, bar visibility, focus latch) lives in its own class; see
+    // HomeSearchState for why search is orthogonal to `_filter`.
+    private val searchState = HomeSearchState()
+    val searchQuery: StateFlow<String> = searchState.query
 
-    // Whether the expanded search bar/field is open. At PaneLayout.Triple this is always true —
-    // FeedListPane's own field is permanent there — kept true by HomeScreen's own
-    // LaunchedEffect(layout); at a narrow layout it starts false and is toggled by the search
-    // icon/back arrow (see ArticleListPane's own KDoc). The SwiftUI app's iOS search field (on its
-    // article list) binds this to `.searchable`'s `isPresented`. searchActive (below) additionally requires
-    // a non-empty query, so opening the bar alone never disturbs the article list underneath it.
-    private val _searchBarVisible = MutableStateFlow(false)
-    val searchBarVisible: StateFlow<Boolean> = _searchBarVisible.asStateFlow()
+    val searchBarVisible: StateFlow<Boolean> = searchState.barVisible
 
-    fun setSearchBarVisible(visible: Boolean) {
-        _searchBarVisible.value = visible
-        // Drops a focus request no field ever consumed (e.g. Cmd+F, then navigating elsewhere
-        // before the bar composed), so it can't steal focus at whatever field appears next.
-        if (!visible) _pendingSearchFocus.value = false
-    }
+    /** @see HomeSearchState.setBarVisible */
+    fun setSearchBarVisible(visible: Boolean) = searchState.setBarVisible(visible)
 
     // Whether the article list is currently showing search results rather than `_filter`'s own
     // list. Deliberately keyed on the query being non-empty (not on `searchTerms` having any valid
     // ones) — a single short character still needs to show the "too short" hint instead of the
     // filter's own list; see ArticleListPane's own 4-state body.
     val searchActive: StateFlow<Boolean> =
-        combine(_searchBarVisible, _searchQuery) { visible, query -> visible && query.isNotEmpty() }
+        combine(searchState.barVisible, searchState.query) { visible, query -> visible && query.isNotEmpty() }
             .stateIn(viewModelScope, started, false)
 
     private val _unreadOnly = MutableStateFlow(
@@ -463,18 +393,13 @@ class HomeViewModel(
             .flowOn(dispatcher)
             .stateIn(viewModelScope, started, null)
 
-    val articles: StateFlow<List<ArticleListRow>> = DerivedStateFlow(
-        { articlesSnapshot.value?.rows.orEmpty() },
-        articlesSnapshot.map { it?.rows.orEmpty() },
-        areEquivalent = ::sameListOrBothEmpty,
-    )
+    val articles: StateFlow<List<ArticleListRow>> =
+        articlesSnapshot.derived(::sameListOrBothEmpty) { it?.rows.orEmpty() }
 
     /** [articles] paired with the filter its rows belong to — see [FilteredArticleRows]. */
-    val articlesWithFilter: StateFlow<FilteredArticleRows> = DerivedStateFlow(
-        { articlesSnapshot.value.toFilteredArticleRows() },
-        articlesSnapshot.map { it.toFilteredArticleRows() },
+    val articlesWithFilter: StateFlow<FilteredArticleRows> = articlesSnapshot.derived(
         areEquivalent = { old, new -> old.filter == new.filter && sameListOrBothEmpty(old.rows, new.rows) },
-    )
+    ) { it.toFilteredArticleRows() }
 
     private fun ScopedRows<ArticleListRow>?.toFilteredArticleRows() =
         FilteredArticleRows(this?.scope?.filter, this?.rows.orEmpty())
@@ -739,7 +664,7 @@ class HomeViewModel(
     // keystrokes, so it re-searches immediately.
     private val _rawSearchResults: StateFlow<SearchSnapshot> =
         combine(
-            _searchQuery.debounce(SEARCH_DEBOUNCE_MS),
+            searchState.query.debounce(SEARCH_DEBOUNCE_MS),
             _filter,
             _searchRefreshTrigger,
             // Re-run search whenever the articles table changes (read/star toggles, refresh, sync
@@ -760,7 +685,7 @@ class HomeViewModel(
     // moved on since the snapshot was taken. Lets the search pane hold instead of flashing "no
     // results" between keystrokes (or right after switching filters) before the real results land.
     val searching: StateFlow<Boolean> =
-        combine(_searchQuery, _filter, _rawSearchResults) { live, filter, snapshot ->
+        combine(searchState.query, _filter, _rawSearchResults) { live, filter, snapshot ->
             searchTerms(live).isNotEmpty() && (live != snapshot.query || filter != snapshot.filter)
         }.stateIn(viewModelScope, started, false)
 
@@ -783,17 +708,12 @@ class HomeViewModel(
             ScopedSearchResults(emptyList(), ListScope(_rawSearchResults.value.filter, narrowing.value)),
         )
 
-    val searchResults: StateFlow<List<ArticleSearchResult>> = DerivedStateFlow(
-        { searchResultsSnapshot.value.rows },
-        searchResultsSnapshot.map { it.rows },
-    )
+    val searchResults: StateFlow<List<ArticleSearchResult>> = searchResultsSnapshot.derived { it.rows }
 
     /** [searchResults] paired with the filter the search was scoped to — see [FilteredSearchResults]. */
-    val searchResultsWithFilter: StateFlow<FilteredSearchResults> = DerivedStateFlow(
-        { searchResultsSnapshot.value.toFilteredSearchResults() },
-        searchResultsSnapshot.map { it.toFilteredSearchResults() },
+    val searchResultsWithFilter: StateFlow<FilteredSearchResults> = searchResultsSnapshot.derived(
         areEquivalent = { old, new -> old.filter == new.filter && sameListOrBothEmpty(old.rows, new.rows) },
-    )
+    ) { it.toFilteredSearchResults() }
 
     private fun ScopedSearchResults.toFilteredSearchResults() = FilteredSearchResults(scope.filter, rows)
 
@@ -802,10 +722,7 @@ class HomeViewModel(
      * flow, so the article list can never render rows from one search update with highlights from
      * another, and does not map the results a second time.
      */
-    val searchListDisplay: StateFlow<SearchListDisplay> = DerivedStateFlow(
-        { searchResultsSnapshot.value.display },
-        searchResultsSnapshot.map { it.display },
-    )
+    val searchListDisplay: StateFlow<SearchListDisplay> = searchResultsSnapshot.derived { it.display }
 
     /** The scope of the rows on screen — see [ListScope]; null before the article list first loads. */
     private fun displayedScope(): ListScope? =
@@ -861,29 +778,27 @@ class HomeViewModel(
         if (canHideRead.value) retrimPinnedReadStates()
     }
 
-    // Requests to move keyboard focus into whichever composable currently owns the search field —
-    // FeedListPane's own KeryxTextField at PaneLayout.Triple, or ArticleListPane's
-    // KeryxExpandedSearchBar at a narrow layout (Cmd+F, or tapping the search icon, both call
-    // requestSearchFocus()). Deliberately a *latched* StateFlow rather than a one-shot SharedFlow:
-    // at a narrow layout the request is raised in the same click that opens the bar, so the
-    // composable that will own the field has not composed yet — a SharedFlow emission (as this used
-    // to be) is dropped silently when no collector exists yet, which is exactly what happened here.
-    // The latch stays set until the field that actually gains focus consumes it
-    // (consumeSearchFocusRequest()), and setSearchBarVisible(false) clears it when the bar closes
-    // without any field ever consuming it, so a stale request can never steal focus from an
-    // unrelated field later.
-    private val _pendingSearchFocus = MutableStateFlow(false)
-    val pendingSearchFocus: StateFlow<Boolean> = _pendingSearchFocus.asStateFlow()
+    /** @see HomeSearchState.pendingFocus */
+    val pendingSearchFocus: StateFlow<Boolean> = searchState.pendingFocus
 
-    fun requestSearchFocus() {
-        _pendingSearchFocus.value = true
-    }
+    /** @see HomeSearchState.requestFocus */
+    fun requestSearchFocus() = searchState.requestFocus()
 
-    fun consumeSearchFocusRequest() {
-        _pendingSearchFocus.value = false
-    }
+    /** @see HomeSearchState.consumeFocusRequest */
+    fun consumeSearchFocusRequest() = searchState.consumeFocusRequest()
 
     private val expansion = FeedListExpansion(settingsRepository)
+
+    // Tag/folder structure actions live in their own class; this ViewModel only delegates to it.
+    private val feedListActions = FeedListActions(
+        feedRepository = feedRepository,
+        tagRepository = tagRepository,
+        folderRepository = folderRepository,
+        expansion = expansion,
+        selectedRowInstance = _selectedRowInstance,
+        currentFilter = { _filter.value },
+        selectFilter = { selectFilter(it) },
+    )
 
     /** The feed list's collapsed folders — see [FeedListExpansion.collapsedFolderIds]. */
     val collapsedFolderIds: StateFlow<Set<String>> get() = expansion.collapsedFolderIds
@@ -903,12 +818,7 @@ class HomeViewModel(
      *
      * @param tagId The identifier of the tag to toggle.
      */
-    fun toggleTagExpanded(tagId: String) {
-        val expanded = expansion.toggleTag(tagId)
-        // A collapsed tag no longer renders its nested feed rows, so a selection on one of them
-        // falls back to that feed's canonical row.
-        if (!expanded) fallBackFromTagRow(tagId)
-    }
+    fun toggleTagExpanded(tagId: String) = feedListActions.toggleTagExpanded(tagId)
 
     /**
      * Expands whatever collapsed folder or tag hides the exact row [instance] (see
@@ -1692,34 +1602,12 @@ class HomeViewModel(
         val flags = withContext(dbWriteDispatcher) { articleRepository.aliveArticleFlags(ids) }
         if (readStateSnapshot.isNotEmpty()) {
             _pinnedReadStates.update { pinned ->
-                // A pin added or replaced since the snapshot is kept: `flags` was read before the write
-                // that justified it was enqueued, so it has no verdict on it (identity, not equality — a
-                // re-pin with the same value is still a write `flags` knows nothing about). Otherwise a
-                // pin is dropped once the article's current is_read no longer matches the pinned value
-                // (an external "mark unread"/"mark read", or a soft-delete tombstone), the same rule as
-                // the starred pin below — except the selection's own pin, which while its article is
-                // alive is refreshed to the current value instead: under unread-only a dropped unread
-                // pin read externally would take the open article out of the list (and the pager).
-                val selectedId = currentSelectionId()
-                buildMap {
-                    pinned.forEach { (id, pin) ->
-                        val old = readStateSnapshot[id]
-                        val current = flags[id]
-                        when {
-                            pinReplacedSince(old, pin) || current?.isRead == old?.is_read -> put(id, pin)
-                            id == selectedId && current != null -> put(id, pin.copy(is_read = current.isRead))
-                        }
-                    }
-                }
+                // Read inside the CAS loop, so a retry sees the selection as of that attempt.
+                reconciledReadPins(pinned, readStateSnapshot, flags, currentSelectionId())
             }
         }
         if (unstarredSnapshot.isNotEmpty()) {
-            _pinnedUnstarredArticles.update { pinned ->
-                // Same idea for the starred pin: dropped once the article's current is_starred no
-                // longer matches what was optimistically pinned (deleted, or externally re-starred),
-                // not just once it is deleted.
-                pinned.filterKeys { it !in unstarredSnapshot || flags[it]?.isStarred == pinned.getValue(it).is_starred }
-            }
+            _pinnedUnstarredArticles.update { pinned -> reconciledUnstarredPins(pinned, unstarredSnapshot, flags) }
         }
         // Keeps the detail pane's toolbar (read/star toggle state) from staying stale forever behind
         // an external change, the same way the two pins above do for the list. Body/title are left
@@ -1767,9 +1655,7 @@ class HomeViewModel(
      *
      * @param query The new search query.
      */
-    fun setSearchQuery(query: String) {
-        _searchQuery.value = query
-    }
+    fun setSearchQuery(query: String) = searchState.setQuery(query)
 
     private val addFeedPreviewResolver = AddFeedPreviewResolver(feedRepository, tagRepository)
 
@@ -1918,10 +1804,7 @@ class HomeViewModel(
 
     // --- Tag actions ---
 
-    fun createTag(name: String, color: String? = null): String? {
-        if (name.isBlank()) return null
-        return tagRepository.createTag(name.trim(), color)
-    }
+    fun createTag(name: String, color: String? = null): String? = feedListActions.createTag(name, color)
 
     /**
      * Updates a tag with the specified name and color.
@@ -1932,32 +1815,14 @@ class HomeViewModel(
      * @param name The tag's new name.
      * @param color The tag's new color, or `null` to remove the color.
      */
-    fun updateTag(id: String, name: String, color: String?) {
-        if (name.isBlank()) return
-        tagRepository.updateTag(id, name.trim(), color)
-    }
+    fun updateTag(id: String, name: String, color: String?) = feedListActions.updateTag(id, name, color)
 
     /**
      * Deletes a tag and resets the active filter if it references the deleted tag.
      *
      * @param id The identifier of the tag to delete.
      */
-    fun deleteTag(id: String) {
-        tagRepository.deleteTag(id)
-        if (_filter.value == ArticleFilter.Tag(id)) selectFilter(ArticleFilter.All)
-        // A deleted tag no longer renders its nested feed rows, so a selection on one of them
-        // falls back to that feed's canonical row (a no-op if the branch above already reset it).
-        fallBackFromTagRow(id)
-        expansion.forgetTag(id)
-    }
-
-    /** Moves a selection on a feed row nested under [tagId] to that feed's canonical row. */
-    private fun fallBackFromTagRow(tagId: String) {
-        val instance = _selectedRowInstance.value
-        if (instance is FeedListRowSelection.FeedInTag && instance.tagId == tagId) {
-            _selectedRowInstance.value = FeedListRowSelection.FeedInFolderGroup(instance.feedId)
-        }
-    }
+    fun deleteTag(id: String) = feedListActions.deleteTag(id)
 
     /**
      * Updates whether a feed is associated with a tag.
@@ -1967,30 +1832,20 @@ class HomeViewModel(
      * @param attached Whether the tag should be associated with the feed.
      */
     fun setFeedTag(feedId: String, tagId: String, attached: Boolean) =
-        tagRepository.setFeedTag(feedId, tagId, attached)
+        feedListActions.setFeedTag(feedId, tagId, attached)
 
     // --- Folder actions ---
 
-    fun createFolder(name: String): String? {
-        if (name.isBlank()) return null
-        return folderRepository.createFolder(name.trim())
-    }
+    fun createFolder(name: String): String? = feedListActions.createFolder(name)
 
-    fun updateFolder(id: String, name: String) {
-        if (name.isBlank()) return
-        folderRepository.updateFolder(id, name.trim())
-    }
+    fun updateFolder(id: String, name: String) = feedListActions.updateFolder(id, name)
 
     /**
      * Deletes a folder and removes it from the collapsed-folder state.
      *
      * @param id The identifier of the folder to delete.
      */
-    fun deleteFolder(id: String) {
-        folderRepository.deleteFolder(id)
-        if (_filter.value == ArticleFilter.Folder(id)) selectFilter(ArticleFilter.All)
-        expansion.forgetFolder(id)
-    }
+    fun deleteFolder(id: String) = feedListActions.deleteFolder(id)
 
     /**
      * Moves a feed into a folder and optionally positions it relative to another feed.
@@ -2000,7 +1855,7 @@ class HomeViewModel(
      * @param targetFeedId The identifier of the feed to position the moved feed relative to, or `null` to use the default position.
      */
     fun moveFeed(feedId: String, folderId: String?, targetFeedId: String? = null) =
-        feedRepository.moveFeed(feedId, folderId, targetFeedId)
+        feedListActions.moveFeed(feedId, folderId, targetFeedId)
 
     /**
      * Reorders a folder relative to the specified target folder.
@@ -2009,6 +1864,6 @@ class HomeViewModel(
      * @param targetFolderId The identifier of the folder to move before, or `null` to move to the end.
      */
     fun reorderFolders(draggedFolderId: String, targetFolderId: String?) =
-        folderRepository.reorderFolders(draggedFolderId, targetFolderId)
+        feedListActions.reorderFolders(draggedFolderId, targetFolderId)
 }
 

@@ -24,6 +24,15 @@ import works.merc.keryx.app.data.remote.ParsedArticle
  */
 private const val ID_FETCH_CHUNK = 900
 
+/**
+ * Runs [query] over these ids, deduplicated and split into [ID_FETCH_CHUNK]-sized chunks, and
+ * collects every id it returns; empty (without querying) when there are no ids.
+ */
+private inline fun Collection<String>.queryIdsInChunks(query: (List<String>) -> List<String>): Set<String> {
+    if (isEmpty()) return emptySet()
+    return distinct().chunked(ID_FETCH_CHUNK).flatMapTo(HashSet()) { chunk -> query(chunk) }
+}
+
 private const val TAG = "ArticleRepository"
 
 /**
@@ -199,11 +208,8 @@ class ArticleRepository(
      * @param feedIds The feed IDs whose articles to collect.
      * @return The matching article IDs; empty (without querying) when [feedIds] is empty.
      */
-    fun articleIdsByFeeds(feedIds: Collection<String>): Set<String> {
-        if (feedIds.isEmpty()) return emptySet()
-        return feedIds.distinct().chunked(ID_FETCH_CHUNK)
-            .flatMapTo(HashSet()) { chunk -> articles.idsByFeeds(chunk).executeAsList() }
-    }
+    fun articleIdsByFeeds(feedIds: Collection<String>): Set<String> =
+        feedIds.queryIdsInChunks { chunk -> articles.idsByFeeds(chunk).executeAsList() }
 
     /**
      * The highest `articles` rowid currently present, or `0` when the table is empty — a watermark
@@ -221,11 +227,8 @@ class ArticleRepository(
      * @param ids The candidate article IDs.
      * @return The subset of [ids] inserted after [rowId]; empty (without querying) when [ids] is empty.
      */
-    fun articleIdsInsertedAfter(rowId: Long, ids: Collection<String>): Set<String> {
-        if (ids.isEmpty()) return emptySet()
-        return ids.distinct().chunked(ID_FETCH_CHUNK)
-            .flatMapTo(HashSet()) { chunk -> articles.idsInsertedAfter(rowId, chunk).executeAsList() }
-    }
+    fun articleIdsInsertedAfter(rowId: Long, ids: Collection<String>): Set<String> =
+        ids.queryIdsInChunks { chunk -> articles.idsInsertedAfter(rowId, chunk).executeAsList() }
 
     /**
      * Marks an article as read and schedules a deferred synchronization. Does nothing (no write, no

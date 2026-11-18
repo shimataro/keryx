@@ -7,7 +7,7 @@ import io.ktor.client.engine.mock.respond
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.http.HttpStatusCode
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.runBlocking
 import works.merc.keryx.app.InMemoryFaviconMissStore
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.data.local.FtsSearch
@@ -127,7 +127,7 @@ class OpmlTransferTest {
     }
 
     @Test
-    fun importOpmlSubscribesEveryFeedInTheDocument() = runTest {
+    fun importOpmlSubscribesEveryFeedInTheDocument() = runBlocking {
         val transfer = newTransfer(succeedingFetcher())
         val xml = """<opml><body><outline text="Feed" xmlUrl="https://ex.com/feed"/></body></opml>"""
 

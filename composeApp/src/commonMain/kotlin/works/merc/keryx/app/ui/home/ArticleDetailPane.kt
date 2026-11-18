@@ -121,7 +121,7 @@ fun ArticleDetailPane(
     onActivated: () -> Unit = {},
     copyPulse: Int = 0,
     onCopyUrl: (ArticleListRow) -> Unit = {},
-    onOpenInBrowser: (ArticleListRow) -> Unit = { openInBrowserIfAllowed(it.url) },
+    onOpenInBrowser: (ArticleListRow) -> Unit = openArticleRowInBrowser,
     onShare: ((ArticleListRow) -> Unit)? = null,
     onNavigateUp: (() -> Unit)? = null,
     swipeNavigation: ArticleSwipeNavigation? = null,
@@ -234,7 +234,7 @@ internal fun ArticleDetailPaneContent(
     onActivated: () -> Unit = {},
     copyPulse: Int = 0,
     onCopyUrl: (ArticleListRow) -> Unit = {},
-    onOpenInBrowser: (ArticleListRow) -> Unit = { openInBrowserIfAllowed(it.url) },
+    onOpenInBrowser: (ArticleListRow) -> Unit = openArticleRowInBrowser,
     onShare: ((ArticleListRow) -> Unit)? = null,
     onToggleStar: () -> Unit = {},
     onToggleRead: () -> Unit = {},
@@ -419,9 +419,7 @@ internal fun ArticleDetailPaneContent(
                         reader = reader,
                     )
                 } else {
-                    val bylineFeed = readerContent.listRow()?.let { bylineFeeds[it.feed_id] }
-                    val bylineFeedName = bylineFeed?.displayTitle()
-                    val bylineFaviconUrl = bylineFeed?.favicon_url
+                    val (bylineFeedName, bylineFaviconUrl) = bylineFeeds.readerByline(readerContent.listRow()?.feed_id)
                     val document = remember(
                         theme, readerContent, bylineFeedName, bylineFaviconUrl, noTitleText, placeholderText, noContentText, openInBrowserTooltip,
                     ) {
@@ -649,4 +647,16 @@ private fun singleReaderDocument(
     is ReaderContent.Full -> readerDocument(
         theme, content.article.toListRow(), content.article.toReaderRow(), feedName, feedFaviconUrl, noTitleText, noContentText, openInBrowserTooltip,
     )
+}
+
+/** What a reader document's byline shows of its article's feed: its name and favicon. */
+internal data class ReaderByline(val feedName: String?, val faviconUrl: String?)
+
+/**
+ * The [ReaderByline] for an article of [feedId], looked up in these byline feeds (`feeds.id` → feed);
+ * both parts are `null` when [feedId] is `null` or not among them.
+ */
+internal fun Map<String, Feeds>.readerByline(feedId: String?): ReaderByline {
+    val feed = feedId?.let { this[it] }
+    return ReaderByline(feed?.displayTitle(), feed?.favicon_url)
 }

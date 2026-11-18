@@ -252,6 +252,13 @@ sealed interface FeedListSelectionTarget {
 }
 
 /**
+ * The feed [filter] selects, or `null` when it selects something other than a single feed, or a
+ * feed no longer in [feeds].
+ */
+fun selectedFeedFor(filter: ArticleFilter, feeds: List<Feeds>): Feeds? =
+    (filter as? ArticleFilter.Feed)?.let { f -> feeds.find { it.id == f.feedId } }
+
+/**
  * Resolves [filter] against the current feed/folder/tag lists, for the rename/delete keyboard
  * shortcuts and the equivalent Feed-menu commands (both need "what is currently selected" without
  * duplicating this lookup). Returns `null` for `All`/`Starred`, or if the selected item no longer
@@ -263,7 +270,7 @@ fun resolveFeedListSelectionTarget(
     folders: List<Folders>,
     tags: List<Tags>,
 ): FeedListSelectionTarget? = when (filter) {
-    is ArticleFilter.Feed -> feeds.find { it.id == filter.feedId }?.let(FeedListSelectionTarget::Feed)
+    is ArticleFilter.Feed -> selectedFeedFor(filter, feeds)?.let(FeedListSelectionTarget::Feed)
     is ArticleFilter.Folder -> folders.find { it.id == filter.folderId }?.let(FeedListSelectionTarget::Folder)
     is ArticleFilter.Tag -> tags.find { it.id == filter.tagId }?.let(FeedListSelectionTarget::Tag)
     ArticleFilter.All, ArticleFilter.Starred -> null

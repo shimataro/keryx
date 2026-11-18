@@ -3,7 +3,7 @@ package works.merc.keryx.app.tray
 import org.freedesktop.dbus.types.Variant
 
 /** dbusmenu node ids. The root is always 0 per the spec; the leaves are ours. */
-internal const val MENU_ROOT_ID = 0
+internal const val MENU_ROOT_ID = DBUSMENU_ROOT_ID
 internal const val MENU_TOGGLE_ID = 1
 internal const val MENU_QUIT_ID = 2
 
@@ -13,7 +13,7 @@ internal const val MENU_UPDATE_ID = 3
 internal const val MENU_SEPARATOR_ID = 4
 
 /** The D-Bus signature of a dbusmenu node, needed to wrap children in a variant. */
-internal const val MENU_LAYOUT_SIGNATURE = "(ia{sv}av)"
+internal const val MENU_LAYOUT_SIGNATURE = DBUSMENU_LAYOUT_SIGNATURE
 
 /** The single update menu entry's label and whether it can currently be clicked — resolved from
  * `UpdateState` by [updateMenuEntry], which is also what the application menu bar's Help menu uses.
@@ -47,31 +47,15 @@ internal fun menuItemProperties(
     propertyNames: List<String> = emptyList(),
 ): Map<String, Variant<*>> {
     val all: Map<String, Variant<*>> = when (id) {
-        MENU_ROOT_ID -> mapOf("children-display" to Variant("submenu"))
-        MENU_TOGGLE_ID -> leafProperties(state.toggleLabel)
-        MENU_QUIT_ID -> leafProperties(state.quitLabel)
-        MENU_UPDATE_ID -> leafProperties(state.update.label, state.update.enabled)
-        MENU_SEPARATOR_ID -> mapOf("type" to Variant("separator"), "visible" to Variant(true))
+        MENU_ROOT_ID -> dbusMenuRootProperties()
+        MENU_TOGGLE_ID -> dbusMenuLeafProperties(state.toggleLabel)
+        MENU_QUIT_ID -> dbusMenuLeafProperties(state.quitLabel)
+        MENU_UPDATE_ID -> dbusMenuLeafProperties(state.update.label, state.update.enabled)
+        MENU_SEPARATOR_ID -> dbusMenuSeparatorProperties()
         else -> emptyMap()
     }
-    if (propertyNames.isEmpty()) return all
-    return all.filterKeys { it in propertyNames }
+    return filterDBusMenuProperties(all, propertyNames)
 }
-
-/**
- * Creates the standard properties for a leaf menu item.
- *
- * @param label The label displayed for the menu item.
- * @param enabled Whether the item can currently be activated — `false` grays it out (e.g. while a
- *   download is in progress) without removing it from the menu.
- * @return A map containing the item's type, escaped label, enabled state, and visibility.
- */
-private fun leafProperties(label: String, enabled: Boolean = true): Map<String, Variant<*>> = mapOf(
-    "type" to Variant("standard"),
-    "label" to Variant(escapeMenuLabel(label)),
-    "enabled" to Variant(enabled),
-    "visible" to Variant(true),
-)
 
 /**
  * The dbusmenu items whose properties changed between [previous] and [next], each carrying only

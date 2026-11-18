@@ -3,16 +3,13 @@ package works.merc.keryx.app.data.cloud
 import io.ktor.client.HttpClient
 import io.ktor.client.request.forms.submitForm
 import io.ktor.http.Parameters
-import io.ktor.http.URLBuilder
 import io.ktor.http.parameters
 import kotlinx.serialization.json.Json
-import works.merc.keryx.app.core.CLOUD_ERROR_BODY_PREVIEW_LENGTH
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.GOOGLE_AUTHORIZE_ENDPOINT
 import works.merc.keryx.app.core.GOOGLE_DRIVE_APPDATA_SCOPE
 import works.merc.keryx.app.core.GOOGLE_REVOKE_ENDPOINT
 import works.merc.keryx.app.core.GOOGLE_TOKEN_ENDPOINT
-import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.core.SystemClock
 
@@ -31,25 +28,18 @@ class GoogleDriveAuthManager(
     private val json: Json = Json { ignoreUnknownKeys = true },
     private val clock: Clock = SystemClock,
 ) : CloudAuthManager {
-    private val scopes = GOOGLE_DRIVE_APPDATA_SCOPE
-
     override fun buildAuthorizeUrl(
         clientId: String,
         redirectUri: String,
         codeChallenge: String,
         state: String,
-    ): String = URLBuilder(GOOGLE_AUTHORIZE_ENDPOINT).apply {
-        parameters.append("client_id", clientId)
-        parameters.append("response_type", "code")
-        parameters.append("redirect_uri", redirectUri)
-        parameters.append("code_challenge", codeChallenge)
-        parameters.append("code_challenge_method", "S256")
-        parameters.append("access_type", "offline")
+    ): String = buildPkceAuthorizeUrl(
+        GOOGLE_AUTHORIZE_ENDPOINT, clientId, redirectUri, codeChallenge, state, GOOGLE_DRIVE_APPDATA_SCOPE,
+    ) {
+        append("access_type", "offline")
         // Force the consent screen so a refresh token is returned even on re-authorization.
-        parameters.append("prompt", "consent")
-        parameters.append("scope", scopes)
-        parameters.append("state", state)
-    }.buildString()
+        append("prompt", "consent")
+    }
 
     override suspend fun exchangeCode(
         clientId: String,
@@ -104,9 +94,10 @@ class GoogleDriveAuthManager(
     private suspend fun tokenRequest(
         form: Parameters,
         keepRefreshToken: String? = null,
-    ): Result<OAuthTokens> = requestOAuthTokens(client, json, clock, GOOGLE_TOKEN_ENDPOINT, form, keepRefreshToken) { status, body ->
-        Log.warn(TAG, "Google token request failed (HTTP $status): ${body.take(CLOUD_ERROR_BODY_PREVIEW_LENGTH)}")
-    }
+    ): Result<OAuthTokens> = requestOAuthTokens(
+        client, json, clock, GOOGLE_TOKEN_ENDPOINT, form, keepRefreshToken,
+        onFailure = tokenRequestFailureLogger(TAG, "Google"),
+    )
 
     private companion object {
         const val TAG = "GoogleDriveAuth"

@@ -44,8 +44,7 @@ internal fun TextPromptDialog(
     var text by remember { mutableStateOf("") }
     val focusRequester = remember { FocusRequester() }
     val trimmed = text.trim()
-    val (error, canConfirm) = inlineRenameValidation(text, allowBlank = false, blockingError)
-    val message = error
+    val (message, canConfirm) = inlineRenameValidation(text, allowBlank = false, blockingError)
 
     fun submit() {
         if (canConfirm) onConfirm(trimmed)
@@ -61,7 +60,7 @@ internal fun TextPromptDialog(
                     onValueChange = { text = it },
                     singleLine = true,
                     placeholder = hint,
-                    isError = error != null,
+                    isError = message != null,
                     supportingText = message,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                     keyboardActions = KeyboardActions(onDone = { submit() }),

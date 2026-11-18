@@ -24,8 +24,8 @@ const val SETTINGS_TAB_UPDATES = "updates"
 const val SQLITE_BUSY_TIMEOUT_MS = 5_000L
 
 // --- Time ---
-const val MILLIS_PER_DAY = 24 * 60 * 60 * 1000L
 const val MILLIS_PER_HOUR = 60 * 60 * 1000L
+const val MILLIS_PER_DAY = 24 * MILLIS_PER_HOUR
 const val MILLIS_PER_MINUTE = 60_000L
 const val MILLIS_PER_SECOND = 1_000L
 

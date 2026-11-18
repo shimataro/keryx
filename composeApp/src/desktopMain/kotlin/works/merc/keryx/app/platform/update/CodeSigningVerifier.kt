@@ -47,11 +47,14 @@ internal fun interface CodeSigningVerifier {
  * non-zero exit) as a failed verification rather than propagating the process-launch failure
  * itself, since either way the answer [DesktopUpdateInstaller] needs is the same: don't swap it in.
  */
-internal class RealCodeSigningVerifier : CodeSigningVerifier {
+internal class RealCodeSigningVerifier(
+    private val runProcess: (command: List<String>, timeoutSeconds: Long, tag: String) -> LocalProcessResult =
+        { command, timeoutSeconds, tag -> runLocalProcess(command, timeoutSeconds, tag) },
+) : CodeSigningVerifier {
     override fun verify(appPath: String): String? = try {
         // Absolute path for the same reason DittoArchiveExtractor uses one.
         val command = listOf("/usr/bin/codesign", "--verify", "--strict", "--deep", appPath)
-        when (val result = runLocalProcess(command, VERIFY_TIMEOUT_SECONDS, TAG)) {
+        when (val result = runProcess(command, VERIFY_TIMEOUT_SECONDS, TAG)) {
             is LocalProcessResult.Exited ->
                 if (result.code == 0) null else "Extracted app failed its own code-signature self-check (codesign exit ${result.code})"
             LocalProcessResult.TimedOut ->

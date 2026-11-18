@@ -20,21 +20,22 @@ import javax.swing.filechooser.FileNameExtensionFilter
  */
 internal interface FilePickerBackend {
     /**
- * Opens a file selection dialog.
- *
- * @param request The open-file request containing the dialog title and extension filters.
- * @param owner The window that owns the dialog, or `null` for no owner.
- * @return The absolute path of the selected file, or `null` if selection is canceled.
- */
-fun pickOpen(request: OpenFileRequest, owner: Window?): String?
+     * Opens a file selection dialog.
+     *
+     * @param request The open-file request containing the dialog title and extension filters.
+     * @param owner The window that owns the dialog, or `null` for no owner.
+     * @return The absolute path of the selected file, or `null` if selection is canceled.
+     */
+    fun pickOpen(request: OpenFileRequest, owner: Window?): String?
+
     /**
- * Displays a save-file dialog.
- *
- * @param request The save dialog configuration.
- * @param owner The window that owns the dialog, or `null` for no owner.
- * @return The selected absolute file path, or `null` if no file is selected.
- */
-fun pickSave(request: SaveFileRequest, owner: Window?): String?
+     * Displays a save-file dialog.
+     *
+     * @param request The save dialog configuration.
+     * @param owner The window that owns the dialog, or `null` for no owner.
+     * @return The selected absolute file path, or `null` if no file is selected.
+     */
+    fun pickSave(request: SaveFileRequest, owner: Window?): String?
 }
 
 /**
@@ -174,9 +175,9 @@ internal object SwingFilePickerBackend : FilePickerBackend {
             JOptionPane.WARNING_MESSAGE,
             null,
             options,
-            options[1],
+            options[OVERWRITE_CANCEL_OPTION],
         )
-        return choice == 0
+        return choice == OVERWRITE_REPLACE_OPTION
     }
 }
 
@@ -252,24 +253,28 @@ internal class PathPickedFile(private val path: String) : PickedFile {
     override suspend fun writeText(text: String) = FileIO.writeText(path, text)
 }
 
+/** The overwrite confirmation's option indices, in the order its `options` array lists them. */
+private const val OVERWRITE_REPLACE_OPTION = 0
+private const val OVERWRITE_CANCEL_OPTION = 1
+
 actual object FilePicker {
     /**
-         * Opens a file selection dialog using the requested title and extension filters.
-         *
-         * @param request The open-file dialog configuration.
-         * @return A handle to the selected file, or `null` if the dialog is canceled.
-         */
-        actual suspend fun pickOpenFile(request: OpenFileRequest): PickedFile? =
+     * Opens a file selection dialog using the requested title and extension filters.
+     *
+     * @param request The open-file dialog configuration.
+     * @return A handle to the selected file, or `null` if the dialog is canceled.
+     */
+    actual suspend fun pickOpenFile(request: OpenFileRequest): PickedFile? =
         withContext(Dispatchers.Swing) { defaultFilePickerBackend().pickOpen(request, resolveDialogOwner()) }
             ?.let(::PathPickedFile)
 
     /**
-         * Opens a save-file dialog and returns a handle to the selected file.
-         *
-         * @param request The save-file request containing the dialog title and default filename.
-         * @return A handle to the selected file, or `null` if selection is canceled.
-         */
-        actual suspend fun pickSaveFile(request: SaveFileRequest): PickedFile? =
+     * Opens a save-file dialog and returns a handle to the selected file.
+     *
+     * @param request The save-file request containing the dialog title and default filename.
+     * @return A handle to the selected file, or `null` if selection is canceled.
+     */
+    actual suspend fun pickSaveFile(request: SaveFileRequest): PickedFile? =
         withContext(Dispatchers.Swing) { defaultFilePickerBackend().pickSave(request, resolveDialogOwner()) }
             ?.let(::PathPickedFile)
 }

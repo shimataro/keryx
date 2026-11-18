@@ -8,6 +8,12 @@ import java.awt.image.BufferedImage
 
 private const val LOG_TAG = "LinuxNotifier"
 
+/**
+ * The conventional action key most notification daemons invoke when the notification itself is
+ * clicked; [SniConnection] watches for it to bring the window forward.
+ */
+internal const val NOTIFICATION_DEFAULT_ACTION = "default"
+
 /** The notification icon is rendered at popup size, not panel size. */
 private const val NOTIFICATION_ICON_SIZE = 48
 
@@ -52,7 +58,7 @@ internal class LinuxNotifier(
                 body = body,
                 // "default" is the conventional action key most notification daemons invoke when
                 // the notification body itself is clicked, rather than a rendered button.
-                actions = listOf("default", ""),
+                actions = listOf(NOTIFICATION_DEFAULT_ACTION, ""),
                 hints = hints,
                 // -1 = let the daemon apply its own default timeout.
                 expireTimeout = -1,

@@ -23,6 +23,8 @@ import works.merc.keryx.app.core.MAX_SYNC_DB_SIZE_BYTES
 import works.merc.keryx.app.core.ONEDRIVE_GRAPH_BASE
 import works.merc.keryx.app.core.Result
 
+private const val PROVIDER_NAME = "OneDrive"
+
 /**
  * [CloudStorage] backed by the Microsoft Graph API, storing the sync DB in
  * OneDrive's hidden app folder (`/me/drive/special/approot`, scope
@@ -50,19 +52,14 @@ class OneDriveStorage(
      * @return A successful result when access is authorized or the app folder has not been provisioned; otherwise, a mapped storage error.
      */
     override suspend fun authenticate(): Result<Unit> = withToken { token ->
-        val response = client.get(appRootUrl) { bearerAuth(token) }
-        when (response.status.value) {
-            in 200..299 -> Result.Ok(Unit)
-            // The token is valid but the app folder has not been provisioned yet — still connected.
-            404 -> Result.Ok(Unit)
-            else -> mapError(response.status.value, response.bodyAsText())
-        }
+        // A 404 means the token is valid but the app folder has not been provisioned yet — still connected.
+        client.get(appRootUrl) { bearerAuth(token) }.okOrAbsentOr(PROVIDER_NAME)
     }
 
     override suspend fun download(path: String, destPath: String): Result<CloudFileMeta> = withToken { token ->
         val meta = client.get(itemUrl(path)) { bearerAuth(token) }
         if (meta.status.value == 404) {
-            return@withToken Result.Err(CloudStorageException("File not found: ${fileName(path)}"))
+            return@withToken Result.Err(CloudStorageException("File not found: ${cloudFileName(path)}"))
         }
         if (!meta.status.isSuccess()) {
             return@withToken mapError(meta.status.value, meta.bodyAsText())
@@ -143,7 +140,7 @@ class OneDriveStorage(
      * @return The written revision, a conflict, or a mapped storage error.
      */
     private suspend fun HttpResponse.metaOrConflictOr(conflictStatus: Int): Result<CloudFileMeta> =
-        writtenMetaOrConflictOr(json, "OneDrive", "eTag", conflictStatus)
+        writtenMetaOrConflictOr(json, PROVIDER_NAME, "eTag", conflictStatus)
 
     /**
      * Deletes the file at the specified path.
@@ -156,7 +153,7 @@ class OneDriveStorage(
     override suspend fun delete(path: String): Result<Unit> = withToken { token ->
         val response = client.delete(itemUrl(path)) { bearerAuth(token) }
         // Already absent counts as deleted — delete is idempotent.
-        response.okOrAbsentOr("OneDrive")
+        response.okOrAbsentOr(PROVIDER_NAME)
     }
 
     /**
@@ -176,10 +173,10 @@ class OneDriveStorage(
         val response = client.patch(itemUrl(from)) {
             bearerAuth(token)
             contentType(ContentType.Application.Json)
-            setBody(buildJsonObject { put("name", fileName(to)) }.toString())
+            setBody(buildJsonObject { put("name", cloudFileName(to)) }.toString())
         }
         // Already absent counts as renamed — rename is idempotent.
-        response.okOrAbsentOr("OneDrive")
+        response.okOrAbsentOr(PROVIDER_NAME)
     }
 
     /**
@@ -210,7 +207,7 @@ class OneDriveStorage(
      * @return The result produced by the operation.
      */
     private suspend fun <T> withToken(block: suspend (String) -> Result<T>): Result<T> =
-        withCloudToken(accessTokenProvider, "OneDrive", block)
+        withCloudToken(accessTokenProvider, PROVIDER_NAME, block)
 
     /**
      * Converts a OneDrive response error into a storage error result.
@@ -219,13 +216,10 @@ class OneDriveStorage(
      * @param body The response body containing error details.
      * @return An error result describing the OneDrive failure.
      */
-    private fun mapError(status: Int, body: String): Result.Err = cloudStorageError("OneDrive", status, body)
-
-    /** Graph app-folder items are path-addressed by name: use the basename of the sync path. */
-    private fun fileName(path: String): String = path.substringAfterLast('/')
+    private fun mapError(status: Int, body: String): Result.Err = cloudStorageError(PROVIDER_NAME, status, body)
 
     /** Metadata / delete URL for the app-folder item (append `:/content` for the content stream). */
-    private fun itemUrl(path: String): String = "$appRootUrl:/${fileName(path)}"
+    private fun itemUrl(path: String): String = "$appRootUrl:/${cloudFileName(path)}"
 
     private val appRootUrl: String get() = "$ONEDRIVE_GRAPH_BASE/me/drive/special/approot"
 }

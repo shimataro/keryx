@@ -320,7 +320,6 @@ internal fun FeedListPane(
         openDeleteDialogForSelection()
     }
     val activeBoundaryState = remember { mutableStateOf<DropBoundary?>(null) }
-    var activeBoundary by activeBoundaryState
     val draggedFeedIdState = remember { mutableStateOf<String?>(null) }
     var draggedFeedId by draggedFeedIdState
     val hoveredAttachTagIdState = remember { mutableStateOf<String?>(null) }
@@ -472,24 +471,11 @@ internal fun FeedListPane(
         // HomeViewModel.setSearchQuery) rather than switching to a distinct "Search" filter — a
         // click or a keyboard cursor landing on this field never changes anything on its own.
         if (onSelectionAdvance == null) {
-            KeryxTextField(
-                value = searchQuery,
-                onValueChange = { vm.setSearchQuery(it) },
-                singleLine = true,
-                placeholder = stringResource(Res.string.home_search_placeholder),
-                leadingIcon = { KeryxIcon(KeryxIcons.Search, contentDescription = null) },
-                trailingIcon = {
-                    if (searchQuery.isNotEmpty()) {
-                        val clearLabel = stringResource(Res.string.home_search_clear)
-                        TooltipIconButton(tooltip = clearLabel, size = 32.dp, onClick = { vm.setSearchQuery("") }) {
-                            KeryxIcon(KeryxIcons.CloseFilled, contentDescription = clearLabel)
-                        }
-                    }
-                },
-                modifier = Modifier.fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 4.dp)
-                    .focusRequester(searchFocusRequester)
-                    .onFocusChanged { searchFieldFocused = it.isFocused },
+            FeedListSearchField(
+                query = searchQuery,
+                onQueryChange = { vm.setSearchQuery(it) },
+                focusRequester = searchFocusRequester,
+                onFocusedChange = { searchFieldFocused = it },
             )
         }
 
@@ -802,44 +788,14 @@ internal fun FeedListPane(
             VerticalScrollbarIfNeeded(listState)
         }
 
-        // The fixed footer: the notification center's entry point and, on a platform with no
-        // native application menu bar (Android — see hasNativeAppMenu's own KDoc), the in-pane entry
-        // point to Settings; this pane's header carries the app's title instead
-        // (FeedListToolbarRow). No HorizontalDivider above it: the ui-guidelines skill's divider
-        // policy reserves that for semantic section breaks within the scrolling list, not for a
-        // fixed-row/scroll-area boundary, which the shared surfaceContainerLow tone already reads
-        // clearly enough on its own (see FeedListToolbarRow just above, which gets the same
-        // treatment at the opposite edge). The notification row is always there, empty or not, so
-        // the footer never changes height under the list; its count (SidebarRow draws it only when
-        // > 0) is what says something has arrived.
-        val showNotificationRow = notifVm != null
-        if (showNotificationRow || !hasNativeAppMenu) {
-            // The bottom inset clears the navigation bar on Android's edge-to-edge layout (see
-            // HomeScreen's Scaffold) — this footer, not the scrolling list above it, is the pane's
-            // last element, so the inset lives here instead of the list's contentPadding. Zero on
-            // desktop (WindowInsets.safeDrawing).
-            Column(Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom))) {
-                if (showNotificationRow) {
-                    NotificationCenterRow(
-                        notifVm = notifVm,
-                        count = notificationCount,
-                        onNavigated = onNotificationNavigated,
-                        isTouchPrimary = isTouchPrimary,
-                    )
-                }
-                if (!hasNativeAppMenu) {
-                    SidebarRow(
-                        icon = { KeryxIcon(KeryxIcons.Tune, null) },
-                        label = stringResource(Res.string.menu_settings),
-                        count = null,
-                        selected = false,
-                        focused = false,
-                        onClick = { menuController.send(MenuCommand.OpenSettings) },
-                        isTouchPrimary = isTouchPrimary,
-                    )
-                }
-            }
-        }
+        FeedListFooter(
+            notifVm = notifVm,
+            notificationCount = notificationCount,
+            onNotificationNavigated = onNotificationNavigated,
+            hasNativeAppMenu = hasNativeAppMenu,
+            onSettingsClick = { menuController.send(MenuCommand.OpenSettings) },
+            isTouchPrimary = isTouchPrimary,
+        )
     }
     }
 
@@ -862,6 +818,94 @@ internal fun FeedListPane(
         creatingTagForFeedId = creatingTagForFeedId,
         onCreatingTagForFeedIdChange = { creatingTagForFeedId = it },
     )
+}
+
+/**
+ * The feed list's own search field (shown only at `PaneLayout.Triple` — see [FeedListPane]'s call
+ * site). Stateless: [focusRequester] and the focus flag reported through [onFocusedChange] are owned
+ * by [FeedListPane], which consumes the search-focus latch and reports text-entry focus upward.
+ */
+@Composable
+private fun FeedListSearchField(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    focusRequester: FocusRequester,
+    onFocusedChange: (Boolean) -> Unit,
+) {
+    KeryxTextField(
+        value = query,
+        onValueChange = onQueryChange,
+        singleLine = true,
+        placeholder = stringResource(Res.string.home_search_placeholder),
+        leadingIcon = { KeryxIcon(KeryxIcons.Search, contentDescription = null) },
+        trailingIcon = {
+            if (query.isNotEmpty()) {
+                val clearLabel = stringResource(Res.string.home_search_clear)
+                TooltipIconButton(tooltip = clearLabel, size = 32.dp, onClick = { onQueryChange("") }) {
+                    KeryxIcon(KeryxIcons.CloseFilled, contentDescription = clearLabel)
+                }
+            }
+        },
+        modifier = Modifier.fillMaxWidth()
+            .padding(horizontal = 8.dp, vertical = 4.dp)
+            .focusRequester(focusRequester)
+            .onFocusChanged { onFocusedChange(it.isFocused) },
+    )
+}
+
+/**
+ * The feed list's fixed footer, below its scrolling drag-host `Box`: the notification center's entry
+ * point ([NotificationCenterRow], left out when [notifVm] is `null` — tests only) and, when
+ * [hasNativeAppMenu] is `false`, the in-pane settings row that sends [onSettingsClick]. Renders
+ * nothing when neither row applies.
+ */
+@Composable
+private fun FeedListFooter(
+    notifVm: NotificationCenterViewModel?,
+    notificationCount: Int,
+    onNotificationNavigated: () -> Unit,
+    hasNativeAppMenu: Boolean,
+    onSettingsClick: () -> Unit,
+    isTouchPrimary: Boolean,
+) {
+    // The fixed footer: the notification center's entry point and, on a platform with no
+    // native application menu bar (Android — see hasNativeAppMenu's own KDoc), the in-pane entry
+    // point to Settings; this pane's header carries the app's title instead
+    // (FeedListToolbarRow). No HorizontalDivider above it: the ui-guidelines skill's divider
+    // policy reserves that for semantic section breaks within the scrolling list, not for a
+    // fixed-row/scroll-area boundary, which the shared surfaceContainerLow tone already reads
+    // clearly enough on its own (see FeedListToolbarRow, which gets the same treatment at the
+    // opposite edge). The notification row is always there, empty or not, so the footer never
+    // changes height under the list; its count (SidebarRow draws it only when > 0) is what says
+    // something has arrived.
+    val showNotificationRow = notifVm != null
+    if (showNotificationRow || !hasNativeAppMenu) {
+        // The bottom inset clears the navigation bar on Android's edge-to-edge layout (see
+        // HomeScreen's Scaffold) — this footer, not the scrolling list above it, is the pane's
+        // last element, so the inset lives here instead of the list's contentPadding. Zero on
+        // desktop (WindowInsets.safeDrawing).
+        Column(Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom))) {
+            if (notifVm != null) {
+                NotificationCenterRow(
+                    notifVm = notifVm,
+                    count = notificationCount,
+                    onNavigated = onNotificationNavigated,
+                    isTouchPrimary = isTouchPrimary,
+                )
+            }
+            if (!hasNativeAppMenu) {
+                SidebarRow(
+                    icon = { KeryxIcon(KeryxIcons.Tune, null) },
+                    label = stringResource(Res.string.menu_settings),
+                    count = null,
+                    selected = false,
+                    focused = false,
+                    onClick = onSettingsClick,
+                    isTouchPrimary = isTouchPrimary,
+                )
+            }
+        }
+    }
 }
 
 /**

@@ -13,11 +13,12 @@ import io.ktor.http.isSuccess
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import works.merc.keryx.app.core.CloudStorageException
 import works.merc.keryx.app.core.MAX_SYNC_DB_SIZE_BYTES
 import works.merc.keryx.app.core.Result
+
+private const val PROVIDER_NAME = "Dropbox"
 
 /**
  * [CloudStorage] backed by the Dropbox v2 REST API. [accessTokenProvider]
@@ -39,10 +40,9 @@ class DropboxStorage(
      * @return A successful result when authentication succeeds, or a mapped storage error otherwise.
      */
     override suspend fun authenticate(): Result<Unit> = withToken { token ->
-        val response = client.post("$apiBase/2/users/get_current_account") {
+        client.post("$apiBase/2/users/get_current_account") {
             bearerAuth(token)
-        }
-        if (response.status.isSuccess()) Result.Ok(Unit) else mapError(response.status.value, response.bodyAsText())
+        }.okOr(PROVIDER_NAME)
     }
 
     /**
@@ -62,8 +62,7 @@ class DropboxStorage(
         }
         val resultHeader = response.headers["dropbox-api-result"]
             ?: return@withToken Result.Err(CloudStorageException("Missing Dropbox-API-Result header"))
-        val rev = (json.parseToJsonElement(resultHeader) as? JsonObject)
-            ?.get("rev")?.jsonPrimitive?.content
+        val rev = json.topLevelString(resultHeader, "rev")
             ?: return@withToken Result.Err(CloudStorageException("Missing rev in metadata"))
         // Read the rev before the body: the metadata rides in a header, so a failure to parse it
         // costs nothing, whereas streaming first would write a file we then throw away.
@@ -137,7 +136,7 @@ class DropboxStorage(
      * @param conflictStatus The HTTP status Dropbox uses to report a lost rev guard.
      */
     private suspend fun HttpResponse.metaOrConflictOr(conflictStatus: Int): Result<CloudFileMeta> =
-        writtenMetaOrConflictOr(json, "Dropbox", "rev", conflictStatus)
+        writtenMetaOrConflictOr(json, PROVIDER_NAME, "rev", conflictStatus)
 
     /**
      * Fetches a file's revision without its contents.
@@ -146,11 +145,7 @@ class DropboxStorage(
      * @return The file's metadata, `null` if the path is not found, or an error result for other failures.
      */
     override suspend fun metadata(path: String): Result<CloudFileMeta?> = withToken { token ->
-        val response = client.post("$apiBase/2/files/get_metadata") {
-            bearerAuth(token)
-            contentType(ContentType.Application.Json)
-            setBody(buildJsonObject { put("path", path) }.toString())
-        }
+        val response = postJson(token, "$apiBase/2/files/get_metadata", buildJsonObject { put("path", path) })
         when {
             response.status.isSuccess() -> {
                 // `rev` is what an update-mode upload is guarded on, and what the caller compares
@@ -160,10 +155,7 @@ class DropboxStorage(
                     ?: return@withToken Result.Err(CloudStorageException("Missing rev in metadata"))
                 Result.Ok(CloudFileMeta(rev))
             }
-            response.status.value == 409 -> {
-                val body = response.bodyAsText()
-                if (body.contains("path/not_found")) Result.Ok(null) else mapError(409, body)
-            }
+            response.status.value == 409 -> response.okIfConflictBodyContains("path/not_found", absent = null)
             else -> mapError(response.status.value, response.bodyAsText())
         }
     }
@@ -175,19 +167,12 @@ class DropboxStorage(
      * @return A result indicating whether the deletion succeeded.
      */
     override suspend fun delete(path: String): Result<Unit> = withToken { token ->
-        val response = client.post("$apiBase/2/files/delete_v2") {
-            bearerAuth(token)
-            contentType(ContentType.Application.Json)
-            setBody(buildJsonObject { put("path", path) }.toString())
-        }
+        val response = postJson(token, "$apiBase/2/files/delete_v2", buildJsonObject { put("path", path) })
         when {
             response.status.isSuccess() -> Result.Ok(Unit)
             // delete_v2 reports an already-absent path as 409 with a "not_found" error summary.
             // Treat that as success so delete is idempotent.
-            response.status.value == 409 -> {
-                val body = response.bodyAsText()
-                if (body.contains("not_found")) Result.Ok(Unit) else mapError(409, body)
-            }
+            response.status.value == 409 -> response.okIfConflictBodyContains("not_found", absent = Unit)
             else -> mapError(response.status.value, response.bodyAsText())
         }
     }
@@ -203,28 +188,40 @@ class DropboxStorage(
     override suspend fun rename(from: String, to: String): Result<Unit> = withToken { token ->
         // move_v2 with autorename=false is a plain rename: it never silently creates "(1)"
         // copies, so an occupied destination surfaces as a conflict instead of being papered over.
-        val response = client.post("$apiBase/2/files/move_v2") {
-            bearerAuth(token)
-            contentType(ContentType.Application.Json)
-            setBody(
-                buildJsonObject {
-                    put("from_path", from)
-                    put("to_path", to)
-                    put("autorename", false)
-                }.toString(),
-            )
-        }
+        val response = postJson(
+            token,
+            "$apiBase/2/files/move_v2",
+            buildJsonObject {
+                put("from_path", from)
+                put("to_path", to)
+                put("autorename", false)
+            },
+        )
         when {
             response.status.isSuccess() -> Result.Ok(Unit)
-            response.status.value == 409 -> {
-                val body = response.bodyAsText()
-                // "from_lookup/not_found" is the source being absent — idempotent success. Matching
-                // the tagged path (rather than a bare "not_found") keeps a "to/conflict" or
-                // "to/malformed_path" error from being swallowed as success.
-                if (body.contains("from_lookup/not_found")) Result.Ok(Unit) else mapError(409, body)
-            }
+            // "from_lookup/not_found" is the source being absent — idempotent success. Matching
+            // the tagged path (rather than a bare "not_found") keeps a "to/conflict" or
+            // "to/malformed_path" error from being swallowed as success.
+            response.status.value == 409 -> response.okIfConflictBodyContains("from_lookup/not_found", absent = Unit)
             else -> mapError(response.status.value, response.bodyAsText())
         }
+    }
+
+    /** POSTs [body] as JSON to the RPC endpoint [url], authorized with [token]. */
+    private suspend fun postJson(token: String, url: String, body: JsonObject): HttpResponse =
+        client.post(url) {
+            bearerAuth(token)
+            contentType(ContentType.Application.Json)
+            setBody(body.toString())
+        }
+
+    /**
+     * Maps a 409 response: [absent] when its error body contains [notFoundMarker] (the path is
+     * already absent, which the caller treats as done), otherwise a mapped storage error.
+     */
+    private suspend fun <T> HttpResponse.okIfConflictBodyContains(notFoundMarker: String, absent: T): Result<T> {
+        val body = bodyAsText()
+        return if (body.contains(notFoundMarker)) Result.Ok(absent) else mapError(409, body)
     }
 
     /**
@@ -234,7 +231,7 @@ class DropboxStorage(
      * @return The result produced by the operation.
      */
     private suspend fun <T> withToken(block: suspend (String) -> Result<T>): Result<T> =
-        withCloudToken(accessTokenProvider, "Dropbox", block)
+        withCloudToken(accessTokenProvider, PROVIDER_NAME, block)
 
     /**
      * Converts a Dropbox API failure response into a storage error result.
@@ -243,5 +240,5 @@ class DropboxStorage(
      * @param body The response body containing error details.
      * @return An error result representing the Dropbox failure.
      */
-    private fun mapError(status: Int, body: String): Result.Err = cloudStorageError("Dropbox", status, body)
+    private fun mapError(status: Int, body: String): Result.Err = cloudStorageError(PROVIDER_NAME, status, body)
 }

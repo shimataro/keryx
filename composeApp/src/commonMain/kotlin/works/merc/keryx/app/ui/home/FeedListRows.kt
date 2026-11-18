@@ -1,7 +1,6 @@
 package works.merc.keryx.app.ui.home
 
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -28,7 +27,6 @@ import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import org.jetbrains.compose.resources.stringResource
@@ -246,19 +244,14 @@ internal fun FolderGroupHeader(
                 Spacer(Modifier.width(8.dp))
                 // Same weighted slot either way, so the chevron/folder icon on the left and the
                 // count badge on the right never move when editing starts or ends.
-                if (editingName) {
-                    Box(Modifier.weight(1f)) {
-                        InlineRenameField(
-                            value = folder.name,
-                            onCommit = onRenameCommit,
-                            onCancel = onRenameCancel,
-                            blockingError = nameError,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                    }
-                } else {
-                    Text(folder.name, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
+                EditableRowName(
+                    editing = editingName,
+                    label = folder.name,
+                    editValue = folder.name,
+                    onCommit = onRenameCommit,
+                    onCancel = onRenameCancel,
+                    blockingError = nameError,
+                )
             }
         }
         if (count > 0) CountBadge(count, selected, focused, isFeedDragHighlight, isDragSource)
@@ -495,27 +488,21 @@ internal fun FeedRow(
         // count badge on the right never move when editing starts or ends. A blank value is
         // meaningful here (it clears `custom_title`), so it commits rather than being rejected,
         // and the placeholder shows the feed's own title it would fall back to.
-        if (editingName) {
-            Box(Modifier.weight(1f)) {
-                InlineRenameField(
-                    value = feed.custom_title ?: feed.title,
-                    onCommit = onRenameCommit,
-                    onCancel = onRenameCancel,
-                    placeholder = feed.title,
-                    allowBlank = true,
-                    modifier = Modifier.fillMaxWidth(),
+        EditableRowName(
+            editing = editingName,
+            label = feed.displayTitle(),
+            editValue = feed.custom_title ?: feed.title,
+            onCommit = onRenameCommit,
+            onCancel = onRenameCancel,
+            placeholder = feed.title,
+            allowBlank = true,
+            wrapLabel = { label ->
+                CompositionLocalProvider(
+                    LocalContentColor provides (selectedContentColor ?: LocalContentColor.current),
+                    content = label,
                 )
-            }
-        } else {
-            CompositionLocalProvider(LocalContentColor provides (selectedContentColor ?: LocalContentColor.current)) {
-                Text(
-                    feed.displayTitle(),
-                    Modifier.weight(1f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
+            },
+        )
         // A 410-Gone feed deliberately keeps error_count at 0 (it is permanent, not a retry
         // candidate), so it is recognized by its last_error marker instead — otherwise a
         // disappeared feed would look completely normal here once its notification is dismissed.
@@ -562,7 +549,7 @@ private fun FeedErrorIndicator(gone: Boolean) {
  * Whether the drop boundary a drag is hovering lands inside a feed group — the feeds of folder
  * [folderId] (`null` = the no-folder group), whose ids are [feedIds] — so that group's header lights up.
  */
-private fun DropBoundary?.highlightsFeedGroup(folderId: String?, feedIds: Set<String>): Boolean = when (this) {
+internal fun DropBoundary?.highlightsFeedGroup(folderId: String?, feedIds: Set<String>): Boolean = when (this) {
     is DropBoundary.BeforeFeed -> feedId in feedIds
     is DropBoundary.AppendFeeds -> this.folderId == folderId
     is DropBoundary.BeforeFolder, DropBoundary.AppendFolders, null -> false

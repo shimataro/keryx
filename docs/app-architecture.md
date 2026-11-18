@@ -123,7 +123,7 @@ actuals — see "Apple targets in `:shared`" below.
     AppInfo (just reads the shared generated BuildConfig), FileSystemExtras, ZipExtractor (in-app
     update — see "In-App Update" below), di/CloudPlatformModule.kt (the shared cloud-provider DI
     wiring both platformModules call — cloudSessionSingles, dropboxProvider, oneDriveProvider)
-  desktopMain/kotlin/…/  main.kt + StartupTasks.kt (runStartupTasks/handleOpenedOpmlFile — the desktop-only orchestration; the actual maintenance work, and the periodic loop, both live in commonMain's StartupMaintenanceTasks/BackgroundRefreshLoop) + actual implementations of the `platform/` expects not covered by jvmCommonMain (e.g. AppDirs, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, PlatformModule, InstallLocation, PlatformScrollbar, BackHandler, ClipboardEntries, CursorIcons, NotificationPermission, NativeMenu, SelfUpdateCheck, WindowChrome, and the WebView-hosting set NativeWebViewSupport/NativeWebViewScrollbar/NativeWebViewAccessibility/NativeWebViewVisibility/NativeWebViewScroll/ReaderWebViewFactory — the last two no-ops / the library's default factory there, see "Article Reader" below) + LoopbackRedirectTransport, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage implementation (KeyringTokenStorage/SecurityCliTokenStorage/LibSecretTokenStorage — all three take their outcome-composition logic from commonMain's SecretStoreTokenStorage; SecurityCliTokenStorage does so through its SecurityKeychainStore backend, wrapped in an in-memory cache), DesktopOs (isMacOs/isWindows/isLinux/isSnap/isTouchPrimary=false/hasNativeAppMenu=true/hasSystemTray=true), DesktopLookAndFeel (Swing L&F: FlatLaf on Linux, plus text-antialiasing hint normalization — missing hint, VALUE_TEXT_ANTIALIAS_DEFAULT, and VALUE_TEXT_ANTIALIAS_OFF are resolved to greyscale antialiasing so Swing surfaces do not look jagged next to the Compose-rendered UI), plus package-root, non-`expect`-backed desktop-only classes: IconBadge (Dock/taskbar/window-icon unread digit badge — see external-spec.md §7), MacActivationPolicy (raw `objc_msgSend` calls — see "What a real fix would need" under "macOS: clicking a notification banner does not restore a tray-hidden window" in known-issues.md), WindowStatePersistence, UpdateMenuActions (onUpdateMenuItemClicked — the click handler behind the tray's and the menu bar's update entry), DesktopShell (window raise/focus, Dock icon, and `java.awt.Desktop` handler helpers for main.kt)
+  desktopMain/kotlin/…/  main.kt (with its startup steps in DesktopStartup, LaunchArgDispatcher, ActivationRequests and MainWindowSupport) + StartupTasks.kt (runStartupTasks/handleOpenedOpmlFile — the desktop-only orchestration; the actual maintenance work, and the periodic loop, both live in commonMain's StartupMaintenanceTasks/BackgroundRefreshLoop) + actual implementations of the `platform/` expects not covered by jvmCommonMain (e.g. AppDirs, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, PlatformModule, InstallLocation, PlatformScrollbar, BackHandler, ClipboardEntries, CursorIcons, NotificationPermission, NativeMenu, SelfUpdateCheck, WindowChrome, and the WebView-hosting set NativeWebViewSupport/NativeWebViewScrollbar/NativeWebViewAccessibility/NativeWebViewVisibility/NativeWebViewScroll/ReaderWebViewFactory — the last two no-ops / the library's default factory there, see "Article Reader" below) + LoopbackRedirectTransport, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage implementation (KeyringTokenStorage/SecurityCliTokenStorage/LibSecretTokenStorage — all three take their outcome-composition logic from commonMain's SecretStoreTokenStorage; SecurityCliTokenStorage does so through its SecurityKeychainStore backend, wrapped in an in-memory cache), DesktopOs (isMacOs/isWindows/isLinux/isSnap/isTouchPrimary=false/hasNativeAppMenu=true/hasSystemTray=true), DesktopLookAndFeel (Swing L&F: FlatLaf on Linux, plus text-antialiasing hint normalization — missing hint, VALUE_TEXT_ANTIALIAS_DEFAULT, and VALUE_TEXT_ANTIALIAS_OFF are resolved to greyscale antialiasing so Swing surfaces do not look jagged next to the Compose-rendered UI), plus package-root, non-`expect`-backed desktop-only classes: IconBadge (Dock/taskbar/window-icon unread digit badge — see external-spec.md §7), MacActivationPolicy (raw `objc_msgSend` calls — see "What a real fix would need" under "macOS: clicking a notification banner does not restore a tray-hidden window" in known-issues.md), WindowStatePersistence, UpdateMenuActions (onUpdateMenuItemClicked — the click handler behind the tray's and the menu bar's update entry), DesktopShell (window raise/focus, Dock icon, and `java.awt.Desktop` handler helpers for main.kt)
     tray/      KeryxTray (platform branch), MacTray, LinuxTray, WindowsTray + the
                StatusNotifierItem/dbusmenu D-Bus objects; TrayActionPolicy (what a tray icon/menu
                click and the update entry do — pure), TrayMenuModel (the tray menu's pure,
@@ -522,7 +522,7 @@ CloudConnectFlow, `OsNotificationSink`, and `UpdateInstaller`; Android's registe
 equivalents (OkHttp-backed HttpClient, `KeystoreTokenStorage`, a `CloudSession` carrying Dropbox, OneDrive and
 Nextcloud plus — only where Play services is available — Google Drive, etc. — see "Android" sections above).
 Every platform's `platformModule` hands `cloudSessionSingles` its own `LoginPageLauncher` for Nextcloud: desktop's
-opens the browser and brings the main window back to the front afterwards (`main.kt`'s `activationRequests`),
+opens the browser and brings the main window back to the front afterwards (`activationRequests`, collected in `main.kt`),
 Android's opens a Custom Tab and brings the app's task back over it (`bringAppTaskToFront`), and the Apple app's
 wraps the `openLoginPage` / `closeLoginPage` closures Swift passes to `KeryxSdk.start` (an
 `ASWebAuthenticationSession` with no callback scheme).
@@ -981,7 +981,7 @@ row), and the same `awaitEachGesture` loop cancels the long-press once the point
 `viewConfiguration.touchSlop`, so a `LazyColumn` scroll that starts as a slow drag on a row cannot
 be mistaken for a long-press-and-hold.
 
-`platform/NativeMenu.desktop.kt`'s `defaultPopupHandle` backs the same call sites on desktop with
+`platform/NativePopupHandles.desktop.kt`'s `defaultPopupHandle` backs the same call sites on desktop with
 one of two implementations, triggered by a right-click instead of a long-press:
 
 | Platform | Implementation | Why |
@@ -1002,7 +1002,7 @@ takes `installLookAndFeel`'s system-L&F branch instead.
 ### Native file dialogs (platform branch)
 
 `platform/FilePicker.desktop.kt`'s `defaultFilePickerBackend` picks one of two implementations, the
-same Linux-Swing-vs-AWT split as `NativeMenu.desktop.kt`'s `defaultPopupHandle` — except that the
+same Linux-Swing-vs-AWT split as `NativePopupHandles.desktop.kt`'s `defaultPopupHandle` — except that the
 file dialog keeps Windows on the AWT side, because `java.awt.FileDialog` there is a real
 `GetOpenFileName` panel with none of the menu peer's scaling problems:
 
@@ -1278,7 +1278,7 @@ where the "+" button that would otherwise fix that lives inside a drawer closed 
 **Search is orthogonal to `ArticleFilter`, not a variant of it.** `core/ArticleFilter.kt` only has
 `All`/`Starred`/`Feed`/`Tag`/`Folder` — there is no `Search` case. The query
 (`HomeViewModel.searchQuery`) narrows whichever filter is already selected instead of displacing it:
-`HomeViewModel.searchActive` (`_searchBarVisible && searchQuery.value.isNotEmpty()`) is the single
+`HomeViewModel.searchActive` (`searchBarVisible.value && searchQuery.value.isNotEmpty()`) is the single
 derived flag that says whether the article list is currently showing search results
 (`HomeViewModel.searchResults`, itself scoped to the current filter — see `FtsSearch.articleScopeSql`
 below) or the filter's own list (`HomeViewModel.articles`); `ArticleListPane` reads it to pick which
@@ -1289,7 +1289,7 @@ entry point: once the field is open — always, at `PaneLayout.Triple` — `sear
 query, so a tap, a keyboard cursor landing on the field, and arrow-key navigation all start a search
 the same way.
 
-**`_searchBarVisible` says whether the search field is open**, which matters only at narrow layouts:
+**`HomeViewModel.searchBarVisible` says whether the search field is open**, which matters only at narrow layouts:
 at `PaneLayout.Triple`, `FeedListPane`'s own query field is permanent, so `HomeScreen`'s own
 `LaunchedEffect(layout)` keeps it `true` there the whole time; on dropping to a narrow layout the same
 effect keeps it open only while the query has text, and otherwise it is toggled by `ArticleListTopBar`'s

@@ -10,6 +10,7 @@ import works.merc.keryx.app.activationRequests
 import works.merc.keryx.app.core.CloudStorageType
 import works.merc.keryx.app.data.cloud.CloudAuthManager
 import works.merc.keryx.app.data.cloud.FileTokenStorage
+import works.merc.keryx.app.data.cloud.fallbackTokenFileName
 import works.merc.keryx.app.data.cloud.GoogleDriveAuthManager
 import works.merc.keryx.app.data.cloud.GoogleDriveStorage
 import works.merc.keryx.app.data.cloud.KeyringTokenStorage
@@ -59,7 +60,7 @@ import works.merc.keryx.app.resources.oauth_loopback_success
  * depending on the real OS/environment this test JVM happens to run under.
  */
 internal fun providerTokenStorage(type: CloudStorageType, macOs: Boolean, snap: Boolean): TokenStorage {
-    val fallback = FileTokenStorage(fileName = ".${type.id}_tokens.json")
+    val fallback = FileTokenStorage(fileName = fallbackTokenFileName(type))
     return when {
         macOs -> SecurityCliTokenStorage(fallback = fallback, account = type.id)
         snap -> LibSecretTokenStorage(fallback = fallback, account = type.id)
@@ -70,7 +71,7 @@ internal fun providerTokenStorage(type: CloudStorageType, macOs: Boolean, snap: 
 /**
  * Desktop's [LoginPageLauncher] for Nextcloud's Login Flow v2: the sign-in page opens in the default
  * browser, and since a browser tab cannot be closed from here, the end of the sign-in brings the main
- * window back to the front instead (through `main.kt`'s [activationRequests], like the tray's "Show").
+ * window back to the front instead (through [activationRequests], like the tray's "Show").
  */
 internal val desktopLoginPageLauncher: LoginPageLauncher =
     BrowserLoginPageLauncher(returnToApp = { activationRequests.tryEmit(Unit) })
