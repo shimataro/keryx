@@ -5,6 +5,7 @@ import org.freedesktop.dbus.connections.impl.DBusConnectionBuilder
 import org.freedesktop.dbus.interfaces.DBus
 import works.merc.keryx.app.core.Log
 import java.util.concurrent.CompletableFuture
+import java.util.concurrent.Executor
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -32,6 +33,7 @@ private val dbusSetupExecutor: ExecutorService =
  *
  * @param timeoutMessage Message describing the fallback action when the timeout expires.
  * @param onLateClose Handles a connection that completes after the timeout.
+ * @param executor Runs [open]; a test supplies its own to observe when the late result has been handled.
  * @param open Creates the connection.
  * @return The opened connection, or `null` if setup fails or exceeds the timeout.
  */
@@ -41,13 +43,14 @@ internal fun <T> openDBusConnectionWithTimeout(
     timeout: Duration,
     timeoutMessage: String,
     onLateClose: (T) -> Unit,
+    executor: Executor = dbusSetupExecutor,
     open: () -> T?,
 ): T? {
     val pending = CompletableFuture.supplyAsync({
         runCatching { open() }
             .onFailure { Log.warn(logTag, "Could not set up the $component", it) }
             .getOrNull()
-    }, dbusSetupExecutor)
+    }, executor)
     return try {
         pending.get(timeout.inWholeMilliseconds, TimeUnit.MILLISECONDS)
     } catch (_: TimeoutException) {

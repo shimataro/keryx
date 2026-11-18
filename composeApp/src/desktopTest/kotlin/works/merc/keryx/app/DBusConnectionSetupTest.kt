@@ -3,6 +3,8 @@ package works.merc.keryx.app
 import works.merc.keryx.app.core.Log
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executor
+import java.util.concurrent.TimeUnit
 import java.util.logging.Handler
 import java.util.logging.LogRecord
 import java.util.logging.Logger
@@ -89,20 +91,27 @@ class DBusConnectionSetupTest {
     @Test
     fun `a late null connection is not passed to onLateClose`() {
         val release = CountDownLatch(1)
-        val done = CountDownLatch(1)
+        val handled = CountDownLatch(1)
         val lateClosed = CopyOnWriteArrayList<String>()
+        // The task completes the future and runs its (non-async) late-result handler before it
+        // returns, so `handled` opens only once that handler has seen the null.
+        val executor = Executor { task ->
+            Thread {
+                try {
+                    task.run()
+                } finally {
+                    handled.countDown()
+                }
+            }.start()
+        }
 
-        val result = openDBusConnectionWithTimeout<String>("Tag", "menu", 50.milliseconds, "fallback", { lateClosed += it }) {
-            try {
-                release.await()
-                null
-            } finally {
-                done.countDown()
-            }
+        val result = openDBusConnectionWithTimeout<String>("Tag", "menu", 50.milliseconds, "fallback", { lateClosed += it }, executor) {
+            release.await()
+            null
         }
         release.countDown()
-        done.await()
 
+        assertTrue(handled.await(5, TimeUnit.SECONDS), "the late result was never handled")
         assertNull(result)
         assertTrue(lateClosed.isEmpty())
     }
