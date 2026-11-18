@@ -11,7 +11,10 @@ import UIKit
 /// per-app text size) is the one control. macOS has no Dynamic Type, so its reader keeps
 /// `LocalSettings.fontSizeScale` instead (see `ReaderPageView.readerFontScale`).
 enum ReaderFontScale {
-    /// The body style's point size at the default Dynamic Type size (`.large`).
+    /// The reference size scaled to get the ratio. `UIFontMetrics` treats any value it scales as the
+    /// value at the default Dynamic Type size (`.large`), so the ratio is 1.0 there whatever this is,
+    /// and it need not track the system's body size. It only affects rounding at the other sizes;
+    /// the body style's own default (17 pt) makes the reader grow exactly as the app's body text does.
     private static let baseBodySize: CGFloat = 17
 
     /// The scale for `size`: 1.0 at the default size, below it for smaller sizes and above it for
