@@ -1622,34 +1622,12 @@ class HomeViewModel(
         val flags = withContext(dbWriteDispatcher) { articleRepository.aliveArticleFlags(ids) }
         if (readStateSnapshot.isNotEmpty()) {
             _pinnedReadStates.update { pinned ->
-                // A pin added or replaced since the snapshot is kept: `flags` was read before the write
-                // that justified it was enqueued, so it has no verdict on it (identity, not equality — a
-                // re-pin with the same value is still a write `flags` knows nothing about). Otherwise a
-                // pin is dropped once the article's current is_read no longer matches the pinned value
-                // (an external "mark unread"/"mark read", or a soft-delete tombstone), the same rule as
-                // the starred pin below — except the selection's own pin, which while its article is
-                // alive is refreshed to the current value instead: under unread-only a dropped unread
-                // pin read externally would take the open article out of the list (and the pager).
-                val selectedId = currentSelectionId()
-                buildMap {
-                    pinned.forEach { (id, pin) ->
-                        val old = readStateSnapshot[id]
-                        val current = flags[id]
-                        when {
-                            pinReplacedSince(old, pin) || current?.isRead == old?.is_read -> put(id, pin)
-                            id == selectedId && current != null -> put(id, pin.copy(is_read = current.isRead))
-                        }
-                    }
-                }
+                // Read inside the CAS loop, so a retry sees the selection as of that attempt.
+                reconciledReadPins(pinned, readStateSnapshot, flags, currentSelectionId())
             }
         }
         if (unstarredSnapshot.isNotEmpty()) {
-            _pinnedUnstarredArticles.update { pinned ->
-                // Same idea for the starred pin: dropped once the article's current is_starred no
-                // longer matches what was optimistically pinned (deleted, or externally re-starred),
-                // not just once it is deleted.
-                pinned.filterKeys { it !in unstarredSnapshot || flags[it]?.isStarred == pinned.getValue(it).is_starred }
-            }
+            _pinnedUnstarredArticles.update { pinned -> reconciledUnstarredPins(pinned, unstarredSnapshot, flags) }
         }
         // Keeps the detail pane's toolbar (read/star toggle state) from staying stale forever behind
         // an external change, the same way the two pins above do for the list. Body/title are left
