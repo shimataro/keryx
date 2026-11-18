@@ -1,6 +1,5 @@
 package works.merc.keryx.app.ui.common
 
-import androidx.compose.foundation.layout.Box
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Text
@@ -13,12 +12,12 @@ import org.jetbrains.compose.resources.DrawableResource
 @Composable
 internal actual fun KeryxBadgedIcon(icon: DrawableResource, contentDescription: String, count: Int) {
     // The count is in the icon's contentDescription; see the expect's KDoc.
-    BadgedBox(badge = { if (count > 0) Box(Modifier.clearAndSetSemantics {}) { KeryxCountBadge(count) } }) {
+    BadgedBox(badge = { KeryxCountBadge(count, Modifier.clearAndSetSemantics {}) }) {
         KeryxIcon(icon, contentDescription = contentDescription)
     }
 }
 
 @Composable
-internal actual fun KeryxCountBadge(count: Int) {
-    if (count > 0) Badge { Text(count.toString()) }
+internal actual fun KeryxCountBadge(count: Int, modifier: Modifier) {
+    if (count > 0) Badge(modifier) { Text(count.toString()) }
 }

@@ -22,17 +22,15 @@ internal actual fun KeryxBadgedIcon(icon: DrawableResource, contentDescription: 
     Box(contentAlignment = Alignment.TopEnd) {
         KeryxIcon(icon, contentDescription = contentDescription)
         // The count is in the icon's contentDescription; see the expect's KDoc.
-        Box(Modifier.clearAndSetSemantics {}.offset(x = 6.dp, y = (-4).dp)) {
-            KeryxCountBadge(count)
-        }
+        KeryxCountBadge(count, Modifier.clearAndSetSemantics {}.offset(x = 6.dp, y = (-4).dp))
     }
 }
 
 @Composable
-internal actual fun KeryxCountBadge(count: Int) {
+internal actual fun KeryxCountBadge(count: Int, modifier: Modifier) {
     if (count <= 0) return
     Box(
-        Modifier
+        modifier
             .defaultMinSize(minWidth = 16.dp, minHeight = 16.dp)
             .clip(CircleShape)
             .background(MaterialTheme.colorScheme.error, CircleShape),
