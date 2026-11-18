@@ -152,9 +152,7 @@ class GoogleDriveStorage(
     private suspend fun resolveCreateRace(token: String, name: String, created: DriveFile): Result<CloudFileMeta> {
         var rechecked = false
         while (true) {
-            val listResult = listFilesByName(token, name)
-            if (listResult is Result.Err) return listResult
-            val files = (listResult as Result.Ok).value
+            val files = listFilesByName(token, name).valueOrElse { return it }
             val winner = files.minByOrNull { it.id }
             if (winner == null) {
                 return Result.Err(CloudStorageException("Created file disappeared immediately"))
@@ -193,10 +191,7 @@ class GoogleDriveStorage(
      * @return `Result.Ok` when all matching files are deleted or none exist; otherwise, the first deletion or lookup error.
      */
     override suspend fun delete(path: String): Result<Unit> = withToken { token ->
-        val name = fileName(path)
-        val listResult = listFilesByName(token, name)
-        if (listResult is Result.Err) return@withToken listResult
-        val files = (listResult as Result.Ok).value
+        val files = listFilesByName(token, fileName(path)).valueOrElse { return@withToken it }
         deleteAll(token, files)
     }
 
@@ -255,12 +250,9 @@ class GoogleDriveStorage(
     }
 
     override suspend fun metadata(path: String): Result<CloudFileMeta?> = withToken { token ->
-        when (val f = findFile(token, fileName(path))) {
-            is Result.Err -> f
-            // `version` is already fetched by the same name lookup this call has always made (it
-            // is what upload() compares as the rev), so returning it costs no extra request.
-            is Result.Ok -> Result.Ok(f.value?.let { CloudFileMeta(it.version) })
-        }
+        // `version` is already fetched by the same name lookup this call has always made (it
+        // is what upload() compares as the rev), so returning it costs no extra request.
+        findFile(token, fileName(path)).map { file -> file?.let { CloudFileMeta(it.version) } }
     }
 
     /** Lists all app-data files matching [name] (there should be at most one). */
@@ -288,12 +280,8 @@ class GoogleDriveStorage(
     /** Looks up the single app-data file by name; returns null when absent.
      *  When transient duplicates exist (e.g. from a racing create), the
      *  deterministic winner (lowest id) is returned so all callers converge. */
-    private suspend fun findFile(token: String, name: String): Result<DriveFile?> {
-        return when (val listResult = listFilesByName(token, name)) {
-            is Result.Err -> listResult
-            is Result.Ok -> Result.Ok(listResult.value.minByOrNull { it.id })
-        }
-    }
+    private suspend fun findFile(token: String, name: String): Result<DriveFile?> =
+        listFilesByName(token, name).map { files -> files.minByOrNull { it.id } }
 
     /** Creates the file in appDataFolder via a multipart/related upload (metadata + media). Returns the created file's id and version. */
     private suspend fun createFile(token: String, name: String, sourcePath: String): Result<DriveFile> {
