@@ -51,7 +51,9 @@
 プロパティーの値は[local.properties.example](../local.properties.example)を参照。
 ビルド時にはこのファイルを `local.properties` にコピーして編集すること。
 
-APIキーが指定されていないクラウドサービスは連携機能が表示されず、どのサービスにも指定されなければ（設定ダイアログのタブなどに）連携機能自体が表れない。
+APIキーが指定されていないクラウドサービスは連携機能が表示されない。ただし Nextcloud は例外で、キーもビルド設定も
+一切不要（利用者が自分のサーバーを指定してそこでサインインする）なので、F-Droid 版を含むすべてのビルドで常に表示され、
+そのためクラウド同期の機能も常に表れる。
 **連携できるクラウドストレージは同時に1つのみ**であり、複数のストレージに分散保存はできない。
 
 `shared/build.gradle.kts` の Gradle カスタムタスク（`generateBuildConfig`、desktop 専用の Google Drive 認証情報向けの `generateDesktopBuildConfig`、および Apple 版自身の secret 不要な Google Drive クライアント ID 向けの `generateAppleBuildConfig`——後述の「Apple（macOS / iOS）」参照）で実現している。
@@ -232,6 +234,7 @@ SwiftUI アプリは Xcode の String Catalog でローカライズする。こ�
 ```bash
 ./gradlew :composeApp:generateStringCatalog
 # -> composeApp/build/generated/stringCatalog/Localizable.xcstrings
+# -> composeApp/build/generated/stringCatalog/InfoPlist.xcstrings
 ```
 
 生成処理は Android リソースのエスケープ（`\n`、`\'` など）を解決し、位置指定のプレースホルダを Apple 形式に変換し
@@ -239,10 +242,18 @@ SwiftUI アプリは Xcode の String Catalog でローカライズする。こ�
 編集もコミットもしない——変更は `strings.xml` に対して行う。`StringCatalogParityTest`（`desktopTest` で実行され、その前に
 カタログが生成される）は、カタログとリソースのキー・複数形・プレースホルダが食い違うと失敗する。
 
+Info.plist の利用目的の説明文も同じ方法で生成する。`strings.xml` の `apple_infoplist_*` キー（現在は
+`apple_infoplist_local_network_usage`。家庭内の Nextcloud などローカルネットワーク上のサーバーにアプリが初めて接続するときに、
+iOS と macOS 15 以降が表示するローカルネットワーク利用の許可ダイアログの説明文）は、`Localizable.xcstrings` ではなく
+`InfoPlist.xcstrings` に、対応する Info.plist のキー（`NSLocalNetworkUsageDescription`）で書き出される。対応付けは
+`generateStringCatalog` の `infoPlistKeys` が持ち、対応付けのない `apple_infoplist_*` キーがあるとビルドが失敗する。
+`project.yml` の `info.properties` には英語の文言を Info.plist の既定値として置き、`StringCatalogParityTest` がそれと
+`strings.xml` の一致を確かめる。
+
 `appleApp/project.yml` の `sources:` は生成済みファイル
-（`../composeApp/build/generated/stringCatalog/Localizable.xcstrings`）を直接参照するので、
+（`../composeApp/build/generated/stringCatalog/Localizable.xcstrings` と、その隣の `InfoPlist.xcstrings`）を直接参照するので、
 `xcodegen generate` は `build-shared.sh` の prebuild ステップが最後に書き出した内容をそのまま
-取り込む——このファイルは最初の `xcodegen generate` より前に一度存在してさえいればよい。
+取り込む——これらのファイルは最初の `xcodegen generate` より前に一度存在してさえいればよい。
 
 **Swift の
 呼び出し側は、通常の `Text("Some Label")` のように英語のリテラル文字列をキーとして使うことはない**：
@@ -679,7 +690,7 @@ JUL のルートロガーに自前の formatter/handler を仕込んでいる。
   **Google Play services を一切含まない** ——
   F-Droid の掲載ポリシーが禁止しているため。Play services を必要とするもの（Android の Google Drive）は
   すべて `:androidGms` モジュールにあり、これに依存するのは `github` と `play` だけ。したがって
-  `fdroid` は Google Drive を提供しない（Dropbox・OneDrive・ローカルのみは通常どおり使える）—— Play
+  `fdroid` は Google Drive を提供しない（Dropbox・OneDrive・Nextcloud・ローカルのみは通常どおり使える）—— Play
   services の無い端末と同じ状態になる。この flavor のマニフェスト
   （`androidApp/src/fdroid/AndroidManifest.xml`）は、`works.merc.keryx.SELF_UPDATE_CHECK` の
   meta-data を `false` にして、どのインストーラーが APK を届けたかに関係なくアプリ内アップデート確認を

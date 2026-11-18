@@ -4,6 +4,8 @@ import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.MockRequestHandler
 import io.ktor.client.engine.mock.respond
+import io.ktor.client.request.HttpRequestData
+import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import kotlinx.coroutines.CompletableDeferred
@@ -29,7 +31,9 @@ import works.merc.keryx.app.data.cloud.DropboxAuthManager
 import works.merc.keryx.app.data.cloud.DropboxStorage
 import works.merc.keryx.app.data.cloud.OAuthTokens
 import works.merc.keryx.app.data.cloud.TokenSaveOutcome
+import works.merc.keryx.app.data.cloud.nextcloud.NextcloudStorage
 import works.merc.keryx.app.data.cloud.oauthAccessToken
+import works.merc.keryx.app.di.nextcloudProvider
 import works.merc.keryx.app.singleProviderCloudSession
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -797,5 +801,70 @@ class CloudSessionTest {
 
         assertNull(assertNotNull(supplier).invoke())
         assertEquals(0, httpCalls)
+    }
+
+    /** A launcher that is never expected to run here: no test below connects. */
+    private object UnusedLoginPageLauncher : LoginPageLauncher {
+        override fun open(url: String) = error("unexpected open")
+        override fun close() = error("unexpected close")
+    }
+
+    /** A session over the real Nextcloud provider registration ([nextcloudProvider]). */
+    private fun nextcloudSession(storage: FakeTokenStorage, handler: MockRequestHandler): CloudSession = CloudSession(
+        providers = mapOf(CloudStorageType.NEXTCLOUD to nextcloudProvider(client(handler), storage, UnusedLoginPageLauncher)),
+        selectedType = { CloudStorageType.NEXTCLOUD },
+        clock = Clock { 0L },
+        notificationCenter = NotificationCenter(),
+    )
+
+    @Test
+    fun nextcloudIsConfiguredInEveryBuildAndStoresItsAppPassword() {
+        val s = nextcloudSession(FakeTokenStorage(appPassword)) { respond("", HttpStatusCode.OK) }
+        assertEquals(CloudStorageType.NEXTCLOUD, s.connectedType())
+        assertNotNull(s.connectFlow(CloudStorageType.NEXTCLOUD))
+        assertIs<NextcloudStorage>(s.current())
+    }
+
+    @Test
+    fun nextcloudDisconnectDeletesTheAppPasswordOnTheServerThenClears() = runBlocking {
+        val requests = mutableListOf<HttpRequestData>()
+        val storage = FakeTokenStorage(appPassword)
+        val s = nextcloudSession(storage) { request ->
+            requests += request
+            respond("", HttpStatusCode.OK)
+        }
+
+        s.disconnect(CloudStorageType.NEXTCLOUD)
+
+        val revoke = requests.single()
+        assertEquals("DELETE", revoke.method.value)
+        assertEquals("https://cloud.example.com/ocs/v2.php/core/apppassword", revoke.url.toString())
+        assertEquals("true", revoke.headers["OCS-APIREQUEST"])
+        assertTrue(revoke.headers[HttpHeaders.Authorization].orEmpty().startsWith("Basic "))
+        assertNull(storage.stored)
+        assertNull(s.connectedType())
+    }
+
+    @Test
+    fun nextcloudDisconnectClearsEvenWhenTheServerRefusesTheRevoke() = runBlocking {
+        val storage = FakeTokenStorage(appPassword)
+        val s = nextcloudSession(storage) { respond("", HttpStatusCode.Unauthorized) }
+
+        s.disconnect(CloudStorageType.NEXTCLOUD)
+
+        assertNull(storage.stored)
+    }
+
+    @Test
+    fun serverUrlOfReadsTheStoredAppPasswordsServer() {
+        val s = nextcloudSession(FakeTokenStorage(appPassword)) { respond("", HttpStatusCode.OK) }
+        assertEquals("https://cloud.example.com", s.serverUrlOf(CloudStorageType.NEXTCLOUD))
+        assertNull(s.serverUrlOf(CloudStorageType.DROPBOX))
+    }
+
+    @Test
+    fun serverUrlOfIsNullForOAuthTokensOrNothingStored() {
+        assertNull(session(FakeTokenStorage(OAuthTokens("AT"))).serverUrlOf(CloudStorageType.DROPBOX))
+        assertNull(nextcloudSession(FakeTokenStorage(null)) { respond("", HttpStatusCode.OK) }.serverUrlOf(CloudStorageType.NEXTCLOUD))
     }
 }

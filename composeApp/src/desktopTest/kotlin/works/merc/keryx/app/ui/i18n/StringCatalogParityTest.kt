@@ -14,7 +14,9 @@ import kotlin.test.assertTrue
 /**
  * The Apple app's String Catalog (`generateStringCatalog`, run before this test) must carry exactly
  * the strings.xml keys, in both locales, with every placeholder converted — so the two UIs can't
- * drift apart in which texts exist or how many arguments each takes.
+ * drift apart in which texts exist or how many arguments each takes. The `apple_infoplist_*` keys
+ * go to the Info.plist catalog (`InfoPlist.xcstrings`) instead, keyed by the Info.plist key each
+ * localizes.
  */
 class StringCatalogParityTest {
 
@@ -22,6 +24,11 @@ class StringCatalogParityTest {
     private val catalog: JsonObject =
         Json.parseToJsonElement(File("build/generated/stringCatalog/Localizable.xcstrings").readText()).jsonObject
     private val strings = catalog.getValue("strings").jsonObject
+    private val infoPlistCatalog: JsonObject =
+        Json.parseToJsonElement(File("build/generated/stringCatalog/InfoPlist.xcstrings").readText()).jsonObject
+    private val infoPlistStrings = infoPlistCatalog.getValue("strings").jsonObject
+
+    private fun isInfoPlistKey(key: String) = key.startsWith("apple_infoplist_")
 
     /** key -> every text of that key (one per plural quantity) in [dir]'s strings.xml. */
     private fun resources(dir: String): Map<String, List<String>> {
@@ -42,7 +49,7 @@ class StringCatalogParityTest {
     }
 
     private fun localization(key: String, locale: String): JsonObject =
-        strings.getValue(key).jsonObject.getValue("localizations").jsonObject.getValue(locale).jsonObject
+        (strings[key] ?: infoPlistEntry(key)).jsonObject.getValue("localizations").jsonObject.getValue(locale).jsonObject
 
     private fun JsonObject.unitValue(): String = getValue("stringUnit").jsonObject.getValue("value").jsonPrimitive.content
 
@@ -72,9 +79,48 @@ class StringCatalogParityTest {
         assertEquals("en", catalog.getValue("sourceLanguage").jsonPrimitive.content)
     }
 
+    /** The Info.plist catalog's entry generated from the strings.xml key [key] (named in its comment). */
+    private fun infoPlistEntry(key: String) = infoPlistStrings.values.single {
+        it.jsonObject["comment"]?.jsonPrimitive?.content == "Generated from strings.xml key $key"
+    }
+
     @Test
     fun theCatalogCarriesExactlyTheResourceKeys() {
-        assertEquals(resources("values").keys, strings.keys)
+        assertEquals(resources("values").keys.filterNot(::isInfoPlistKey).toSet(), strings.keys)
+    }
+
+    @Test
+    fun theInfoPlistCatalogCarriesExactlyTheInfoPlistKeys() {
+        assertEquals("en", infoPlistCatalog.getValue("sourceLanguage").jsonPrimitive.content)
+        val infoPlistKeys = resources("values").keys.filter(::isInfoPlistKey)
+        assertTrue(infoPlistKeys.isNotEmpty())
+        assertEquals(infoPlistKeys.size, infoPlistStrings.size)
+        // Every entry is keyed by an Info.plist key and traces back to its own strings.xml key.
+        for (key in infoPlistKeys) infoPlistEntry(key)
+        assertTrue(infoPlistStrings.keys.all { it.startsWith("NS") }, infoPlistStrings.keys.toString())
+    }
+
+    @Test
+    fun theLocalNetworkUsageDescriptionLocalizesItsInfoPlistKey() {
+        val entry = infoPlistStrings.getValue("NSLocalNetworkUsageDescription").jsonObject
+        assertEquals("Generated from strings.xml key apple_infoplist_local_network_usage", entry.getValue("comment").jsonPrimitive.content)
+        for ((locale, dir) in listOf("ja" to "values-ja", "en" to "values")) {
+            assertEquals(
+                resources(dir).getValue("apple_infoplist_local_network_usage").single(),
+                localization("apple_infoplist_local_network_usage", locale).unitValue(),
+            )
+        }
+    }
+
+    /**
+     * project.yml's English default for the Info.plist key must be the same text, or a locale the
+     * catalog does not cover would show a different wording than English users see.
+     */
+    @Test
+    fun projectYmlCarriesTheEnglishLocalNetworkUsageDescription() {
+        val english = resources("values").getValue("apple_infoplist_local_network_usage").single()
+        val projectYml = File("../appleApp/project.yml").readText()
+        assertTrue("NSLocalNetworkUsageDescription: \"$english\"" in projectYml, "project.yml's NSLocalNetworkUsageDescription differs")
     }
 
     /**

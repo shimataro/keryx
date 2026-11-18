@@ -10,6 +10,8 @@ final class SetupObservable {
 
     private(set) var phase: SetupPhase = .idle
     private(set) var canCancelConnect: Bool = false
+    /// The provider whose connect is running — Nextcloud's says it waits on the browser sign-in.
+    private(set) var connectingType: CloudStorageType?
 
     init(controller: SetupController) {
         self.controller = controller
@@ -18,7 +20,12 @@ final class SetupObservable {
     func startObserving() async {
         async let t1: () = observePhase()
         async let t2: () = observeCanCancelConnect()
-        _ = await (t1, t2)
+        async let t3: () = observeConnectingType()
+        _ = await (t1, t2, t3)
+    }
+
+    private func observeConnectingType() async {
+        for await v in controller.connectingType { connectingType = v }
     }
 
     private func observePhase() async {

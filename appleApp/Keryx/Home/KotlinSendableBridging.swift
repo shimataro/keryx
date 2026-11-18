@@ -10,3 +10,5 @@ extension AddFeedController: @retroactive @unchecked Sendable {}
 extension OpmlTransferController: @retroactive @unchecked Sendable {}
 extension KeryxSdk: @retroactive @unchecked Sendable {}
 extension HomeViewModel: @retroactive @unchecked Sendable {}
+extension NextcloudServerController: @retroactive @unchecked Sendable {}
+extension CloudSyncController: @retroactive @unchecked Sendable {}

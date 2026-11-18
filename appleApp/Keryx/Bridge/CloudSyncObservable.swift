@@ -7,6 +7,8 @@ import Observation
 @Observable
 final class CloudSyncObservable {
     let controller: CloudSyncController
+    /// Builds the Nextcloud server sheet's state machine (`KeryxSdk.newNextcloudServerController`).
+    let makeServerController: (String) -> NextcloudServerController
 
     private(set) var connectedType: CloudStorageType?
     private(set) var connectingType: CloudStorageType?
@@ -28,8 +30,9 @@ final class CloudSyncObservable {
     var availableCloudTypes: [CloudStorageType] { controller.availableCloudTypes }
     var meteredSettingSupported: Bool { controller.meteredSettingSupported }
 
-    init(controller: CloudSyncController) {
+    init(controller: CloudSyncController, makeServerController: @escaping (String) -> NextcloudServerController) {
         self.controller = controller
+        self.makeServerController = makeServerController
     }
 
     func startObserving() async {

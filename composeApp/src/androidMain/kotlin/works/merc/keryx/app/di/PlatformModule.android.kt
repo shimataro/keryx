@@ -13,6 +13,7 @@ import works.merc.keryx.app.data.cloud.TokenStorage
 import works.merc.keryx.app.domain.OsNotificationSink
 import works.merc.keryx.app.domain.UpdateInstaller
 import works.merc.keryx.app.platform.AndroidAppContext
+import works.merc.keryx.app.platform.androidLoginPageLauncher
 import works.merc.keryx.app.platform.AndroidNotificationSink
 import works.merc.keryx.app.platform.update.AndroidUpdateInstaller
 
@@ -64,5 +65,6 @@ actual val platformModule: Module = module {
                 emptyMap()
             }
         },
+        loginPageLauncher = androidLoginPageLauncher,
     )
 }

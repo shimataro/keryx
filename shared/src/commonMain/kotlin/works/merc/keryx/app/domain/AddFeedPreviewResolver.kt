@@ -3,6 +3,7 @@ package works.merc.keryx.app.domain
 import works.merc.keryx.app.core.DiscoveredFeedLink
 import works.merc.keryx.app.core.FeedDiscoveryException
 import works.merc.keryx.app.core.KeryxException
+import works.merc.keryx.app.core.NextcloudServerException
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.core.CloudAuthException
 import works.merc.keryx.app.core.CloudDataIncompatibleException
@@ -117,6 +118,7 @@ class AddFeedPreviewResolver(
                 is FeedFetchException, is FeedParseException, is FeedTimeoutException, is FeedNotFoundException,
                 is CloudAuthException, is CloudStorageException, is SyncConflictException,
                 is SchemaVersionException, is CloudDataIncompatibleException, is UpdateException,
+                is NextcloudServerException,
                 -> AddFeedPreview.Failed(ex)
             }
         }

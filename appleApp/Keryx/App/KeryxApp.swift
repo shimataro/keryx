@@ -86,6 +86,7 @@ struct KeryxApp: App {
                     SetupView(
                         controller: sdk.setupController,
                         oauthCoordinator: model.oauthCoordinator,
+                        makeServerController: { sdk.doNewNextcloudServerController(initialUrl: $0) },
                         onDone: { model.completeSetup() }
                     )
                 } else if let notifications = model.notifications, let opmlTransfer = model.opmlTransfer {

@@ -53,6 +53,24 @@ class SchemaVersionException(val localVersion: Long, val cloudVersion: Long) :
  */
 class CloudDataIncompatibleException(message: String) : KeryxException(message)
 
+/** Why a Nextcloud server address the user entered cannot be connected to. */
+enum class NextcloudServerProblem {
+    /** The address names a scheme other than `https` (plain `http://` included). */
+    HTTPS_REQUIRED,
+
+    /** The address is malformed, or nothing at it answers as an installed Nextcloud server. */
+    NOT_NEXTCLOUD,
+
+    /** The request got no response at all (offline, DNS failure, refused or untrusted TLS, timeout). */
+    UNREACHABLE,
+}
+
+/**
+ * A Nextcloud server address was rejected before any sign-in started — see [problem]. Raised by the
+ * address normalization and the `status.php` probe that the connect dialog runs.
+ */
+class NextcloudServerException(val problem: NextcloudServerProblem, message: String) : KeryxException(message)
+
 // --- Update ---
 
 /** Which step of an in-app update ([works.merc.keryx.app.domain.UpdateRepository]) failed. */

@@ -30,6 +30,7 @@
     <string name="setup_dropbox">Dropbox で同期する</string>
     <string name="setup_google_drive">Google Drive で同期する</string>
     <string name="setup_onedrive">OneDrive で同期する</string>
+    <string name="setup_nextcloud">Nextcloud で同期する</string>
     <string name="setup_connecting">クラウドストレージに接続中...</string>
     <string name="setup_abort_connect_confirm_title">接続を中止しますか？</string>
     <string name="setup_abort_connect_confirm_body">まだ何も保存されていません。</string>
@@ -216,6 +217,14 @@
     <string name="settings_google_drive_disconnect">連携を解除</string>
     <string name="settings_onedrive_connect">連携する</string>
     <string name="settings_onedrive_disconnect">連携を解除</string>
+    <string name="settings_nextcloud_connect">連携する</string>
+    <string name="settings_nextcloud_disconnect">連携を解除</string>
+    <string name="nextcloud_server_title">Nextcloud に接続</string>
+    <string name="nextcloud_server_hint">サーバーのアドレス（例: cloud.example.com）</string>
+    <string name="nextcloud_server_scope">Keryx は同期データを Nextcloud のファイルにある「Keryx」フォルダーに保存します。サインインするとアカウント全体にアクセスできるアプリパスワードが作成されますが、Keryx が使うのはこのフォルダーだけです。アプリパスワードはサーバーの「設定 ▸ セキュリティ ▸ デバイスとセッション」からいつでも取り消せます。Nextcloud 36 以降では、そこでファイルへのアクセスだけに制限することもできます。</string>
+    <string name="nextcloud_server_checking">サーバーを確認しています…</string>
+    <string name="nextcloud_server_continue">続ける</string>
+    <string name="nextcloud_login_waiting">ブラウザで Nextcloud へのサインインを完了してください。</string>
     <string name="settings_cloud_disconnect_confirm_title">%1$sとの連携を解除しますか？</string>
     <string name="settings_cloud_disconnect_confirm_body">ローカルのデータはそのまま残ります。</string>
     <string name="settings_cloud_abort_connect_confirm_title">%1$sへの接続を中止しますか？</string>
@@ -387,6 +396,9 @@
     <string name="error_feed_not_found">フィードが見つかりませんでした</string>
     <string name="error_generic">エラーが発生しました</string>
     <string name="error_update">アップデートに失敗しました</string>
+    <string name="error_nextcloud_https_required">サーバーのアドレスは HTTPS である必要があります。https:// で始まるアドレスを入力してください。</string>
+    <string name="error_nextcloud_not_found">このアドレスに Nextcloud サーバーが見つかりません。URL を確認して、もう一度お試しください。</string>
+    <string name="error_nextcloud_unreachable">サーバーに接続できません。アドレスとインターネット接続を確認して、もう一度お試しください。</string>
 
     <!-- Apple (SwiftUI) app only — a fixed-wording, non-plural counterpart to Compose's own
          two-argument home_add_feed_partial. Formatted via LF, same as every other Apple-only
@@ -419,4 +431,9 @@
     <string name="apple_tag_color_pink">ピンク</string>
     <!-- Apple (SwiftUI) app only — VoiceOver label of the Clear button at the end of the name field. -->
     <string name="apple_clear_text">テキストを消去</string>
+    <!-- Apple（SwiftUI）版のみ — Info.plist の NSLocalNetworkUsageDescription。ローカルネットワーク上の
+         サーバーに初めて接続するときに iOS（と macOS 15 以降）が表示する許可ダイアログの説明文。
+         generateStringCatalog は apple_infoplist_* のキーを Localizable.xcstrings ではなく
+         InfoPlist.xcstrings に書き出す。 -->
+    <string name="apple_infoplist_local_network_usage">購読と既読状態を同期するため、Keryx は選択された Nextcloud サーバーに接続します。サーバーはローカルネットワーク上にある場合があります。</string>
 </resources>
