@@ -1865,6 +1865,10 @@ HIG が「表示中のビューの検索」に勧める位置であり、メー�
   合わせる。タップは `List` の
   ときと同じ `CompactSidebarSelection` のルールで処理する。
   畳んだサイドバーが選択を表示しないとき（iPhone で一番手前の列のとき）は、エコーも出さない。
+- **通知センター行の上まで。** リストはナビゲーションバーと左右のセーフエリアの下には広げる
+  （`.ignoresSafeArea(edges: [.top, .horizontal])`）が、下端に固定した通知センター行の上で終える。この行は
+  SwiftUI の safe-area inset（`safeAreaInset(edge: .bottom)`）で、UIKit 側の inset には伝わらないため、
+  行の下まで広げると最後の行を行の上までスクロールできなくなる。
 - **コンテキストメニューは `UIMenu`** で、`contextMenuConfigurationForItemsAt` から返す
   （`Home/Sidebar/SidebarContextMenus.swift`）。項目、順序、有効・無効、チェックは macOS の SwiftUI メニューと
   同じにしている。セル内で SwiftUI の `.contextMenu` を使うと、セル自身の持ち上げやドラッグと競合する。

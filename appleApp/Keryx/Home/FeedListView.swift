@@ -138,7 +138,11 @@ struct FeedListView: View {
         }
         #else
         SidebarCollectionView(home: home, state: collectionState, actions: collectionActions)
-            .ignoresSafeArea()
+            // Under the navigation bar (and the side insets) as a UIKit list is, but not under the
+            // notification-center footer: that footer is a SwiftUI safe-area inset (see `body`),
+            // which UIKit never sees, so a list extending under it could not scroll its last row
+            // clear of it.
+            .ignoresSafeArea(edges: [.top, .horizontal])
             .focusable()
             .focusEffectDisabled()
             .focused(focusedPane, equals: .feedList)

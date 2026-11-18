@@ -1949,6 +1949,10 @@ list forward (`CompactSearchNavigation`).
   fill of the selection color reads as a dull smudge on a light list); otherwise the hosted content
   takes the text color a system cell would use in that state. A tap goes through the same `CompactSidebarSelection` rules as the `List` did; while the
   collapsed sidebar shows no selection (it is the topmost column on an iPhone), it shows no echo either.
+- **Above the notification-center row.** The list extends under the navigation bar and the side insets
+  (`.ignoresSafeArea(edges: [.top, .horizontal])`), but ends above the notification-center row pinned to
+  the bottom. That row is a SwiftUI safe-area inset (`safeAreaInset(edge: .bottom)`), which never reaches
+  UIKit's own insets, so a list laid out under it could not scroll its last row clear of it.
 - **Context menus are `UIMenu`s** from `contextMenuConfigurationForItemsAt`
   (`Home/Sidebar/SidebarContextMenus.swift`), with the same items, order, enablement and checkmarks as the
   macOS SwiftUI menus — a SwiftUI `.contextMenu` inside a cell would compete with the cell's own lift and
