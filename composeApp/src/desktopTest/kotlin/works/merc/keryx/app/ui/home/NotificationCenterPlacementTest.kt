@@ -440,6 +440,9 @@ class NotificationCenterPlacementTest {
     fun anAlertsLevelIsNamedToAssistiveTechnologyNotLeftToTheTintAlone() = runDesktopComposeUiTest {
         // `Res.string.notification_level_warning` / `notification_level_error`, reported as the
         // button's state (`notificationAlertStateDescription`); the bell itself stays decorative.
+        // Desktop's accessibility bridge drops stateDescription, so on desktop (where this test runs)
+        // the level is also in the button's accessible name, with the row's name and count
+        // (`Res.string.home_notifications_alert_accessible_name`).
         val warning = centerOf(AppNotificationLevel.INFO, AppNotificationLevel.WARNING)
         val error = centerOf(AppNotificationLevel.WARNING, AppNotificationLevel.ERROR)
         val info = centerOf(AppNotificationLevel.INFO)
@@ -460,8 +463,17 @@ class NotificationCenterPlacementTest {
         rowIn("warning").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "警告"))
         rowIn("error").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "エラー"))
         rowIn("info").assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.StateDescription))
+        rowIn("warning").assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, listOf("通知、2、警告")))
+        rowIn("error").assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, listOf("通知、2、エラー")))
+        rowIn("info").assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.ContentDescription))
+        // The bell carries no description of its own: the only one in each row is the button's.
         for (tag in listOf("warning", "error", "info")) {
-            rowIn(tag).assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.ContentDescription))
+            assertEquals(
+                0,
+                onAllNodes(hasAnyAncestor(hasTestTag(tag)) and SemanticsMatcher.keyIsDefined(SemanticsProperties.ContentDescription) and SemanticsMatcher.keyNotDefined(SemanticsProperties.Role), useUnmergedTree = true)
+                    .fetchSemanticsNodes().size,
+                tag,
+            )
         }
     }
 

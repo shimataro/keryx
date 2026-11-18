@@ -154,7 +154,12 @@ not in global chrome:
   color, since the severity colors lose their contrast on the selection
   background — and an alert's level is reported as the button's
   `stateDescription` (`notificationAlertStateDescription`), the bell itself
-  staying decorative, so the tint is not the only sign. The history
+  staying decorative, so the tint is not the only sign. Desktop's AWT
+  accessibility bridge drops `stateDescription`
+  (`accessibilityBridgeReadsStateDescription`), so there the level also goes
+  into the button's `contentDescription`, spelled out with the row's name and
+  count (`notificationRowAlertAccessibleName`), since that name replaces the
+  row's text. The history
   is empty most of the time, so a permanent toolbar slot for it was wasted room;
   a sidebar row costs little and, unlike a row that comes and goes, never
   changes the list's height. The bell lived

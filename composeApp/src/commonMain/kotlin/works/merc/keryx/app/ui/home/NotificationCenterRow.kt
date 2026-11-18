@@ -18,11 +18,13 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.collapse
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.expand
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
 import org.jetbrains.compose.resources.stringResource
+import works.merc.keryx.app.platform.accessibilityBridgeReadsStateDescription
 import works.merc.keryx.app.presentation.home.NotificationBellTone
 import works.merc.keryx.app.presentation.home.highestNotificationLevel
 import works.merc.keryx.app.presentation.home.notificationBellTone
@@ -33,6 +35,7 @@ import works.merc.keryx.app.ui.common.KeryxCountBadge
 import works.merc.keryx.app.ui.common.KeryxIcon
 import works.merc.keryx.app.ui.common.KeryxIcons
 import works.merc.keryx.app.ui.i18n.notificationAlertStateDescription
+import works.merc.keryx.app.ui.i18n.notificationRowAlertAccessibleName
 
 /**
  * The bell's color for [tone] (the shared [notificationBellTone]): the error color for an alert, the
@@ -91,7 +94,11 @@ internal fun NotificationCenterRow(
     val tone = notificationBellTone(items)
     // The tint alone would carry the severity by color only: the button also reports an alert's
     // level as its state, read by assistive technology with the row's name and count.
-    val alertState = notificationAlertStateDescription(highestNotificationLevel(items))
+    val level = highestNotificationLevel(items)
+    val alertState = notificationAlertStateDescription(level)
+    // Desktop's accessibility bridge drops stateDescription, so there the level also goes into the
+    // button's accessible name, spelled out with the row's name and count (which it replaces).
+    val alertName = if (accessibilityBridgeReadsStateDescription) null else notificationRowAlertAccessibleName(count, level)
     Box(Modifier.onSizeChanged { rowHeightPx = it.height }) {
         SidebarRow(
             icon = {
@@ -119,6 +126,7 @@ internal fun NotificationCenterRow(
                     .semantics {
                         if (showNotifications) collapse { toggle(); true } else expand { toggle(); true }
                         alertState?.let { stateDescription = it }
+                        alertName?.let { contentDescription = it }
                     }
             },
             isTouchPrimary = isTouchPrimary,

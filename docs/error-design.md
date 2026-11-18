@@ -187,8 +187,9 @@ Status labels that are not messages (a notification's level, such as "Error") ar
   `presentation/home/NotificationSeverity.kt`'s `notificationBellTone`). While the Compose row holds
   keyboard focus and is highlighted, the bell takes the highlight's content color instead, since the
   severity colors cannot keep their contrast on the selection background. An alert's level is also read
-  out with the row's name and count (Compose reports it as the button's state description, SwiftUI as
-  the bell's label in the combined element), so the severity does not rest on color alone. Clicking the row opens the list above it — a
+  out with the row's name and count (Compose reports it as the button's state description — and on
+  desktop, whose accessibility bridge does not pass state descriptions on, also in the button's
+  accessible name with the row's name and count — SwiftUI as the bell's label in the combined element), so the severity does not rest on color alone. Clicking the row opens the list above it — a
   bottom sheet on Android, a sheet at an iPhone's compact width. The row is
   `ui/home/NotificationCenterRow.kt` in Compose and `NotificationCenterRow.swift` in SwiftUI. It takes
   no toolbar slot, since the history is empty most of the time, and it stays in place rather than
