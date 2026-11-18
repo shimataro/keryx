@@ -321,9 +321,9 @@ swipe, as in Mail), and on Android: from the leading edge (left to right in a le
 it marks the article read or unread, from the trailing edge it stars or unstars it — the same edges
 and actions everywhere, named by the context menu's own labels. Each platform presents it its own way:
 iOS and macOS reveal the action as an icon-only button (a title would widen it past other apps'
-swipe buttons; screen readers still hear the label), which a full swipe also runs. While it is showing, a tap
-or click on any article row, the swiped one included, only closes it and opens nothing, as the platform's own
-lists (Mail, Notes) do; scrolling closes it too. Android runs it once the
+swipe buttons; screen readers still hear the label), which a full swipe also runs. On iOS and macOS, while it is
+showing, a tap or click on any article row, the swiped one included, only closes it and opens nothing, as the
+platform's own lists (Mail, Notes) do. Android runs it once the
 row is dragged past a threshold (the revealed strip turns the action's color, with a haptic tick) and
 released, and the row springs back; a diagonal drag, or one started just after a vertical scroll, is not
 a row swipe (the reader swipe's own rule). A swipe
