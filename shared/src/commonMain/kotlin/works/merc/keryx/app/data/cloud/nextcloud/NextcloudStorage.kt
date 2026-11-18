@@ -33,6 +33,7 @@ import works.merc.keryx.app.data.cloud.CloudCredentials
 import works.merc.keryx.app.data.cloud.CloudFileMeta
 import works.merc.keryx.app.data.cloud.CloudStorage
 import works.merc.keryx.app.data.cloud.FileUploadContent
+import works.merc.keryx.app.data.cloud.cloudFileName
 import works.merc.keryx.app.data.cloud.cloudStorageError
 import works.merc.keryx.app.data.cloud.headerRevOrConflictOr
 import works.merc.keryx.app.data.cloud.okOrAbsentOr
@@ -92,7 +93,7 @@ class NextcloudStorage(
         // memory before `writeBodyToFile` copies it to disk.
         client.prepareGet(fileUrl(credentials, path)) { authorize(credentials) }.execute { response ->
             when (response.status.value) {
-                404 -> Result.Err(CloudStorageException("File not found: ${path.substringAfterLast('/')}"))
+                404 -> Result.Err(CloudStorageException("File not found: ${cloudFileName(path)}"))
                 200 -> {
                     // The ETag of the very response being saved — the revision this download is based on.
                     val rev = response.headers[HttpHeaders.ETag]

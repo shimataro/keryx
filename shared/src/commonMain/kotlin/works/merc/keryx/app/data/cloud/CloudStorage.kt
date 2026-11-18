@@ -133,6 +133,16 @@ internal suspend fun HttpResponse.headerRevOrConflictOr(
 }
 
 /**
+ * Maps an HTTP response to success for a 2xx, or a cloud storage error otherwise.
+ *
+ * @param providerName The name of the cloud storage provider.
+ */
+internal suspend fun HttpResponse.okOr(providerName: String): Result<Unit> = when {
+    status.isSuccess() -> Result.Ok(Unit)
+    else -> cloudStorageError(providerName, status.value, bodyAsText())
+}
+
+/**
  * Maps an HTTP response to success for a 2xx or a 404, or a cloud storage error otherwise — for an
  * idempotent delete/rename, where an already-absent item counts as done.
  *
@@ -143,6 +153,12 @@ internal suspend fun HttpResponse.okOrAbsentOr(providerName: String): Result<Uni
     status.value == 404 -> Result.Ok(Unit)
     else -> cloudStorageError(providerName, status.value, bodyAsText())
 }
+
+/**
+ * The basename of a sync path — the name a provider that addresses files by name (Google Drive,
+ * OneDrive's app folder) stores it under.
+ */
+internal fun cloudFileName(path: String): String = path.substringAfterLast('/')
 
 /** The string value of the top-level [key] in the JSON object [body], or `null` if there is none. */
 internal fun Json.topLevelString(body: String, key: String): String? =

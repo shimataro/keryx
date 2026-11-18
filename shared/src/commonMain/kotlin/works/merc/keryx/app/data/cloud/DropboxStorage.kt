@@ -13,11 +13,12 @@ import io.ktor.http.isSuccess
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import works.merc.keryx.app.core.CloudStorageException
 import works.merc.keryx.app.core.MAX_SYNC_DB_SIZE_BYTES
 import works.merc.keryx.app.core.Result
+
+private const val PROVIDER_NAME = "Dropbox"
 
 /**
  * [CloudStorage] backed by the Dropbox v2 REST API. [accessTokenProvider]
@@ -39,10 +40,9 @@ class DropboxStorage(
      * @return A successful result when authentication succeeds, or a mapped storage error otherwise.
      */
     override suspend fun authenticate(): Result<Unit> = withToken { token ->
-        val response = client.post("$apiBase/2/users/get_current_account") {
+        client.post("$apiBase/2/users/get_current_account") {
             bearerAuth(token)
-        }
-        if (response.status.isSuccess()) Result.Ok(Unit) else mapError(response.status.value, response.bodyAsText())
+        }.okOr(PROVIDER_NAME)
     }
 
     /**
@@ -62,8 +62,7 @@ class DropboxStorage(
         }
         val resultHeader = response.headers["dropbox-api-result"]
             ?: return@withToken Result.Err(CloudStorageException("Missing Dropbox-API-Result header"))
-        val rev = (json.parseToJsonElement(resultHeader) as? JsonObject)
-            ?.get("rev")?.jsonPrimitive?.content
+        val rev = json.topLevelString(resultHeader, "rev")
             ?: return@withToken Result.Err(CloudStorageException("Missing rev in metadata"))
         // Read the rev before the body: the metadata rides in a header, so a failure to parse it
         // costs nothing, whereas streaming first would write a file we then throw away.
@@ -137,7 +136,7 @@ class DropboxStorage(
      * @param conflictStatus The HTTP status Dropbox uses to report a lost rev guard.
      */
     private suspend fun HttpResponse.metaOrConflictOr(conflictStatus: Int): Result<CloudFileMeta> =
-        writtenMetaOrConflictOr(json, "Dropbox", "rev", conflictStatus)
+        writtenMetaOrConflictOr(json, PROVIDER_NAME, "rev", conflictStatus)
 
     /**
      * Fetches a file's revision without its contents.
@@ -234,7 +233,7 @@ class DropboxStorage(
      * @return The result produced by the operation.
      */
     private suspend fun <T> withToken(block: suspend (String) -> Result<T>): Result<T> =
-        withCloudToken(accessTokenProvider, "Dropbox", block)
+        withCloudToken(accessTokenProvider, PROVIDER_NAME, block)
 
     /**
      * Converts a Dropbox API failure response into a storage error result.
@@ -243,5 +242,5 @@ class DropboxStorage(
      * @param body The response body containing error details.
      * @return An error result representing the Dropbox failure.
      */
-    private fun mapError(status: Int, body: String): Result.Err = cloudStorageError("Dropbox", status, body)
+    private fun mapError(status: Int, body: String): Result.Err = cloudStorageError(PROVIDER_NAME, status, body)
 }

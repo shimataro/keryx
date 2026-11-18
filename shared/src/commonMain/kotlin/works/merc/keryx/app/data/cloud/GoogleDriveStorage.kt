@@ -7,7 +7,6 @@ import io.ktor.client.request.get
 import io.ktor.client.request.patch
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
-import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
@@ -29,6 +28,8 @@ import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.core.SyncConflictException
 import works.merc.keryx.app.core.map
 import works.merc.keryx.app.core.valueOrElse
+
+private const val PROVIDER_NAME = "Google Drive"
 
 /**
  * [CloudStorage] backed by the Google Drive API v3, storing the sync DB in the
@@ -69,7 +70,7 @@ class GoogleDriveStorage(
                 parameters.append("fields", "files(id)")
             }
         }
-        okOrError(response)
+        response.okOr(PROVIDER_NAME)
     }
 
     /**
@@ -80,8 +81,8 @@ class GoogleDriveStorage(
      * @return The downloaded file's Google Drive revision.
      */
     override suspend fun download(path: String, destPath: String): Result<CloudFileMeta> = withToken { token ->
-        val file = findFile(token, fileName(path)).valueOrElse { return@withToken it }
-            ?: return@withToken Result.Err(CloudStorageException("File not found: ${fileName(path)}"))
+        val file = findFile(token, cloudFileName(path)).valueOrElse { return@withToken it }
+            ?: return@withToken Result.Err(CloudStorageException("File not found: ${cloudFileName(path)}"))
         val response = client.get("$apiBase/files/${file.id}") {
             bearerAuth(token)
             url { parameters.append("alt", "media") }
@@ -100,7 +101,7 @@ class GoogleDriveStorage(
         sourcePath: String,
         expectedRev: String?,
     ): Result<CloudFileMeta> = withToken { token ->
-        val name = fileName(path)
+        val name = cloudFileName(path)
         val existing = findFile(token, name).valueOrElse { return@withToken it }
         if (existing == null) {
             createFile(token, name, sourcePath).map { CloudFileMeta(it.version) }
@@ -121,7 +122,7 @@ class GoogleDriveStorage(
      * @return `Ok` when the file is created successfully, or an error if the file already exists or creation fails.
      */
     override suspend fun create(path: String, sourcePath: String): Result<CloudFileMeta> = withToken { token ->
-        val name = fileName(path)
+        val name = cloudFileName(path)
         // Best-effort create-only: Drive has no atomic create-if-absent, so we check first and
         // fail with a conflict when the file already exists rather than overwriting it. The small
         // check-then-write window is reconciled by the sync retry loop, as with upload().
@@ -191,7 +192,7 @@ class GoogleDriveStorage(
      * @return `Result.Ok` when all matching files are deleted or none exist; otherwise, the first deletion or lookup error.
      */
     override suspend fun delete(path: String): Result<Unit> = withToken { token ->
-        val files = listFilesByName(token, fileName(path)).valueOrElse { return@withToken it }
+        val files = listFilesByName(token, cloudFileName(path)).valueOrElse { return@withToken it }
         deleteAll(token, files)
     }
 
@@ -214,7 +215,7 @@ class GoogleDriveStorage(
         val response = client.delete("$apiBase/files/$fileId") {
             bearerAuth(token)
         }
-        return response.okOrAbsentOr("Google Drive")
+        return response.okOrAbsentOr(PROVIDER_NAME)
     }
 
     /**
@@ -231,9 +232,9 @@ class GoogleDriveStorage(
      * otherwise, the first lookup, rename, or cleanup error.
      */
     override suspend fun rename(from: String, to: String): Result<Unit> = withToken { token ->
-        val files = listFilesByName(token, fileName(from)).valueOrElse { return@withToken it }
+        val files = listFilesByName(token, cloudFileName(from)).valueOrElse { return@withToken it }
         val winner = files.minByOrNull { it.id } ?: return@withToken Result.Ok(Unit) // absent = done
-        renameById(token, winner.id, fileName(to)).valueOrElse { return@withToken it }
+        renameById(token, winner.id, cloudFileName(to)).valueOrElse { return@withToken it }
         deleteAll(token, files, keepId = winner.id)
     }
 
@@ -246,13 +247,13 @@ class GoogleDriveStorage(
             contentType(ContentType.Application.Json)
             setBody(buildJsonObject { put("name", name) }.toString())
         }
-        return response.okOrAbsentOr("Google Drive")
+        return response.okOrAbsentOr(PROVIDER_NAME)
     }
 
     override suspend fun metadata(path: String): Result<CloudFileMeta?> = withToken { token ->
         // `version` is already fetched by the same name lookup this call has always made (it
         // is what upload() compares as the rev), so returning it costs no extra request.
-        findFile(token, fileName(path)).map { file -> file?.let { CloudFileMeta(it.version) } }
+        findFile(token, cloudFileName(path)).map { file -> file?.let { CloudFileMeta(it.version) } }
     }
 
     /** Lists all app-data files matching [name] (there should be at most one). */
@@ -366,19 +367,8 @@ class GoogleDriveStorage(
         return Result.Ok(DriveFile(id, version))
     }
 
-    /**
-     * Converts an HTTP response into a successful or mapped error result.
-     *
-     * @param response The HTTP response to evaluate.
-     * @return `Result.Ok` for a successful status, or a mapped error result otherwise.
-     */
-    private suspend fun okOrError(response: HttpResponse): Result<Unit> = when {
-        response.status.isSuccess() -> Result.Ok(Unit)
-        else -> mapError(response.status.value, response.bodyAsText())
-    }
-
     private suspend fun <T> withToken(block: suspend (String) -> Result<T>): Result<T> =
-        withCloudToken(accessTokenProvider, "Google Drive", block)
+        withCloudToken(accessTokenProvider, PROVIDER_NAME, block)
 
     /**
      * Maps a Google Drive HTTP response to a cloud storage error.
@@ -387,10 +377,7 @@ class GoogleDriveStorage(
      * @param body The response body.
      * @return The corresponding cloud storage error result.
      */
-    private fun mapError(status: Int, body: String): Result.Err = cloudStorageError("Google Drive", status, body)
-
-    /** Drive files are named, not path-addressed: use the basename of the sync path. */
-    private fun fileName(path: String): String = path.substringAfterLast('/')
+    private fun mapError(status: Int, body: String): Result.Err = cloudStorageError(PROVIDER_NAME, status, body)
 
     private class DriveFile(val id: String, val version: String)
 
