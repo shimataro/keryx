@@ -357,11 +357,43 @@ struct ArticleTableView: NSViewRepresentable {
 /// `onKeyPress`) runs as for any other pane — the table's own arrow-key selection and type-select
 /// never see them. A click outside any row, which no hosted row sees, is reported so the pane can
 /// still take focus.
+///
+/// While a row's swipe actions are showing, a click on any row only closes them, as in Mail: the
+/// hosted rows' own buttons would otherwise take the click, open that row and leave the actions
+/// out. The action buttons themselves, and the menu a right-click or Control-click opens, are left
+/// alone.
 final class ArticleNSTableView: NSTableView {
     var onBackgroundClick: (() -> Void)?
 
+    /// Sends a left click on a hosted row to the table itself while row actions are showing, so the
+    /// row's own button never sees it; `mouseDown` then closes the actions and consumes the click.
+    /// The two overrides are one behavior: change them together.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        let hit = super.hitTest(point)
+        // A Control-click arrives as a left mouse-down too, but opens the row's menu like a right-click.
+        guard rowActionsVisible, let event = NSApp.currentEvent, event.type == .leftMouseDown,
+              !event.modifierFlags.contains(.control),
+              let hit, Self.isInsideHostedRow(hit) else { return hit }
+        return self
+    }
+
     override func mouseDown(with event: NSEvent) {
+        // A click `hitTest` redirected from a row, or one on the table's background: either way, open
+        // row actions only close.
+        if rowActionsVisible {
+            rowActionsVisible = false
+            return
+        }
         onBackgroundClick?()
+    }
+
+    private static func isInsideHostedRow(_ view: NSView) -> Bool {
+        var current: NSView? = view
+        while let candidate = current {
+            if candidate is ArticleRowHostingView { return true }
+            current = candidate.superview
+        }
+        return false
     }
 
     override func keyDown(with event: NSEvent) {

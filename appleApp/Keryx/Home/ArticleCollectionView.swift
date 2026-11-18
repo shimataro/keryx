@@ -14,7 +14,7 @@ import UIKit
 ///   `ContextMenuPressHighlight`'s clear view ("iOS: a row jumps when a swipe starts").
 ///
 /// The rows are `ArticleRowView`s, hosted one per visible cell (`UIHostingConfiguration`): selection
-/// drawing and taps are theirs.
+/// drawing is theirs, while a tap reaches them through the list's own selection.
 struct ArticleCollectionView: UIViewControllerRepresentable {
     let rows: ArticleRowList
     let scrollRequest: ArticleListScrollRequest
@@ -128,9 +128,12 @@ final class ArticleCollectionViewController: UIViewController, UICollectionViewD
         collectionView = ArticleListCollectionView(frame: view.bounds, collectionViewLayout: makeLayout())
         collectionView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         collectionView.backgroundColor = .clear
-        // Arrow keys and J/K are `HomeView`'s, not UIKit's focus engine; a row's own button takes the tap.
+        // Arrow keys and J/K are `HomeView`'s, not UIKit's focus engine.
         collectionView.allowsFocus = false
-        collectionView.allowsSelection = false
+        // A tap selects through the list itself (`didSelectItemAt`), so a tap while a row's swipe
+        // actions are open only closes them, as in UIKit's own lists. `didSelectItemAt` clears the
+        // list's selection at once; the selection that stays is the row's to draw.
+        collectionView.allowsSelection = true
         collectionView.delegate = self
         collectionView.onWindowChange = { [weak self] in self?.windowChanged() }
         pullToRefresh.scrollView = collectionView
@@ -179,7 +182,13 @@ final class ArticleCollectionViewController: UIViewController, UICollectionViewD
 
     private func makeDataSource() -> UICollectionViewDiffableDataSource<Int, String> {
         let registration = UICollectionView.CellRegistration<ArticleCell, String> { [weak self] cell, _, id in
-            cell.backgroundConfiguration = .clear()
+            // The system's own press highlight while the finger is down; clear otherwise, since the
+            // row draws its selection itself.
+            cell.configurationUpdateHandler = { cell, state in
+                cell.backgroundConfiguration = state.isHighlighted
+                    ? UIBackgroundConfiguration.listPlainCell().updated(for: state)
+                    : .clear()
+            }
             self?.configure(cell, id: id)
         }
         return UICollectionViewDiffableDataSource<Int, String>(collectionView: collectionView) { collectionView, indexPath, id in
@@ -335,6 +344,15 @@ final class ArticleCollectionViewController: UIViewController, UICollectionViewD
         guard ids != lastReportedIds else { return }
         lastReportedIds = ids
         input?.onVisibleIdsChanged(ids)
+    }
+
+    // MARK: - Selection
+
+    /// A tap on a row opens it (the row's `onSelect`). UIKit does not call this for a tap that closes
+    /// open swipe actions. The list's own selection is cleared at once: the row draws the selection.
+    func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+        collectionView.deselectItem(at: indexPath, animated: true)
+        row(at: indexPath)?.onSelect()
     }
 
     // MARK: - Swipe actions

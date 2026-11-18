@@ -1865,6 +1865,10 @@ HIG が「表示中のビューの検索」に勧める位置であり、メー�
   合わせる。タップは `List` の
   ときと同じ `CompactSidebarSelection` のルールで処理する。
   畳んだサイドバーが選択を表示しないとき（iPhone で一番手前の列のとき）は、エコーも出さない。
+- **通知センター行の上まで。** リストはナビゲーションバーと左右のセーフエリアの下には広げる
+  （`.ignoresSafeArea(edges: [.top, .horizontal])`）が、下端に固定した通知センター行の上で終える。この行は
+  SwiftUI の safe-area inset（`safeAreaInset(edge: .bottom)`）で、UIKit 側の inset には伝わらないため、
+  行の下まで広げると最後の行を行の上までスクロールできなくなる。
 - **コンテキストメニューは `UIMenu`** で、`contextMenuConfigurationForItemsAt` から返す
   （`Home/Sidebar/SidebarContextMenus.swift`）。項目、順序、有効・無効、チェックは macOS の SwiftUI メニューと
   同じにしている。セル内で SwiftUI の `.contextMenu` を使うと、セル自身の持ち上げやドラッグと競合する。
@@ -1993,12 +1997,24 @@ macOS の記事一覧は、SwiftUI の `List` ではなく、行の高さを固�
     デリゲートは、ハイライトを `ContextMenuPressHighlight` の透明なビューに向け、プレビューに行の見た目
     （`ArticleRowLabel`）を出す（`ArticleRowMenu.configuration`）。項目と動作は macOS と同じ
     （`ArticleRowMenuState.items`、`ArticleRowMenu.perform`）。
+  - *行へのタップは `Button` ではなく、リスト自身の選択で受ける。* セルにホストしたボタンは UIKit より先に
+    タップを取るので、ある行のアクションが出ている間に別の行をタップすると、その行が開いてアクションが
+    出たまま残っていた。コレクションビューは選択を許可し、`didSelectItemAt` で行の `onSelect` を呼んで、
+    リストの選択はすぐ解除する（選択の描画は行が担う）。開いているアクションを閉じるタップはここに届かない
+    ので、Mail やメモと同じく閉じるだけになる。VoiceOver には、`ArticleRowView` がボタンのときと同じ
+    1 つの起動できる要素を渡す。
 - **macOS。** 記事テーブルの `tableView(_:rowActionsForRow:edge:)` が各辺に `NSTableViewRowAction` を 1 つ
   返す（`Home/ArticleTableView.swift`）。Mail のメッセージ一覧と同じ仕組みで、ボタンの描画、行のスライド、
   フルスワイプは AppKit が行う。AppKit は行アクションのボタンをタイトルの幅まで広げる（「既読にする」で
   約 125pt、「Mark as read」で 157pt。Mail は 85〜105pt）ので、タイトルは空にし、ラベルは画像の
   アクセシビリティ説明に入れて VoiceOver に読ませる。これでボタンは 48pt になる。`shouldSelectRow` は
   `false` のままなので、行は選択されない。
+  - *アクションが出ている間のクリックは、閉じるだけにする。* 行はホストした SwiftUI のボタンなので、
+    クリックがテーブルに届かず、アクションが出たまま残っていた。`rowActionsVisible` の間は、
+    `ArticleNSTableView.hitTest` がホストした行への左クリックをテーブルに回し、テーブルの `mouseDown` が
+    アクションを閉じてそのクリックを消費する（Mail と同じ）。アクションのボタンと、右クリックや
+    Control+クリックで開くメニューには手を付けない（Control+クリックも左クリックとして届くので、振り替えの
+    対象から外す）。
 - **Android。** `ui/home/ArticleRowSwipe.kt` の `Modifier.articleRowSwipe` を、`ArticleRow` が
   `isTouchPrimary` のときだけ付ける。M3 の `SwipeToDismissBox` ではなく、行自身のノードに付ける修飾子
   （`pointerInput`、`drawBehind`、`absoluteOffset`）だけで作る。`SwipeToDismissBox` は、
