@@ -2090,12 +2090,23 @@ edge shows and what it does are decided once in `:shared` (`ArticleSwipeActions.
     points the highlight at `ContextMenuPressHighlight`'s clear view and shows the row's look
     (`ArticleRowLabel`) as the preview (`ArticleRowMenu.configuration`). The items and their actions are
     the same as macOS's (`ArticleRowMenuState.items`, `ArticleRowMenu.perform`).
+  - *A tap reaches the row through the list's own selection, not a `Button`.* A button inside the hosted
+    cell takes the tap before UIKit sees it, so a tap on another row while a row's actions were showing
+    opened that row and left the actions out. The collection view allows selection and its
+    `didSelectItemAt` calls the row's `onSelect`, clearing the list's selection at once (the row draws
+    the selection itself); a tap that closes open actions never reaches it, as in Mail and Notes.
+    `ArticleRowView` gives VoiceOver the same single activatable element the button did.
 - **macOS.** The article table's `tableView(_:rowActionsForRow:edge:)` returns one
   `NSTableViewRowAction` per edge (`Home/ArticleTableView.swift`), as Mail's message list does; AppKit
   draws them, slides the row and runs a full swipe. AppKit widens a row action's button to fit its
   title (about 125pt for "既読にする", 157pt for "Mark as read", against Mail's 85–105pt), so the title
   is empty and the label goes in the image's accessibility description, which VoiceOver reads; the
   button is then 48pt. `shouldSelectRow` stays `false`, so the row is not selected.
+  - *A click while actions are showing only closes them.* The rows are hosted SwiftUI buttons, so a
+    click on one never reached the table and the actions stayed out. While `rowActionsVisible`,
+    `ArticleNSTableView.hitTest` sends a left click on a hosted row to the table, whose `mouseDown`
+    closes the actions and consumes it, as in Mail. The action buttons, and the menu a right-click or
+    Control-click opens (a Control-click is a left mouse-down too, so it is let through), are left alone.
 - **Android.** `ui/home/ArticleRowSwipe.kt`'s `Modifier.articleRowSwipe`, applied by `ArticleRow` only
   where `isTouchPrimary`. It is built from modifiers on the row's own node (`pointerInput`, `drawBehind`,
   `absoluteOffset`) rather than M3's `SwipeToDismissBox`, which would add nodes to a row that sits next
