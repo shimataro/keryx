@@ -254,6 +254,7 @@ targets:
       - path: Keryx/Platform/AppIconBadge.swift
       - path: Keryx/Platform/BackgroundRefreshDate.swift
       - path: Keryx/Platform/NotificationAuthorizationPolicy.swift
+      - path: Keryx/Platform/TextInputComposition.swift
       - path: Keryx/Bridge/ArticleRowModel.swift
       - path: Keryx/Bridge/ArticleUrlCopy.swift
       - path: Keryx/Bridge/TransientToastState.swift
