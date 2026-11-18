@@ -182,7 +182,11 @@ initial sync.
 - Font size setting (reflected in `LocalDensity` fontScale). It is applied on top of the OS's own font
   size rather than replacing it — the app setting multiplies the system font scale — so text enlarged
   system-wide stays enlarged in Keryx. On Android 14+, the OS's nonlinear scaling (large text grows
-  less than small text) still applies, evaluated for the combined scale.
+  less than small text) still applies, evaluated for the combined scale. The SwiftUI app differs, since
+  its own text sizes come from the OS rather than a scale it can multiply: on iOS / iPadOS there is no
+  font-size setting — the article reader follows the system text size (Dynamic Type, including
+  Control Center's per-app text size) like the rest of the app — and on macOS, which has no Dynamic
+  Type, the setting sizes the article reader's text.
 - On Android, the status and navigation bar icons follow the in-app light/dark setting (including in
   the settings screen), not the OS's.
 

@@ -406,7 +406,7 @@ jobs:
 
       # Builds the appleApp/ SwiftUI project (XcodeGen-generated from project.yml; the
       # .xcodeproj itself is never committed — see .gitignore) for macOS and iOS Simulator, and
-      # runs its Swift Testing target on macOS. Signing is skipped outright
+      # runs its Swift Testing target on macOS and on an iOS simulator. Signing is skipped outright
       # (CODE_SIGNING_ALLOWED=NO), not just ad-hoc: Keryx.entitlements' app sandbox always
       # requires a real Apple Development/Developer ID certificate to embed (confirmed locally —
       # an ad-hoc identity with no team fails with "requires a provisioning profile" even under
@@ -425,6 +425,18 @@ jobs:
           xcodebuild -scheme Keryx -destination 'generic/platform=iOS Simulator' -derivedDataPath "$RUNNER_TEMP/dd-ios" \
             CODE_SIGNING_ALLOWED=NO build
           xcodebuild -scheme Keryx -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO test
+          # The same tests on an iOS simulator, for the iOS-only ones (`#if os(iOS)`) the macOS run
+          # never compiles. Any available iPhone will do; its name varies with the runner image.
+          sim="$(xcrun simctl list devices available iPhone -j | python3 -c '
+          import json, sys
+          devices = json.load(sys.stdin)["devices"]
+          print(next((d["udid"] for runtime, ds in devices.items() if "iOS" in runtime for d in ds), ""))')"
+          if [ -z "$sim" ]; then
+            echo "error: no available iPhone simulator to run KeryxTests on" >&2
+            exit 1
+          fi
+          xcodebuild -scheme Keryx -destination "platform=iOS Simulator,id=$sim" -derivedDataPath "$RUNNER_TEMP/dd-ios" \
+            CODE_SIGNING_ALLOWED=NO test
           # The Info.plist and privacy-manifest settings that App Store upload and review depend on (see docs/build.md, "App Store submission materials").
           Scripts/verify-store-requirements.sh "$RUNNER_TEMP/dd-ios/Build/Products/Debug-iphonesimulator/Keryx.app"
 

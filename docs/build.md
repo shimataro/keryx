@@ -387,7 +387,9 @@ call site left outside its `#if` breaks only that build. Signing and notarizatio
 the release job (see "SwiftUI macOS app" under "Release (CD)").
 
 `KeryxTests` (Swift Testing, standalone/non-hosted) runs with the same `CODE_SIGNING_ALLOWED=NO` on
-macOS: it produces a `.xctest` bundle rather than a sandboxed app, so nothing needs signing.
+macOS: it produces a `.xctest` bundle rather than a sandboxed app, so nothing needs signing. The
+`apple-release-toolchain` job also runs it on an iOS simulator (any available iPhone on the image), since a
+test guarded by `#if os(iOS)` is never compiled by the macOS run.
 
 ### App Store submission materials
 
