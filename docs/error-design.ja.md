@@ -181,7 +181,11 @@ SwiftUI アプリは String Catalog で。唯一の例外は新着記事の OS �
   ないため（[external-spec.ja.md](external-spec.ja.md) §9 の「更新のフィードバック」を参照）。いずれの場合も
   共有ゲート `NewArticleNotifier.notifyIfEnabled`（新着件数 > 0 かつ `notificationEnabled` 設定）を経由する。
 - **入口は、フィード一覧の下端の行で、常に表示する。** 行には通知センターの名前と、通知があるときは
-  件数を表示する。0 件のときは件数を出さず、開くと「通知はありません」と表示する。行を押すと、行の上に
+  件数を表示する。0 件のときは件数を出さず、開くと「通知はありません」と表示する。件数は、フィード行の
+  ような素の数字ではなく、ドロワーボタンと同じ赤いピルのバッジで表示する。これで、未読数の一つと
+  見間違えないようにする。ベルのアイコンは、最も重い通知のレベルの色にする（警告とエラーは error 色、
+  新バージョンのお知らせだけなら accent 色。共有の `presentation/home/NotificationSeverity.kt` の
+  `highestNotificationLevel` で決める）。行を押すと、行の上に
   一覧を開く。Android ではボトムシート、iPhone の狭い幅ではシートになる。行の実装は、Compose が
   `ui/home/NotificationCenterRow.kt`、SwiftUI が `NotificationCenterRow.swift` にある。履歴はほとんどの
   時間空なので、ツールバーの枠は使わない。また、出たり消えたりせず同じ場所にあるので、上のフィード一覧の

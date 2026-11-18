@@ -180,7 +180,11 @@ Status labels that are not messages (a notification's level, such as "Error") ar
 - History is kept only for the session (not persisted to DB). Only things worth looking back at are recorded: errors and warnings, plus `INFO` for a new app version. **New articles are NOT recorded in the notification center** — `NewArticleNotifier` only feeds the OS notification (tray), because their arrival is already durably visible in the article list and the unread badges. This OS notification fires for a manual refresh ("Refresh All", a pull) always — including one that joined an automatic refresh already running (`RefreshCycleRunner.joinAutomaticCycle`), which then posts that refresh's notification, or the one it held back — and for an automatic one (startup, the periodic loop, Android's `FeedRefreshWorker`, iOS's background refresh) only while the app is not in front (`domain/AppForeground`, checked by `RefreshCycleRunner`) — a user looking at the app already sees the new articles land, so a refresh they did not ask for is not worth interrupting them over (see "Refresh feedback" in [external-spec.md](external-spec.md) §9). Either way it goes through the shared `NewArticleNotifier.notifyIfEnabled` gate (new-article count > 0 and the `notificationEnabled` setting).
 - **Entry point: a row at the bottom of the feed list, always shown.** It names the notification
   center and shows the count while there is something in it; when it is empty the row shows no
-  count, and opening it shows "No notifications". Clicking the row opens the list above it — a
+  count, and opening it shows "No notifications". The count is a red pill — the same badge the drawer
+  button carries — rather than the feed rows' plain number, so it never reads as one more unread
+  count, and the bell takes the color of the most severe notification (the error color for a warning
+  or an error, the accent color for new-version notices alone; the shared
+  `presentation/home/NotificationSeverity.kt`'s `highestNotificationLevel`). Clicking the row opens the list above it — a
   bottom sheet on Android, a sheet at an iPhone's compact width. The row is
   `ui/home/NotificationCenterRow.kt` in Compose and `NotificationCenterRow.swift` in SwiftUI. It takes
   no toolbar slot, since the history is empty most of the time, and it stays in place rather than

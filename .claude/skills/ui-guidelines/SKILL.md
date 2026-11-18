@@ -132,7 +132,12 @@ not in global chrome:
   and choosing Unread already clear the kept read rows (`external-spec.md` §7).
 - Notifications — not in any toolbar: `NotificationCenterRow`, a `SidebarRow`
   in `FeedListPane`'s fixed footer (above Android's settings row), always
-  shown so it stays in one place, its count drawn only above zero. The history
+  shown so it stays in one place, its count drawn only above zero — as a
+  `KeryxCountBadge` pill (through `SidebarRow`'s `trailing` slot), not the
+  feed rows' plain `CountBadge`, so it matches the drawer button's badge and
+  never reads as one more unread count; the bell is tinted by the most severe
+  notification (`highestNotificationLevel`: `error` for a warning or an error,
+  `primary` for new-version notices alone). The history
   is empty most of the time, so a permanent toolbar slot for it was wasted room;
   a sidebar row costs little and, unlike a row that comes and goes, never
   changes the list's height. The bell lived
@@ -1418,12 +1423,14 @@ side, Android's own Material 3 ripple/shapes/components on the other:
   — see the `KeryxTextField` bullet below for why that's the right call on
   that platform. `KeryxBadgedIcon` (`ui/common/KeryxBadge.kt`, expect/actual) —
   the count badge overlaid on an icon (currently only `ArticleListTopBar`'s
-  drawer button, carrying the notification center's count) — follows
+  drawer button, carrying the notification center's count), and
+  `KeryxCountBadge`, the same pill on its own (`NotificationCenterRow`'s
+  count, so the row visibly matches the drawer button) — follow
   the same split: desktop's `actual` draws a
   hand-rolled `Box`/`Text` pill (`error` fill, `onError` text), Android's
   `actual` uses M3's own `BadgedBox`/`Badge`. Don't add a raw `Box`/`Text` pill
   or a raw `BadgedBox`/`Badge` at a `commonMain` call site — use
-  `KeryxBadgedIcon`.
+  `KeryxBadgedIcon` / `KeryxCountBadge`.
 - **`KeryxTextField`** (`ui/common/KeryxTextField.kt`, expect/actual): the
   replacement for M3's `OutlinedTextField` for every text input — a flat,
   thin-bordered field on desktop, plain M3 on Android (same "why fight the
