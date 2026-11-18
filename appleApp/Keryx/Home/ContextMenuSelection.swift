@@ -138,17 +138,4 @@ private struct SelectsOnContextMenuModifier: ViewModifier {
         pointerIsOver?.wrappedValue = isOver
     }
 }
-#else
-extension View {
-    /// No-op on iOS: there is no right-click, and a long-press context menu leaves the selection
-    /// as it is.
-    /// `pointerIsOver` is never set: iOS has no hover that selects anything.
-    func selectsOnContextMenu(
-        id: AnyHashable,
-        pointerIsOver: Binding<Bool>? = nil,
-        perform select: @escaping () -> Void
-    ) -> some View {
-        self
-    }
-}
 #endif

@@ -507,7 +507,9 @@ jobs:
         shell: bash
         run: |
           macos="$(sw_vers -productVersion)"
-          xcode="$(xcodebuild -version | head -1)"
+          # Not `| head -1`: head closing the pipe early makes xcodebuild abort on EPIPE.
+          xcode="$(xcodebuild -version)"
+          xcode="${xcode%%$'\n'*}"
           echo "macOS $macos, $xcode"
           if [[ "$macos" != 15.* ]]; then
             echo "::error::This job must run on macOS 15, the oldest macOS the app is developed on; the image runs $macos."

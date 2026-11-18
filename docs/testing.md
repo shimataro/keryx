@@ -1420,8 +1420,8 @@ orientations), with a feed of a few dozen articles whose bodies are longer than 
 
 ### (iOS) Going back to the article list
 
-`ArticleListScrollGateTests` covers when a scroll is held and carried out, but whether the list is
-reported as on screen, and the crash itself (see "iOS: going back to the article list crashed in
+`ArticleListScrollRequestTests` covers when the list counts as showing rows. Whether a scroll is carried
+out once the list is back on screen, and the crash itself (see "iOS: going back to the article list crashed in
 `UICollectionView`" in [known-issues.md](known-issues.md)), need a simulator or device. On an iPhone, with a
 feed of a few dozen articles:
 
@@ -1431,7 +1431,11 @@ feed of a few dozen articles:
   jumping a long way once it is back.
 - Open an article, send the app to the background and have iOS terminate it, relaunch into the reader, and go
   back: the selected row is shown, and the row touched next does not jump.
-- A list opened from the sidebar starts at the top, and switching the filter goes back to the top.
+- Picking the same item again from the sidebar keeps the list where it was, and switching the filter goes
+  back to the top.
+- Pull the list, go back to the sidebar, pick the same item and pull again: the spinner shows both times.
+  On iOS 17 or 18, where the pull also brings out the search field, the spinner stays up without
+  flickering until the refresh finishes.
 - Going back still flashes the row just read.
 - On an iPad, selecting an article off screen with a hardware keyboard and switching the filter still scroll
   the list, in the three-pane layout and in portrait.

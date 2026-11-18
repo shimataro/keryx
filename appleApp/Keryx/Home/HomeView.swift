@@ -53,9 +53,6 @@ struct HomeView: View {
     @State private var compactColumn: NavigationSplitViewColumn = .sidebar
     private var compactColumnBinding: Binding<NavigationSplitViewColumn> { $compactColumn }
     #endif
-    /// Bumped each time a phone-width split view brings the article list forward from the sidebar —
-    /// see `ArticleListView.remountGeneration`.
-    @State private var articleListRemountGeneration = 0
     #if os(macOS)
     @State private var contextMenuSelectionTracker = ContextMenuSelectionTracker()
     #else
@@ -85,7 +82,7 @@ struct HomeView: View {
     /// article list — the iOS idiom of a list row fading out its highlight on return, and the role
     /// Android's own neutral ripple pulse (`ripplePulseFor`) plays there. `nil` otherwise.
     @State private var returnFlashId: String?
-    private static let returnFlashFadeSeconds = 0.35
+    static let returnFlashFadeSeconds = 0.35
 
     /// The ideal widths of the sidebar and article list columns. macOS restores the widths the user
     /// last dragged the dividers to. iOS asks for the defaults every time, as Android's touch layouts
@@ -140,8 +137,7 @@ struct HomeView: View {
                 focusedPane: $focusedPane,
                 articleListIsTopmost: articleListIsTopmost,
                 returnFlashId: returnFlashId,
-                onOpenArticle: { compactColumn = .detail },
-                remountGeneration: articleListRemountGeneration
+                onOpenArticle: { compactColumn = .detail }
             )
                 .navigationSplitViewColumnWidth(
                     min: CGFloat(ConstantsKt.ARTICLE_LIST_PANE_MIN_WIDTH),
@@ -172,13 +168,6 @@ struct HomeView: View {
         .onChange(of: compactColumn) { old, new in
             #if os(iOS)
             guard restoration.columnChanged() else { return }
-            if ArticleListRemount.isNeeded(
-                isCompact: horizontalSizeClass == .compact,
-                from: HomeView.compactSearchColumn(old),
-                to: HomeView.compactSearchColumn(new)
-            ) {
-                articleListRemountGeneration += 1
-            }
             #endif
             guard old == .detail, new == .content, articleListIsTopmost,
                   let id = home.selectedArticleId else { return }

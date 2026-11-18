@@ -19,9 +19,6 @@ struct ArticleListView: View {
     /// Pushes the reader when the split view is collapsed (iPhone); a no-op otherwise. A row is a
     /// plain button rather than a `List` selection, so nothing navigates to the reader by itself.
     let onOpenArticle: () -> Void
-    /// Bumped by `HomeView` each time a phone-width split view brings this list forward from the
-    /// sidebar; every change rebuilds `content` (see its `.id` in `body`). Unused on macOS.
-    let remountGeneration: Int
 
     /// The selection is drawn strongly only while this window is key (AppKit's own rule for a
     /// source list's selection), on top of the article list holding the pane focus.
@@ -41,25 +38,11 @@ struct ArticleListView: View {
     /// The new-articles pill's pending jump — see `ArticleTableScrollRequest`.
     @State private var tableScrollRequest = ArticleTableScrollRequest()
     #else
-    /// Which rows are on screen, and the pending report of them — see `VisibleRowTracker`.
-    @State private var visibleRows = VisibleRowTracker()
     /// Whether the first real rows have been shown — see the restored-selection scroll in `body`.
     @State private var didShowFirstRows = false
-    #if os(iOS)
     @State private var topReset = ArticleListTopReset()
-    @State private var scrollGate = ArticleListScrollGate()
-    /// Whether this list is on screen rather than under the reader.
-    @State private var listVisible = false
-    #endif
-    /// Whether this list has been put into a window yet, which rebuilds `content` once more (its
-    /// `.id`). The list a phone-width split view pushes for the first time has its refresh control
-    /// hung under the navigation bar, and after its first pull that control leaves the list resting
-    /// tens of points short of the top (the top inset shrinks back but the offset does not follow).
-    /// A list built once its column is in the navigation stack gets the control inside it and rests
-    /// at the top. Rebuilding as the push starts is too early (the control still goes under the
-    /// bar); rebuilding on window attachment happens before the list can be touched, so nothing
-    /// the reader did is lost.
-    @State private var attachedToWindow = false
+    /// The latest scroll asked of `ArticleCollectionView`.
+    @State private var scrollRequest = ArticleListScrollRequest()
     #endif
 
     /// The rows on screen: the search results while a search is active, else the filter's own list.
@@ -88,12 +71,6 @@ struct ArticleListView: View {
             firstRowId: displayedRows.first?.id
         )
     }
-
-    /// `attachedToWindow` too: its first change rebuilds the list, and a scroll carried out before
-    /// that would be lost with the list it was aimed at.
-    private var scrollGateInput: ArticleListScrollGate.Input {
-        ArticleListScrollGate.Input(canScroll: listVisible && attachedToWindow, remountGeneration: remountGeneration)
-    }
     #endif
 
     var body: some View {
@@ -111,68 +88,40 @@ struct ArticleListView: View {
                 tableResetGeneration += 1
             }
             #else
-            ScrollViewReader { proxy in
-                // Rebuilt whenever a phone-width split view brings this list forward from the
-                // sidebar. SwiftUI hangs a `.refreshable` list's refresh control from the navigation
-                // bar and drops it once the column is popped, but never re-attaches it to the list it
-                // keeps: the pull still refreshes, with no spinner (seen on iOS 27). A rebuilt list
-                // gets a fresh control. `EnvironmentValues.refresh` is read-only, so there is no
-                // lighter way to detach and re-attach the action. The rebuilt list starts at the top,
-                // as NetNewsWire's does on the same route: scrolling it back right after the rebuild
-                // made a row touched next jump for a moment.
-                withNewArticlesPill(content.id(listIdentity)) {
-                    scrollToFreshEnd(proxy)
-                }
-                    // Resets to the top on every filter switch, whatever the sort order — unlike
-                    // the new-articles pill's own jump, which follows it (`ArticleListPane.kt:205-213`
-                    // vs. `NewArticlesPill`'s own "fresh end") — once the new filter's rows are on
-                    // screen, never at the previous filter's (`ArticleListTopReset`). The first
-                    // composition — including a restored `lastArticleId` selection — is not a switch
-                    // and is not scrolled out from under.
-                    .onChange(of: topResetInput, initial: true) { _, input in
-                        if let first = topReset.update(input) {
-                            requestScroll(ArticleListScrollGate.Target(rowId: first), proxy)
-                        }
-                    }
-                    // Only when the user selected an article (`selectionRevealRequests`) and it is off-screen
-                    // (keyboard navigation) — a row already visible (e.g. just clicked) never jumps.
-                    // Not on `selectedArticleId` itself: it also moves back without the user acting
-                    // (a selection found tombstoned), which must not scroll the list.
-                    .onChange(of: home.selectionRevealRequests) { _, _ in
-                        guard let id = home.selectedArticleId else { return }
-                        requestScroll(ArticleListScrollGate.Target(rowId: id, onlyIfOffScreen: true), proxy)
-                    }
-                    .onChange(of: showsRows) { _, shows in
-                        // The article restored from the previous session is already selected before
-                        // any row exists, so the selection-change scroll above never sees it; bring it
-                        // into view once, when the list first shows rows (after they are laid out).
-                        // Not on the rows alone: they and `listBody` arrive separately, and rows
-                        // behind a pending body have no list to take the scroll.
-                        guard !didShowFirstRows, shows else { return }
-                        didShowFirstRows = true
-                        guard let id = home.selectedArticleId else { return }
-                        requestScrollAfterUpdate(ArticleListScrollGate.Target(rowId: id), proxy)
-                    }
-                    // After the current update, so the rows coming back with the list have reported
-                    // themselves (`onlyIfOffScreen`).
-                    .onChange(of: scrollGateInput, initial: true) { _, input in
-                        if let target = scrollGate.update(input) { requestScrollAfterUpdate(target, proxy) }
-                    }
+            withNewArticlesPill(content) {
+                scrollRequest = scrollRequest.next(.freshEnd(newestFirst: home.newestFirst))
             }
+                // Resets to the top on every filter switch, whatever the sort order — unlike
+                // the new-articles pill's own jump, which follows it (`ArticleListPane.kt:205-213`
+                // vs. `NewArticlesPill`'s own "fresh end") — once the new filter's rows are on
+                // screen, never at the previous filter's (`ArticleListTopReset`). The first
+                // composition — including a restored `lastArticleId` selection — is not a switch
+                // and is not scrolled out from under.
+                .onChange(of: topResetInput, initial: true) { _, input in
+                    if let first = topReset.update(input) {
+                        requestScroll(ArticleListScrollRequest.Target(rowId: first))
+                    }
+                }
+                // Only when the user selected an article (`selectionRevealRequests`) and it is off-screen
+                // (keyboard navigation) — a row already visible (e.g. just clicked) never jumps.
+                // Not on `selectedArticleId` itself: it also moves back without the user acting
+                // (a selection found tombstoned), which must not scroll the list.
+                .onChange(of: home.selectionRevealRequests) { _, _ in
+                    guard let id = home.selectedArticleId else { return }
+                    requestScroll(ArticleListScrollRequest.Target(rowId: id, onlyIfOffScreen: true))
+                }
+                .onChange(of: showsRows) { _, shows in
+                    // The article restored from the previous session is already selected before
+                    // any row exists, so the selection-change scroll above never sees it; bring it
+                    // into view once, when the list first shows rows.
+                    guard !didShowFirstRows, shows else { return }
+                    didShowFirstRows = true
+                    guard let id = home.selectedArticleId else { return }
+                    requestScroll(ArticleListScrollRequest.Target(rowId: id))
+                }
             #endif
         }
         #if os(iOS)
-        // Outside the rebuilt `content`, so a rebuild does not attach a fresh probe and fire again.
-        .background {
-            WindowAttachmentProbe {
-                guard !attachedToWindow else { return }
-                // After the current update: the probe reports from inside UIKit's own layout pass.
-                Task { @MainActor in attachedToWindow = true }
-            }
-        }
-        // Outside the rebuilt `content` too, so a rebuild does not read as the list leaving the screen.
-        .onAppear { listVisible = true }
-        .onDisappear { listVisible = false }
         .focused(focusedPane, equals: .articleList)
         #endif
         .toolbar { toolbarContent }
@@ -406,13 +355,6 @@ struct ArticleListView: View {
 
     // MARK: - Content / empty states
 
-    #if os(iOS)
-    /// The identity `body` gives `content`: a change rebuilds the list (see `body`).
-    private var listIdentity: ListIdentity {
-        ListIdentity(remountGeneration: remountGeneration, attachedToWindow: attachedToWindow)
-    }
-    #endif
-
     /// What `content` shows, decided in one place.
     private enum ContentState {
         /// Nothing yet: the lists, the rows or a search are still on their way.
@@ -476,8 +418,13 @@ struct ArticleListView: View {
         case .searchResults:
             articleList
         case .articles:
+            #if os(iOS)
+            // The collection view runs its own refresh control (`ArticleCollectionView`).
+            articleList
+            #else
             articleList
                 .modifier(PullToRefreshModifier(home: home))
+            #endif
         }
     }
 
@@ -613,69 +560,18 @@ struct ArticleListView: View {
     private var articleList: some View {
         let selectedId = displayedSelectedId
         let paneFocused = focusedPane.wrappedValue == .articleList && windowIsKey
-        return List {
-            ForEach(displayedRows) { article in
-                articleRow(article, selectedId: selectedId, paneFocused: paneFocused)
-            }
-        }
-        .listStyle(.plain)
-    }
-
-    private func articleRow(_ article: ArticleRowModel, selectedId: String?, paneFocused: Bool) -> some View {
-        rowView(article, selectedId: selectedId, paneFocused: paneFocused)
-            .equatable()
-            // No horizontal inset of our own: the List's own row padding already supplies the
-            // card's gap from the pane edge (on macOS, where this list used to run too, 8pt —
-            // Compose's `listRowHorizontalMargin()`); adding 8 on top of it doubled that gap.
-            .listRowInsets(EdgeInsets(top: 2, leading: 0, bottom: 2, trailing: 0))
-            .listRowSeparator(.hidden)
-            // Read/unread from the leading edge, star from the trailing one — the same edges and
-            // actions as the macOS table and Android (`ArticleSwipeActionStyle`). Neither selects
-            // the row, so a star never marks the article read; both only change reading state, so a
-            // full swipe runs them without asking.
-            .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                swipeButton(ArticleSwipeActionStyle.leading(article), for: article)
-            }
-            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                swipeButton(ArticleSwipeActionStyle.trailing(article), for: article)
-            }
-            .onAppear {
-                visibleRows.appearedIds.insert(article.id)
-                scheduleReportVisible()
-            }
-            .onDisappear {
-                visibleRows.appearedIds.remove(article.id)
-                scheduleReportVisible()
-            }
-    }
-
-    private func swipeButton(_ action: ArticleSwipeAction, for article: ArticleRowModel) -> some View {
-        Button {
-            home.viewModel.performSwipeAction(article: article.row, action: action)
-        } label: {
-            // Icon only, as on macOS (`ArticleTableView`): the context menu's labels would widen the
-            // button. The title stays the button's VoiceOver label.
-            Label(ArticleSwipeActionStyle.title(action), systemImage: ArticleSwipeActionStyle.systemImage(action))
-                .labelStyle(.iconOnly)
-        }
-        .tint(ArticleSwipeActionStyle.tint(action))
-    }
-
-    /// Schedules a debounced report of visible article ids. Rapid `onAppear`/`onDisappear` pairs
-    /// from a single scroll gesture are coalesced into one `markArticlesSeen` call after a short
-    /// delay, mirroring Compose's own `distinctUntilChanged` behaviour.
-    private func scheduleReportVisible() {
-        visibleRows.reportTask?.cancel()
-        visibleRows.reportTask = Task {
-            try? await Task.sleep(for: .milliseconds(50))
-            guard !Task.isCancelled else { return }
-            let indexById = displayed.indexById
-            let ordered = visibleRows.appearedIds
-                .compactMap { id in indexById[id].map { (index: $0, id: id) } }
-                .sorted { $0.index < $1.index }
-                .map(\.id)
-            reportVisible(ordered)
-        }
+        return ArticleCollectionView(
+            rows: displayed,
+            scrollRequest: scrollRequest,
+            canPullToRefresh: PullToRefreshAvailability.isAvailable(searchActive: home.searchActive, hasFeeds: home.hasFeeds),
+            onRefresh: { await home.pullToRefresh() },
+            makeRow: { rowView($0, selectedId: selectedId, paneFocused: paneFocused) },
+            onVisibleIdsChanged: { reportVisible($0) }
+        )
+        // Under the bars, as a UIKit list in a navigation stack is. Laid out below them instead, the
+        // navigation bar's search drawer (iOS 17 and 18) and the refresh control kept resetting each
+        // other's top inset, and the pull's spinner flickered.
+        .ignoresSafeArea()
     }
     #endif
 
@@ -715,9 +611,9 @@ struct ArticleListView: View {
     }
 
     #if os(iOS)
-    /// Whether the list is showing rows — see `ArticleListScrollGate.listShowsRows`.
+    /// Whether the list is showing rows — see `ArticleListScrollRequest.listShowsRows`.
     private var showsRows: Bool {
-        ArticleListScrollGate.listShowsRows(
+        ArticleListScrollRequest.listShowsRows(
             bodyIsContent: home.listBody == .content,
             rowCount: displayedRows.count,
             searchActive: home.searchActive,
@@ -725,30 +621,10 @@ struct ArticleListView: View {
         )
     }
 
-    /// Only a row the list shows: a scroll sent while it does not exist would be lost.
-    private func rowExists(_ id: String) -> Bool { showsRows && displayed.indexById[id] != nil }
-
-    /// Every scroll but the pill's goes through here: the pill can only be tapped on screen.
-    private func requestScroll(_ target: ArticleListScrollGate.Target, _ proxy: ScrollViewProxy) {
-        guard let target = scrollGate.request(target, rowExists: rowExists) else { return }
-        carryOut(target, proxy)
-    }
-
-    private func requestScrollAfterUpdate(_ target: ArticleListScrollGate.Target, _ proxy: ScrollViewProxy) {
-        Task {
-            await Task.yield()
-            requestScroll(target, proxy)
-        }
-    }
-
-    private func carryOut(_ target: ArticleListScrollGate.Target, _ proxy: ScrollViewProxy) {
-        guard !target.onlyIfOffScreen || !visibleRows.appearedIds.contains(target.rowId) else { return }
-        proxy.scrollTo(target.rowId)
-    }
-
-    private func scrollToFreshEnd(_ proxy: ScrollViewProxy) {
-        guard let target = home.newestFirst ? displayedRows.first?.id : displayedRows.last?.id else { return }
-        proxy.scrollTo(target, anchor: home.newestFirst ? .top : .bottom)
+    /// Every scroll but the pill's goes through here; `ArticleCollectionView` carries it out once
+    /// the list can, against the rows it holds by then.
+    private func requestScroll(_ target: ArticleListScrollRequest.Target) {
+        scrollRequest = scrollRequest.next(.reveal(target))
     }
     #endif
 }
@@ -772,21 +648,3 @@ private struct PullToRefreshModifier: ViewModifier {
     }
 }
 
-#if os(iOS)
-/// What `ArticleListView` rebuilds its list on — see `remountGeneration` and `attachedToWindow`.
-private struct ListIdentity: Hashable {
-    let remountGeneration: Int
-    let attachedToWindow: Bool
-}
-
-/// The article list's on-screen rows and its pending visible-row report. A plain class held in
-/// `@State` rather than `@State` values of their own: every row scrolling in or out writes to it,
-/// and nothing here is drawn, so those writes must not invalidate the list's body.
-@MainActor
-private final class VisibleRowTracker {
-    var appearedIds: Set<String> = []
-    /// Rapid `onAppear`/`onDisappear` pairs from scrolling are coalesced into a single report after
-    /// a short delay — mirroring Compose's `snapshotFlow { ... }.distinctUntilChanged()` behaviour.
-    var reportTask: Task<Void, Never>?
-}
-#endif

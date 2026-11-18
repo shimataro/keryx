@@ -57,17 +57,6 @@ struct SidebarCollectionView: UIViewControllerRepresentable {
     }
 }
 
-/// Keeps the refresh control visible. The list layout's section background (a decoration view
-/// stretched far above the content to cover the overscroll) is drawn over the control, so the pull
-/// revealed only that background while the control spun behind it (iOS 26). The collection view
-/// orders its own subviews, so the control is lifted by layer depth instead; it sits above the
-/// content, so it never covers a cell.
-private final class RefreshableListCollectionView: UICollectionView {
-    override var refreshControl: UIRefreshControl? {
-        didSet { refreshControl?.layer.zPosition = 1 }
-    }
-}
-
 final class SidebarCollectionViewController: UIViewController, UICollectionViewDelegate {
     var actions: SidebarCollectionActions
     private(set) var state: SidebarRenderState?
@@ -82,6 +71,7 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
     private var renderedRefreshing: SidebarRefreshing
 
     private(set) var collectionView: UICollectionView!
+    private let pullToRefresh = ListPullToRefresh()
     private(set) var dataSource: UICollectionViewDiffableDataSource<SidebarSection, SidebarItemID>!
 
     /// Disclosures the user just toggled, until the shared state catches up — the view model
@@ -94,6 +84,11 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
     var dragInProgress = false
     /// The latest state handed over mid-drag, applied when the drag ends.
     private(set) var deferredState: SidebarRenderState?
+
+    /// The long-press menu's clear highlight, so a press that turns into a swipe does not make the row
+    /// jump (see `ContextMenuPressHighlight`). The whole cell is hidden behind the menu's preview, since
+    /// its background and accessories are outside its content view.
+    private let pressHighlight = ContextMenuPressHighlight(hiding: { $0 })
 
     init(home: HomeObservable, actions: SidebarCollectionActions) {
         self.home = home
@@ -114,6 +109,7 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
     override func viewDidLoad() {
         super.viewDidLoad()
         collectionView = RefreshableListCollectionView(frame: view.bounds, collectionViewLayout: makeLayout())
+        pullToRefresh.scrollView = collectionView
         collectionView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         // Arrow keys are `HomeView`'s (the same shortcuts as macOS), not UIKit's focus engine.
         collectionView.allowsFocus = false
@@ -293,36 +289,21 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
         guard force || newState != old else { return }
         state = newState
 
-        if newState.canPullToRefresh != old?.canPullToRefresh { updateRefreshControl(enabled: newState.canPullToRefresh) }
+        if newState.canPullToRefresh != old?.canPullToRefresh {
+            // Pulling the sidebar down refreshes every feed and syncs, like the toolbar's Refresh All
+            // it replaces on iOS; the indicator stays up until both have finished.
+            if newState.canPullToRefresh {
+                pullToRefresh.setAction { [weak self] in await self?.home.pullToRefreshAll() }
+            } else {
+                pullToRefresh.setAction(nil)
+            }
+        }
         applyStructure(newState.outline, animated: old != nil)
         reconfigure(SidebarRowContent.changedItems(from: old?.contents ?? [:], to: newState.contents))
         applySelection(newState.selectedItem, scroll: newState.selectedItem != old?.selectedItem)
         // Counts that changed mid-drag (when `refreshUnreadCounts()` holds back) reach their cells
         // here, on the forced apply at the drag's end.
         refreshUnreadCounts()
-    }
-
-    // MARK: - Pull to refresh
-
-    /// Pulling the sidebar down refreshes every feed and syncs, like the toolbar's Refresh All it
-    /// replaces on iOS; the indicator stays up until both have finished.
-    private func updateRefreshControl(enabled: Bool) {
-        guard enabled else {
-            collectionView.refreshControl = nil
-            return
-        }
-        guard collectionView.refreshControl == nil else { return }
-        let control = UIRefreshControl()
-        control.addAction(UIAction { [weak self] _ in self?.pullToRefresh() }, for: .valueChanged)
-        collectionView.refreshControl = control
-    }
-
-    private func pullToRefresh() {
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            await home.pullToRefreshAll()
-            collectionView.refreshControl?.endRefreshing()
-        }
     }
 
     // MARK: - Unread counts
@@ -546,6 +527,11 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
 
     /// A long press opens the menu; moving the finger instead lifts the row for a drag. Opening the
     /// menu does not select the row, as in the system apps (and Android's own long-press menu).
+    ///
+    /// The menu's highlight is `ContextMenuPressHighlight`'s clear view rather than the row, and its
+    /// preview is an image of the row: the row's selection fill, unread count and disclosure are
+    /// drawn by the cell's background and accessories, so an image matches it where a rebuilt view
+    /// might not.
     func collectionView(
         _ collectionView: UICollectionView,
         contextMenuConfigurationForItemsAt indexPaths: [IndexPath],
@@ -555,7 +541,67 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
               let item = dataSource.itemIdentifier(for: indexPaths[0]),
               let key = item.selectionKey,
               let menu = actions.menu(item) else { return nil }
-        return UIContextMenuConfiguration(identifier: key as NSString, previewProvider: nil) { _ in menu }
+        let cell = collectionView.cellForItem(at: indexPaths[0])
+        pressHighlight.pressed(cell)
+        // Drawn now: by the time the preview is asked for, the cell is already hidden.
+        let image = cell.flatMap(Self.image(of:))
+        return UIContextMenuConfiguration(identifier: key as NSString, previewProvider: {
+            image.map(Self.menuPreview(showing:))
+        }) { _ in menu }
+    }
+
+    func collectionView(
+        _ collectionView: UICollectionView,
+        contextMenuConfiguration configuration: UIContextMenuConfiguration,
+        highlightPreviewForItemAt indexPath: IndexPath
+    ) -> UITargetedPreview? {
+        pressHighlight.highlightPreview(in: collectionView.cellForItem(at: indexPath))
+    }
+
+    func collectionView(
+        _ collectionView: UICollectionView,
+        contextMenuConfiguration configuration: UIContextMenuConfiguration,
+        dismissalPreviewForItemAt indexPath: IndexPath
+    ) -> UITargetedPreview? {
+        pressHighlight.dismissalPreview(in: collectionView.cellForItem(at: indexPath))
+    }
+
+    func collectionView(
+        _ collectionView: UICollectionView,
+        willDisplayContextMenu configuration: UIContextMenuConfiguration,
+        animator: (any UIContextMenuInteractionAnimating)?
+    ) {
+        pressHighlight.menuWillDisplay(animator: animator)
+    }
+
+    func collectionView(
+        _ collectionView: UICollectionView,
+        willEndContextMenuInteraction configuration: UIContextMenuConfiguration,
+        animator: (any UIContextMenuInteractionAnimating)?
+    ) {
+        pressHighlight.menuWillEnd(animator: animator)
+    }
+
+    /// An image of `cell` for the menu's preview. An image rather than
+    /// `snapshotView(afterScreenUpdates:)`, which mirrors the cell live and so would go blank with it
+    /// once the cell is hidden behind the menu.
+    private static func image(of cell: UIView) -> UIImage? {
+        guard cell.bounds.width > 0, cell.bounds.height > 0 else { return nil }
+        return UIGraphicsImageRenderer(bounds: cell.bounds).image { _ in
+            cell.drawHierarchy(in: cell.bounds, afterScreenUpdates: false)
+        }
+    }
+
+    private static func menuPreview(showing image: UIImage) -> UIViewController {
+        let controller = UIViewController()
+        // Sized before the image goes in, so resizing the view to the preview size does not shrink it.
+        controller.view.frame = CGRect(origin: .zero, size: image.size)
+        let imageView = UIImageView(image: image)
+        imageView.frame = controller.view.bounds
+        imageView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        controller.view.addSubview(imageView)
+        controller.preferredContentSize = image.size
+        return controller
     }
 }
 
