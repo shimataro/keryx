@@ -25,6 +25,8 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
@@ -420,5 +422,30 @@ class NotificationCenterPlacementTest {
 
         assertNotEquals(capture("info"), capture("warning"), "a warning tints the bell unlike new-version notices alone")
         assertEquals(capture("warning"), capture("error"), "warnings and errors share the error color")
+    }
+
+    @Test
+    fun anAlertsLevelIsNamedToAssistiveTechnologyNotLeftToTheTintAlone() = runDesktopComposeUiTest {
+        // `Res.string.notification_level_warning` / `notification_level_error`, read with the row.
+        val warning = centerOf(AppNotificationLevel.INFO, AppNotificationLevel.WARNING)
+        val error = centerOf(AppNotificationLevel.WARNING, AppNotificationLevel.ERROR)
+        val info = centerOf(AppNotificationLevel.INFO)
+        setContent {
+            KoinIsolatedContext(context = remember { isolatedKoin() }) {
+                Column {
+                    for ((tag, center) in listOf("warning" to warning, "error" to error, "info" to info)) {
+                        Box(Modifier.testTag(tag)) {
+                            NotificationCenterRow(notifVm = NotificationCenterViewModel(center, NotificationAlerts(center)), count = center.items.value.size)
+                        }
+                    }
+                }
+            }
+        }
+        waitForIdle()
+        fun rowIn(tag: String) = onNode(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Button) and hasAnyAncestor(hasTestTag(tag)))
+
+        rowIn("warning").assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, listOf("警告")))
+        rowIn("error").assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, listOf("エラー")))
+        rowIn("info").assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.ContentDescription))
     }
 }
