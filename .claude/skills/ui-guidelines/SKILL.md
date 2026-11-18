@@ -59,6 +59,18 @@ content whose position must stay fixed (e.g. a title `Text`).
   gets shrunk back down to `8.dp` with no error. Use
   `Modifier.requiredSize(x)` when the child is meant to overflow its
   container's declared bounds.
+- **A count after a `weight(1f)` label is the exception: it may draw
+  nothing at zero, with no reserved slot.** The feed rows' unread counts
+  (`CountBadge`) and the notification center row's `KeryxCountBadge`
+  (`SidebarRow`'s `trailing`) work this way. The weighted label absorbs the
+  width the count takes or gives back, so nothing moves — not the elements
+  before the label, and not those after the count that sit at the row's end
+  (a folder row's touch `DragHandle`). A reserved slot could not keep the size
+  fixed anyway, since a count widens with its number of digits. What it costs
+  instead: the label's room shrinks when a count appears, so at a very large
+  font scale it may truncate — accepted. Not covered: a data-dependent element
+  *before* the weighted label (the `ArticleRow` star incident above), or a row with
+  no weighted element to absorb the change; those reserve their slot as usual.
 - **Prefer disabled over hidden.** When a control's availability depends on
   state (an action needs a selection, a precondition isn't met yet, a
   feature is temporarily unavailable), render it in a disabled/inactive
