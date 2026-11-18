@@ -4,16 +4,14 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import org.freedesktop.dbus.DBusPath
 import org.freedesktop.dbus.connections.impl.DBusConnection
-import org.freedesktop.dbus.connections.impl.DBusConnectionBuilder
 import org.freedesktop.dbus.interfaces.DBus
 import org.freedesktop.dbus.messages.DBusSignal
 import org.freedesktop.dbus.types.UInt32
-import works.merc.keryx.app.DBUS_BUS
-import works.merc.keryx.app.DBUS_PATH
+import works.merc.keryx.app.DEFAULT_DBUS_SETUP_TIMEOUT
 import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.openDBusConnectionWithTimeout
+import works.merc.keryx.app.openUnsharedSessionBus
 import kotlin.time.Duration
-import kotlin.time.Duration.Companion.seconds
 
 private const val LOG_TAG = "AppMenuConnection"
 
@@ -113,15 +111,13 @@ internal class AppMenuConnection private constructor(
         /** Where the exported dbusmenu object lives (arbitrary, but stable). */
         const val MENU_PATH = "/com/canonical/menu/keryx"
 
-        private val DEFAULT_TIMEOUT = 2.seconds
-
         /**
          * Creates an AppMenu connection when the KDE Global Menu registrar is available.
          *
          * @param timeout The maximum time allowed to establish the connection.
          * @return The connection, or `null` if the registrar is unavailable or the timeout expires.
          */
-        fun tryCreate(timeout: Duration = DEFAULT_TIMEOUT): AppMenuConnection? = openDBusConnectionWithTimeout(
+        fun tryCreate(timeout: Duration = DEFAULT_DBUS_SETUP_TIMEOUT): AppMenuConnection? = openDBusConnectionWithTimeout(
             logTag = LOG_TAG,
             component = "AppMenu connection",
             timeout = timeout,
@@ -135,25 +131,10 @@ internal class AppMenuConnection private constructor(
          *
          * @return A configured connection, or `null` when the registrar is unavailable.
          */
-        private fun open(): AppMenuConnection? {
-            // withShared(false): we export an object on this one, so it must not be the process-wide
-            // refcounted connection.
-            val connection = DBusConnectionBuilder.forSessionBus().withShared(false).build()
-            var handedOver = false
-            try {
-                val bus = connection.getRemoteObject(DBUS_BUS, DBUS_PATH, DBus::class.java)
-                if (!bus.NameHasOwner(REGISTRAR_BUS)) {
-                    Log.info(LOG_TAG, "No $REGISTRAR_BUS on the session bus; skipping the Global Menu")
-                    return null
-                }
-                val created = AppMenuConnection(connection)
-                handedOver = true
-                return created
-            } finally {
-                if (!handedOver) {
-                    runCatching { connection.disconnect() }
-                }
-            }
-        }
+        private fun open(): AppMenuConnection? = openUnsharedSessionBus(
+            requiredBusName = REGISTRAR_BUS,
+            logTag = LOG_TAG,
+            absentMessage = "No $REGISTRAR_BUS on the session bus; skipping the Global Menu",
+        ) { connection, _ -> AppMenuConnection(connection) }
     }
 }

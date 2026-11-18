@@ -5,6 +5,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import org.freedesktop.dbus.types.UInt32
 import org.freedesktop.dbus.types.Variant
 import works.merc.keryx.app.tray.AboutToShowGroupReply
+import works.merc.keryx.app.tray.DBUSMENU_EVENT_CLICKED
 import works.merc.keryx.app.tray.DBusMenu
 import works.merc.keryx.app.tray.DBusMenuEventEntry
 import works.merc.keryx.app.tray.DBusMenuItemProperties
@@ -123,7 +124,7 @@ internal class AppMenuDBusMenu(
     private fun handleEvent(id: Int, eventId: String): Boolean {
         val layout = current.get().layout
         if (id !in layout.knownIds) return false
-        if (eventId == "clicked" && id in layout.dispatch) {
+        if (eventId == DBUSMENU_EVENT_CLICKED && id in layout.dispatch) {
             _clickedIds.tryEmit(id)
         }
         // "hovered" / "opened" / "closed" and clicks on submenu/separator nodes need no action,

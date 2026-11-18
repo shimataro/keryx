@@ -1,17 +1,23 @@
 package works.merc.keryx.app.appmenu
 
 import org.freedesktop.dbus.types.Variant
+import works.merc.keryx.app.tray.DBUSMENU_LAYOUT_SIGNATURE
+import works.merc.keryx.app.tray.DBUSMENU_ROOT_ID
 import works.merc.keryx.app.tray.DBusMenuLayoutItem
+import works.merc.keryx.app.tray.dbusMenuLeafProperties
+import works.merc.keryx.app.tray.dbusMenuRootProperties
+import works.merc.keryx.app.tray.dbusMenuSeparatorProperties
 import works.merc.keryx.app.tray.escapeMenuLabel
+import works.merc.keryx.app.tray.filterDBusMenuProperties
 import works.merc.keryx.app.ui.menu.AppMenuNode
 import works.merc.keryx.app.ui.menu.AppMenuRoot
 import works.merc.keryx.app.ui.menu.AppMenuShortcut
 
 /** The dbusmenu root id is always 0 per the spec. */
-internal const val APPMENU_ROOT_ID = 0
+internal const val APPMENU_ROOT_ID = DBUSMENU_ROOT_ID
 
 /** The D-Bus signature of a dbusmenu node, needed to wrap children in a variant. */
-internal const val APPMENU_LAYOUT_SIGNATURE = "(ia{sv}av)"
+internal const val APPMENU_LAYOUT_SIGNATURE = DBUSMENU_LAYOUT_SIGNATURE
 
 /**
  * A built `com.canonical.dbusmenu` layout derived from an [AppMenuRoot].
@@ -61,17 +67,12 @@ internal class AppMenuLayout(
         } else {
             emptyList()
         }
-        return DBusMenuLayoutItem(parentId, filterProperties(node.properties, propertyNames), children)
+        return DBusMenuLayoutItem(parentId, filterDBusMenuProperties(node.properties, propertyNames), children)
     }
 
     /** The properties of [id], filtered to [propertyNames] (empty = all). Unknown id → empty map. */
     fun propertiesOf(id: Int, propertyNames: List<String>): Map<String, Variant<*>> =
-        filterProperties(nodesById[id]?.properties ?: emptyMap(), propertyNames)
-
-    private fun filterProperties(
-        all: Map<String, Variant<*>>,
-        propertyNames: List<String>,
-    ): Map<String, Variant<*>> = if (propertyNames.isEmpty()) all else all.filterKeys { it in propertyNames }
+        filterDBusMenuProperties(nodesById[id]?.properties ?: emptyMap(), propertyNames)
 }
 
 /**
@@ -100,7 +101,7 @@ internal fun buildAppMenuLayout(root: AppMenuRoot): AppMenuLayout {
     val rootChildIds = root.menus.map { visit(it) }
     nodesById[rootId] = AppMenuLayout.LayoutNode(
         rootId,
-        mapOf("children-display" to Variant("submenu")),
+        dbusMenuRootProperties(),
         rootChildIds,
     )
 
@@ -116,25 +117,16 @@ private fun propertiesFor(node: AppMenuNode): Map<String, Variant<*>> = when (no
         "children-display" to Variant("submenu"),
     )
     is AppMenuNode.Item -> buildMap {
-        put("type", Variant("standard"))
-        put("label", Variant(escapeMenuLabel(node.label)))
-        put("enabled", Variant(node.enabled))
-        put("visible", Variant(true))
+        putAll(dbusMenuLeafProperties(node.label, node.enabled))
         node.shortcut?.let { put("shortcut", it.toDbusmenuShortcut()) }
     }
     is AppMenuNode.CheckboxItem -> buildMap {
-        put("type", Variant("standard"))
-        put("label", Variant(escapeMenuLabel(node.label)))
-        put("enabled", Variant(node.enabled))
-        put("visible", Variant(true))
+        putAll(dbusMenuLeafProperties(node.label, node.enabled))
         put("toggle-type", Variant("checkmark"))
         put("toggle-state", Variant(if (node.checked) 1 else 0))
         node.shortcut?.let { put("shortcut", it.toDbusmenuShortcut()) }
     }
-    AppMenuNode.Separator -> mapOf(
-        "type" to Variant("separator"),
-        "visible" to Variant(true),
-    )
+    AppMenuNode.Separator -> dbusMenuSeparatorProperties()
 }
 
 /**

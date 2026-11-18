@@ -12,6 +12,43 @@ internal const val DBUSMENU_INTERFACE = "com.canonical.dbusmenu"
 /** The dbusmenu protocol version both exported menus implement. */
 private const val DBUSMENU_VERSION = 3L
 
+/** The dbusmenu root node id, which the spec fixes at 0 for every exported menu. */
+internal const val DBUSMENU_ROOT_ID = 0
+
+/** The D-Bus signature of a dbusmenu node, needed to wrap children in a variant. */
+internal const val DBUSMENU_LAYOUT_SIGNATURE = "(ia{sv}av)"
+
+/** The dbusmenu `Event` id a host sends when an item is activated. */
+internal const val DBUSMENU_EVENT_CLICKED = "clicked"
+
+/** The properties of a dbusmenu root node: its children are shown as a submenu. */
+internal fun dbusMenuRootProperties(): Map<String, Variant<*>> = mapOf("children-display" to Variant("submenu"))
+
+/**
+ * Creates the standard properties for a leaf menu item.
+ *
+ * @param label The label displayed for the menu item (escaped here via [escapeMenuLabel]).
+ * @param enabled Whether the item can currently be activated — `false` grays it out (e.g. while a
+ *   download is in progress) without removing it from the menu.
+ * @return A map containing the item's type, escaped label, enabled state, and visibility, in that order.
+ */
+internal fun dbusMenuLeafProperties(label: String, enabled: Boolean = true): Map<String, Variant<*>> = mapOf(
+    "type" to Variant("standard"),
+    "label" to Variant(escapeMenuLabel(label)),
+    "enabled" to Variant(enabled),
+    "visible" to Variant(true),
+)
+
+/** The properties of a dbusmenu separator node. */
+internal fun dbusMenuSeparatorProperties(): Map<String, Variant<*>> =
+    mapOf("type" to Variant("separator"), "visible" to Variant(true))
+
+/** [all] filtered to [propertyNames], where an empty list means "all of them". */
+internal fun filterDBusMenuProperties(
+    all: Map<String, Variant<*>>,
+    propertyNames: List<String>,
+): Map<String, Variant<*>> = if (propertyNames.isEmpty()) all else all.filterKeys { it in propertyNames }
+
 /**
  * The read-only properties both exported menus (the tray's and the KDE Global Menu's) report for
  * [interfaceName]: fixed values for [DBUSMENU_INTERFACE], nothing for any other interface.
@@ -209,7 +246,7 @@ internal class SniDBusMenu(
      */
     private fun handleEvent(id: Int, eventId: String): Boolean {
         if (id !in MENU_KNOWN_IDS) return false
-        if (eventId == "clicked") {
+        if (eventId == DBUSMENU_EVENT_CLICKED) {
             when (id) {
                 MENU_TOGGLE_ID -> _toggleRequests.tryEmit(Unit)
                 MENU_QUIT_ID -> _quitRequests.tryEmit(Unit)

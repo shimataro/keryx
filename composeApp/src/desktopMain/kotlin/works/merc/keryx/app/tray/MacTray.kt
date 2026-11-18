@@ -7,7 +7,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import kotlinx.coroutines.flow.SharedFlow
-import works.merc.keryx.app.core.APP_NAME
 import java.awt.Component
 import java.awt.Frame
 import java.awt.Image
@@ -34,7 +33,7 @@ internal class MacTrayMenu(
     onToggle: () -> Unit,
     onQuit: () -> Unit,
     onUpdateAction: () -> Unit = {},
-) {
+) : AwtTrayMenuLabels {
     private val toggleItem = MenuItem().apply { addActionListener { onToggle() } }
     private val quitItem = MenuItem().apply { addActionListener { onQuit() } }
     private val updateItem = MenuItem().apply { addActionListener { onUpdateAction() } }
@@ -58,7 +57,7 @@ internal class MacTrayMenu(
      * Compose state, not something this AWT-facing class needs to know about.
      * @param quit The label for the quit entry.
      */
-    fun setLabels(toggle: String, quit: String) {
+    override fun setLabels(toggle: String, quit: String) {
         toggleItem.label = toggle
         quitItem.label = quit
     }
@@ -69,7 +68,7 @@ internal class MacTrayMenu(
      * `UpdateState` maps to a label, and one with nothing to act on is shown disabled rather than
      * removed.
      */
-    fun setUpdateEntry(entry: TrayUpdateEntry) {
+    override fun setUpdateEntry(entry: TrayUpdateEntry) {
         updateItem.label = entry.label
         updateItem.isEnabled = entry.enabled
     }
@@ -100,9 +99,11 @@ internal class MacTrayMenu(
  * @param toggleLabel The toggle item's label: Hide while the window is shown (visible and not
  *   minimized — see [trayWindowShown]), Show otherwise.
  * @param quitLabel The menu label for quitting the application.
+ * @param updateEntry The in-app update menu entry's label and enabled state (see [updateMenuEntry]).
  * @param onToggle Called when the toggle menu item is activated.
  * @param onIconClick Called for a left click on the tray icon.
  * @param onQuit Called when the quit menu item is activated.
+ * @param onUpdateAction Called when the in-app update menu item is activated.
  * @param newArticleNotifications Notifications to display as macOS user notifications.
  */
 @Composable
@@ -182,22 +183,7 @@ internal fun MacTray(
         }
     }
 
-    LaunchedEffect(trayIcon, tooltip) {
-        trayIcon.toolTip = tooltip
-    }
-    LaunchedEffect(menu, toggleLabel, quitLabel) {
-        menu.setLabels(toggle = toggleLabel, quit = quitLabel)
-    }
-    LaunchedEffect(menu, updateEntry) {
-        menu.setUpdateEntry(updateEntry)
-    }
+    AwtTrayMenuTextEffects(trayIcon, menu, tooltip, toggleLabel, quitLabel, updateEntry)
 
-    // Tray()'s own composable body is what turns a queued TrayState notification
-    // into an actual TrayIcon.displayMessage(...) call; since MacTray replaces
-    // Tray() entirely on macOS, it must consume newArticleNotifications itself.
-    LaunchedEffect(trayIcon) {
-        newArticleNotifications.collect { message ->
-            trayIcon.displayMessage(APP_NAME, message, TrayIcon.MessageType.NONE)
-        }
-    }
+    AwtTrayNotificationsEffect(trayIcon, newArticleNotifications)
 }

@@ -3,16 +3,14 @@ package works.merc.keryx.app.tray
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import org.freedesktop.dbus.connections.impl.DBusConnection
-import org.freedesktop.dbus.connections.impl.DBusConnectionBuilder
 import org.freedesktop.dbus.interfaces.DBus
 import org.freedesktop.dbus.messages.DBusSignal
 import org.freedesktop.dbus.types.UInt32
-import works.merc.keryx.app.DBUS_BUS
-import works.merc.keryx.app.DBUS_PATH
+import works.merc.keryx.app.DEFAULT_DBUS_SETUP_TIMEOUT
 import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.openDBusConnectionWithTimeout
+import works.merc.keryx.app.openUnsharedSessionBus
 import kotlin.time.Duration
-import kotlin.time.Duration.Companion.seconds
 
 private const val LOG_TAG = "SniConnection"
 
@@ -175,15 +173,13 @@ internal class SniConnection private constructor(
          */
         const val MENU_PATH = "/StatusNotifierItem/menu"
 
-        private val DEFAULT_TIMEOUT = 2.seconds
-
         /**
          * Attempts to create a session-bus connection for the native tray.
          *
          * @param timeout The maximum time allowed for connection setup.
          * @return A configured connection, or `null` when the native tray is unavailable or setup fails.
          */
-        fun tryCreate(timeout: Duration = DEFAULT_TIMEOUT): SniConnection? = openDBusConnectionWithTimeout(
+        fun tryCreate(timeout: Duration = DEFAULT_DBUS_SETUP_TIMEOUT): SniConnection? = openDBusConnectionWithTimeout(
             logTag = LOG_TAG,
             component = "StatusNotifierItem tray",
             timeout = timeout,
@@ -197,33 +193,20 @@ internal class SniConnection private constructor(
          *
          * @return A configured connection, or `null` when the status notifier watcher is unavailable or setup fails.
          */
-        private fun open(): SniConnection? {
-            // withShared(false) is required: the default is a process-wide refcounted
-            // connection, and we own a well-known name and export objects on this one.
-            val connection = DBusConnectionBuilder.forSessionBus().withShared(false).build()
-            var handedOver = false
-            try {
-                val bus = connection.getRemoteObject(DBUS_BUS, DBUS_PATH, DBus::class.java)
-                if (!bus.NameHasOwner(WATCHER_BUS)) {
-                    Log.info(LOG_TAG, "No $WATCHER_BUS on the session bus; using the AWT tray instead")
-                    return null
-                }
-                val busName = sniBusName(ProcessHandle.current().pid())
-                connection.requestBusName(busName)
+        private fun open(): SniConnection? = openUnsharedSessionBus(
+            requiredBusName = WATCHER_BUS,
+            logTag = LOG_TAG,
+            absentMessage = "No $WATCHER_BUS on the session bus; using the AWT tray instead",
+        ) { connection, bus ->
+            val busName = sniBusName(ProcessHandle.current().pid())
+            connection.requestBusName(busName)
 
-                val notificationsAvailable = bus.NameHasOwner(NOTIFICATIONS_BUS)
-                if (!notificationsAvailable) {
-                    Log.warn(LOG_TAG, "$NOTIFICATIONS_BUS is not available; desktop notifications will be skipped")
-                }
-
-                val created = SniConnection(connection, busName, notificationsAvailable)
-                handedOver = true
-                return created
-            } finally {
-                if (!handedOver) {
-                    runCatching { connection.disconnect() }
-                }
+            val notificationsAvailable = bus.NameHasOwner(NOTIFICATIONS_BUS)
+            if (!notificationsAvailable) {
+                Log.warn(LOG_TAG, "$NOTIFICATIONS_BUS is not available; desktop notifications will be skipped")
             }
+
+            SniConnection(connection, busName, notificationsAvailable)
         }
     }
 }
