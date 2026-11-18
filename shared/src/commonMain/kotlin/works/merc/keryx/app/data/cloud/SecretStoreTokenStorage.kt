@@ -37,12 +37,12 @@ abstract class SecretStoreTokenStorage(
      */
     protected abstract fun clearSecret(): Boolean
 
-    final override fun save(tokens: OAuthTokens): TokenSaveOutcome {
-        val payload = json.encodeToString(tokens)
+    final override fun save(credentials: CloudCredentials): TokenSaveOutcome {
+        val payload = json.encodeToString(CloudCredentialsSerializer, credentials)
         if (!storeSecret(payload)) {
             // Report the fallback's own outcome rather than a flat "not secure": its write can
-            // fail too, and that leaves the tokens nowhere at all instead of in a plaintext file.
-            return fallback.save(tokens)
+            // fail too, and that leaves the credentials nowhere at all instead of in a plaintext file.
+            return fallback.save(credentials)
         }
         // A previous run may have written the plaintext fallback before the backend became
         // available again; clear it so a stale plaintext copy doesn't linger once secure storage
@@ -51,7 +51,7 @@ abstract class SecretStoreTokenStorage(
         // warning exists for. The check has to be fallback.clear()'s own answer, not a follow-up
         // fallback.load(): FileTokenStorage.load() reports a file whose JSON no longer decodes as
         // "nothing stored", so a failed delete of a corrupt-but-readable file would have looked
-        // like a successful cleanup and claimed SECURE with the tokens still on disk.
+        // like a successful cleanup and claimed SECURE with the credentials still on disk.
         return if (fallback.clear() == TokenClearOutcome.CLEARED) {
             TokenSaveOutcome.SECURE
         } else {
@@ -59,11 +59,11 @@ abstract class SecretStoreTokenStorage(
         }
     }
 
-    final override fun load(): OAuthTokens? {
+    final override fun load(): CloudCredentials? {
         val decoded = loadSecret()?.let {
-            runCatching { json.decodeFromString<OAuthTokens>(it) }
+            runCatching { json.decodeFromString(CloudCredentialsSerializer, it) }
                 // Logs only the exception's type, never the exception itself: kotlinx.serialization's
-                // JsonDecodingException embeds the offending input (i.e. the token payload) in its
+                // JsonDecodingException embeds the offending input (i.e. the credential payload) in its
                 // own message, which Log.warn(tag, message, throwable) would otherwise write
                 // straight into the log file — defeating the whole point of a secure store.
                 .onFailure { e -> Log.warn(TOKEN_STORAGE_LOG_TAG, "Stored token payload could not be decoded (${e::class.simpleName})") }

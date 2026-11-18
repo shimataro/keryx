@@ -5,6 +5,9 @@ import kotlin.experimental.ExperimentalNativeApi
 @OptIn(ExperimentalNativeApi::class)
 actual val isMacOs: Boolean = Platform.osFamily == OsFamily.MACOSX
 
+/** iPadOS reports itself as iOS here, which is also how it names itself to servers. */
+actual val platformOsName: String = if (isMacOs) "macOS" else "iOS"
+
 @OptIn(ExperimentalNativeApi::class)
 actual val isTouchPrimary: Boolean = Platform.osFamily == OsFamily.IOS
 

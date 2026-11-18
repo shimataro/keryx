@@ -30,10 +30,10 @@ class FileTokenStorage(
      * ([TokenSaveOutcome.NOT_PERSISTED]) — only the latter loses the tokens when the app exits, so
      * the caller warns about the two differently.
      */
-    override fun save(tokens: OAuthTokens): TokenSaveOutcome {
+    override fun save(credentials: CloudCredentials): TokenSaveOutcome {
         // Persisting must never throw: this is the last-resort store, and a failure here (unwritable
         // data dir, a pre-existing root-owned/read-only token file) would otherwise propagate up
-        // through CloudSession.saveTokens() and abort the connect flow *after* the token is already
+        // through CloudSession.saveCredentials() and abort the connect flow *after* the token is already
         // held in memory — leaving the user unable to link at all. Swallow and log instead; the
         // in-memory session still works, only cross-restart persistence is lost.
         val result = runCatching {
@@ -51,7 +51,7 @@ class FileTokenStorage(
                 if (!restrictToOwnerOnly(tmp)) {
                     throw IOException("Failed to restrict token file to owner-only permissions: $tmp")
                 }
-                tmp.writeText(json.encodeToString(tokens))
+                tmp.writeText(json.encodeToString(CloudCredentialsSerializer, credentials))
                 Files.move(tmp.toPath(), file.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
             } catch (e: Exception) {
                 tmp.delete()
@@ -85,10 +85,10 @@ class FileTokenStorage(
         }
     }
 
-    override fun load(): OAuthTokens? =
+    override fun load(): CloudCredentials? =
         file.takeIf { it.exists() }
             ?.let {
-                runCatching { json.decodeFromString<OAuthTokens>(it.readText()) }
+                runCatching { json.decodeFromString(CloudCredentialsSerializer, it.readText()) }
                     // Logs only the exception's type, never the exception itself: kotlinx.serialization's
                     // JsonDecodingException embeds the offending input (i.e. the token payload) in its
                     // own message, which Log.warn(tag, message, throwable) would otherwise write

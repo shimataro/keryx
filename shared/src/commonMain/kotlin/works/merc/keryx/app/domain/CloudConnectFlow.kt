@@ -5,38 +5,58 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import works.merc.keryx.app.core.Result
-import works.merc.keryx.app.data.cloud.OAuthTokens
+import works.merc.keryx.app.data.cloud.CloudCredentials
 
 /**
- * Runs the interactive connect flow for one cloud provider (browser + OAuth 2.0
- * authorization-code-with-PKCE), returning the issued tokens. The redirect
- * transport is provider- and platform-specific — Dropbox uses a custom URI
- * scheme; Google requires a loopback redirect — so this is an interface with a
- * per-provider implementation.
+ * Runs the interactive connect flow for one cloud provider, returning the credentials it issued.
+ * For the OAuth providers that is a browser + OAuth 2.0 authorization-code-with-PKCE flow whose
+ * redirect transport is provider- and platform-specific — Dropbox uses a custom URI scheme; Google
+ * requires a loopback redirect — so this is an interface with a per-provider implementation.
+ *
+ * Only Nextcloud's Login Flow v2 (`data/cloud/nextcloud/NextcloudLoginFlow.kt`) reads the
+ * [CloudConnectRequest] it is handed — the server the user named. Neither the OAuth flows nor
+ * Android's Play services flow need anything from the user before they start.
  */
 interface CloudConnectFlow {
     /**
-     * Runs the cloud provider's interactive OAuth connection flow.
+     * Runs the cloud provider's interactive connection flow.
      *
-     * @return The issued OAuth tokens wrapped in a result.
+     * @param request What the user supplied before the flow started; [CloudConnectRequest.NONE] when
+     *   nothing was asked for.
+     * @return The issued credentials wrapped in a result.
      */
-    suspend fun connect(): Result<OAuthTokens>
+    suspend fun connect(request: CloudConnectRequest = CloudConnectRequest.NONE): Result<CloudCredentials>
+}
+
+/**
+ * Input the user supplies before a [CloudConnectFlow] starts.
+ *
+ * @property serverUrl The server to connect to, for a provider reached at a user-chosen server
+ *   (Nextcloud) — already checked by the connect dialog; `null` for every other provider.
+ */
+class CloudConnectRequest(val serverUrl: String? = null) {
+    companion object {
+        /** The request for a flow that asks the user for nothing before it starts. */
+        val NONE: CloudConnectRequest = CloudConnectRequest()
+    }
 }
 
 /**
  * Runs the cloud connection flow and reports its active job and cancellation availability.
  *
  * @param flow The cloud connection flow to run.
+ * @param request What the user supplied before the flow started, handed to [CloudConnectFlow.connect].
  * @param onJobChange Called with the active job, or `null` after completion or cancellation.
  * @param onCanCancelChange Called with `true` while cancellation is available and `false` afterward.
- * @return The OAuth tokens result, or `null` if the connection is cancelled.
+ * @return The credentials result, or `null` if the connection is cancelled.
  */
 suspend fun CoroutineScope.awaitCancellableConnect(
     flow: CloudConnectFlow,
+    request: CloudConnectRequest = CloudConnectRequest.NONE,
     onJobChange: (Job?) -> Unit,
     onCanCancelChange: (Boolean) -> Unit,
-): Result<OAuthTokens>? {
-    val waitJob = async { flow.connect() }
+): Result<CloudCredentials>? {
+    val waitJob = async { flow.connect(request) }
     onJobChange(waitJob)
     onCanCancelChange(true)
     return try {

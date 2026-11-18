@@ -4,9 +4,12 @@ import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.MockRequestHandler
 import io.ktor.client.engine.mock.respond
+import io.ktor.client.request.HttpRequestData
+import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
@@ -16,13 +19,21 @@ import works.merc.keryx.app.FakeTokenStorage
 import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.Clock
+import works.merc.keryx.app.core.CloudAuthException
 import works.merc.keryx.app.core.CloudStorageType
 import works.merc.keryx.app.core.InfoDialogText
 import works.merc.keryx.app.core.NotificationText
 import works.merc.keryx.app.core.Result
+import works.merc.keryx.app.data.cloud.AppPasswordCredentials
+import works.merc.keryx.app.data.cloud.CloudCredentials
+import works.merc.keryx.app.data.cloud.CloudStorage
 import works.merc.keryx.app.data.cloud.DropboxAuthManager
+import works.merc.keryx.app.data.cloud.DropboxStorage
 import works.merc.keryx.app.data.cloud.OAuthTokens
 import works.merc.keryx.app.data.cloud.TokenSaveOutcome
+import works.merc.keryx.app.data.cloud.nextcloud.NextcloudStorage
+import works.merc.keryx.app.data.cloud.oauthAccessToken
+import works.merc.keryx.app.di.nextcloudProvider
 import works.merc.keryx.app.singleProviderCloudSession
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -124,32 +135,32 @@ class CloudSessionTest {
     }
 
     @Test
-    fun saveTokensPersistsToTokenStorage() = runBlocking {
+    fun saveCredentialsPersistsToTokenStorage() = runBlocking {
         val storage = FakeTokenStorage(null)
         val s = session(storage, clientId = "APPKEY")
 
-        s.saveTokens(CloudStorageType.DROPBOX, OAuthTokens("AT", "RT"))
+        s.saveCredentials(CloudStorageType.DROPBOX, OAuthTokens("AT", "RT"))
 
-        assertEquals("AT", storage.stored?.accessToken)
-        assertEquals("RT", storage.stored?.refreshToken)
+        assertEquals("AT", (storage.stored as? OAuthTokens)?.accessToken)
+        assertEquals("RT", (storage.stored as? OAuthTokens)?.refreshToken)
     }
 
     @Test
-    fun saveTokensRaisesNoNotificationWhenStoredSecurely() = runBlocking {
+    fun saveCredentialsRaisesNoNotificationWhenStoredSecurely() = runBlocking {
         val center = NotificationCenter()
         val s = session(FakeTokenStorage(null, outcome = TokenSaveOutcome.SECURE), notificationCenter = center)
 
-        s.saveTokens(CloudStorageType.DROPBOX, OAuthTokens("AT", "RT"))
+        s.saveCredentials(CloudStorageType.DROPBOX, OAuthTokens("AT", "RT"))
 
         assertEquals(emptyList(), center.items.value)
     }
 
     @Test
-    fun saveTokensWarnsWhenTheTokenOnlyReachedThePlaintextFallback() = runBlocking {
+    fun saveCredentialsWarnsWhenTheTokenOnlyReachedThePlaintextFallback() = runBlocking {
         val center = NotificationCenter()
         val s = session(FakeTokenStorage(null, outcome = TokenSaveOutcome.PLAINTEXT_FILE), notificationCenter = center)
 
-        s.saveTokens(CloudStorageType.DROPBOX, OAuthTokens("AT", "RT"))
+        s.saveCredentials(CloudStorageType.DROPBOX, OAuthTokens("AT", "RT"))
 
         val notification = center.items.value.single()
         assertEquals(AppNotificationLevel.WARNING, notification.level)
@@ -166,11 +177,11 @@ class CloudSessionTest {
      * shared message would tell the user their sign-in is in a file that was never written.
      */
     @Test
-    fun saveTokensWarnsDistinctlyWhenTheTokenCouldNotBePersistedAtAll() = runBlocking {
+    fun saveCredentialsWarnsDistinctlyWhenTheTokenCouldNotBePersistedAtAll() = runBlocking {
         val center = NotificationCenter()
         val s = session(FakeTokenStorage(null, outcome = TokenSaveOutcome.NOT_PERSISTED), notificationCenter = center)
 
-        s.saveTokens(CloudStorageType.DROPBOX, OAuthTokens("AT", "RT"))
+        s.saveCredentials(CloudStorageType.DROPBOX, OAuthTokens("AT", "RT"))
 
         val notification = center.items.value.single()
         assertEquals(AppNotificationLevel.WARNING, notification.level)
@@ -204,13 +215,13 @@ class CloudSessionTest {
         )
 
         // 1st fallback save: the initial connect.
-        s.saveTokens(CloudStorageType.DROPBOX, OAuthTokens("STALE", "RT", expiresAtMillis = 1_000L))
+        s.saveCredentials(CloudStorageType.DROPBOX, OAuthTokens("STALE", "RT", expiresAtMillis = 1_000L))
         // 2nd fallback save: the expired token is refreshed and persisted again.
         val cloudStorage = s.current()
         assertNotNull(cloudStorage)
         cloudStorage.authenticate()
 
-        assertEquals("FRESH", storage.stored?.accessToken) // the refresh really did save again
+        assertEquals("FRESH", (storage.stored as? OAuthTokens)?.accessToken) // the refresh really did save again
         assertEquals(1, center.items.value.size)
         assertEquals(AppNotificationLevel.WARNING, center.items.value.single().level)
     }
@@ -229,7 +240,7 @@ class CloudSessionTest {
             respond("{}", HttpStatusCode.OK)
         })
 
-        s.saveTokens(CloudStorageType.DROPBOX, OAuthTokens("AT", "RT"))
+        s.saveCredentials(CloudStorageType.DROPBOX, OAuthTokens("AT", "RT"))
 
         assertNull(storage.stored)
         assertTrue(s.isConnected())
@@ -267,7 +278,7 @@ class CloudSessionTest {
         assertNotNull(s.current()).authenticate()
         assertNotNull(s.current()).authenticate()
 
-        assertEquals("STALE", storage.stored?.accessToken) // the refresh never reached the store
+        assertEquals("STALE", (storage.stored as? OAuthTokens)?.accessToken) // the refresh never reached the store
         assertEquals(listOf<String?>("Bearer FRESH", "Bearer FRESH"), authHeaders)
         assertEquals(1, refreshCalls) // the second call used the in-memory token, no second refresh
     }
@@ -281,10 +292,10 @@ class CloudSessionTest {
             authHeaderSeen = request.headers["Authorization"]
             respond("{}", HttpStatusCode.OK)
         })
-        s.saveTokens(CloudStorageType.DROPBOX, OAuthTokens("MEMORY", "RT"))
+        s.saveCredentials(CloudStorageType.DROPBOX, OAuthTokens("MEMORY", "RT"))
 
         storage.outcome = TokenSaveOutcome.SECURE
-        s.saveTokens(CloudStorageType.DROPBOX, OAuthTokens("STORED", "RT"))
+        s.saveCredentials(CloudStorageType.DROPBOX, OAuthTokens("STORED", "RT"))
 
         assertNotNull(s.current()).authenticate()
         assertEquals("Bearer STORED", authHeaderSeen)
@@ -298,7 +309,7 @@ class CloudSessionTest {
             authHeaderSeen = request.headers["Authorization"]
             respond("", HttpStatusCode.OK)
         })
-        s.saveTokens(CloudStorageType.DROPBOX, OAuthTokens("AT", "RT"))
+        s.saveCredentials(CloudStorageType.DROPBOX, OAuthTokens("AT", "RT"))
 
         s.disconnect(CloudStorageType.DROPBOX)
 
@@ -347,7 +358,7 @@ class CloudSessionTest {
             CompletableDeferred<Unit>().await() // never answers
             respond("", HttpStatusCode.OK)
         })
-        s.saveTokens(CloudStorageType.DROPBOX, OAuthTokens("AT", "RT"))
+        s.saveCredentials(CloudStorageType.DROPBOX, OAuthTokens("AT", "RT"))
 
         val disconnect = launch { s.disconnect(CloudStorageType.DROPBOX) }
         revokeStarted.await()
@@ -471,8 +482,8 @@ class CloudSessionTest {
         val result = cloudStorage.authenticate()
 
         assertIs<Result.Ok<Unit>>(result)
-        assertEquals("FRESH", storage.stored?.accessToken)
-        assertEquals("RT", storage.stored?.refreshToken)
+        assertEquals("FRESH", (storage.stored as? OAuthTokens)?.accessToken)
+        assertEquals("RT", (storage.stored as? OAuthTokens)?.refreshToken)
     }
 
     @Test
@@ -534,7 +545,7 @@ class CloudSessionTest {
         assertEquals("Bearer FRESH", authHeaderSeen)
         assertEquals(0, refreshCalls)
         // Nothing was re-persisted: the override's token lives only for the call it was fetched for.
-        assertEquals("STALE", storage.stored?.accessToken)
+        assertEquals("STALE", (storage.stored as? OAuthTokens)?.accessToken)
     }
 
     /**
@@ -582,5 +593,278 @@ class CloudSessionTest {
 
         // Null access token means withToken() short-circuits with CloudAuthException.
         assertIs<Result.Err>(result)
+    }
+
+    private val appPassword = AppPasswordCredentials(
+        serverUrl = "https://cloud.example.com",
+        userId = "alice",
+        loginName = "alice",
+        appPassword = "pw",
+    )
+
+    /**
+     * A session whose provider has a [CloudSession.CredentialLifecycle.Static] lifecycle. Its
+     * [CloudStorage] factory records the credentials supplier it is handed in [supplier], so a test
+     * can read exactly what the storage would be given. Any HTTP request counts in [httpCalls]: a
+     * static lifecycle must never reach the OAuth refresh or revoke endpoints.
+     */
+    private class StaticFixture(
+        storage: FakeTokenStorage,
+        revoke: suspend (CloudCredentials) -> Result<Unit>,
+    ) {
+        var httpCalls = 0
+        var supplier: (suspend () -> CloudCredentials?)? = null
+        val session: CloudSession
+
+        init {
+            val client = HttpClient(MockEngine { httpCalls++; respond("{}", HttpStatusCode.OK) }) { expectSuccess = false }
+            session = singleProviderCloudSession(
+                client = client,
+                tokenStorage = storage,
+                authManager = DropboxAuthManager(client),
+                clock = Clock { Long.MAX_VALUE },
+                lifecycle = CloudSession.CredentialLifecycle.Static(revoke),
+                createStorage = { credentials ->
+                    supplier = credentials
+                    DropboxStorage(client, oauthAccessToken(credentials))
+                },
+            )
+        }
+
+        suspend fun suppliedCredentials(): CloudCredentials? {
+            assertNotNull(session.current())
+            return assertNotNull(supplier).invoke()
+        }
+    }
+
+    @Test
+    fun staticLifecycleHandsOutTheStoredCredentialsUnchanged() = runBlocking {
+        val fixture = StaticFixture(FakeTokenStorage(appPassword)) { Result.Ok(Unit) }
+
+        assertTrue(fixture.session.isConnected())
+        assertEquals(appPassword, fixture.suppliedCredentials())
+        assertEquals(0, fixture.httpCalls)
+    }
+
+    @Test
+    fun staticLifecycleNeverRefreshesExpiredOAuthTokens() = runBlocking {
+        // Even tokens that look expired are handed out as stored: only the OAuth lifecycle refreshes.
+        val expired = OAuthTokens("AT", "RT", expiresAtMillis = 1_000L)
+        val fixture = StaticFixture(FakeTokenStorage(expired)) { Result.Ok(Unit) }
+
+        assertEquals(expired, fixture.suppliedCredentials())
+        assertEquals(0, fixture.httpCalls)
+    }
+
+    @Test
+    fun staticLifecycleHoldsUnpersistedCredentialsInMemory() = runBlocking {
+        val storage = FakeTokenStorage(null, outcome = TokenSaveOutcome.NOT_PERSISTED)
+        val fixture = StaticFixture(storage) { Result.Ok(Unit) }
+
+        fixture.session.saveCredentials(CloudStorageType.DROPBOX, appPassword)
+
+        assertNull(storage.stored)
+        assertTrue(fixture.session.isConnected())
+        assertEquals(appPassword, fixture.suppliedCredentials())
+    }
+
+    @Test
+    fun staticLifecycleDisconnectRevokesTheStoredCredentialsThenClears() = runBlocking {
+        val revoked = mutableListOf<CloudCredentials>()
+        val storage = FakeTokenStorage(appPassword)
+        val fixture = StaticFixture(storage) {
+            revoked += it
+            Result.Ok(Unit)
+        }
+
+        fixture.session.disconnect(CloudStorageType.DROPBOX)
+
+        assertEquals(listOf<CloudCredentials>(appPassword), revoked)
+        assertNull(storage.stored)
+        assertTrue(!fixture.session.isConnected())
+        assertEquals(0, fixture.httpCalls)
+    }
+
+    @Test
+    fun staticLifecycleDisconnectClearsEvenWhenTheRevokeFails() = runBlocking {
+        val storage = FakeTokenStorage(appPassword)
+        val fixture = StaticFixture(storage) { Result.Err(CloudAuthException("revoke failed")) }
+
+        fixture.session.disconnect(CloudStorageType.DROPBOX)
+
+        assertNull(storage.stored)
+        assertTrue(!fixture.session.isConnected())
+    }
+
+    @Test
+    fun staticLifecycleDisconnectCancelledDuringRevokeStillClears() = runBlocking {
+        val revokeStarted = CompletableDeferred<Unit>()
+        val storage = FakeTokenStorage(appPassword)
+        val fixture = StaticFixture(storage) {
+            revokeStarted.complete(Unit)
+            awaitCancellation()
+        }
+
+        val disconnect = launch { fixture.session.disconnect(CloudStorageType.DROPBOX) }
+        revokeStarted.await()
+        disconnect.cancelAndJoin()
+
+        assertNull(storage.stored)
+        assertTrue(!fixture.session.isConnected())
+    }
+
+    @Test
+    fun staticLifecycleDisconnectWithNothingStoredSkipsTheRevoke() = runBlocking {
+        var revokeCalled = false
+        val fixture = StaticFixture(FakeTokenStorage(null)) {
+            revokeCalled = true
+            Result.Ok(Unit)
+        }
+
+        fixture.session.disconnect(CloudStorageType.DROPBOX)
+
+        assertTrue(!revokeCalled)
+    }
+
+    @Test
+    fun platformOwnedDisconnectRevokesTheStoredAccessTokenThenClears() = runBlocking {
+        var revokeAuthHeader: String? = null
+        val storage = FakeTokenStorage(OAuthTokens("STORED"))
+        val s = session(
+            storage,
+            authHandler = { request ->
+                if (request.url.encodedPath.contains("token/revoke")) revokeAuthHeader = request.headers["Authorization"]
+                respond("", HttpStatusCode.OK)
+            },
+            // The platform would mint a different token; disconnect revokes the stored one.
+            accessTokenProvider = { "MINTED" },
+        )
+
+        s.disconnect(CloudStorageType.DROPBOX)
+
+        assertEquals("Bearer STORED", revokeAuthHeader)
+        assertNull(storage.stored)
+        assertTrue(!s.isConnected())
+    }
+
+    /**
+     * An OAuth-revocable lifecycle can only revoke an access token. Credentials of another kind in
+     * its store (an app password) send no revoke request, but disconnect still clears them.
+     */
+    private fun assertDisconnectClearsAppPasswordWithoutRevoking(accessTokenProvider: (suspend () -> String?)?) = runBlocking {
+        var httpCalls = 0
+        val storage = FakeTokenStorage(appPassword)
+        val s = session(
+            storage,
+            authHandler = {
+                httpCalls++
+                respond("", HttpStatusCode.OK)
+            },
+            accessTokenProvider = accessTokenProvider,
+        )
+
+        s.disconnect(CloudStorageType.DROPBOX)
+
+        assertEquals(0, httpCalls)
+        assertNull(storage.stored)
+        assertTrue(!s.isConnected())
+    }
+
+    @Test
+    fun oauthDisconnectClearsAppPasswordCredentialsWithoutRevoking() =
+        assertDisconnectClearsAppPasswordWithoutRevoking(accessTokenProvider = null)
+
+    @Test
+    fun platformOwnedDisconnectClearsAppPasswordCredentialsWithoutRevoking() =
+        assertDisconnectClearsAppPasswordWithoutRevoking(accessTokenProvider = { "MINTED" })
+
+    @Test
+    fun oauthLifecycleSuppliesNoCredentialsWhenTheStoreHoldsAnAppPassword() = runBlocking {
+        var httpCalls = 0
+        var supplier: (suspend () -> CloudCredentials?)? = null
+        val client = client {
+            httpCalls++
+            respond("{}", HttpStatusCode.OK)
+        }
+        val s = singleProviderCloudSession(
+            client = client,
+            tokenStorage = FakeTokenStorage(appPassword),
+            authManager = DropboxAuthManager(client),
+            clock = Clock { Long.MAX_VALUE },
+            createStorage = { credentials ->
+                supplier = credentials
+                DropboxStorage(client, oauthAccessToken(credentials))
+            },
+        )
+
+        assertNotNull(s.current())
+
+        assertNull(assertNotNull(supplier).invoke())
+        assertEquals(0, httpCalls)
+    }
+
+    /** A launcher that is never expected to run here: no test below connects. */
+    private object UnusedLoginPageLauncher : LoginPageLauncher {
+        override fun open(url: String) = error("unexpected open")
+        override fun close() = error("unexpected close")
+    }
+
+    /** A session over the real Nextcloud provider registration ([nextcloudProvider]). */
+    private fun nextcloudSession(storage: FakeTokenStorage, handler: MockRequestHandler): CloudSession = CloudSession(
+        providers = mapOf(CloudStorageType.NEXTCLOUD to nextcloudProvider(client(handler), storage, UnusedLoginPageLauncher)),
+        selectedType = { CloudStorageType.NEXTCLOUD },
+        clock = Clock { 0L },
+        notificationCenter = NotificationCenter(),
+    )
+
+    @Test
+    fun nextcloudIsConfiguredInEveryBuildAndStoresItsAppPassword() {
+        val s = nextcloudSession(FakeTokenStorage(appPassword)) { respond("", HttpStatusCode.OK) }
+        assertEquals(CloudStorageType.NEXTCLOUD, s.connectedType())
+        assertNotNull(s.connectFlow(CloudStorageType.NEXTCLOUD))
+        assertIs<NextcloudStorage>(s.current())
+    }
+
+    @Test
+    fun nextcloudDisconnectDeletesTheAppPasswordOnTheServerThenClears() = runBlocking {
+        val requests = mutableListOf<HttpRequestData>()
+        val storage = FakeTokenStorage(appPassword)
+        val s = nextcloudSession(storage) { request ->
+            requests += request
+            respond("", HttpStatusCode.OK)
+        }
+
+        s.disconnect(CloudStorageType.NEXTCLOUD)
+
+        val revoke = requests.single()
+        assertEquals("DELETE", revoke.method.value)
+        assertEquals("https://cloud.example.com/ocs/v2.php/core/apppassword", revoke.url.toString())
+        assertEquals("true", revoke.headers["OCS-APIREQUEST"])
+        assertTrue(revoke.headers[HttpHeaders.Authorization].orEmpty().startsWith("Basic "))
+        assertNull(storage.stored)
+        assertNull(s.connectedType())
+    }
+
+    @Test
+    fun nextcloudDisconnectClearsEvenWhenTheServerRefusesTheRevoke() = runBlocking {
+        val storage = FakeTokenStorage(appPassword)
+        val s = nextcloudSession(storage) { respond("", HttpStatusCode.Unauthorized) }
+
+        s.disconnect(CloudStorageType.NEXTCLOUD)
+
+        assertNull(storage.stored)
+    }
+
+    @Test
+    fun serverUrlOfReadsTheStoredAppPasswordsServer() {
+        val s = nextcloudSession(FakeTokenStorage(appPassword)) { respond("", HttpStatusCode.OK) }
+        assertEquals("https://cloud.example.com", s.serverUrlOf(CloudStorageType.NEXTCLOUD))
+        assertNull(s.serverUrlOf(CloudStorageType.DROPBOX))
+    }
+
+    @Test
+    fun serverUrlOfIsNullForOAuthTokensOrNothingStored() {
+        assertNull(session(FakeTokenStorage(OAuthTokens("AT"))).serverUrlOf(CloudStorageType.DROPBOX))
+        assertNull(nextcloudSession(FakeTokenStorage(null)) { respond("", HttpStatusCode.OK) }.serverUrlOf(CloudStorageType.NEXTCLOUD))
     }
 }

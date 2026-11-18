@@ -6,9 +6,19 @@
 -->
 <full-backup-content>
     <exclude domain="file" path=".dropbox_tokens.enc" />
+    <exclude domain="file" path=".dropbox_tokens.enc.tmp" />
     <exclude domain="file" path=".dropbox_tokens.json" />
+    <exclude domain="file" path=".dropbox_tokens.json.tmp" />
     <exclude domain="file" path=".google_drive_tokens.enc" />
+    <exclude domain="file" path=".google_drive_tokens.enc.tmp" />
     <exclude domain="file" path=".google_drive_tokens.json" />
+    <exclude domain="file" path=".google_drive_tokens.json.tmp" />
     <exclude domain="file" path=".onedrive_tokens.enc" />
+    <exclude domain="file" path=".onedrive_tokens.enc.tmp" />
     <exclude domain="file" path=".onedrive_tokens.json" />
+    <exclude domain="file" path=".onedrive_tokens.json.tmp" />
+    <exclude domain="file" path=".nextcloud_tokens.enc" />
+    <exclude domain="file" path=".nextcloud_tokens.enc.tmp" />
+    <exclude domain="file" path=".nextcloud_tokens.json" />
+    <exclude domain="file" path=".nextcloud_tokens.json.tmp" />
 </full-backup-content>

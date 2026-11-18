@@ -16,6 +16,7 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.job
 import works.merc.keryx.app.InMemoryFaviconMissStore
 import works.merc.keryx.app.core.Clock
+import works.merc.keryx.app.data.cloud.CloudCredentials
 import works.merc.keryx.app.data.cloud.DropboxAuthManager
 import works.merc.keryx.app.data.cloud.OAuthTokens
 import works.merc.keryx.app.data.cloud.TokenClearOutcome
@@ -57,12 +58,12 @@ import kotlin.random.Random
  */
 
 class HomeViewModelFixtureTokenStorage : TokenStorage {
-    private var stored: OAuthTokens? = null
-    override fun save(tokens: OAuthTokens): TokenSaveOutcome {
-        stored = tokens
+    private var stored: CloudCredentials? = null
+    override fun save(credentials: CloudCredentials): TokenSaveOutcome {
+        stored = credentials
         return TokenSaveOutcome.SECURE
     }
-    override fun load(): OAuthTokens? = stored
+    override fun load(): CloudCredentials? = stored
     override fun clear(): TokenClearOutcome {
         stored = null
         return TokenClearOutcome.CLEARED

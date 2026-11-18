@@ -6,6 +6,7 @@ import org.jetbrains.compose.resources.getString
 import org.koin.core.module.Module
 import org.koin.dsl.module
 import works.merc.keryx.app.DesktopBuildConfig
+import works.merc.keryx.app.activationRequests
 import works.merc.keryx.app.core.CloudStorageType
 import works.merc.keryx.app.data.cloud.CloudAuthManager
 import works.merc.keryx.app.data.cloud.FileTokenStorage
@@ -15,7 +16,10 @@ import works.merc.keryx.app.data.cloud.KeyringTokenStorage
 import works.merc.keryx.app.data.cloud.LibSecretTokenStorage
 import works.merc.keryx.app.data.cloud.SecurityCliTokenStorage
 import works.merc.keryx.app.data.cloud.TokenStorage
+import works.merc.keryx.app.data.cloud.oauthAccessToken
+import works.merc.keryx.app.domain.BrowserLoginPageLauncher
 import works.merc.keryx.app.domain.CloudSession
+import works.merc.keryx.app.domain.LoginPageLauncher
 import works.merc.keryx.app.domain.LoopbackRedirectTransport
 import works.merc.keryx.app.domain.OAuthConnectFlow
 import works.merc.keryx.app.domain.OsNotificationSink
@@ -63,6 +67,14 @@ internal fun providerTokenStorage(type: CloudStorageType, macOs: Boolean, snap: 
     }
 }
 
+/**
+ * Desktop's [LoginPageLauncher] for Nextcloud's Login Flow v2: the sign-in page opens in the default
+ * browser, and since a browser tab cannot be closed from here, the end of the sign-in brings the main
+ * window back to the front instead (through `main.kt`'s [activationRequests], like the tray's "Show").
+ */
+internal val desktopLoginPageLauncher: LoginPageLauncher =
+    BrowserLoginPageLauncher(returnToApp = { activationRequests.tryEmit(Unit) })
+
 actual val platformModule: Module = module {
     // No-op: main.kt collects NewArticleNotifier.trayEvents itself for the whole process
     // lifetime and posts tray notifications from there (see that flow's own KDoc). Posting again
@@ -76,6 +88,7 @@ actual val platformModule: Module = module {
     cloudSessionSingles(
         tokenStorage = { type -> providerTokenStorage(type, isMacOs, isSnap) },
         extraProviders = { client, _ -> mapOf(CloudStorageType.GOOGLE_DRIVE to googleDriveProvider(client)) },
+        loginPageLauncher = desktopLoginPageLauncher,
     )
 }
 
@@ -89,9 +102,8 @@ actual val platformModule: Module = module {
 private fun googleDriveProvider(client: HttpClient): CloudSession.Provider {
     val driveAuth: CloudAuthManager = GoogleDriveAuthManager(client, DesktopBuildConfig.GOOGLE_DRIVE_CLIENT_SECRET)
     return CloudSession.Provider(
-        clientId = DesktopBuildConfig.GOOGLE_DRIVE_CLIENT_ID,
+        isConfigured = DesktopBuildConfig.GOOGLE_DRIVE_CLIENT_ID.isNotEmpty(),
         tokenStorage = providerTokenStorage(CloudStorageType.GOOGLE_DRIVE, isMacOs, isSnap),
-        authManager = driveAuth,
         connectFlow = OAuthConnectFlow(
             authManager = driveAuth,
             clientId = DesktopBuildConfig.GOOGLE_DRIVE_CLIENT_ID,
@@ -99,6 +111,10 @@ private fun googleDriveProvider(client: HttpClient): CloudSession.Provider {
                 successMessageProvider = { getString(Res.string.oauth_loopback_success) },
             ),
         ),
-        createStorage = { tokenProvider -> GoogleDriveStorage(client, tokenProvider) },
+        lifecycle = CloudSession.CredentialLifecycle.OAuth(
+            clientId = DesktopBuildConfig.GOOGLE_DRIVE_CLIENT_ID,
+            authManager = driveAuth,
+        ),
+        createStorage = { credentials -> GoogleDriveStorage(client, oauthAccessToken(credentials)) },
     )
 }

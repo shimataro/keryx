@@ -32,6 +32,7 @@ import works.merc.keryx.app.core.FeedFetchException
 import works.merc.keryx.app.core.FeedNotFoundException
 import works.merc.keryx.app.core.FeedParseException
 import works.merc.keryx.app.core.FeedTimeoutException
+import works.merc.keryx.app.core.NextcloudServerException
 import works.merc.keryx.app.core.NotificationText
 import works.merc.keryx.app.core.SETTINGS_TAB_CLOUD_SYNC
 import works.merc.keryx.app.core.SETTINGS_TAB_UPDATES
@@ -546,7 +547,7 @@ class SyncRepository(
         is SchemaVersionException -> AppNotificationAction.ShowSettingsTab(SETTINGS_TAB_UPDATES)
         is FeedFetchException, is FeedParseException, is FeedDiscoveryException, is FeedTimeoutException,
         is FeedNotFoundException, is CloudAuthException, is CloudStorageException, is SyncConflictException,
-        is UpdateException,
+        is UpdateException, is NextcloudServerException,
         -> AppNotificationAction.ShowSettingsTab(SETTINGS_TAB_CLOUD_SYNC)
     }
 

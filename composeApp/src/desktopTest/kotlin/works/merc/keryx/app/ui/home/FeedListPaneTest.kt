@@ -33,6 +33,7 @@ import org.koin.compose.KoinApplication
 import org.koin.dsl.koinConfiguration
 import org.koin.dsl.module
 import works.merc.keryx.app.core.ArticleFilter
+import works.merc.keryx.app.data.cloud.CloudCredentials
 import works.merc.keryx.app.data.cloud.OAuthTokens
 import works.merc.keryx.app.data.cloud.TokenClearOutcome
 import works.merc.keryx.app.data.cloud.TokenSaveOutcome
@@ -451,12 +452,12 @@ class FeedListPaneTest {
 }
 
 private class FeedListPaneTestTokenStorage : TokenStorage {
-    private var stored: OAuthTokens? = null
-    override fun save(tokens: OAuthTokens): TokenSaveOutcome {
-        stored = tokens
+    private var stored: CloudCredentials? = null
+    override fun save(credentials: CloudCredentials): TokenSaveOutcome {
+        stored = credentials
         return TokenSaveOutcome.SECURE
     }
-    override fun load(): OAuthTokens? = stored
+    override fun load(): CloudCredentials? = stored
     override fun clear(): TokenClearOutcome {
         stored = null
         return TokenClearOutcome.CLEARED

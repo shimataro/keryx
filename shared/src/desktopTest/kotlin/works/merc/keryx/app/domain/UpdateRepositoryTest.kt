@@ -1140,10 +1140,10 @@ class UpdateRepositoryTest {
     @Test
     fun performPrimaryActionIsANoOpForStatesWithNoActionOfTheirOwn() {
         var checkRequestCount = 0
-        var downloadRequestCount = 0
+        val downloadRequestCount = AtomicInteger(0)
         val payload = Random(33).nextBytes(64 * 1024)
         val downloadGate = CompletableDeferred<Unit>()
-        val downloaderClient = HttpClient(MockEngine { downloadRequestCount++; downloadGate.await(); respond(payload, HttpStatusCode.OK) }) { expectSuccess = false }
+        val downloaderClient = HttpClient(MockEngine { downloadRequestCount.incrementAndGet(); downloadGate.await(); respond(payload, HttpStatusCode.OK) }) { expectSuccess = false }
         val checkerClient = HttpClient(
             MockEngine {
                 checkRequestCount++
@@ -1173,9 +1173,12 @@ class UpdateRepositoryTest {
         runBlocking { repo.check() }
         repo.startDownload()
         awaitState(repo) { it is UpdateState.Downloading }
-        val requestsWhileDownloading = downloadRequestCount
+        // Downloading is set before the request is sent, so wait for it to reach the (gated) engine
+        // before snapshotting the count; otherwise the first request can land after the snapshot.
+        await(describe = { "Timed out; download requests: ${downloadRequestCount.get()}" }) { downloadRequestCount.get() == 1 }
+        val requestsWhileDownloading = downloadRequestCount.get()
         repo.performPrimaryAction()
-        assertEquals(requestsWhileDownloading, downloadRequestCount, "Downloading must be a no-op, not a second download")
+        assertEquals(requestsWhileDownloading, downloadRequestCount.get(), "Downloading must be a no-op, not a second download")
         assertIs<UpdateState.Downloading>(repo.state.value)
 
         downloadGate.complete(Unit)

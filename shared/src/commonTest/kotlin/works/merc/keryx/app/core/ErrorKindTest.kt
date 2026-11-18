@@ -19,6 +19,18 @@ class ErrorKindTest {
         assertEquals(ErrorKind.SCHEMA_VERSION, SchemaVersionException(localVersion = 2, cloudVersion = 3).errorKind)
         assertEquals(ErrorKind.UPDATE, UpdateException(UpdateStage.DOWNLOAD, "io").errorKind)
         assertEquals(ErrorKind.GENERIC, FeedDiscoveryException(emptyList()).errorKind)
+        assertEquals(
+            ErrorKind.NEXTCLOUD_HTTPS_REQUIRED,
+            NextcloudServerException(NextcloudServerProblem.HTTPS_REQUIRED, "http").errorKind,
+        )
+        assertEquals(
+            ErrorKind.NEXTCLOUD_NOT_FOUND,
+            NextcloudServerException(NextcloudServerProblem.NOT_NEXTCLOUD, "404").errorKind,
+        )
+        assertEquals(
+            ErrorKind.NEXTCLOUD_UNREACHABLE,
+            NextcloudServerException(NextcloudServerProblem.UNREACHABLE, "offline").errorKind,
+        )
     }
 
     @Test
@@ -30,5 +42,6 @@ class ErrorKindTest {
         assertEquals(ErrorKind.CLOUD_STORAGE, CloudStorageException("503").syncErrorKind)
         assertEquals(ErrorKind.GENERIC, FeedTimeoutException().syncErrorKind)
         assertEquals(ErrorKind.GENERIC, FeedParseException("bad xml").syncErrorKind)
+        assertEquals(ErrorKind.GENERIC, NextcloudServerException(NextcloudServerProblem.UNREACHABLE, "offline").syncErrorKind)
     }
 }

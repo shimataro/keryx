@@ -7,6 +7,13 @@ package works.merc.keryx.app.platform
 expect val isMacOs: Boolean
 
 /**
+ * The operating system's name as a user would know it (`Windows`, `macOS`, `Linux`, `Android`,
+ * `iOS`) — used to name this device to a server, e.g. the Nextcloud app password's
+ * "Devices & sessions" entry. Not localized: it is a product name, and it is not shown in this app.
+ */
+expect val platformOsName: String
+
+/**
  * Whether touch is this platform's primary pointer input, rather than a precise mouse. Gates the
  * feed list's drag-to-reorder affordance (a `Modifier.dragHandle` icon reserved on each draggable
  * row, so the row's own band stays scrollable — see `ui/home/FeedListDragGestures.kt`) and,

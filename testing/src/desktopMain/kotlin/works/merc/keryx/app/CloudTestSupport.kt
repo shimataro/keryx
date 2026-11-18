@@ -7,6 +7,7 @@ import works.merc.keryx.app.core.CloudAuthException
 import works.merc.keryx.app.core.CloudStorageType
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.data.cloud.CloudAuthManager
+import works.merc.keryx.app.data.cloud.CloudCredentials
 import works.merc.keryx.app.data.cloud.CloudStorage
 import works.merc.keryx.app.data.cloud.DropboxAuthManager
 import works.merc.keryx.app.data.cloud.DropboxStorage
@@ -16,7 +17,9 @@ import works.merc.keryx.app.data.cloud.OAuthTokens
 import works.merc.keryx.app.data.cloud.TokenClearOutcome
 import works.merc.keryx.app.data.cloud.TokenSaveOutcome
 import works.merc.keryx.app.data.cloud.TokenStorage
+import works.merc.keryx.app.data.cloud.oauthAccessToken
 import works.merc.keryx.app.domain.CloudConnectFlow
+import works.merc.keryx.app.domain.CloudConnectRequest
 import works.merc.keryx.app.domain.CloudSession
 import works.merc.keryx.app.domain.NotificationCenter
 
@@ -28,18 +31,18 @@ import works.merc.keryx.app.domain.NotificationCenter
  * store that starts working again.
  */
 class FakeTokenStorage(
-    initial: OAuthTokens? = null,
+    initial: CloudCredentials? = null,
     var outcome: TokenSaveOutcome = TokenSaveOutcome.SECURE,
 ) : TokenStorage {
-    var stored: OAuthTokens? = initial
+    var stored: CloudCredentials? = initial
         private set
 
-    override fun save(tokens: OAuthTokens): TokenSaveOutcome {
-        if (outcome != TokenSaveOutcome.NOT_PERSISTED) stored = tokens
+    override fun save(credentials: CloudCredentials): TokenSaveOutcome {
+        if (outcome != TokenSaveOutcome.NOT_PERSISTED) stored = credentials
         return outcome
     }
 
-    override fun load(): OAuthTokens? = stored
+    override fun load(): CloudCredentials? = stored
 
     override fun clear(): TokenClearOutcome {
         stored = null
@@ -49,19 +52,21 @@ class FakeTokenStorage(
 
 /** A [CloudConnectFlow] fake that returns a canned result. */
 class FakeCloudConnectFlow(
-    private val result: Result<OAuthTokens> = Result.Err(CloudAuthException("no connect flow")),
+    private val result: Result<CloudCredentials> = Result.Err(CloudAuthException("no connect flow")),
 ) : CloudConnectFlow {
-    override suspend fun connect(): Result<OAuthTokens> = result
+    override suspend fun connect(request: CloudConnectRequest): Result<CloudCredentials> = result
 }
 
 /** A [CloudConnectFlow] fake that suspends until cancelled — models an in-flight OAuth wait. */
 class SuspendingCloudConnectFlow : CloudConnectFlow {
-    override suspend fun connect(): Result<OAuthTokens> = awaitCancellation()
+    override suspend fun connect(request: CloudConnectRequest): Result<CloudCredentials> = awaitCancellation()
 }
 
 /**
  * Builds a [CloudSession] with a single provider ([type], default Dropbox) selected, for tests.
- * Pass an empty [clientId] to model a provider not configured in the build.
+ * Pass an empty [clientId] to model a provider not configured in the build. The provider's
+ * [CloudSession.CredentialLifecycle] is [CloudSession.CredentialLifecycle.OAuth] over [authManager]
+ * unless [lifecycle] (or, for a platform-owned token, [accessTokenProvider]) says otherwise.
  */
 fun singleProviderCloudSession(
     client: HttpClient,
@@ -71,19 +76,22 @@ fun singleProviderCloudSession(
     type: CloudStorageType = CloudStorageType.DROPBOX,
     clock: Clock = Clock { 0L },
     connectFlow: CloudConnectFlow = FakeCloudConnectFlow(),
-    createStorage: (suspend () -> String?) -> CloudStorage = { tokenProvider -> DropboxStorage(client, tokenProvider) },
+    createStorage: (suspend () -> CloudCredentials?) -> CloudStorage =
+        { credentials -> DropboxStorage(client, oauthAccessToken(credentials)) },
     accessTokenProvider: (suspend () -> String?)? = null,
+    lifecycle: CloudSession.CredentialLifecycle = accessTokenProvider
+        ?.let { CloudSession.CredentialLifecycle.PlatformOwned(it, authManager) }
+        ?: CloudSession.CredentialLifecycle.OAuth(clientId, authManager),
     selectedType: () -> CloudStorageType? = { type },
     notificationCenter: NotificationCenter = NotificationCenter(),
 ): CloudSession = CloudSession(
     providers = mapOf(
         type to CloudSession.Provider(
-            clientId = clientId,
+            isConfigured = clientId.isNotEmpty(),
             tokenStorage = tokenStorage,
-            authManager = authManager,
             connectFlow = connectFlow,
+            lifecycle = lifecycle,
             createStorage = createStorage,
-            accessTokenProvider = accessTokenProvider,
         ),
     ),
     selectedType = selectedType,
@@ -112,18 +120,21 @@ fun multiProviderCloudSession(
 ): CloudSession = CloudSession(
     providers = mapOf(
         CloudStorageType.DROPBOX to CloudSession.Provider(
-            clientId = dropboxClientId,
+            isConfigured = dropboxClientId.isNotEmpty(),
             tokenStorage = dropboxTokenStorage,
-            authManager = DropboxAuthManager(client, clock = clock),
             connectFlow = dropboxConnectFlow,
-            createStorage = { tokenProvider -> DropboxStorage(client, tokenProvider) },
+            lifecycle = CloudSession.CredentialLifecycle.OAuth(dropboxClientId, DropboxAuthManager(client, clock = clock)),
+            createStorage = { credentials -> DropboxStorage(client, oauthAccessToken(credentials)) },
         ),
         CloudStorageType.GOOGLE_DRIVE to CloudSession.Provider(
-            clientId = googleDriveClientId,
+            isConfigured = googleDriveClientId.isNotEmpty(),
             tokenStorage = googleDriveTokenStorage,
-            authManager = GoogleDriveAuthManager(client, clientSecret = "SECRET", clock = clock),
             connectFlow = googleDriveConnectFlow,
-            createStorage = { tokenProvider -> GoogleDriveStorage(client, tokenProvider) },
+            lifecycle = CloudSession.CredentialLifecycle.OAuth(
+                googleDriveClientId,
+                GoogleDriveAuthManager(client, clientSecret = "SECRET", clock = clock),
+            ),
+            createStorage = { credentials -> GoogleDriveStorage(client, oauthAccessToken(credentials)) },
         ),
     ),
     selectedType = selectedType,

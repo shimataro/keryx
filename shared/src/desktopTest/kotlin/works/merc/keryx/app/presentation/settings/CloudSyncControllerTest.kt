@@ -40,6 +40,8 @@ import works.merc.keryx.app.core.CloudStorageType
 import works.merc.keryx.app.core.ErrorKind
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.core.SYNC_STATE_LAST_SYNCED_AT
+import works.merc.keryx.app.data.cloud.AppPasswordCredentials
+import works.merc.keryx.app.data.cloud.CloudCredentials
 import works.merc.keryx.app.data.cloud.CloudFileMeta
 import works.merc.keryx.app.data.cloud.CloudStorage
 import works.merc.keryx.app.data.cloud.DropboxAuthManager
@@ -51,6 +53,7 @@ import works.merc.keryx.app.data.local.LocalSettingsStore
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.domain.ActivityCenter
 import works.merc.keryx.app.domain.CloudConnectFlow
+import works.merc.keryx.app.domain.CloudConnectRequest
 import works.merc.keryx.app.domain.CloudConnectionService
 import works.merc.keryx.app.domain.CloudSession
 import works.merc.keryx.app.domain.NotificationCenter
@@ -77,6 +80,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 /** A [CloudStorage] whose every operation fails with an auth error, to drive a sync failure. */
@@ -287,7 +291,7 @@ class CloudSyncControllerTest {
         assertEquals(CloudStorageType.DROPBOX, controller.connectedType.value)
         assertNull(controller.connectingType.value)
         assertFalse(controller.canCancelConnect.value)
-        assertEquals("AT", tokenStorage.load()?.accessToken)
+        assertEquals("AT", (tokenStorage.load() as? OAuthTokens)?.accessToken)
     }
 
     @Test
@@ -564,7 +568,7 @@ class CloudSyncControllerTest {
         assertEquals(CloudStorageType.GOOGLE_DRIVE, controller.connectedType.value)
         assertNull(controller.connectingType.value)
         assertNull(dropboxTokenStorage.load())
-        assertEquals("AT2", googleDriveTokenStorage.load()?.accessToken)
+        assertEquals("AT2", (googleDriveTokenStorage.load() as? OAuthTokens)?.accessToken)
     }
 
     @Test
@@ -971,7 +975,7 @@ class CloudSyncControllerTest {
         // starts on Dropbox, so awaiting Dropbox alone would pass even if reconnect() did nothing.
         val authorization = CompletableDeferred<Result<OAuthTokens>>()
         val connectFlow = object : CloudConnectFlow {
-            override suspend fun connect(): Result<OAuthTokens> = authorization.await()
+            override suspend fun connect(request: CloudConnectRequest): Result<CloudCredentials> = authorization.await()
         }
         val controller = newController(tokenStorage = tokenStorage, connectFlow = connectFlow, syncCloudProvider = { cloud })
         runBlocking { createdSyncRepository.sync() }
@@ -1116,4 +1120,98 @@ class CloudSyncControllerTest {
         awaitConditionBlocking { controller.lastSyncError.value == null }
     }
 
+    /** Records every request it is handed and answers each with [result]. */
+    private class RecordingConnectFlow(private val result: Result<CloudCredentials>) : CloudConnectFlow {
+        val requests = java.util.concurrent.CopyOnWriteArrayList<CloudConnectRequest>()
+        override suspend fun connect(request: CloudConnectRequest): Result<CloudCredentials> {
+            requests += request
+            return result
+        }
+    }
+
+    private val nextcloudCredentials = AppPasswordCredentials(
+        serverUrl = "https://cloud.example.com",
+        userId = "alice",
+        loginName = "alice",
+        appPassword = "pw",
+    )
+
+    @Test
+    fun connectHandsTheServerRequestToTheConnectFlow() = runTest {
+        val flow = RecordingConnectFlow(Result.Ok(OAuthTokens("AT")))
+        val controller = newController(connectFlow = flow)
+        val request = CloudConnectRequest(serverUrl = "https://cloud.example.com")
+
+        controller.connect(CloudStorageType.DROPBOX, request)
+        testScheduler.advanceUntilIdle()
+
+        assertSame(request, flow.requests.single())
+        assertEquals(CloudStorageType.DROPBOX, controller.connectedType.value)
+    }
+
+    @Test
+    fun connectWithoutARequestHandsTheFlowNone() = runTest {
+        val flow = RecordingConnectFlow(Result.Ok(OAuthTokens("AT")))
+        val controller = newController(connectFlow = flow)
+
+        controller.connect(CloudStorageType.DROPBOX)
+        testScheduler.advanceUntilIdle()
+
+        assertSame(CloudConnectRequest.NONE, flow.requests.single())
+    }
+
+    /**
+     * The reconnect starts by clearing the stored credentials, so the server the dialog starts from
+     * has to be read before it — and reading it must change nothing.
+     */
+    @Test
+    fun reconnectServerUrlReturnsTheStoredServerWithoutTearingAnythingDown() = runTest {
+        val tokenStorage = FakeTokenStorage(nextcloudCredentials)
+        val controller = newController(tokenStorage = tokenStorage)
+
+        assertEquals("https://cloud.example.com", controller.reconnectServerUrl())
+        assertEquals(CloudStorageType.DROPBOX, controller.connectedType.value)
+        assertEquals(nextcloudCredentials, tokenStorage.load())
+    }
+
+    @Test
+    fun reconnectServerUrlIsNullForOAuthTokensOrWhenNotConnected() = runTest {
+        assertNull(newController(tokenStorage = FakeTokenStorage(OAuthTokens("AT"))).reconnectServerUrl())
+        assertNull(newController(tokenStorage = FakeTokenStorage()).reconnectServerUrl())
+    }
+
+    /** Note: avoids `runTest`'s virtual scheduler, like reconnectTearsDownAndConnectsBackToTheSameProvider. */
+    @Test
+    fun reconnectHandsTheServerRequestToTheConnectFlow() {
+        val tokenStorage = FakeTokenStorage(nextcloudCredentials)
+        val flow = RecordingConnectFlow(Result.Ok(nextcloudCredentials.copy(appPassword = "pw2")))
+        val controller = newController(tokenStorage = tokenStorage, connectFlow = flow)
+        val request = CloudConnectRequest(serverUrl = "https://cloud.example.com")
+
+        controller.reconnect(request)
+        awaitConditionBlocking { flow.requests.isNotEmpty() && controller.connectingType.value == null }
+
+        assertSame(request, flow.requests.single())
+        assertEquals("pw2", (tokenStorage.load() as? AppPasswordCredentials)?.appPassword)
+    }
+
+    /** Note: avoids `runTest`'s virtual scheduler, like switchToDisconnectsOldProviderAndConnectsNewProvider. */
+    @Test
+    fun switchToHandsTheServerRequestToTheNewProvidersConnectFlow() {
+        val flow = RecordingConnectFlow(Result.Ok(OAuthTokens("AT2")))
+        val session = multiProviderCloudSession(
+            client = okAuthClient(),
+            dropboxTokenStorage = FakeTokenStorage(OAuthTokens("AT")),
+            googleDriveTokenStorage = FakeTokenStorage(),
+            selectedType = settingsBackedSelection(CloudStorageType.DROPBOX),
+            googleDriveConnectFlow = flow,
+        )
+        val controller = newController(cloudSession = session)
+        val request = CloudConnectRequest(serverUrl = "https://cloud.example.com")
+
+        controller.switchTo(CloudStorageType.GOOGLE_DRIVE, request)
+        awaitConditionBlocking { flow.requests.isNotEmpty() && controller.connectingType.value == null }
+
+        assertSame(request, flow.requests.single())
+    }
 }
