@@ -965,7 +965,7 @@ Repository は触れず、Linux のパネルプロトコルにモバイル側の
 打ち切るため、行の上で始まったゆっくりしたドラッグ（`LazyColumn` のスクロール）が長押しと
 誤認されることもない。
 
-`platform/NativeMenu.desktop.kt` の `defaultPopupHandle` は、同じ呼び出し箇所をデスクトップでは
+`platform/NativePopupHandles.desktop.kt` の `defaultPopupHandle` は、同じ呼び出し箇所をデスクトップでは
 長押しではなく右クリックで開き、2 つの実装のどちらかで裏打ちする。
 
 | プラットフォーム | 実装 | 理由 |
@@ -985,7 +985,7 @@ Repository は触れず、Linux のパネルプロトコルにモバイル側の
 ### ネイティブファイルダイアログ（プラットフォーム分岐）
 
 `platform/FilePicker.desktop.kt` の `defaultFilePickerBackend` は 2 つの実装のどちらかを選ぶ。
-`NativeMenu.desktop.kt` の `defaultPopupHandle` と同じ Linux は Swing・他は AWT という分岐だが、
+`NativePopupHandles.desktop.kt` の `defaultPopupHandle` と同じ Linux は Swing・他は AWT という分岐だが、
 ファイルダイアログは Windows を AWT 側に残す点だけが異なる。Windows の `java.awt.FileDialog` は本物の
 `GetOpenFileName` パネルであり、メニューピアのようなスケーリングの問題が無いためである。
 

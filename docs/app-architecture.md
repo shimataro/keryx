@@ -981,7 +981,7 @@ row), and the same `awaitEachGesture` loop cancels the long-press once the point
 `viewConfiguration.touchSlop`, so a `LazyColumn` scroll that starts as a slow drag on a row cannot
 be mistaken for a long-press-and-hold.
 
-`platform/NativeMenu.desktop.kt`'s `defaultPopupHandle` backs the same call sites on desktop with
+`platform/NativePopupHandles.desktop.kt`'s `defaultPopupHandle` backs the same call sites on desktop with
 one of two implementations, triggered by a right-click instead of a long-press:
 
 | Platform | Implementation | Why |
@@ -1002,7 +1002,7 @@ takes `installLookAndFeel`'s system-L&F branch instead.
 ### Native file dialogs (platform branch)
 
 `platform/FilePicker.desktop.kt`'s `defaultFilePickerBackend` picks one of two implementations, the
-same Linux-Swing-vs-AWT split as `NativeMenu.desktop.kt`'s `defaultPopupHandle` — except that the
+same Linux-Swing-vs-AWT split as `NativePopupHandles.desktop.kt`'s `defaultPopupHandle` — except that the
 file dialog keeps Windows on the AWT side, because `java.awt.FileDialog` there is a real
 `GetOpenFileName` panel with none of the menu peer's scaling problems:
 

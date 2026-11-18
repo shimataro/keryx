@@ -1,0 +1,338 @@
+package works.merc.keryx.app.platform
+
+import androidx.compose.ui.input.key.Key
+import java.awt.Component
+import java.awt.MenuShortcut
+import java.awt.event.InputEvent
+import java.awt.event.KeyEvent
+import javax.swing.JCheckBoxMenuItem
+import javax.swing.JComponent
+import javax.swing.JMenu
+import javax.swing.JMenuItem
+import javax.swing.JPopupMenu
+import javax.swing.KeyStroke
+import javax.swing.SwingUtilities
+
+/**
+ * The AWT virtual-key code for [NativeMenuShortcut.key]. Covers only the keys actually used by a
+ * menu shortcut today (R/U/S/O/C for the Ctrl+Shift app-menu-mirrored actions, 1/2/3 for the
+ * article list modes, F2/Enter/Delete for the bare rename/delete family) — deliberately not a
+ * general `Key` → `VK_*`
+ * mapping. `appmenu/MenuBarVisibility.kt` has its own, separate `awtKeyCode()` for `AppMenuShortcut`;
+ * that lives in the KDE-Global-Menu-specific `appmenu/` package, so pulling `platform/` code from
+ * it would be a backwards layering dependency — this is kept local instead.
+ */
+private fun NativeMenuShortcut.awtKeyCode(): Int = when (key) {
+    Key.R -> KeyEvent.VK_R
+    Key.U -> KeyEvent.VK_U
+    Key.S -> KeyEvent.VK_S
+    Key.O -> KeyEvent.VK_O
+    Key.C -> KeyEvent.VK_C
+    Key.One -> KeyEvent.VK_1
+    Key.Two -> KeyEvent.VK_2
+    Key.Three -> KeyEvent.VK_3
+    Key.F2 -> KeyEvent.VK_F2
+    Key.Enter -> KeyEvent.VK_ENTER
+    Key.Delete -> KeyEvent.VK_DELETE
+    else -> error("No AWT key-code mapping for native menu shortcut key $key")
+}
+
+/**
+ * The native menu widgets backing one [nativeContextMenu] call site, hiding which toolkit drew
+ * them. Two implementations exist because no single one looks native everywhere: see
+ * [AwtPopupHandle] and [SwingPopupHandle].
+ */
+internal interface NativePopupHandle {
+    /** Pushes the current [items] labels and checked states onto the already-built widgets. */
+    fun sync(items: List<NativeMenuEntry>)
+
+    /** Adds the menu to [window], for toolkits that require it to be part of the hierarchy. */
+    fun attach(window: NativeWindowHandle?)
+
+    fun detach(window: NativeWindowHandle?)
+
+    /** Shows the menu. May display on a later EDT turn rather than before returning. */
+    fun show(invoker: Component, x: Int, y: Int)
+}
+
+/**
+ * Resolves the leaf that a click on the widget at [index] (and [childIndex], for a submenu child)
+ * should invoke, against the entries the menu was **last shown with** rather than the ones the
+ * widgets were first built from.
+ *
+ * The widgets are built once and only relabelled on later shows (see [LazyNativePopup]), so the
+ * entries they were built from go stale. But resolving against the call site's *latest* entries
+ * is wrong too: the call site recomposes while the menu is open — the row's own `onOpen` side
+ * effect (selecting an article marks it read), or a background sync reordering folders/tags — and
+ * a click would then run whatever now occupies that slot rather than what the menu displayed.
+ * Resolving against the shown entries means a click always performs exactly what its label and
+ * checkmark displayed.
+ */
+private fun leafAt(items: List<NativeMenuEntry>, index: Int, childIndex: Int?): NativeMenuLeaf? {
+    val entry = items.getOrNull(index) ?: return null
+    return if (childIndex == null) entry as? NativeMenuLeaf
+    else (entry as? NativeSubMenu)?.items?.getOrNull(childIndex)
+}
+
+/** Runs the leaf [leafAt] resolves for the widget at [index]/[childIndex], if any. */
+private fun invokeShownLeaf(shownItems: () -> List<NativeMenuEntry>, index: Int, childIndex: Int?) {
+    leafAt(shownItems(), index, childIndex)?.onClick?.invoke()
+}
+
+/**
+ * `java.awt.PopupMenu` backend, used on macOS, where AWT maps it onto a genuine `NSMenu`.
+ *
+ * Windows used to share this backend — AWT does hand its items to a real Win32 `TrackPopupMenu`
+ * there — but the JDK's Windows menu peer is not HiDPI-aware, so above 100% display scaling it
+ * both mispositions the menu and paints its items on top of each other. See [SwingPopupHandle]
+ * and `known-issues.md`. macOS is unaffected because AppKit is point-based, so the Dp-space
+ * coordinates [nativeContextMenu] passes need no device-pixel conversion at all.
+ *
+ * Internal rather than private so tests can check what actually ended up in the menu (mirrors
+ * [SwingPopupHandle]) — load-bearing since [defaultPopupHandle] only picks this backend on macOS,
+ * so a Linux or Windows CI runner would otherwise never construct or exercise it at all.
+ */
+internal class AwtPopupHandle(
+    items: List<NativeMenuEntry>,
+    shownItems: () -> List<NativeMenuEntry>,
+) : NativePopupHandle {
+    // Not named `components`: see the note on SwingPopupHandle.menuItems. AWT's PopupMenu is not
+    // a Container so it wouldn't actually collide here, but keeping the two backends symmetric
+    // stops the name from being "tidied" back later.
+    private val menuItems: List<java.awt.MenuItem> = items.mapIndexed { index, entry ->
+        when (entry) {
+            is NativeMenuLeaf ->
+                awtLeaf(entry) { invokeShownLeaf(shownItems, index, childIndex = null) }
+            is NativeSubMenu ->
+                java.awt.Menu().apply {
+                    entry.items.forEachIndexed { childIndex, child ->
+                        add(awtLeaf(child) { invokeShownLeaf(shownItems, index, childIndex) })
+                    }
+                }
+            // A MenuItem labelled "-" is the exact idiom java.awt.Menu.addSeparator() itself uses
+            // (`add(new MenuItem("-"))`); the native peer renders it as a separator, not a real item.
+            is NativeMenuSeparator -> java.awt.MenuItem("-")
+        }
+    }
+
+    internal val popupMenu = java.awt.PopupMenu().apply { menuItems.forEach { add(it) } }
+
+    override fun sync(items: List<NativeMenuEntry>) {
+        items.forEachIndexed { index, entry ->
+            val component = menuItems.getOrNull(index) ?: return@forEachIndexed
+            // Never relabel a separator: it carries no state, and doing so would overwrite the
+            // "-" marker the native peer relies on to render it as a separator.
+            if (entry is NativeMenuSeparator) return@forEachIndexed
+            syncLeaf(component, entry)
+            if (entry is NativeSubMenu && component is java.awt.Menu) {
+                entry.items.forEachIndexed { childIndex, child ->
+                    component.getItem(childIndex)?.let { syncLeaf(it, child) }
+                }
+            }
+        }
+    }
+
+    /**
+     * `java.awt.CheckboxMenuItem` (a `MenuItem` subclass) for a [NativeCheckMenuItem], so its
+     * checked state is drawn with the platform's own checkmark and gutter instead of being faked
+     * into the label text — that fake left unchecked siblings flush left while checked ones sat
+     * two characters in, which is the misalignment this fixes. A plain [java.awt.MenuItem]
+     * otherwise.
+     */
+    private fun awtLeaf(entry: NativeMenuLeaf, onClick: () -> Unit): java.awt.MenuItem {
+        val item = if (entry is NativeCheckMenuItem) java.awt.CheckboxMenuItem() else java.awt.MenuItem()
+        // A native checkbox menu item's peer reports selection as an ItemEvent, not an
+        // ActionEvent (unlike Swing's JCheckBoxMenuItem, which fires ActionEvent for both — see
+        // SwingPopupHandle.swingLeaf). A plain MenuItem only ever fires ActionEvent.
+        if (item is java.awt.CheckboxMenuItem) {
+            item.addItemListener { onClick() }
+        } else {
+            item.addActionListener { onClick() }
+        }
+        // A bare (ctrl = false) shortcut — the rename/delete family — has no MenuShortcut
+        // representation at all: the class always bakes in the platform's primary modifier, so it
+        // can only show a modifier'd combo correctly. Those items render with no native hint here;
+        // see NativeMenuShortcut's doc comment.
+        item.isEnabled = entry.isEnabled
+        entry.shortcut?.takeIf { it.ctrl }?.let { item.shortcut = MenuShortcut(it.awtKeyCode(), it.shift) }
+        return item
+    }
+
+    private fun syncLeaf(component: java.awt.MenuItem, entry: NativeMenuEntry) {
+        component.label = entry.label
+        // Set through the model, not re-derived from the label, so a click (which toggles the
+        // native item itself) is corrected back to the app's own state on the next sync — same
+        // reasoning as SwingPopupHandle.syncLeaf.
+        if (component is java.awt.CheckboxMenuItem && entry is NativeCheckMenuItem) {
+            component.state = entry.checked
+        }
+        if (entry is NativeMenuLeaf) component.isEnabled = entry.isEnabled
+    }
+
+    // An AWT PopupMenu is only showable once it belongs to a component's menu hierarchy.
+    override fun attach(window: NativeWindowHandle?) {
+        window?.contentPane?.add(popupMenu)
+    }
+
+    override fun detach(window: NativeWindowHandle?) {
+        window?.contentPane?.remove(popupMenu)
+    }
+
+    override fun show(invoker: Component, x: Int, y: Int) {
+        popupMenu.show(invoker, x, y)
+    }
+}
+
+/**
+ * `javax.swing.JPopupMenu` backend, used everywhere except macOS. Both platforms that pick it do
+ * so because AWT's own `PopupMenu` is unusable there, for unrelated reasons:
+ *
+ * - **Linux**: AWT's `PopupMenu` is a heavyweight XAWT widget that ignores the Swing Look & Feel
+ *   entirely, so it keeps its Motif-era appearance no matter how the rest of the app is themed; a
+ *   `JPopupMenu` picks up FlatLaf (see `ui/theme/DesktopLookAndFeel.kt`) and matches the Compose
+ *   UI around it.
+ * - **Windows**: the JDK's Windows menu peer never converts between Java's user space and device
+ *   pixels, so every display scale above 100% breaks it twice over. `AwtPopupMenu::Show` feeds the
+ *   user-space x/y straight into `MapWindowPoints`/`TrackPopupMenu` without `ScaleUpX/ScaleUpY`,
+ *   putting the menu at `windowOrigin + clickOffset / scale`; and `AwtMenuItem::MeasureSelf` fills
+ *   `MEASUREITEMSTRUCT.itemHeight` from `FontMetrics.getHeight()` (user space) while the items are
+ *   drawn with an HFONT whose `lfHeight` *is* scaled up, so every row ends up `1 / scale` as tall
+ *   as its own glyphs and the labels overlap. Upstream: JDK-8259913 (unresolved). Swing paints
+ *   through Java2D with the transform applied, so it is correct at any scale — the app's own
+ *   `MenuBar` (a `javax.swing.JMenuBar`) already proved that on the same screen.
+ */
+internal class SwingPopupHandle(
+    items: List<NativeMenuEntry>,
+    shownItems: () -> List<NativeMenuEntry>,
+) : NativePopupHandle {
+    // Deliberately NOT named `components`. Inside the `apply` below the implicit receiver is the
+    // JPopupMenu, which extends Container and therefore exposes a synthetic `components` property
+    // (Container.getComponents()). That receiver wins name resolution over a field of this class,
+    // so a field called `components` would silently resolve to the popup's own — empty — child
+    // array, adding nothing and leaving a menu that shows as a 0x0 nothing. AWT's PopupMenu is
+    // not a Container, which is why only the Swing backend was ever affected.
+    // JComponent, not JMenuItem: a separator is a JPopupMenu.Separator, which is a JComponent but
+    // not a JMenuItem.
+    private val menuItems: List<JComponent> = items.mapIndexed { index, entry ->
+        when (entry) {
+            is NativeMenuLeaf ->
+                swingLeaf(entry) { invokeShownLeaf(shownItems, index, childIndex = null) }
+            is NativeSubMenu ->
+                JMenu().apply {
+                    // A submenu opens through its own popup, which needs the same treatment as
+                    // the root one below. Called as the getter to keep it unambiguous that this
+                    // is the JMenu's popup, not this class's `popupMenu` field.
+                    forceHeavyweight(getPopupMenu())
+                    entry.items.forEachIndexed { childIndex, child ->
+                        add(swingLeaf(child) { invokeShownLeaf(shownItems, index, childIndex) })
+                    }
+                }
+            is NativeMenuSeparator -> JPopupMenu.Separator()
+        }
+    }
+
+    /** Internal rather than private so tests can check what actually ended up in the menu. */
+    internal val popupMenu = JPopupMenu().apply {
+        forceHeavyweight(this)
+        menuItems.forEach { add(it) }
+    }
+
+    override fun sync(items: List<NativeMenuEntry>) {
+        items.forEachIndexed { index, entry ->
+            val component = menuItems.getOrNull(index) ?: return@forEachIndexed
+            // A separator's JPopupMenu.Separator carries no label/state, so it has nothing to sync.
+            if (component is JMenuItem) syncLeaf(component, entry)
+            if (entry is NativeSubMenu && component is JMenu) {
+                entry.items.forEachIndexed { childIndex, child ->
+                    component.getItem(childIndex)?.let { syncLeaf(it, child) }
+                }
+            }
+        }
+    }
+
+    private fun swingLeaf(entry: NativeMenuLeaf, onClick: () -> Unit): JMenuItem {
+        val item = if (entry is NativeCheckMenuItem) JCheckBoxMenuItem() else JMenuItem()
+        item.addActionListener { onClick() }
+        // Safe even for a bare (ctrl = false) key: this JPopupMenu is never attached to a
+        // JMenuBar/JRootPane (see the note on `attach` below), so Swing's automatic
+        // WHEN_IN_FOCUSED_WINDOW global keybinding registration — which only walks from a
+        // JMenuBar's structure — never reaches it. Setting `accelerator` here is purely cosmetic:
+        // it renders in Swing's own native accelerator column with no live global keybinding.
+        item.isEnabled = entry.isEnabled
+        entry.shortcut?.let { shortcut ->
+            // Never macOS (see defaultPopupHandle), so the primary modifier is always Ctrl —
+            // never Cmd.
+            var modifiers = 0
+            if (shortcut.ctrl) modifiers = modifiers or InputEvent.CTRL_DOWN_MASK
+            if (shortcut.shift) modifiers = modifiers or InputEvent.SHIFT_DOWN_MASK
+            item.accelerator = KeyStroke.getKeyStroke(shortcut.awtKeyCode(), modifiers)
+        }
+        return item
+    }
+
+    private fun syncLeaf(component: JMenuItem, entry: NativeMenuEntry) {
+        component.text = entry.label
+        // Set through the model so re-labelling a checkbox item can't drop its tick, and so a
+        // click (which toggles the item itself) is corrected back to the app's own state.
+        if (component is JCheckBoxMenuItem && entry is NativeCheckMenuItem) {
+            component.isSelected = entry.checked
+        }
+        if (entry is NativeMenuLeaf) component.isEnabled = entry.isEnabled
+    }
+
+    // JPopupMenu.show takes the invoker directly, so unlike AWT there is nothing to add to the
+    // window's hierarchy up front.
+    override fun attach(window: NativeWindowHandle?) = Unit
+
+    override fun detach(window: NativeWindowHandle?) = Unit
+
+    override fun show(invoker: Component, x: Int, y: Int) {
+        // Deferred rather than shown inline: Swing requires show() on the EDT, and this keeps the
+        // menu from being mapped in the middle of Compose Desktop dispatching the press that
+        // asked for it. AwtPopupHandle needs neither — its menu is a native NSMenu/Win32 menu
+        // with its own modal event loop — so it stays inline exactly as it always was.
+        SwingUtilities.invokeLater {
+            // Re-apply the current Look & Feel. This popup belongs to no window's component tree,
+            // so FlatLaf.updateUI() — which walks Window.getWindows() — structurally cannot reach
+            // it, and it would otherwise keep whatever L&F was in force when it was built. That
+            // matters both for an in-app theme change and for the case where the L&F is installed
+            // later than the popup. Submenus come along: updateComponentTreeUI recurses through
+            // JMenu.getMenuComponents(), and JMenu.updateUI() re-applies its own popup's UI.
+            SwingUtilities.updateComponentTreeUI(popupMenu)
+            popupMenu.show(invoker, x, y)
+        }
+    }
+}
+
+/**
+ * Forces [popup] into its own top-level window. A lightweight popup is drawn inside the Compose
+ * window, which puts it *behind* the article reader's native WebView — the same heavyweight AWT
+ * interop limitation that makes every dialog in this app a separate window (see `KeryxDialogs`).
+ */
+private fun forceHeavyweight(popup: JPopupMenu) {
+    // Load-bearing on Windows and on the Linux fallback path. Under FlatLaf this is already
+    // guaranteed: with Popup.dropShadowPainted on (its default), FlatPopupFactory forces heavy
+    // weight for every popup on Linux, overriding this hint either way — but Windows never
+    // installs FlatLaf at all (`DesktopLookAndFeel.installLookAndFeel` takes the system L&F
+    // branch there), so this line is the only thing keeping the menu out from behind the WebView.
+    popup.isLightWeightPopupEnabled = false
+}
+
+/**
+ * Builds the backend appropriate to the current platform: [AwtPopupHandle] on macOS, where AWT's
+ * `PopupMenu` is a real `NSMenu`, and [SwingPopupHandle] everywhere else, where it is either
+ * unthemed (Linux) or outright broken above 100% display scaling (Windows). See both KDocs.
+ *
+ * @param items The menu entries the widgets are built from.
+ * @param shownItems Provides the entries the menu was last shown with, which a click is resolved
+ * against (see [leafAt]).
+ * @param macOs Whether this is macOS. A parameter, defaulting to the process constant, purely so
+ * a test can pin the mapping on any host — no production call site passes it.
+ * @return The popup backend for this platform.
+ */
+internal fun defaultPopupHandle(
+    items: List<NativeMenuEntry>,
+    shownItems: () -> List<NativeMenuEntry>,
+    macOs: Boolean = isMacOs,
+): NativePopupHandle =
+    if (macOs) AwtPopupHandle(items, shownItems) else SwingPopupHandle(items, shownItems)
