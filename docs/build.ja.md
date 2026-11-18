@@ -383,6 +383,8 @@ Debug ビルドはアクティブなアーキテクチャしかコンパイル�
 
 `KeryxTests`（Swift Testing、単体で完結するテストバンドル）も macOS 上で同じ `CODE_SIGNING_ALLOWED=NO` の
 まま実行する。サンドボックス化されたアプリではなく `.xctest` バンドルを生成するだけなので、署名は要らない。
+`apple-release-toolchain` ジョブは iOS シミュレータ（イメージにある任意の iPhone）でも実行する。`#if os(iOS)` で
+囲んだテストは macOS での実行ではコンパイルすらされないためである。
 
 ### App Store 提出用の資料
 
