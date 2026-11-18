@@ -31,6 +31,9 @@ struct ReaderPageView: View {
     var onScroll: ((Double) -> Void)?
 
     @Environment(\.colorScheme) private var colorScheme
+    #if os(iOS)
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    #endif
     /// The page's current document, built by `rebuildDocument()` off the main thread. Held here
     /// rather than recomputed in `body`: building it means wrapping the whole article body, far too
     /// heavy to repeat on every body evaluation — and
@@ -67,7 +70,7 @@ struct ReaderPageView: View {
             feedName: feedName,
             feedFaviconUrl: feedFaviconUrl,
             colorScheme: colorScheme,
-            fontSizeScale: preferences.fontSizeScale
+            fontScale: readerFontScale
         )
     }
 
@@ -91,8 +94,18 @@ struct ReaderPageView: View {
         document = built
     }
 
+    /// The reader's font scale: the system text size (Dynamic Type) on iOS, which has no font-size
+    /// setting of its own, and the app's font-size setting on macOS, which has no Dynamic Type.
+    private var readerFontScale: Float {
+        #if os(iOS)
+        ReaderFontScale.scale(for: dynamicTypeSize)
+        #else
+        Float(preferences.fontSizeScale)
+        #endif
+    }
+
     private func readerDocumentInputs() -> ReaderDocumentInputs {
-        let theme = themeColors(colorScheme: colorScheme, fontScale: Float(preferences.fontSizeScale))
+        let theme = themeColors(colorScheme: colorScheme, fontScale: readerFontScale)
         // A blank themed document rather than none, so a previous article's embedded media stops
         // playing.
         guard let row else {
