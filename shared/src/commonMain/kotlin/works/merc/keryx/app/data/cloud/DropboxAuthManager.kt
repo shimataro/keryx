@@ -4,15 +4,12 @@ import io.ktor.client.HttpClient
 import io.ktor.client.request.bearerAuth
 import io.ktor.client.request.post
 import io.ktor.http.Parameters
-import io.ktor.http.URLBuilder
 import io.ktor.http.parameters
 import kotlinx.serialization.json.Json
-import works.merc.keryx.app.core.CLOUD_ERROR_BODY_PREVIEW_LENGTH
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.DROPBOX_AUTHORIZE_ENDPOINT
 import works.merc.keryx.app.core.DROPBOX_REVOKE_ENDPOINT
 import works.merc.keryx.app.core.DROPBOX_TOKEN_ENDPOINT
-import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.core.SystemClock
 
@@ -33,16 +30,9 @@ class DropboxAuthManager(
         redirectUri: String,
         codeChallenge: String,
         state: String,
-    ): String = URLBuilder(DROPBOX_AUTHORIZE_ENDPOINT).apply {
-        parameters.append("client_id", clientId)
-        parameters.append("response_type", "code")
-        parameters.append("redirect_uri", redirectUri)
-        parameters.append("code_challenge", codeChallenge)
-        parameters.append("code_challenge_method", "S256")
-        parameters.append("token_access_type", "offline")
-        parameters.append("scope", scopes)
-        parameters.append("state", state)
-    }.buildString()
+    ): String = buildPkceAuthorizeUrl(DROPBOX_AUTHORIZE_ENDPOINT, clientId, redirectUri, codeChallenge, state, scopes) {
+        append("token_access_type", "offline")
+    }
 
     override suspend fun exchangeCode(
         clientId: String,
@@ -97,9 +87,10 @@ class DropboxAuthManager(
     private suspend fun tokenRequest(
         form: Parameters,
         keepRefreshToken: String? = null,
-    ): Result<OAuthTokens> = requestOAuthTokens(client, json, clock, DROPBOX_TOKEN_ENDPOINT, form, keepRefreshToken) { status, body ->
-        Log.warn(TAG, "Dropbox token request failed (HTTP $status): ${body.take(CLOUD_ERROR_BODY_PREVIEW_LENGTH)}")
-    }
+    ): Result<OAuthTokens> = requestOAuthTokens(
+        client, json, clock, DROPBOX_TOKEN_ENDPOINT, form, keepRefreshToken,
+        onFailure = tokenRequestFailureLogger(TAG, "Dropbox"),
+    )
 
     private companion object {
         const val TAG = "DropboxAuth"
