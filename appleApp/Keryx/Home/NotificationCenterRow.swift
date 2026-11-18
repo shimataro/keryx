@@ -28,14 +28,13 @@ struct NotificationCenterRow: View {
 
     private var unreadCount: Int { notifications.items.count }
 
-    /// The bell's style for the most severe notification, from the shared `highestNotificationLevel`:
-    /// red for a warning or an error, the accent color for new-version notices alone, and the row's
-    /// own style when the notification center is empty.
+    /// The bell's style for the shared `notificationBellTone`: red for an alert, the accent color for
+    /// notices alone, and the row's own style when the notification center is empty.
     private var bellStyle: AnyShapeStyle {
-        switch NotificationSeverityKt.highestNotificationLevel(items: notifications.items) {
-        case .error, .warning: return AnyShapeStyle(Color.red)
-        case .info: return AnyShapeStyle(Color.accentColor)
-        default: return AnyShapeStyle(.primary)
+        switch NotificationSeverityKt.notificationBellTone(items: notifications.items) {
+        case .alert: return AnyShapeStyle(Color.red)
+        case .notice: return AnyShapeStyle(Color.accentColor)
+        case .quiet: return AnyShapeStyle(.primary)
         }
     }
 

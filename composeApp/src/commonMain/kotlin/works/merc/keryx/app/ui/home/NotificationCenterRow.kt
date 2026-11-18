@@ -22,8 +22,8 @@ import androidx.compose.ui.semantics.expand
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import org.jetbrains.compose.resources.stringResource
-import works.merc.keryx.app.core.AppNotificationLevel
-import works.merc.keryx.app.presentation.home.highestNotificationLevel
+import works.merc.keryx.app.presentation.home.NotificationBellTone
+import works.merc.keryx.app.presentation.home.notificationBellTone
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.home_notifications
 import works.merc.keryx.app.ui.common.KeryxAnchoredPanel
@@ -32,15 +32,15 @@ import works.merc.keryx.app.ui.common.KeryxIcon
 import works.merc.keryx.app.ui.common.KeryxIcons
 
 /**
- * The bell's color for the most severe notification [level]: the error color for a warning or an
- * error, the primary color for new-version notices alone, and the row's own content color when the
- * notification center is empty.
+ * The bell's color for [tone] (the shared [notificationBellTone]): the error color for an alert, the
+ * primary color for notices alone, and the row's own content color when the notification center is
+ * empty.
  */
 @Composable
-private fun bellTint(level: AppNotificationLevel?): Color = when (level) {
-    AppNotificationLevel.ERROR, AppNotificationLevel.WARNING -> MaterialTheme.colorScheme.error
-    AppNotificationLevel.INFO -> MaterialTheme.colorScheme.primary
-    null -> LocalContentColor.current
+private fun bellTint(tone: NotificationBellTone): Color = when (tone) {
+    NotificationBellTone.ALERT -> MaterialTheme.colorScheme.error
+    NotificationBellTone.NOTICE -> MaterialTheme.colorScheme.primary
+    NotificationBellTone.QUIET -> LocalContentColor.current
 }
 
 /** The gap between [NotificationCenterRow] and the panel that opens above it (desktop only). */
@@ -84,13 +84,13 @@ internal fun NotificationCenterRow(
     // Highlighted while it holds keyboard focus (reached with Tab), the way a list row shows the
     // keyboard's position; never otherwise, since this row is not a destination.
     val selected = keyboardFocused && LocalKeyboardEngaged.current
-    val level = highestNotificationLevel(notifVm.items.collectAsState().value)
+    val tone = notificationBellTone(notifVm.items.collectAsState().value)
     Box(Modifier.onSizeChanged { rowHeightPx = it.height }) {
         SidebarRow(
             icon = {
                 // Tinted by the most severe notification so a warning or an error reads differently
                 // from a new-version notice; left to the selection's content color while highlighted.
-                val tint = if (selected) LocalContentColor.current else bellTint(level)
+                val tint = if (selected) LocalContentColor.current else bellTint(tone)
                 KeryxIcon(KeryxIcons.Notifications, null, tint = tint)
             },
             label = stringResource(Res.string.home_notifications),

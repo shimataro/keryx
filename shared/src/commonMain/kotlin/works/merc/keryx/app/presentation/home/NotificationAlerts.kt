@@ -10,8 +10,8 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import works.merc.keryx.app.core.AlertKey
 import works.merc.keryx.app.core.AppNotification
-import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.alertKey
+import works.merc.keryx.app.core.isAlert
 import works.merc.keryx.app.domain.NotificationCenter
 
 /**
@@ -52,7 +52,7 @@ class NotificationAlerts(
     val alertToSurface: StateFlow<AppNotification?> =
         combine(center.items, surfacedAlerts) { notifications, surfaced ->
             // items is newest-first (NotificationCenter.add prepends), so this is the newest.
-            notifications.firstOrNull { it.level != AppNotificationLevel.INFO && it.alertKey() !in surfaced }
+            notifications.firstOrNull { it.level.isAlert && it.alertKey() !in surfaced }
         }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     /**
@@ -73,7 +73,7 @@ class NotificationAlerts(
         // items is newest-first, so everything from shown's position on is shown or older.
         val index = items.indexOfFirst { it.id == shown.id || it.alertKey() == shownKey }
         val older = if (index < 0) emptyList() else items.drop(index)
-        val keys = older.filter { it.level != AppNotificationLevel.INFO }.map { it.alertKey() } + shownKey
+        val keys = older.filter { it.level.isAlert }.map { it.alertKey() } + shownKey
         surfacedAlerts.update { it + keys }
     }
 }

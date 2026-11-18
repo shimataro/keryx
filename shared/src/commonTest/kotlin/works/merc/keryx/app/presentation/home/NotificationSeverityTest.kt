@@ -47,4 +47,25 @@ class NotificationSeverityTest {
             ),
         )
     }
+
+    @Test
+    fun theBellIsQuietWithNoNotifications() {
+        assertEquals(NotificationBellTone.QUIET, notificationBellTone(emptyList()))
+    }
+
+    @Test
+    fun noticesAloneGiveTheNoticeTone() {
+        assertEquals(NotificationBellTone.NOTICE, notificationBellTone(listOf(notification("a", AppNotificationLevel.INFO))))
+    }
+
+    @Test
+    fun aWarningOrAnErrorAmongNoticesGivesTheAlertTone() {
+        for (level in listOf(AppNotificationLevel.WARNING, AppNotificationLevel.ERROR)) {
+            assertEquals(
+                NotificationBellTone.ALERT,
+                notificationBellTone(listOf(notification("a", AppNotificationLevel.INFO), notification("b", level))),
+                level.name,
+            )
+        }
+    }
 }
