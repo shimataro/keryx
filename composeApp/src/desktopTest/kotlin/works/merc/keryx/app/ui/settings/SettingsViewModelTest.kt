@@ -95,35 +95,6 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
-/**
- * A [FileSelector] fake: hands back a handle to a fixed path (or null, i.e. "cancelled") and records
- * what it was asked for. The handle is the production [PathPickedFile], so reads and writes still go
- * to a real file on disk — which is what these tests assert on.
- */
-private class FakeFileSelector(
-    private val openPath: String? = null,
-    private val savePath: String? = null,
-) : FileSelector {
-    var lastOpenRequest: OpenFileRequest? = null
-        private set
-    var lastSaveRequest: SaveFileRequest? = null
-        private set
-
-    var openCount = 0
-        private set
-
-    override suspend fun pickOpenFile(request: OpenFileRequest): PickedFile? {
-        lastOpenRequest = request
-        openCount++
-        return openPath?.let(::PathPickedFile)
-    }
-
-    override suspend fun pickSaveFile(request: SaveFileRequest): PickedFile? {
-        lastSaveRequest = request
-        return savePath?.let(::PathPickedFile)
-    }
-}
-
 /** A [FileSelector] whose open pick suspends until the test resolves [openDeferred] — for exercising the in-flight state of a still-running import. */
 private class SuspendingFileSelector : FileSelector {
     val openDeferred = CompletableDeferred<PickedFile?>()
@@ -185,210 +156,33 @@ private const val TWO_FEED_OPML =
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class SettingsViewModelTest {
 
-    private lateinit var driver: SqlDriver
-    private lateinit var db: KeryxDatabase
-    private val dir = FileIO.join(AppDirs.tempDir(), "settings-vm-test-${Random.nextInt()}")
-
-    // ViewModels created via newViewModel(). Their viewModelScope is not tied to runTest's scope,
-    // so it must be cancelled explicitly before driver.close() — otherwise in-flight coroutines
-    // outlive the test and can throw against the closed driver, surfacing (flakily, on another
-    // test) as kotlinx.coroutines.test.UncaughtExceptionsBeforeTest. The wrapped CloudSyncController
-    // has its own separate viewModelScope and must be cancelled too.
-    private val createdViewModels = mutableListOf<SettingsViewModel>()
-    private val createdCloudSyncControllers = mutableListOf<CloudSyncController>()
-    private val createdSyncScopes = mutableListOf<CoroutineScope>()
-
-    /** The [OpmlTransferController] behind the last [newViewModel] — what the File menu would call. */
-    private lateinit var lastOpmlController: OpmlTransferController
-
-    /** The app scope behind [lastOpmlController], where its imports run. */
-    private lateinit var lastOpmlScope: CoroutineScope
+    private lateinit var fx: SettingsViewModelFixture
+    private val driver get() = fx.driver
+    private val db get() = fx.db
+    private val dir get() = fx.dir
+    private val lastOpmlController get() = fx.lastOpmlController
+    private val lastOpmlScope get() = fx.lastOpmlScope
 
     @BeforeTest
     fun setUp() {
         Dispatchers.setMain(UnconfinedTestDispatcher())
-        val (d, database) = inMemoryDb()
-        driver = d
-        db = database
+        fx = SettingsViewModelFixture()
     }
 
     @AfterTest
     fun tearDown() {
-        runBlocking {
-            createdViewModels.forEach { it.viewModelScope.coroutineContext.job.cancelAndJoin() }
-            createdCloudSyncControllers.forEach { it.viewModelScope.coroutineContext.job.cancelAndJoin() }
-            createdSyncScopes.forEach { it.coroutineContext.job.cancelAndJoin() }
-        }
-        createdViewModels.clear()
-        createdCloudSyncControllers.clear()
-        createdSyncScopes.clear()
+        fx.cancelWork()
         Dispatchers.resetMain()
-        driver.close()
-        File(dir).deleteRecursively()
+        fx.closeStorage()
     }
 
-    private fun failingFetcher(): FeedFetcher {
-        val client = HttpClient(MockEngine { respond("", HttpStatusCode.NotFound) }) {
-            followRedirects = false
-            expectSuccess = false
-            install(HttpTimeout)
-        }
-        return FeedFetcher(client)
-    }
-
-    /** A [FeedFetcher] that answers every request with a minimal valid feed, for OPML import tests. */
-    private fun succeedingFetcher(): FeedFetcher {
-        val rss = """<?xml version="1.0"?><rss version="2.0"><channel>
-            <title>Feed</title><link>https://ex.com</link>
-            <item><title>Post</title><link>https://ex.com/1</link><guid>g1</guid></item>
-            </channel></rss>"""
-        val client = HttpClient(MockEngine { respond(rss, HttpStatusCode.OK) }) {
-            followRedirects = false
-            expectSuccess = false
-            install(HttpTimeout)
-        }
-        return FeedFetcher(client)
-    }
-
-    /**
-     * [succeedingFetcher], with every response held until [gate] completes; [started] completes once
-     * a request has reached it.
-     */
-    private fun gatedSucceedingFetcher(gate: CompletableDeferred<Unit>, started: CompletableDeferred<Unit>? = null): FeedFetcher {
-        val rss = """<?xml version="1.0"?><rss version="2.0"><channel>
-            <title>Feed</title><link>https://ex.com</link>
-            </channel></rss>"""
-        val client = HttpClient(
-            MockEngine {
-                started?.complete(Unit)
-                gate.await()
-                respond(rss, HttpStatusCode.OK)
-            },
-        ) {
-            followRedirects = false
-            expectSuccess = false
-            install(HttpTimeout)
-        }
-        return FeedFetcher(client)
-    }
-
-    private fun missingFaviconResolver(): FaviconResolver {
-        val client = HttpClient(MockEngine { respond("", HttpStatusCode.NotFound) }) {
-            followRedirects = false
-            expectSuccess = false
-            install(HttpTimeout)
-        }
-        return FaviconResolver(client)
-    }
-
-    private fun updateCheckerReturning(tagName: String): UpdateChecker {
-        // currentVersion 1.0.0 is stable, so the checker queries releases/latest (a single object).
-        val client = HttpClient(
-            MockEngine { respond("""{"tag_name":"$tagName","html_url":"https://ex.com/releases/$tagName","prerelease":false,"draft":false}""", HttpStatusCode.OK) },
-        ) { expectSuccess = false }
-        return UpdateChecker(client, currentVersion = "1.0.0", repoSlug = "owner/repo")
-    }
-
-    /**
-     * Wraps [checker] in a real [UpdateRepository] so [SettingsViewModel.checkForUpdate] exercises
-     * the same code path production does — only [downloader]/[installer] are inert stand-ins,
-     * since these tests only exercise the check/result path, never an actual download or install.
-     */
-    private fun fakeUpdateRepository(checker: UpdateChecker): UpdateRepository {
-        val unusedClient = HttpClient(MockEngine { respondError(HttpStatusCode.NotImplemented) }) { expectSuccess = false }
-        val installer = object : UpdateInstaller {
-            override fun canInstall(plan: UpdatePlan) = false
-            override suspend fun install(filePath: String, update: AvailableUpdate) =
-                InstallLaunchResult.Failed("not used in this test")
-        }
-        return UpdateRepository(
-            checker = checker,
-            downloader = UpdateDownloader(unusedClient),
-            installer = installer,
-            notificationCenter = NotificationCenter(),
-            scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined).also { createdSyncScopes += it },
-        )
-    }
-
-    private fun newViewModel(
-        updateRepository: UpdateRepository = fakeUpdateRepository(updateCheckerReturning("1.0.0")),
-        // Only the OPML import tests need subscribeFeed to actually succeed.
-        feedFetcher: FeedFetcher = failingFetcher(),
-        // Default cancels every OPML pick — a test exercising import/export supplies its own.
-        fileSelector: FileSelector = FakeFileSelector(),
-        // Passed to the VM's own `dispatcher` (blocking OPML build/write/import work). Default
-        // matches the rest of newViewModel's Unconfined setup; a test can supply a CountingDispatcher
-        // to assert it was actually used.
-        dispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
-        // Where the OpmlTransferController runs an import; a test can supply a HoldingDispatcher to
-        // keep a cancelled import from stopping until it says so.
-        opmlImportDispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
-    ): SettingsViewModel {
-        val clock = Clock { 0L }
-        val syncScheduler = SyncScheduler {}
-        val articleRepository = ArticleRepository(db, FtsSearch(driver), syncScheduler, clock, Dispatchers.Unconfined)
-        // Mirror startup: ensureIndexed() creates articles_fts so subscribeFeed's indexMissing() works.
-        val ftsManager = ftsManagerIndexed(driver)
-        val feedRepository = FeedRepository(
-            db, feedFetcher, missingFaviconResolver(), articleRepository, ftsManager, syncScheduler,
-            NotificationCenter(), clock, Dispatchers.Unconfined,
-            faviconMisses = InMemoryFaviconMissStore(),
-        )
-        val folderRepository = FolderRepository(db, feedRepository, syncScheduler, clock, Dispatchers.Unconfined)
-        val tagRepository = TagRepository(db, syncScheduler, clock, Dispatchers.Unconfined)
-        val opmlImporter = OpmlImporter(feedRepository, folderRepository, tagRepository)
-        val opmlTransfer = OpmlTransfer(feedRepository, folderRepository, tagRepository, opmlImporter)
-        // Stands in for the app scope the controller runs imports on.
-        val opmlScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined).also {
-            createdSyncScopes += it
-            lastOpmlScope = it
-        }
-        val opmlController = OpmlTransferController(opmlTransfer, opmlScope, opmlImportDispatcher).also { lastOpmlController = it }
-        // Unconfined write dispatcher so saveLocalSettings persists inline.
-        val settingsRepository =
-            SettingsRepository(db, LocalSettingsStore(dirOverride = dir), syncScheduler, clock, writeDispatcher = Dispatchers.Unconfined)
-        val preferencesController = PreferencesController(settingsRepository)
-        val syncScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
-        createdSyncScopes += syncScope
-        val syncRepository = SyncRepository(
-            driver = driver,
-            db = db,
-            ftsManager = FtsManager(driver),
-            cloudProvider = { null },
-            clock = clock,
-            scope = syncScope,
-            activityCenter = ActivityCenter(),
-            notificationCenter = NotificationCenter(),
-            localDbPath = "unused",
-            tempDir = "unused",
-        )
-        val authClient = HttpClient(MockEngine { respond("{}", HttpStatusCode.OK) }) { expectSuccess = false }
-        val authManager = DropboxAuthManager(authClient, clock = clock)
-        val cloudSession = singleProviderCloudSession(
-            client = authClient,
-            tokenStorage = FakeTokenStorage(),
-            authManager = authManager,
-            clock = clock,
-            connectFlow = FakeCloudConnectFlow(Result.Ok(OAuthTokens("AT"))),
-        )
-        val cloudSyncController = CloudSyncController(
-            cloudSession, syncRepository, CloudConnectionService(cloudSession, settingsRepository, syncRepository), ActivityCenter(),
-            settingsRepository,
-            // Unconfined so connectDelegatesToCloudSyncController's testScheduler.advanceUntilIdle()
-            // actually observes the token-save/sync hop, rather than it landing on a real thread.
-            Dispatchers.Unconfined,
-        ).also { createdCloudSyncControllers += it }
-        return SettingsViewModel(
-            cloudSyncController, preferencesController, opmlController, updateRepository, dispatcher, fileSelector,
-        ).also { createdViewModels += it }
-    }
 
     // --- Delegation smoke tests: the wrapper must actually forward to its controllers ---
 
     @Test
     fun setThemeModeDelegatesToPreferencesControllerAndPersists() {
         val store = LocalSettingsStore(dirOverride = dir)
-        val vm = newViewModel()
+        val vm = fx.newViewModel()
 
         vm.setThemeMode("dark")
 
@@ -398,7 +192,7 @@ class SettingsViewModelTest {
 
     @Test
     fun connectDelegatesToCloudSyncController() = runTest {
-        val vm = newViewModel()
+        val vm = fx.newViewModel()
         assertNull(vm.connectedType.value)
 
         vm.connect(CloudStorageType.DROPBOX)
@@ -414,7 +208,7 @@ class SettingsViewModelTest {
     // TestCoroutineScheduler, so we poll with real wall-clock waits instead.
     @Test
     fun checkForUpdateSurfacesAvailableResultWithoutTouchingLastUpdateCheckAt() {
-        val vm = newViewModel(updateRepository = fakeUpdateRepository(updateCheckerReturning("2.0.0")))
+        val vm = fx.newViewModel(updateRepository = fx.fakeUpdateRepository(fx.updateCheckerReturning("2.0.0")))
         assertEquals(UpdateState.Idle, vm.updateState.value)
 
         vm.checkForUpdate()
@@ -442,7 +236,7 @@ class SettingsViewModelTest {
                 )
             },
         ) { expectSuccess = false }
-        val vm = newViewModel(updateRepository = fakeUpdateRepository(UpdateChecker(client, currentVersion = "1.0.0", repoSlug = "owner/repo")))
+        val vm = fx.newViewModel(updateRepository = fx.fakeUpdateRepository(UpdateChecker(client, currentVersion = "1.0.0", repoSlug = "owner/repo")))
 
         vm.checkForUpdate()
         awaitConditionBlocking { vm.updateState.value is UpdateState.Checking }
@@ -471,8 +265,8 @@ class SettingsViewModelTest {
             },
         ) { expectSuccess = false }
         val dispatcher = QueueingDispatcher()
-        val vm = newViewModel(
-            updateRepository = fakeUpdateRepository(UpdateChecker(client, currentVersion = "1.0.0", repoSlug = "owner/repo")),
+        val vm = fx.newViewModel(
+            updateRepository = fx.fakeUpdateRepository(UpdateChecker(client, currentVersion = "1.0.0", repoSlug = "owner/repo")),
             dispatcher = dispatcher,
         )
 
@@ -501,7 +295,7 @@ class SettingsViewModelTest {
     fun exportOpmlWritesTheBuiltDocumentToThePickedPath() = runTest {
         db.insertFeed("f1", url = "https://a.com/feed")
         val path = FileIO.join(dir, "export.opml")
-        val vm = newViewModel(fileSelector = FakeFileSelector(savePath = path))
+        val vm = fx.newViewModel(fileSelector = FakeFileSelector(savePath = path))
 
         vm.exportOpml()
 
@@ -515,7 +309,7 @@ class SettingsViewModelTest {
 
     @Test
     fun exportOpmlLeavesResultNullWhenTheDialogIsDismissed() = runTest {
-        val vm = newViewModel(fileSelector = FakeFileSelector(savePath = null))
+        val vm = fx.newViewModel(fileSelector = FakeFileSelector(savePath = null))
 
         vm.exportOpml()
 
@@ -525,7 +319,7 @@ class SettingsViewModelTest {
     @Test
     fun exportOpmlPassesTheLocalizedTitleAndOverwriteLabelsToTheDialog() = runTest {
         val selector = FakeFileSelector(savePath = null)
-        val vm = newViewModel(fileSelector = selector)
+        val vm = fx.newViewModel(fileSelector = selector)
 
         vm.exportOpml()
 
@@ -544,7 +338,7 @@ class SettingsViewModelTest {
         db.insertFeed("f1", url = "https://a.com/feed")
         val path = FileIO.join(dir, "export-dispatcher.opml")
         val counting = CountingDispatcher()
-        val vm = newViewModel(fileSelector = FakeFileSelector(savePath = path), dispatcher = counting)
+        val vm = fx.newViewModel(fileSelector = FakeFileSelector(savePath = path), dispatcher = counting)
 
         vm.exportOpml()
 
@@ -558,7 +352,7 @@ class SettingsViewModelTest {
         val blockingFile = FileIO.join(dir, "not-a-directory")
         FileIO.writeText(blockingFile, "x")
         val path = FileIO.join(blockingFile, "export.opml")
-        val vm = newViewModel(fileSelector = FakeFileSelector(savePath = path))
+        val vm = fx.newViewModel(fileSelector = FakeFileSelector(savePath = path))
 
         vm.exportOpml()
 
@@ -569,7 +363,7 @@ class SettingsViewModelTest {
     @Test
     fun exportOpmlRethrowsCancellationInsteadOfReportingFailure() = runTest {
         val path = FileIO.join(dir, "export-cancel.opml")
-        val vm = newViewModel(fileSelector = FakeFileSelector(savePath = path), dispatcher = CancellingDispatcher())
+        val vm = fx.newViewModel(fileSelector = FakeFileSelector(savePath = path), dispatcher = CancellingDispatcher())
 
         vm.exportOpml()
 
@@ -582,7 +376,7 @@ class SettingsViewModelTest {
         val xml = """<opml><body><outline text="Feed" xmlUrl="https://ex.com/feed"/></body></opml>"""
         val path = FileIO.join(dir, "import.opml")
         FileIO.writeText(path, xml)
-        val vm = newViewModel(feedFetcher = succeedingFetcher(), fileSelector = FakeFileSelector(openPath = path))
+        val vm = fx.newViewModel(feedFetcher = fx.succeedingFetcher(), fileSelector = FakeFileSelector(openPath = path))
 
         vm.importOpml()
 
@@ -596,7 +390,7 @@ class SettingsViewModelTest {
 
     @Test
     fun importOpmlLeavesResultNullWhenTheDialogIsDismissed() = runTest {
-        val vm = newViewModel(fileSelector = FakeFileSelector(openPath = null))
+        val vm = fx.newViewModel(fileSelector = FakeFileSelector(openPath = null))
 
         vm.importOpml()
 
@@ -606,7 +400,7 @@ class SettingsViewModelTest {
     @Test
     fun importOpmlReportsFailedWhenTheFileCannotBeRead() = runTest {
         val missingPath = FileIO.join(dir, "does-not-exist.opml")
-        val vm = newViewModel(fileSelector = FakeFileSelector(openPath = missingPath))
+        val vm = fx.newViewModel(fileSelector = FakeFileSelector(openPath = missingPath))
 
         vm.importOpml()
 
@@ -617,7 +411,7 @@ class SettingsViewModelTest {
     fun importOpmlRethrowsCancellationInsteadOfReportingFailure() = runTest {
         val path = FileIO.join(dir, "import-cancel.opml")
         FileIO.writeText(path, "<opml><body/></opml>")
-        val vm = newViewModel(fileSelector = FakeFileSelector(openPath = path), dispatcher = CancellingDispatcher())
+        val vm = fx.newViewModel(fileSelector = FakeFileSelector(openPath = path), dispatcher = CancellingDispatcher())
 
         vm.importOpml()
 
@@ -631,8 +425,8 @@ class SettingsViewModelTest {
         FileIO.writeText(path, ONE_FEED_OPML)
         val started = CompletableDeferred<Unit>()
         val importDispatcher = HoldingDispatcher()
-        val vm = newViewModel(
-            feedFetcher = gatedSucceedingFetcher(gate = CompletableDeferred(), started = started),
+        val vm = fx.newViewModel(
+            feedFetcher = fx.gatedSucceedingFetcher(gate = CompletableDeferred(), started = started),
             fileSelector = FakeFileSelector(openPath = path),
             opmlImportDispatcher = importDispatcher,
         )
@@ -671,8 +465,8 @@ class SettingsViewModelTest {
         val path = FileIO.join(dir, "import-dispatcher.opml")
         FileIO.writeText(path, xml)
         val counting = CountingDispatcher()
-        val vm = newViewModel(
-            feedFetcher = succeedingFetcher(),
+        val vm = fx.newViewModel(
+            feedFetcher = fx.succeedingFetcher(),
             fileSelector = FakeFileSelector(openPath = path),
             dispatcher = counting,
         )
@@ -687,7 +481,7 @@ class SettingsViewModelTest {
     @Test
     fun importAndExportOpmlRefuseToRunConcurrently() = runTest {
         val selector = SuspendingFileSelector()
-        val vm = newViewModel(fileSelector = selector)
+        val vm = fx.newViewModel(fileSelector = selector)
 
         vm.importOpml()
         assertEquals(OpmlOperation.Importing, vm.opmlRunning.value)
@@ -705,7 +499,7 @@ class SettingsViewModelTest {
     @Test
     fun importDocumentImportsAnAlreadyReadDocument() = runTest {
         val xml = """<opml><body><outline text="Feed" xmlUrl="https://ex.com/feed"/></body></opml>"""
-        val vm = newViewModel(feedFetcher = succeedingFetcher())
+        val vm = fx.newViewModel(feedFetcher = fx.succeedingFetcher())
 
         vm.importDocument(xml)
 
@@ -717,7 +511,7 @@ class SettingsViewModelTest {
     @Test
     fun importDocumentRunsThroughTheSharedControllerAndRefusesASecondConcurrentRun() = runTest {
         val gate = CompletableDeferred<Unit>()
-        val vm = newViewModel(feedFetcher = gatedSucceedingFetcher(gate))
+        val vm = fx.newViewModel(feedFetcher = fx.gatedSucceedingFetcher(gate))
 
         vm.importDocument(ONE_FEED_OPML)
         assertEquals(OpmlOperation.Importing, vm.opmlRunning.value)
@@ -736,7 +530,7 @@ class SettingsViewModelTest {
 
     @Test
     fun importDocumentReportsFailedForAnUnreadableFile() = runTest {
-        val vm = newViewModel()
+        val vm = fx.newViewModel()
 
         vm.importDocument(null)
 
@@ -747,7 +541,7 @@ class SettingsViewModelTest {
     @Test
     fun startingANewOperationClearsThePreviousResult() = runTest {
         val selector = SuspendingFileSelector()
-        val vm = newViewModel(fileSelector = selector)
+        val vm = fx.newViewModel(fileSelector = selector)
         vm.importDocument(null)
         assertEquals(OpmlResult.ImportFailed, vm.opmlResult.value)
 
@@ -760,7 +554,7 @@ class SettingsViewModelTest {
     @Test
     fun aPendingRequestIsHandedOutOnlyWhileNothingRuns() = runTest {
         val selector = SuspendingFileSelector()
-        val vm = newViewModel(fileSelector = selector)
+        val vm = fx.newViewModel(fileSelector = selector)
         vm.importOpml()
 
         lastOpmlController.request(OpmlRequest.ExportFile)
@@ -778,7 +572,7 @@ class SettingsViewModelTest {
     @Test
     fun dataTabCarriesOutAPendingMenuImportExactlyOnce() {
         val selector = FakeFileSelector(openPath = null)
-        val vm = newViewModel(fileSelector = selector)
+        val vm = fx.newViewModel(fileSelector = selector)
         lastOpmlController.request(OpmlRequest.ImportFile)
 
         runDesktopComposeUiTest {
@@ -795,7 +589,7 @@ class SettingsViewModelTest {
     @Test
     fun dataTabLeavesAPendingRequestAloneWhileAnOperationRuns() {
         val selector = FakeFileSelector(openPath = null)
-        val vm = newViewModel(fileSelector = selector)
+        val vm = fx.newViewModel(fileSelector = selector)
         lastOpmlController.tryBegin(OpmlOperation.Exporting)
         lastOpmlController.request(OpmlRequest.ImportFile)
 
