@@ -2,6 +2,8 @@ package works.merc.keryx.app.ui.home
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -11,6 +13,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
@@ -19,11 +22,26 @@ import androidx.compose.ui.semantics.expand
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import org.jetbrains.compose.resources.stringResource
+import works.merc.keryx.app.core.AppNotificationLevel
+import works.merc.keryx.app.presentation.home.highestNotificationLevel
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.home_notifications
 import works.merc.keryx.app.ui.common.KeryxAnchoredPanel
+import works.merc.keryx.app.ui.common.KeryxCountBadge
 import works.merc.keryx.app.ui.common.KeryxIcon
 import works.merc.keryx.app.ui.common.KeryxIcons
+
+/**
+ * The bell's color for the most severe notification [level]: the error color for a warning or an
+ * error, the primary color for new-version notices alone, and the row's own content color when the
+ * notification center is empty.
+ */
+@Composable
+private fun bellTint(level: AppNotificationLevel?): Color = when (level) {
+    AppNotificationLevel.ERROR, AppNotificationLevel.WARNING -> MaterialTheme.colorScheme.error
+    AppNotificationLevel.INFO -> MaterialTheme.colorScheme.primary
+    null -> LocalContentColor.current
+}
 
 /** The gap between [NotificationCenterRow] and the panel that opens above it (desktop only). */
 private val PanelGap = 4.dp
@@ -40,7 +58,8 @@ internal fun notificationCountOf(notifVm: NotificationCenterViewModel?): Int =
 /**
  * The notification center's entry point: a row fixed to the bottom of `FeedListPane`, always shown so
  * it stays in one place (an empty center opens to [NotificationCenterSheet]'s own empty state). The
- * [count] is drawn only when it is above zero (`SidebarRow`'s own rule). It replaced the bell in the
+ * [count] is drawn only when it is above zero, as the same [KeryxCountBadge] pill the narrow layout's
+ * drawer button carries, and the bell takes the color of the most severe notification. It replaced the bell in the
  * article list's toolbar, so the toolbar no longer gives a slot to a list that is empty most of the
  * time.
  *
@@ -62,14 +81,25 @@ internal fun NotificationCenterRow(
     val density = LocalDensity.current
     var keyboardFocused by remember { mutableStateOf(false) }
     val toggle = { showNotifications = !showNotifications }
+    // Highlighted while it holds keyboard focus (reached with Tab), the way a list row shows the
+    // keyboard's position; never otherwise, since this row is not a destination.
+    val selected = keyboardFocused && LocalKeyboardEngaged.current
+    val level = highestNotificationLevel(notifVm.items.collectAsState().value)
     Box(Modifier.onSizeChanged { rowHeightPx = it.height }) {
         SidebarRow(
-            icon = { KeryxIcon(KeryxIcons.Notifications, null) },
+            icon = {
+                // Tinted by the most severe notification so a warning or an error reads differently
+                // from a new-version notice; left to the selection's content color while highlighted.
+                val tint = if (selected) LocalContentColor.current else bellTint(level)
+                KeryxIcon(KeryxIcons.Notifications, null, tint = tint)
+            },
             label = stringResource(Res.string.home_notifications),
-            count = count.toLong(),
-            // Highlighted while it holds keyboard focus (reached with Tab), the way a list row shows
-            // the keyboard's position; never otherwise, since this row is not a destination.
-            selected = keyboardFocused && LocalKeyboardEngaged.current,
+            count = null,
+            // The same pill as the narrow layout's drawer button carries, so the two read as one
+            // thing — the feed rows' plain unread counts would not. Its number stays in the row's
+            // semantics ("Notifications, 2").
+            trailing = { KeryxCountBadge(count) },
+            selected = selected,
             focused = true,
             onClick = toggle,
             // A button that opens a panel, not a selectable destination: announced as a button with

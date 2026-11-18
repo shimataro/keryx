@@ -149,6 +149,8 @@ internal fun FeedListToolbarRow(
  *   row's own interaction source, so hover and press still reach [listRowSurface]. [onClick] is
  *   then unused.
  * @param isTouchPrimary Overridable for tests only — see `feedListReorderDrag`'s own KDoc.
+ * @param trailing Drawn at the trailing edge in place of [count]'s plain number, for a row whose
+ *   count must not look like the feeds' unread counts ([NotificationCenterRow]'s badge).
  */
 @Composable
 internal fun SidebarRow(
@@ -160,6 +162,7 @@ internal fun SidebarRow(
     onClick: () -> Unit,
     clickModifier: ((MutableInteractionSource) -> Modifier)? = null,
     isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
+    trailing: (@Composable () -> Unit)? = null,
 ) {
     val rowInteraction = remember { MutableInteractionSource() }
     Row(
@@ -188,6 +191,10 @@ internal fun SidebarRow(
                 style = if (isTouchPrimary) MaterialTheme.typography.labelLarge else LocalTextStyle.current,
             )
         }
-        if (count != null && count > 0) CountBadge(count, selected, focused)
+        if (trailing != null) {
+            trailing()
+        } else if (count != null && count > 0) {
+            CountBadge(count, selected, focused)
+        }
     }
 }

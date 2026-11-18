@@ -13,3 +13,13 @@ import org.jetbrains.compose.resources.DrawableResource
  */
 @Composable
 internal expect fun KeryxBadgedIcon(icon: DrawableResource, contentDescription: String, count: Int)
+
+/**
+ * The count pill alone — the same pill [KeryxBadgedIcon] overlays on its icon (a hand-rolled pill on
+ * desktop, M3's own `Badge` on Android), for a row that shows the same count beside its label (the
+ * notification center's row, so it visibly matches the drawer button's badge). Draws nothing when
+ * [count] is `0`. Unlike [KeryxBadgedIcon]'s badge, the number stays in the semantics tree, since a
+ * row's own label says what it counts.
+ */
+@Composable
+internal expect fun KeryxCountBadge(count: Int)

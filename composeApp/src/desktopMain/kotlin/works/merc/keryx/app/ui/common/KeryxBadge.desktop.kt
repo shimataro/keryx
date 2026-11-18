@@ -21,24 +21,28 @@ import org.jetbrains.compose.resources.DrawableResource
 internal actual fun KeryxBadgedIcon(icon: DrawableResource, contentDescription: String, count: Int) {
     Box(contentAlignment = Alignment.TopEnd) {
         KeryxIcon(icon, contentDescription = contentDescription)
-        if (count > 0) {
-            Box(
-                Modifier
-                    // The count is in the icon's contentDescription; see the expect's KDoc.
-                    .clearAndSetSemantics {}
-                    .offset(x = 6.dp, y = (-4).dp)
-                    .defaultMinSize(minWidth = 16.dp, minHeight = 16.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.error, CircleShape),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    count.toString(),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onError,
-                    modifier = Modifier.padding(horizontal = 4.dp),
-                )
-            }
+        // The count is in the icon's contentDescription; see the expect's KDoc.
+        Box(Modifier.clearAndSetSemantics {}.offset(x = 6.dp, y = (-4).dp)) {
+            KeryxCountBadge(count)
         }
+    }
+}
+
+@Composable
+internal actual fun KeryxCountBadge(count: Int) {
+    if (count <= 0) return
+    Box(
+        Modifier
+            .defaultMinSize(minWidth = 16.dp, minHeight = 16.dp)
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.error, CircleShape),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            count.toString(),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onError,
+            modifier = Modifier.padding(horizontal = 4.dp),
+        )
     }
 }

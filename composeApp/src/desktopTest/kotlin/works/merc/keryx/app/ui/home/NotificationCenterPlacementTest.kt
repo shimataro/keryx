@@ -369,4 +369,56 @@ class NotificationCenterPlacementTest {
             assertEquals(2, onAllNodesWithText(shown()).fetchSemanticsNodes().size)
         }
     }
+
+    private fun centerOf(vararg levels: AppNotificationLevel): NotificationCenter {
+        val center = NotificationCenter()
+        levels.forEachIndexed { i, level ->
+            center.add(AppNotification(id = "n$i", level = level, text = notificationText, timestampMillis = 0L, action = null))
+        }
+        return center
+    }
+
+    @Test
+    fun theRowsCountIsABadgeKeptInTheRowsSemanticsAndAbsentWhenEmpty() = runDesktopComposeUiTest {
+        // The pill (KeryxCountBadge) is drawn instead of the feed rows' plain count, but its number
+        // still reads with the row's label; an empty center draws no "0".
+        var count by mutableStateOf(2)
+        val center = newCenter(2)
+        val notifVm = NotificationCenterViewModel(center, NotificationAlerts(center))
+        setContent {
+            KoinIsolatedContext(context = remember { isolatedKoin() }) {
+                NotificationCenterRow(notifVm = notifVm, count = count)
+            }
+        }
+        waitForIdle()
+        onNodeWithText(rowLabel).assert(SemanticsMatcher.expectValue(SemanticsProperties.Text, listOf(rowLabel, "2").map { androidx.compose.ui.text.AnnotatedString(it) }))
+
+        count = 0
+        waitForIdle()
+        onNodeWithText(rowLabel).assert(SemanticsMatcher.expectValue(SemanticsProperties.Text, listOf(androidx.compose.ui.text.AnnotatedString(rowLabel))))
+    }
+
+    @Test
+    fun theBellIsTintedByTheMostSevereNotification() = runDesktopComposeUiTest {
+        // Same count, different levels: only the bell's tint tells the rows apart.
+        val info = centerOf(AppNotificationLevel.INFO, AppNotificationLevel.INFO)
+        val warning = centerOf(AppNotificationLevel.INFO, AppNotificationLevel.WARNING)
+        val error = centerOf(AppNotificationLevel.ERROR, AppNotificationLevel.INFO)
+        setContent {
+            KoinIsolatedContext(context = remember { isolatedKoin() }) {
+                Column {
+                    for ((tag, center) in listOf("info" to info, "warning" to warning, "error" to error)) {
+                        Box(Modifier.testTag(tag)) {
+                            NotificationCenterRow(notifVm = NotificationCenterViewModel(center, NotificationAlerts(center)), count = 2)
+                        }
+                    }
+                }
+            }
+        }
+        waitForIdle()
+        fun capture(tag: String) = pixelsOf(onNodeWithTag(tag).captureToImage().toPixelMap())
+
+        assertNotEquals(capture("info"), capture("warning"), "a warning tints the bell unlike new-version notices alone")
+        assertEquals(capture("warning"), capture("error"), "warnings and errors share the error color")
+    }
 }
