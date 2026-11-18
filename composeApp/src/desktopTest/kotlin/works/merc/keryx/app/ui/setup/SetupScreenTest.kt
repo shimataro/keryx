@@ -1,14 +1,13 @@
 package works.merc.keryx.app.ui.setup
 
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.remember
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.onRoot
-import androidx.compose.ui.test.printToLog
 import androidx.compose.ui.test.v2.runDesktopComposeUiTest
 import androidx.lifecycle.viewModelScope
 import app.cash.sqldelight.db.SqlDriver
@@ -23,8 +22,8 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.setMain
-import org.koin.compose.KoinApplication
-import org.koin.dsl.koinConfiguration
+import org.koin.compose.KoinIsolatedContext
+import org.koin.dsl.koinApplication
 import org.koin.dsl.module
 import works.merc.keryx.app.FakeCloudConnectFlow
 import works.merc.keryx.app.FakeTokenStorage
@@ -42,7 +41,6 @@ import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.SyncScheduler
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.platform.AppDirs
-import works.merc.keryx.app.ui.home.testMenuController
 import works.merc.keryx.app.platform.FileIO
 import works.merc.keryx.app.presentation.setup.SetupController
 import works.merc.keryx.app.presentation.setup.SetupPhase
@@ -107,11 +105,11 @@ class SetupScreenTest {
     fun idleScreenOffersLocalOnlyAndTheConfiguredCloudProviders() = runDesktopComposeUiTest {
         val controller = newController()
         setContent {
-            // MenuController too: other tests' native popups look it up in the global Koin that the
-            // last KoinApplication left behind, and this one would otherwise replace it without it.
-            KoinApplication(
-                configuration = koinConfiguration { modules(module { single { controller }; single { testMenuController } }) },
-            ) {
+            // KoinIsolatedContext, not KoinApplication: KoinApplication reuses an already-started global
+            // Koin and ignores its own modules, so SetupController would not resolve after another test
+            // class left a global Koin behind. Registers no global Koin either, so it leaks nothing.
+            val koin = remember { koinApplication { modules(module { single { controller } }) } }
+            KoinIsolatedContext(context = koin) {
                 MaterialTheme { SetupScreen(onComplete = {}) }
             }
         }
