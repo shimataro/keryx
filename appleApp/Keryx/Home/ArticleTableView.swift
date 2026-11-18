@@ -364,6 +364,9 @@ struct ArticleTableView: NSViewRepresentable {
 final class ArticleNSTableView: NSTableView {
     var onBackgroundClick: (() -> Void)?
 
+    /// Sends a left click on a hosted row to the table itself while row actions are showing, so the
+    /// row's own button never sees it; `mouseDown` then closes the actions and consumes the click.
+    /// The two overrides are one behavior: change them together.
     override func hitTest(_ point: NSPoint) -> NSView? {
         let hit = super.hitTest(point)
         guard rowActionsVisible, NSApp.currentEvent?.type == .leftMouseDown,
@@ -372,6 +375,8 @@ final class ArticleNSTableView: NSTableView {
     }
 
     override func mouseDown(with event: NSEvent) {
+        // A click `hitTest` redirected from a row, or one on the table's background: either way, open
+        // row actions only close.
         if rowActionsVisible {
             rowActionsVisible = false
             return
