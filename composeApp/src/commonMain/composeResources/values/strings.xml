@@ -422,12 +422,14 @@
     <!-- Apple (SwiftUI) app only — the button that closes the iOS Settings sheet. macOS reaches
          Settings as a window of its own, and Compose's dialog closes through its own controls. -->
     <string name="apple_settings_done">Done</string>
+    <!-- Apple (SwiftUI) app only, macOS only — the General tab's picker for the article reader's
+         text size. iOS has no such setting: its reader follows the system text size (Dynamic Type). -->
+    <string name="apple_settings_reader_font_size">Article text size</string>
     <!-- Apple (SwiftUI) app only, macOS only — the Sparkle-driven update controls: the app menu
          item and the General-tab toggle. Compose has its own update UI (update_* / settings_update_*),
          and iOS updates through the App Store. -->
     <string name="apple_menu_check_for_updates">Check for Updates…</string>
     <string name="apple_settings_auto_check_updates">Automatically check for updates</string>
-    <string name="apple_settings_reader_font_size">Article text size</string>
     <string name="apple_update_check_failed_title">Couldn’t check for updates</string>
     <string name="apple_update_check_failed_unavailable">A new version may be getting ready. Try again in a little while.</string>
     <string name="apple_update_check_failed_offline">Check your internet connection and try again.</string>
