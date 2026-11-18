@@ -131,8 +131,8 @@ final class ArticleCollectionViewController: UIViewController, UICollectionViewD
         // Arrow keys and J/K are `HomeView`'s, not UIKit's focus engine.
         collectionView.allowsFocus = false
         // A tap selects through the list itself (`didSelectItemAt`), so a tap while a row's swipe
-        // actions are open only closes them, as in UIKit's own lists. The selection is the row's to
-        // draw; the list keeps none of its own.
+        // actions are open only closes them, as in UIKit's own lists. `didSelectItemAt` clears the
+        // list's selection at once; the selection that stays is the row's to draw.
         collectionView.allowsSelection = true
         collectionView.delegate = self
         collectionView.onWindowChange = { [weak self] in self?.windowChanged() }
