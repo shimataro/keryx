@@ -10,7 +10,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.runBlocking
 import org.koin.core.Koin
 import org.koin.dsl.koinApplication
 import org.koin.dsl.module
@@ -118,7 +118,7 @@ class OpmlOpenHandlerTest {
     }
 
     @Test
-    fun theRequestedDocumentIsImportedOnceConsumed() = runTest {
+    fun theRequestedDocumentIsImportedOnceConsumed() = runBlocking {
         requestOpenedOpmlImport(koin, OPML_ONE_FEED)
 
         val request = controller.consumeRequest() as OpmlRequest.ImportDocument
@@ -128,7 +128,7 @@ class OpmlOpenHandlerTest {
     }
 
     @Test
-    fun anUnreadableFileBecomesAnImportFailureOnceConsumed() = runTest {
+    fun anUnreadableFileBecomesAnImportFailureOnceConsumed() = runBlocking {
         requestOpenedOpmlImport(koin, null)
 
         val request = controller.consumeRequest() as OpmlRequest.ImportDocument
@@ -138,7 +138,7 @@ class OpmlOpenHandlerTest {
     }
 
     @Test
-    fun nothingIsPostedToTheNotificationCenter() = runTest {
+    fun nothingIsPostedToTheNotificationCenter() = runBlocking {
         requestOpenedOpmlImport(koin, OPML_ONE_FEED)
         val request = controller.consumeRequest() as OpmlRequest.ImportDocument
         controller.importDocument(request.xml)

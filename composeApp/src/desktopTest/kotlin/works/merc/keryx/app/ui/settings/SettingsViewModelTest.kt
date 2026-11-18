@@ -18,12 +18,10 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.job
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
-import kotlinx.coroutines.withTimeout
 import org.jetbrains.compose.resources.getString
 import works.merc.keryx.app.FakeCloudConnectFlow
 import works.merc.keryx.app.FakeTokenStorage
@@ -432,7 +430,7 @@ class SettingsViewModelTest {
         )
 
         vm.importOpml()
-        runBlocking { withTimeout(5_000) { started.await() } }
+        awaitConditionBlocking { started.isCompleted }
         assertEquals(OpmlOperation.Importing, vm.opmlRunning.value)
         val import = lastOpmlScope.coroutineContext.job.children.single()
 

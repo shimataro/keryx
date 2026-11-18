@@ -7,7 +7,7 @@ import io.ktor.client.engine.mock.respond
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
-import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
@@ -26,7 +26,7 @@ class FaviconResolverTest {
         "<html><head>${links.joinToString("")}</head><body>site</body></html>"
 
     @Test
-    fun prefersSvgOverBitmapCandidates() = runTest {
+    fun prefersSvgOverBitmapCandidates() = runBlocking {
         val page = html(
             """<link rel="icon" type="image/png" sizes="32x32" href="/icon-32.png">""",
             """<link rel="icon" type="image/svg+xml" href="/icon.svg">""",
@@ -42,7 +42,7 @@ class FaviconResolverTest {
     }
 
     @Test
-    fun prefersLargestBitmapWhenNoSvg() = runTest {
+    fun prefersLargestBitmapWhenNoSvg() = runBlocking {
         val page = html(
             """<link rel="icon" sizes="16x16" href="/icon-16.png">""",
             """<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">""",
@@ -58,7 +58,7 @@ class FaviconResolverTest {
     }
 
     @Test
-    fun excludesMaskIconAndFallsBackToNormalIcon() = runTest {
+    fun excludesMaskIconAndFallsBackToNormalIcon() = runBlocking {
         val page = html(
             """<link rel="mask-icon" href="/mask-icon.svg" color="#000000">""",
             """<link rel="icon" sizes="32x32" href="/icon-32.png">""",
@@ -73,7 +73,7 @@ class FaviconResolverTest {
     }
 
     @Test
-    fun fallsBackToNextCandidateWhenTopChoiceUnreachable() = runTest {
+    fun fallsBackToNextCandidateWhenTopChoiceUnreachable() = runBlocking {
         val page = html(
             """<link rel="icon" type="image/svg+xml" href="/icon.svg">""",
             """<link rel="icon" sizes="32x32" href="/icon-32.png">""",
@@ -89,7 +89,7 @@ class FaviconResolverTest {
     }
 
     @Test
-    fun fallsBackToFaviconIcoWhenNoCandidateReachable() = runTest {
+    fun fallsBackToFaviconIcoWhenNoCandidateReachable() = runBlocking {
         val page = html("""<link rel="icon" href="/icon.png">""")
         val r = resolverWith { request ->
             when {
