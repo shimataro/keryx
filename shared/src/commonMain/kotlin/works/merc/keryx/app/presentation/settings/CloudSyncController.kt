@@ -62,10 +62,13 @@ class CloudSyncController(
     private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
     // Whether this platform reports metered networks at all (see [meteredSettingSupported]).
     networkConditionMonitor: NetworkConditionMonitor = UnrestrictedNetworkConditionMonitor,
+    // The build's configured providers; a test pins its own list so it does not depend on the
+    // build's OAuth keys.
+    availableCloudTypes: List<CloudStorageType> = CloudStorageAvailability.available,
 ) : ViewModel(), ManualSync {
 
     /** Cloud providers configured in this build, in display order. */
-    val availableCloudTypes: List<CloudStorageType> = CloudStorageAvailability.available
+    val availableCloudTypes: List<CloudStorageType> = availableCloudTypes
 
     /** The provider selection [connectedType]'s initial value was read against. */
     private val initialCloudStorageTypeId = settingsRepository.localSettings.value.cloudStorageType

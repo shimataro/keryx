@@ -31,6 +31,7 @@ import works.merc.keryx.app.HoldingDispatcher
 import works.merc.keryx.app.InMemoryFaviconMissStore
 import works.merc.keryx.app.awaitConditionBlocking
 import works.merc.keryx.app.core.Clock
+import works.merc.keryx.app.core.CloudStorageAvailability
 import works.merc.keryx.app.core.CloudStorageType
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.data.cloud.CloudStorage
@@ -249,6 +250,8 @@ class SettingsViewModelFixture {
         connectFlow: CloudConnectFlow = FakeCloudConnectFlow(Result.Ok(OAuthTokens("AT"))),
         // The storage syncs run against; null (the default) means no provider, so a sync is a no-op.
         cloudStorage: CloudStorage? = null,
+        // The providers the Cloud Sync tab lists; defaults to whatever this build configures.
+        availableCloudTypes: List<CloudStorageType> = CloudStorageAvailability.available,
     ): SettingsViewModel {
         val clock = Clock { 0L }
         val syncScheduler = SyncScheduler {}
@@ -304,6 +307,7 @@ class SettingsViewModelFixture {
             // Unconfined so connectDelegatesToCloudSyncController's testScheduler.advanceUntilIdle()
             // actually observes the token-save/sync hop, rather than it landing on a real thread.
             Dispatchers.Unconfined,
+            availableCloudTypes = availableCloudTypes,
         ).also { createdCloudSyncControllers += it }
         return SettingsViewModel(
             cloudSyncController, preferencesController, opmlController, updateRepository, dispatcher, fileSelector,

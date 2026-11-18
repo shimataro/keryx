@@ -53,9 +53,9 @@ private class AuthFailingCloudStorage : CloudStorage {
  * `FeedListDragTest`). That rules out disconnect, reset, switch and the server-address (Nextcloud)
  * routes; what is left is a fresh connect and the reconnect of an auth-failed connection.
  *
- * The tab lists whatever providers this build configures, so each test drives the first one that
- * needs no server address (Dropbox / OneDrive / Google Drive, depending on the build's keys) and
- * returns early when the build configures none.
+ * Each test pins the listed providers rather than taking the build's own, which depend on its OAuth
+ * keys (CI builds with none, leaving only Nextcloud, which needs a server address), and drives the
+ * Dropbox row through an injected connect flow that needs no real credentials.
  */
 @OptIn(ExperimentalTestApi::class)
 class CloudSyncTabTest {
@@ -82,15 +82,16 @@ class CloudSyncTabTest {
         fx.closeStorage()
     }
 
-    /** The provider the tab's tests drive, or null when this build configures only one that needs a server address. */
-    private fun SettingsViewModel.drivableType(): CloudStorageType? = availableCloudTypes.firstOrNull { !it.requiresServerUrl }
+    /** The provider the tests drive. */
+    private val type = CloudStorageType.DROPBOX
+
+    /** The providers the tab lists: the driven one, plus one that needs a server address. */
+    private val providers = listOf(CloudStorageType.DROPBOX, CloudStorageType.NEXTCLOUD)
 
     @Test
     fun connectButtonOfAnIdleRowStartsTheConnectAndShowsItsActions() = runDesktopComposeUiTest {
         val flow = CountingConnectFlow()
-        val probe = fx.newViewModel()
-        val type = probe.drivableType() ?: return@runDesktopComposeUiTest
-        val vm = fx.newViewModel(cloudType = type, connectFlow = flow)
+        val vm = fx.newViewModel(cloudType = type, connectFlow = flow, availableCloudTypes = providers)
         setContent { MaterialTheme { CloudSyncTabContent(vm) } }
         waitForIdle()
         assertNull(vm.connectedType.value)
@@ -109,10 +110,8 @@ class CloudSyncTabTest {
 
     @Test
     fun syncNowIsDisabledUntilAProviderIsConnected() = runDesktopComposeUiTest {
-        val probe = fx.newViewModel()
-        val type = probe.drivableType() ?: return@runDesktopComposeUiTest
         val flow = CountingConnectFlow()
-        val vm = fx.newViewModel(cloudType = type, connectFlow = flow)
+        val vm = fx.newViewModel(cloudType = type, connectFlow = flow, availableCloudTypes = providers)
         setContent { MaterialTheme { CloudSyncTabContent(vm) } }
         waitForIdle()
 
@@ -127,9 +126,7 @@ class CloudSyncTabTest {
 
     @Test
     fun meteredNetworkSettingIsNotOfferedOnDesktop() = runDesktopComposeUiTest {
-        val probe = fx.newViewModel()
-        val type = probe.drivableType() ?: return@runDesktopComposeUiTest
-        val vm = fx.newViewModel(cloudType = type, connectFlow = CountingConnectFlow())
+        val vm = fx.newViewModel(cloudType = type, connectFlow = CountingConnectFlow(), availableCloudTypes = providers)
         setContent { MaterialTheme { CloudSyncTabContent(vm) } }
         onAllNodesWithText(connectLabel)[vm.availableCloudTypes.indexOf(type)].performClick()
         waitUntil(timeoutMillis = 5_000) { vm.connectedType.value == type }
@@ -141,11 +138,9 @@ class CloudSyncTabTest {
 
     @Test
     fun authFailureOffersReconnectInPlaceOfResetAndReconnectRunsTheConnectFlowAgain() = runDesktopComposeUiTest {
-        val probe = fx.newViewModel()
-        val type = probe.drivableType() ?: return@runDesktopComposeUiTest
         val flow = CountingConnectFlow()
         // The initial sync a fresh connect starts fails with an auth error, which is what flips the row.
-        val vm = fx.newViewModel(cloudType = type, connectFlow = flow, cloudStorage = AuthFailingCloudStorage())
+        val vm = fx.newViewModel(cloudType = type, connectFlow = flow, cloudStorage = AuthFailingCloudStorage(), availableCloudTypes = providers)
         setContent { MaterialTheme { CloudSyncTabContent(vm) } }
         waitForIdle()
 
