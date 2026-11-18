@@ -2064,8 +2064,9 @@ edge shows and what it does are decided once in `:shared` (`ArticleSwipeActions.
   `ArticleSwipeActionStyle` supplies the symbols (the state the action leaves the article in, except
   unstar, which is `star.slash` as Mail's unflag is `flag.slash`), the colors (the accent color, and
   orange for star as Mail's flag: the button's icon is always white, and the row's star yellow left it
-  at about 1.5:1) and the context menu's labels. The buttons show only the icon; the title stays the
-  action's VoiceOver label, which UIKit exposes as an action.
+  at about 1.5:1) and the context menu's labels. The buttons show only the icon: a title would widen
+  them, and from iOS 26 UIKit draws it under the icon. The label goes in the image's accessibility label
+  instead, which VoiceOver reads as the action's name.
   - *The row's long-press menu goes through the collection view's delegate.* A menu that highlights the
     row itself while the finger is down makes a swipe recognized late in the press start with a jump
     ("iOS: a row jumps when a swipe starts" in [known-issues.md](known-issues.md)), so the delegate

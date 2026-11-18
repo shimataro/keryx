@@ -346,12 +346,15 @@ final class ArticleCollectionViewController: UIViewController, UICollectionViewD
         guard let row = row(at: indexPath) else { return nil }
         let model = row.model
         let action = leading ? ArticleSwipeActionStyle.leading(model) : ArticleSwipeActionStyle.trailing(model)
-        let contextual = UIContextualAction(style: .normal, title: ArticleSwipeActionStyle.title(action)) { _, _, completion in
+        // Icon only, as on macOS: a title would widen the button, and from iOS 26 it is drawn under the
+        // icon. The label goes on the image instead, which VoiceOver reads as the action's name.
+        let contextual = UIContextualAction(style: .normal, title: nil) { _, _, completion in
             row.viewModel.performSwipeAction(article: model.row, action: action)
             completion(true)
         }
-        // Icon only, as on macOS: the title would widen the button; it stays the VoiceOver label.
-        contextual.image = UIImage(systemName: ArticleSwipeActionStyle.systemImage(action))
+        let image = UIImage(systemName: ArticleSwipeActionStyle.systemImage(action))
+        image?.accessibilityLabel = ArticleSwipeActionStyle.title(action)
+        contextual.image = image
         contextual.backgroundColor = ArticleSwipeActionStyle.uiColor(action)
         let configuration = UISwipeActionsConfiguration(actions: [contextual])
         configuration.performsFirstActionWithFullSwipe = true
