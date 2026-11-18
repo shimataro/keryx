@@ -109,8 +109,8 @@ final class ArticleCollectionViewController: UIViewController, UICollectionViewD
     private var pendingScroll: ArticleListScrollRequest.Kind?
 
     private var reportTask: Task<Void, Never>?
+    private let pullToRefresh = ListPullToRefresh()
     private var lastReportedIds: [String]?
-    private var refreshTask: Task<Void, Never>?
 
     private let pressHighlight = ContextMenuPressHighlight()
     /// The cell whose menu is opening or open, hidden behind the menu's preview.
@@ -134,6 +134,7 @@ final class ArticleCollectionViewController: UIViewController, UICollectionViewD
         collectionView.allowsSelection = false
         collectionView.delegate = self
         collectionView.onWindowChange = { [weak self] in self?.windowChanged() }
+        pullToRefresh.scrollView = collectionView
         dataSource = makeDataSource()
         view.addSubview(collectionView)
     }
@@ -157,7 +158,7 @@ final class ArticleCollectionViewController: UIViewController, UICollectionViewD
 
     func tearDown() {
         reportTask?.cancel()
-        refreshTask?.cancel()
+        pullToRefresh.cancel()
     }
 
     // MARK: - Layout and cells
@@ -205,7 +206,11 @@ final class ArticleCollectionViewController: UIViewController, UICollectionViewD
     func apply(_ new: ArticleCollectionView) {
         loadViewIfNeeded()
         input = new
-        updateRefreshControl(enabled: new.canPullToRefresh)
+        if new.canPullToRefresh {
+            pullToRefresh.setAction { [weak self] in await self?.input?.onRefresh() }
+        } else {
+            pullToRefresh.setAction(nil)
+        }
 
         let old = rows
         rows = new.rows
@@ -331,38 +336,6 @@ final class ArticleCollectionViewController: UIViewController, UICollectionViewD
         guard ids != lastReportedIds else { return }
         lastReportedIds = ids
         input?.onVisibleIdsChanged(ids)
-    }
-
-    // MARK: - Pull to refresh
-
-    private func updateRefreshControl(enabled: Bool) {
-        guard enabled else {
-            collectionView.refreshControl = nil
-            // The control is gone, so a refresh it started has no spinner left to end.
-            refreshTask?.cancel()
-            refreshTask = nil
-            return
-        }
-        guard collectionView.refreshControl == nil else { return }
-        let control = UIRefreshControl()
-        control.addAction(
-            UIAction { [weak self] action in self?.pullToRefresh(from: action.sender as? UIRefreshControl) },
-            for: .valueChanged
-        )
-        collectionView.refreshControl = control
-    }
-
-    /// The indicator of `control` — the one that was pulled — stays up for as long as the refresh runs.
-    /// A task cancelled by a newer pull or by the control's removal ends nothing: the spinner is no
-    /// longer this task's.
-    private func pullToRefresh(from control: UIRefreshControl?) {
-        refreshTask?.cancel()
-        refreshTask = Task { @MainActor [weak self] in
-            guard let self else { return }
-            await input?.onRefresh()
-            guard !Task.isCancelled else { return }
-            control?.endRefreshing()
-        }
     }
 
     // MARK: - Swipe actions

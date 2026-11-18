@@ -71,6 +71,7 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
     private var renderedRefreshing: SidebarRefreshing
 
     private(set) var collectionView: UICollectionView!
+    private let pullToRefresh = ListPullToRefresh()
     private(set) var dataSource: UICollectionViewDiffableDataSource<SidebarSection, SidebarItemID>!
 
     /// Disclosures the user just toggled, until the shared state catches up — the view model
@@ -109,6 +110,7 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
     override func viewDidLoad() {
         super.viewDidLoad()
         collectionView = RefreshableListCollectionView(frame: view.bounds, collectionViewLayout: makeLayout())
+        pullToRefresh.scrollView = collectionView
         collectionView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         // Arrow keys are `HomeView`'s (the same shortcuts as macOS), not UIKit's focus engine.
         collectionView.allowsFocus = false
@@ -288,36 +290,21 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
         guard force || newState != old else { return }
         state = newState
 
-        if newState.canPullToRefresh != old?.canPullToRefresh { updateRefreshControl(enabled: newState.canPullToRefresh) }
+        if newState.canPullToRefresh != old?.canPullToRefresh {
+            // Pulling the sidebar down refreshes every feed and syncs, like the toolbar's Refresh All
+            // it replaces on iOS; the indicator stays up until both have finished.
+            if newState.canPullToRefresh {
+                pullToRefresh.setAction { [weak self] in await self?.home.pullToRefreshAll() }
+            } else {
+                pullToRefresh.setAction(nil)
+            }
+        }
         applyStructure(newState.outline, animated: old != nil)
         reconfigure(SidebarRowContent.changedItems(from: old?.contents ?? [:], to: newState.contents))
         applySelection(newState.selectedItem, scroll: newState.selectedItem != old?.selectedItem)
         // Counts that changed mid-drag (when `refreshUnreadCounts()` holds back) reach their cells
         // here, on the forced apply at the drag's end.
         refreshUnreadCounts()
-    }
-
-    // MARK: - Pull to refresh
-
-    /// Pulling the sidebar down refreshes every feed and syncs, like the toolbar's Refresh All it
-    /// replaces on iOS; the indicator stays up until both have finished.
-    private func updateRefreshControl(enabled: Bool) {
-        guard enabled else {
-            collectionView.refreshControl = nil
-            return
-        }
-        guard collectionView.refreshControl == nil else { return }
-        let control = UIRefreshControl()
-        control.addAction(UIAction { [weak self] _ in self?.pullToRefresh() }, for: .valueChanged)
-        collectionView.refreshControl = control
-    }
-
-    private func pullToRefresh() {
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            await home.pullToRefreshAll()
-            collectionView.refreshControl?.endRefreshing()
-        }
     }
 
     // MARK: - Unread counts
