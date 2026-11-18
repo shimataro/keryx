@@ -31,7 +31,7 @@ they survive testing and reach users as intermittent freezes, corrupted state, o
 
 - **Mutex coverage.** Production mutexes today: `FtsManager.indexWriteMutex`,
   `FeedRepository.subscribePlacementMutex`, `SyncRepository.mutex`, `OpmlImporter.mutex`,
-  `CloudSession.tokenLifecycleMutex`, `UpdateRepository`'s `mutex` / `checkMutex` /
+  `CloudSession.credentialLifecycleMutex`, `UpdateRepository`'s `mutex` / `checkMutex` /
   `notificationMutex`, `ReleaseFeedSource.cacheMutex`, and Android's process-wide
   `startupMaintenanceMutex` (`AndroidStartupTasks.kt`). Does a new
   path that mutates the same state take the same lock? `indexMissing()` and `rebuildIndex()` must

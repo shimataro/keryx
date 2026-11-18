@@ -10,6 +10,7 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.resetMain
@@ -22,6 +23,7 @@ import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.CloudAuthException
 import works.merc.keryx.app.core.CloudStorageType
 import works.merc.keryx.app.core.Result
+import works.merc.keryx.app.data.cloud.CloudCredentials
 import works.merc.keryx.app.data.cloud.DropboxAuthManager
 import works.merc.keryx.app.data.cloud.OAuthTokens
 import works.merc.keryx.app.data.cloud.TokenStorage
@@ -31,6 +33,7 @@ import works.merc.keryx.app.data.local.LocalSettingsStore
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.domain.ActivityCenter
 import works.merc.keryx.app.domain.CloudConnectFlow
+import works.merc.keryx.app.domain.CloudConnectRequest
 import works.merc.keryx.app.domain.CloudConnectionService
 import works.merc.keryx.app.domain.NotificationCenter
 import works.merc.keryx.app.domain.SettingsRepository
@@ -48,6 +51,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 /**
@@ -176,7 +180,7 @@ class SetupControllerTest {
         assertEquals(SetupPhase.IDLE, vm.phase.value)
         assertFalse(vm.canCancelConnect.value)
         assertTrue(onDoneCalled)
-        assertEquals("AT", tokenStorage.load()?.accessToken)
+        assertEquals("AT", (tokenStorage.load() as? OAuthTokens)?.accessToken)
         assertEquals("dropbox", store.load().cloudStorageType)
     }
 
@@ -232,5 +236,55 @@ class SetupControllerTest {
         // Two withContext(dispatcher) hops: CloudConnectionService.completeConnect() (token save +
         // settings flush) and sync().
         assertTrue(counting.dispatchCount >= 2)
+    }
+
+    /** Records the request it was handed, then suspends until cancelled — an in-flight sign-in. */
+    private class RecordingSuspendingConnectFlow : CloudConnectFlow {
+        var request: CloudConnectRequest? = null
+        override suspend fun connect(request: CloudConnectRequest): Result<CloudCredentials> {
+            this.request = request
+            awaitCancellation()
+        }
+    }
+
+    @Test
+    fun connectHandsTheServerRequestToTheFlowAndReportsTheConnectingType() = runTest {
+        val flow = RecordingSuspendingConnectFlow()
+        val vm = newViewModel(connectFlow = flow)
+        val request = CloudConnectRequest(serverUrl = "https://cloud.example.com")
+
+        vm.connect(CloudStorageType.DROPBOX, request) {}
+        testScheduler.advanceUntilIdle()
+
+        assertSame(request, flow.request)
+        assertEquals(CloudStorageType.DROPBOX, vm.connectingType.value)
+
+        vm.cancelConnect()
+        testScheduler.advanceUntilIdle()
+
+        assertNull(vm.connectingType.value)
+    }
+
+    @Test
+    fun connectWithoutARequestHandsTheFlowNone() = runTest {
+        val flow = RecordingSuspendingConnectFlow()
+        val vm = newViewModel(connectFlow = flow)
+
+        vm.connect(CloudStorageType.DROPBOX) {}
+        testScheduler.advanceUntilIdle()
+
+        assertSame(CloudConnectRequest.NONE, flow.request)
+        vm.cancelConnect()
+        testScheduler.advanceUntilIdle()
+    }
+
+    @Test
+    fun connectingTypeClearsOnceTheConnectFinishes() = runTest {
+        val vm = newViewModel(connectResult = Result.Err(CloudAuthException("connect failed")))
+
+        vm.connect(CloudStorageType.DROPBOX) {}
+        testScheduler.advanceUntilIdle()
+
+        assertNull(vm.connectingType.value)
     }
 }

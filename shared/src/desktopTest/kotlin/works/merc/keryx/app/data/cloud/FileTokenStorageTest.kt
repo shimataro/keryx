@@ -173,7 +173,7 @@ class FileTokenStorageTest {
     @Test
     fun clearDeletesFileAndSubsequentLoadReturnsNull() {
         storage.save(OAuthTokens(accessToken = "access-123"))
-        assertEquals("access-123", storage.load()?.accessToken)
+        assertEquals("access-123", (storage.load() as? OAuthTokens)?.accessToken)
 
         assertEquals(TokenClearOutcome.CLEARED, storage.clear(), "a delete that landed must report a cleared store")
 
@@ -196,7 +196,7 @@ class FileTokenStorageTest {
             storage.save(OAuthTokens(accessToken = "replacement")) // must not throw
         }
 
-        assertEquals("original", storage.load()?.accessToken)
+        assertEquals("original", (storage.load() as? OAuthTokens)?.accessToken)
     }
 
     @Test
@@ -244,5 +244,22 @@ class FileTokenStorageTest {
                 "a malformed file that survived the delete must not be reported as cleared",
             )
         }
+    }
+
+    @Test
+    fun appPasswordCredentialsRoundTrip() {
+        val credentials = AppPasswordCredentials("https://cloud.example.com", "alice", "alice@example.com", "pw")
+
+        assertEquals(TokenSaveOutcome.PLAINTEXT_FILE, storage.save(credentials))
+
+        assertEquals(credentials, storage.load())
+    }
+
+    @Test
+    fun aTokenFileWrittenByAnOlderBuildStillLoads() {
+        File(dir).mkdirs()
+        File(FileIO.join(dir, ".dropbox_tokens.json")).writeText("""{"accessToken":"AT","refreshToken":"RT","expiresAtMillis":5}""")
+
+        assertEquals(OAuthTokens(accessToken = "AT", refreshToken = "RT", expiresAtMillis = 5L), storage.load())
     }
 }

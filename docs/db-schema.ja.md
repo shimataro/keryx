@@ -124,7 +124,7 @@
 
 `key`(PK), `value`。既知キー: `last_synced_at`（Unix ミリ秒）, `cloud_file_rev`（**このデバイスがマージ済みの**
 クラウドファイルのリビジョン。Dropbox は `rev`、Google Drive は file resource の `version`、OneDrive は
-DriveItem の `eTag`）, `last_uploaded_snapshot_digest`（このデバイスが最後にアップロードしたスナップショットの
+DriveItem の `eTag`、Nextcloud は WebDAV の `ETag`（引用符を含む））, `last_uploaded_snapshot_digest`（このデバイスが最後にアップロードしたスナップショットの
 SHA-256 を hex 化したもの）。
 
 後者2つは「やることが無い同期が何も転送しない」ために存在する。`cloud_file_rev` が変わっていなければ

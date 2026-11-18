@@ -11,7 +11,8 @@ A local-first, cross-platform RSS reader
 ## Features
 
 - **Multi-device sync**: via cloud storage (Dropbox / OneDrive / Google Drive — on Android, Google
-  Drive requires Google Play services, so a device without it is offered Dropbox and OneDrive)
+  Drive requires Google Play services, so a device without it is offered Dropbox and OneDrive), or
+  your own Nextcloud server (see [Syncing with Nextcloud](#syncing-with-nextcloud))
 - **Local-first**: no central server; works fully offline without sync
 - **Fast local full-text search**: instantly search article titles and content by keyword
 - **Organize feeds with tags and folders**: tags for cross-cutting labels, folders for hierarchical grouping
@@ -37,7 +38,7 @@ A local-first, cross-platform RSS reader
 
 [releases]: https://github.com/shimataro/keryx/releases
 
-The F-Droid build has no Google Drive sync (Dropbox and OneDrive work as usual).
+The F-Droid build has no Google Drive sync (Dropbox, OneDrive and Nextcloud work as usual).
 
 > [!IMPORTANT]
 > **Windows**: Until a code-signing certificate is in place, the `.msi` is unsigned, so
@@ -64,6 +65,26 @@ Update a `.deb`/`.rpm` install through your package manager; a Snap install is u
 by the Snap Store, so there is nothing to download from that page. The F-Droid build leaves updates
 entirely to the F-Droid client, so it has no in-app update at all. The iOS/iPadOS app is updated by the
 App Store, so it has no in-app update either.
+
+## Syncing with Nextcloud
+
+Choose **Nextcloud** in the first-run setup or in Settings → Cloud sync, enter your server's address
+(for example `cloud.example.com`), and sign in on your server's page. A few things to know:
+
+- The server must be reachable over **HTTPS** with a certificate your device trusts; `http://`
+  addresses are not accepted.
+- Keryx keeps its sync data in a **`Keryx` folder** in your files. The app password Keryx receives can
+  reach your whole account, but Keryx only uses that folder. You can revoke it any time under
+  Settings → Security → Devices & sessions on your server, and on Nextcloud 36 or later limit it to
+  file access there. Disconnecting in Keryx also asks your server to revoke it, but only on a best-effort
+  basis — if the server can't be reached or doesn't accept the request, the app password stays valid
+  there, so check Devices & sessions and revoke it yourself if it's still listed.
+- Each sync updates the sync file, so your server may keep **earlier versions** of it and list each
+  update in its **Activity** stream.
+- If a Nextcloud desktop client syncs your files to a computer, you may want to exclude the `Keryx`
+  folder in its selective sync settings.
+
+See [PRIVACY.md](PRIVACY.md#nextcloud) for exactly what is sent where.
 
 ## Development Documentation
 

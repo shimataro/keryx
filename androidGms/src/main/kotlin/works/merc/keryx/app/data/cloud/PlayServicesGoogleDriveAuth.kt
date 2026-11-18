@@ -20,6 +20,7 @@ import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.core.map
 import works.merc.keryx.app.core.valueOrNull
 import works.merc.keryx.app.domain.CloudConnectFlow
+import works.merc.keryx.app.domain.CloudConnectRequest
 import works.merc.keryx.app.platform.AndroidAppContext
 import works.merc.keryx.app.platform.AndroidAuthorizationHost
 import kotlin.coroutines.resume
@@ -161,8 +162,8 @@ internal fun tokenFrom(accessToken: String?, grantedScopes: List<String>): Resul
  *
  * The returned [OAuthTokens] carries no refresh token and no expiry: Play services owns the grant
  * and re-issues a token on demand, so there is nothing to refresh and no deadline worth recording.
- * `CloudSession.Provider.accessTokenProvider` is what keeps `CloudSession` from trying to refresh
- * it; the stored copy exists only so a restart still reports the account as connected.
+ * `CloudSession.CredentialLifecycle.PlatformOwned` is what keeps `CloudSession` from trying to
+ * refresh it; the stored copy exists only so a restart still reports the account as connected.
  */
 class PlayServicesConnectFlow(
     private val authorization: PlayServicesAuthorization,
@@ -182,7 +183,7 @@ class PlayServicesConnectFlow(
      * is still good, Play services simply mints a new token and no consent screen appears. This
      * also covers a stale cache arriving by any other route, not just an external revoke.
      */
-    override suspend fun connect(): Result<OAuthTokens> {
+    override suspend fun connect(request: CloudConnectRequest): Result<CloudCredentials> {
         authorization.accessToken(allowUserInteraction = false).valueOrNull
             ?.let { authorization.clearToken(it) }
         return authorization.accessToken(allowUserInteraction = true)
@@ -192,8 +193,9 @@ class PlayServicesConnectFlow(
 
 /**
  * The [CloudAuthManager] slot for Android's Google Drive. Only [revoke] does anything: this
- * provider supplies both its own [CloudConnectFlow] and its own
- * `CloudSession.Provider.accessTokenProvider`, so the browser-PKCE members below are never reached.
+ * provider supplies both its own [CloudConnectFlow] and its own access tokens
+ * (`CloudSession.CredentialLifecycle.PlatformOwned`), so the browser-PKCE members below are never
+ * reached.
  */
 class PlayServicesGoogleDriveAuthManager(
     private val httpClient: HttpClient,

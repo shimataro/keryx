@@ -50,7 +50,9 @@ Specify API keys at build time to enable cloud storage (sync) integration.
 Property values are referenced from [local.properties.example](../local.properties.example).
 Copy this file to `local.properties` and edit it during the build.
 
-Services without an API key will not show integration options. If no service is configured, the integration itself does not appear (e.g., tabs in the settings dialog).
+Services without an API key will not show integration options. Nextcloud is the exception: it needs no key or
+build setting at all (the user names their own server and signs in there), so every build — the F-Droid build
+included — always offers it, and cloud sync therefore always appears.
 **Only one cloud storage can be connected at a time**, and data cannot be distributed across multiple storages.
 
 This is implemented via Gradle custom tasks in `shared/build.gradle.kts` (`generateBuildConfig`, plus `generateDesktopBuildConfig` for the desktop-only Google Drive credentials and `generateAppleBuildConfig` for the Apple app's own, secretless Google Drive client id — see "Apple (macOS / iOS)" below).
@@ -232,6 +234,7 @@ The SwiftUI app localizes through an Xcode String Catalog generated from the Com
 ```bash
 ./gradlew :composeApp:generateStringCatalog
 # -> composeApp/build/generated/stringCatalog/Localizable.xcstrings
+# -> composeApp/build/generated/stringCatalog/InfoPlist.xcstrings
 ```
 
 The generator resolves Android resource escapes (`\n`, `\'`, …), maps positional placeholders to
@@ -240,10 +243,19 @@ is a build output — never edit or commit it; change `strings.xml` instead.
 `StringCatalogParityTest` (run by `desktopTest`, which generates the catalog first) fails if the
 catalog and the resources disagree on keys, plural forms or placeholders.
 
+The Info.plist usage descriptions are generated the same way. An `apple_infoplist_*` key in
+`strings.xml` (today `apple_infoplist_local_network_usage`, the explanation in the local-network
+permission prompt iOS and macOS 15 or later show when the app first reaches a server on the local
+network, such as a home Nextcloud) is written to `InfoPlist.xcstrings` instead of
+`Localizable.xcstrings`, under the Info.plist key it localizes (`NSLocalNetworkUsageDescription`).
+`generateStringCatalog`'s `infoPlistKeys` maps one to the other, and the build fails on an
+`apple_infoplist_*` key it does not map. `project.yml`'s `info.properties` carries the English text as
+the Info.plist default; `StringCatalogParityTest` checks that it matches `strings.xml`.
+
 `appleApp/project.yml`'s `sources:` list references the generated file directly
-(`../composeApp/build/generated/stringCatalog/Localizable.xcstrings`), so `xcodegen generate` bundles
-whatever `build-shared.sh`'s prebuild step most recently wrote — the file only needs to exist once,
-before the first `xcodegen generate`.
+(`../composeApp/build/generated/stringCatalog/Localizable.xcstrings`, and `InfoPlist.xcstrings` beside
+it), so `xcodegen generate` bundles whatever `build-shared.sh`'s prebuild step most recently wrote —
+the files only need to exist once, before the first `xcodegen generate`.
 
 **A Swift call site never uses a literal English string as the
 key** the way `Text("Some Label")` ordinarily would: the catalog's own top-level keys are exactly the
@@ -680,7 +692,7 @@ and `fdroid`, same `applicationId`:
   developer-signed APK `release.yml` attaches, publishes with the app's own signature — see
   "Publishing to F-Droid"), and it contains **no Google Play services at all** — F-Droid's inclusion policy forbids them. Everything that needs Play services (Google
   Drive on Android) lives in the `:androidGms` module, which only `github` and `play` depend on;
-  `fdroid` therefore never offers Google Drive (Dropbox, OneDrive and local-only work as usual), the
+  `fdroid` therefore never offers Google Drive (Dropbox, OneDrive, Nextcloud and local-only work as usual), the
   same state as a device without Play services. Its manifest
   (`androidApp/src/fdroid/AndroidManifest.xml`) also carries the `works.merc.keryx.SELF_UPDATE_CHECK`
   meta-data set to `false`, which turns the in-app update check off whichever installer delivered

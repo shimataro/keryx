@@ -24,6 +24,15 @@ final class OAuthSessionCoordinator: NSObject, @unchecked Sendable {
 
     private var activeSession: ASWebAuthenticationSession?
 
+    /// The session showing a sign-in page that calls nothing back (Nextcloud's Login Flow v2 — see
+    /// `openLoginPage(url:)`); separate from `activeSession` so closing one never touches the other.
+    private var loginPageSession: ASWebAuthenticationSession?
+
+    /// Bumped each time `presentLoginPage` shows a page, so the completion of a page it has since
+    /// replaced (its `cancel()` completes asynchronously) does not clear the newer session.
+    /// Main-actor state, like `loginPageSession`.
+    private var loginPageGeneration = 0
+
     func open(url: String, callbackScheme: String) {
         Task { @MainActor in
             self.presentSession(url: url, callbackScheme: callbackScheme)
@@ -37,7 +46,47 @@ final class OAuthSessionCoordinator: NSObject, @unchecked Sendable {
         Task { @MainActor in
             self.activeSession?.cancel()
             self.activeSession = nil
+            self.loginPageSession?.cancel()
+            self.loginPageSession = nil
         }
+    }
+
+    /// Shows a sign-in page that sends nothing back to the app — wired as `KeryxSdk.start`'s
+    /// `openLoginPage`. Nextcloud's Login Flow v2 learns of the sign-in by polling its server, so the
+    /// session has no callback scheme and only ever ends by `closeLoginPage()` (or the user
+    /// dismissing it). Called from any thread, like `open(url:callbackScheme:)`.
+    func openLoginPage(url: String) {
+        Task { @MainActor in
+            self.presentLoginPage(url: url)
+        }
+    }
+
+    /// Dismisses what `openLoginPage(url:)` showed — wired as `KeryxSdk.start`'s `closeLoginPage`,
+    /// which the Kotlin flow calls however the sign-in ends.
+    func closeLoginPage() {
+        Task { @MainActor in
+            self.loginPageSession?.cancel()
+            self.loginPageSession = nil
+        }
+    }
+
+    @MainActor
+    private func presentLoginPage(url: String) {
+        guard let pageURL = URL(string: url) else { return }
+        loginPageSession?.cancel()
+        loginPageGeneration += 1
+        let generation = loginPageGeneration
+        // Same `@Sendable` reasoning as `presentSession`'s handler. Nothing to forward: the page has
+        // no callback, and the Kotlin flow ends the wait itself (by polling, or by being cancelled).
+        let session = ASWebAuthenticationSession(url: pageURL, callbackURLScheme: nil) { @Sendable [weak self] _, _ in
+            Task { @MainActor in
+                guard let self, self.loginPageGeneration == generation else { return }
+                self.loginPageSession = nil
+            }
+        }
+        session.presentationContextProvider = self
+        loginPageSession = session
+        session.start()
     }
 
     @MainActor

@@ -16,6 +16,9 @@ import works.merc.keryx.app.resources.error_feed_not_found
 import works.merc.keryx.app.resources.error_feed_parse
 import works.merc.keryx.app.resources.error_feed_timeout
 import works.merc.keryx.app.resources.error_generic
+import works.merc.keryx.app.resources.error_nextcloud_https_required
+import works.merc.keryx.app.resources.error_nextcloud_not_found
+import works.merc.keryx.app.resources.error_nextcloud_unreachable
 import works.merc.keryx.app.resources.error_schema_version
 import works.merc.keryx.app.resources.error_sync_conflict
 import works.merc.keryx.app.resources.error_update
@@ -41,5 +44,8 @@ internal fun errorMessageResource(kind: ErrorKind): StringResource = when (kind)
     ErrorKind.SYNC_CONFLICT -> Res.string.error_sync_conflict
     ErrorKind.SCHEMA_VERSION -> Res.string.error_schema_version
     ErrorKind.UPDATE -> Res.string.error_update
+    ErrorKind.NEXTCLOUD_HTTPS_REQUIRED -> Res.string.error_nextcloud_https_required
+    ErrorKind.NEXTCLOUD_NOT_FOUND -> Res.string.error_nextcloud_not_found
+    ErrorKind.NEXTCLOUD_UNREACHABLE -> Res.string.error_nextcloud_unreachable
     ErrorKind.GENERIC -> Res.string.error_generic
 }

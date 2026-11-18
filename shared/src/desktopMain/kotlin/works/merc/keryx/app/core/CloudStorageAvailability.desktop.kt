@@ -12,6 +12,14 @@ actual object CloudStorageAvailability {
     // OneDrive is a PKCE public client — the client id alone gates availability (no secret).
     actual val oneDriveAvailable: Boolean = BuildConfig.ONEDRIVE_CLIENT_ID.isNotEmpty()
 
+    // No build-time key: the user names their own server, so every build (F-Droid included) offers it.
+    actual val nextcloudAvailable: Boolean = true
+
     actual val available: List<CloudStorageType> =
-        availableCloudStorageTypes(dropbox = dropboxAvailable, googleDrive = googleDriveAvailable, oneDrive = oneDriveAvailable)
+        availableCloudStorageTypes(
+            dropbox = dropboxAvailable,
+            googleDrive = googleDriveAvailable,
+            oneDrive = oneDriveAvailable,
+            nextcloud = nextcloudAvailable,
+        )
 }

@@ -308,3 +308,12 @@ const val OAUTH_CUSTOM_URI_REDIRECT = "keryx://oauth2/callback"
 
 /** How long the interactive connect flow waits for the browser redirect before timing out. */
 const val OAUTH_CONNECT_TIMEOUT_MS = 3 * MILLIS_PER_MINUTE
+
+/**
+ * How long Nextcloud's Login Flow v2 waits for the user to finish signing in — the lifetime the
+ * server gives a login request, after which polling it can no longer succeed.
+ */
+const val NEXTCLOUD_LOGIN_TIMEOUT_MS = 20 * MILLIS_PER_MINUTE
+
+/** How often Login Flow v2 asks the server whether the user has signed in yet. */
+const val NEXTCLOUD_LOGIN_POLL_INTERVAL_MS = MILLIS_PER_SECOND

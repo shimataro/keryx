@@ -268,6 +268,7 @@ AGP の `build` ライフサイクルは `androidTest` ソースセットに対�
 - クラウドデータの破損／非互換からの復旧（`SyncRepositoryTest.kt`／`SyncMergerTest.kt`：制約違反するクラウドデータ——`feeds` の行集合が UNIQUE な `url` を重複させている、または NOT NULL 違反の NULL をクラウド DB 自身の（より緩い）スキーマだけが許していた——を、破損ファイルや外部スキーマと同様に `CloudDataIncompatibleException` として分類すること、`SyncMergerTest.mergeDoesNotClassifyABrokenLocalSchemaAsCloudDataIncompatible` がその逆（ローカル側の破損は誤分類しない）を担保すること、`SyncRepositoryTest.postMergeIndexFailureIsNotClassifiedAsCloudDataIncompatible` がマージ commit 後の `FtsManager.indexMissing()` の失敗——壊れたクラウドスキーマと同じ曖昧な SQLite エラーコードを共有する——を誤って分類しないことを担保すること。`core/SqliteFileTest.kt`＝アップロード側と対称なダウンロードバイト列の SQLite ヘッダ検証）
 - 削除ではなく退避するようになったクラウドデータのリセット（`core/CloudBackupPathTest.kt`＝決定的で UTC 整形された退避パス、`CloudStorage.rename` は `DropboxStorageTest.kt`／`GoogleDriveStorageTest.kt`／`OneDriveStorageTest.kt` でプロバイダごとに（退避先の衝突・退避元の不在ケースを含めて）検証、`SyncRepositoryTest.kt` の `resetCloudData*` 系がリネームしてから作り直すフローとその削除フォールバックを検証）
 - クラウド転送のファイルストリーミング（`CloudFileTransferTest.kt`：レスポンスボディが複数チャンクにまたがっても宛先ファイルへそのまま書かれること、短いペイロードが既存の宛先ファイルに追記されず置き換わること、`FileUploadContent` がファイルをストリームし——Drive の `multipart/related` 封筒を可能にする prefix/suffix で包む場合も含めて——正しい `contentLength` を報告すること。`ContentDigestTest.kt`：アップロードのスキップ判定に使うチャンク単位 SHA-256——最終チャンクの変更も検出されること、ファイルが無い場合は誤一致ではなくダイジェスト無しを返すことを含む。`SqliteFileTest.kt`：パス版のヘッダ検証が、どのバッファよりも大きなファイルでも先頭16バイトだけで判定すること）
+- Nextcloud プロバイダー（`data/cloud/nextcloud/`）：`NextcloudUrlTest`（アドレスの正規化を表駆動で。スキームの付加、ブラウザの URL をベースまで切り詰めること、`http://` やその他のスキームを HTTPS 必須とすること、認証情報・クエリ・フラグメント・不正なホストを拒否すること）。`NextcloudServerProbeTest`（`installed: true` の `status.php`、3xx を追わずに Nextcloud ではないとすること、応答なしを到達不能とすること）。`NextcloudStorageTest`（`MockEngine` で `CloudStorage` の全メソッド：各リクエストの Basic 認証と User-Agent、`If-Match` がそのまま渡ること、412/423 が競合になること、`create` の `MKCOL` → 一時名への `PUT` → `MOVE Overwrite: F` と、412 やアップロード失敗時に一時ファイルを消すこと、`rename` の 412 がストレージエラーになること、ETag がない場合、401 が認証エラーになること、キャンセル、アプリパスワード以外や HTTPS でない認証情報をリクエストなしで拒否すること、名前空間の接頭辞に関係なく `PROPFIND` を読めること）。`CloudStorageResponseTest`（`headerRevOrConflictOr`）。`NextcloudLoginFlowTest`（404 → 200 のポーリング、約 1 秒ごとのポーリング、仮想時間での 20 分のタイムアウト——`MockEngine` をテストのスケジューラで動かすので、処理中のリクエストが仮想時間をタイムアウトまで飛ばすことはない——、成功・失敗・キャンセルのいずれでも `LoginPageLauncher.close()` が呼ばれること、HTTPS でないエンドポイント・ページ・許可されたサーバーの拒否、OCS からのユーザー ID の取得と、完了できなかったアプリパスワードの失効）。`NextcloudServerControllerTest`。そして登録まわりの `CloudSessionTest`（Static の revoke が `DELETE core/apppassword` を呼ぶこと、`serverUrlOf`）、`CloudSyncControllerTest`/`SetupControllerTest`（`CloudConnectRequest` がフローに届くこと、`reconnectServerUrl`）、`CloudStorageAvailabilityTest`（Nextcloud が最後に並び、キーなしで提供されること）、`TokenBackupExclusionTest`、`CloudProviderRowTest`/`NextcloudServerDialogContentTest`、`StringCatalogParityTest`（`InfoPlist.xcstrings`）、`KeryxSdkTest`（`openLoginPage`/`closeLoginPage`、`newNextcloudServerController`）
 - 変更がないときの転送スキップ（`SyncRepositoryTest.kt`）:
   - 双方とも変更が無い2回目の同期がペイロードを1バイトも転送せずメタデータ取得1回だけで済むこと、
     そのスキップの後にローカルを変更したら確実にアップロードされること、リモートの変更は従来どおり
@@ -1605,6 +1606,29 @@ SwiftUI のファイルメニューのインポート／エクスポートは要
   しない。
 - （macOS）ウィンドウを最小まで縮める: 2 つの選択肢のカードが省略も切れもなく全体表示される。既定の
   ウィンドウサイズでは、接続中の表示かエラーがカードの下に出るまではスクロールしない。
+
+### Nextcloud
+
+テスト用のサーバーだけを使う（実際のアカウントには接続しない）：公式の `nextcloud` Docker イメージを、OS が信頼する
+証明書の HTTPS の後ろで動かす（[setup.ja.md](setup.ja.md) の「Nextcloud をローカルで試す」参照）。最新の安定版と、保守中の
+最古の版の 2 つを用意する。
+
+- **各プラットフォーム**（Windows、Linux、F-Droid 版を含む Android、macOS、iOS）：セットアップと設定 ▸ クラウド同期の両方から
+  接続できる。アドレスの誤り、`http://` のアドレス、Nextcloud ではないサーバーで、ダイアログにそれぞれ専用のメッセージが出る。
+  2 段階認証を有効にしたアカウントでも接続できる。サインイン待ちの間に中断できる（Apple ではサインインページも閉じる）。
+  他のプロバイダーからの切り替え（切り替えを確認してからサーバーのダイアログが出て、それをキャンセルすれば元の接続が残る）と、
+  再接続（保存済みのサーバーがダイアログの初期値になる）ができる。
+- **2 台**で同時に編集して同期し、競合の再試行で収束する。
+- **同期データのリセット**で、`Keryx` フォルダーに `keryx-<日時>.db.gz.bak` が残る。
+- **連携の解除**で、サーバーの「設定 ▸ セキュリティ ▸ デバイスとセッション」からアプリパスワードが消える。
+- **実機・実サーバーでしか確かめられない項目：**
+  - iOS / macOS：コールバックスキームなしで開いた `ASWebAuthenticationSession` が、サインインの完了後に `cancel()` で閉じる。
+  - Android：サインインの後、起動 intent によって Custom Tab が閉じ、アプリが前面に戻る。バックグラウンドからの起動制限で
+    それが妨げられても、利用者が手で戻れば接続は完了する（アプリはポーリングでサインインを知る）。
+  - 上書きの `PUT` と `MOVE` の応答に `OC-ETag` / `ETag` が付く（付かないとアップロードが "Missing ETag" で失敗する）。
+  - iOS と macOS 15 以降：LAN 内の HTTPS サーバーに接続すると、英語・日本語の説明文付きでローカルネットワーク利用の許可
+    ダイアログが出る。ビルドした `.app` の `Info.plist` に `NSLocalNetworkUsageDescription` が、`ja.lproj/InfoPlist.strings`
+    に日本語の説明文が入っている。
 
 ### アプリ内アップデート
 

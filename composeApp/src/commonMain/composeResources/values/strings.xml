@@ -32,6 +32,7 @@
     <string name="setup_dropbox">Sync with Dropbox</string>
     <string name="setup_google_drive">Sync with Google Drive</string>
     <string name="setup_onedrive">Sync with OneDrive</string>
+    <string name="setup_nextcloud">Sync with Nextcloud</string>
     <string name="setup_connecting">Connecting to cloud storage...</string>
     <string name="setup_abort_connect_confirm_title">Abort the connection?</string>
     <string name="setup_abort_connect_confirm_body">Nothing has been saved yet.</string>
@@ -224,6 +225,14 @@
     <string name="settings_google_drive_disconnect">Disconnect</string>
     <string name="settings_onedrive_connect">Connect</string>
     <string name="settings_onedrive_disconnect">Disconnect</string>
+    <string name="settings_nextcloud_connect">Connect</string>
+    <string name="settings_nextcloud_disconnect">Disconnect</string>
+    <string name="nextcloud_server_title">Connect to Nextcloud</string>
+    <string name="nextcloud_server_hint">Server address (e.g. cloud.example.com)</string>
+    <string name="nextcloud_server_scope">Keryx keeps its sync data in a “Keryx” folder in your Nextcloud files. Signing in creates an app password that can reach your whole account, but Keryx only uses it for that folder. You can revoke it at any time under Settings ▸ Security ▸ Devices &amp; sessions on your server; on Nextcloud 36 or later you can also limit it to file access there.</string>
+    <string name="nextcloud_server_checking">Checking the server…</string>
+    <string name="nextcloud_server_continue">Continue</string>
+    <string name="nextcloud_login_waiting">Finish signing in to Nextcloud in the browser.</string>
     <string name="settings_cloud_disconnect_confirm_title">Disconnect from %1$s?</string>
     <string name="settings_cloud_disconnect_confirm_body">Your local data will remain untouched.</string>
     <string name="settings_cloud_abort_connect_confirm_title">Abort the connection to %1$s?</string>
@@ -399,6 +408,9 @@
     <string name="error_feed_not_found">Feed not found</string>
     <string name="error_generic">An error occurred</string>
     <string name="error_update">Update failed</string>
+    <string name="error_nextcloud_https_required">The server address must use HTTPS. Enter an address that starts with https://.</string>
+    <string name="error_nextcloud_not_found">No Nextcloud server was found at this address. Check the URL and try again.</string>
+    <string name="error_nextcloud_unreachable">Couldn’t reach the server. Check the address and your internet connection, then try again.</string>
 
     <!-- Apple (SwiftUI) app only — a fixed-wording, non-plural counterpart to Compose's own
          two-argument home_add_feed_partial. Formatted via LF, same as every other Apple-only
@@ -431,4 +443,9 @@
     <string name="apple_tag_color_pink">Pink</string>
     <!-- Apple (SwiftUI) app only — VoiceOver label of the Clear button at the end of the name field. -->
     <string name="apple_clear_text">Clear text</string>
+    <!-- Apple (SwiftUI) app only — Info.plist's NSLocalNetworkUsageDescription, the explanation in the
+         permission prompt iOS (and macOS 15 or later) shows when the app first reaches a server on
+         the local network. generateStringCatalog writes apple_infoplist_* keys to InfoPlist.xcstrings,
+         not Localizable.xcstrings. -->
+    <string name="apple_infoplist_local_network_usage">Keryx connects to the Nextcloud server you choose, which may be on your local network, to sync your subscriptions and reading state.</string>
 </resources>

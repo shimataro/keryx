@@ -8,6 +8,7 @@ paths:
   - "**/DropboxStorage.kt"      # per-provider rev semantics (rev / version / eTag)
   - "**/GoogleDriveStorage.kt"
   - "**/OneDriveStorage.kt"
+  - "**/NextcloudStorage.kt"    # WebDAV: ETag/If-Match, 412/423, create via temp PUT + MOVE
   - "**/CloudSession.kt"        # current provider + access-token refresh
   - "**/CloudFileTransfer.kt"   # file-streamed transfers (never buffer the DB)
   - "**/Gzip*.kt"               # the compressed upload / legacy fallback

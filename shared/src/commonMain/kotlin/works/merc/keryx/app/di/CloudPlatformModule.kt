@@ -11,10 +11,17 @@ import works.merc.keryx.app.data.cloud.DropboxStorage
 import works.merc.keryx.app.data.cloud.OneDriveAuthManager
 import works.merc.keryx.app.data.cloud.OneDriveStorage
 import works.merc.keryx.app.data.cloud.TokenStorage
+import works.merc.keryx.app.data.cloud.nextcloud.NextcloudLoginFlow
+import works.merc.keryx.app.data.cloud.nextcloud.NextcloudServerProbe
+import works.merc.keryx.app.data.cloud.nextcloud.NextcloudStorage
+import works.merc.keryx.app.data.cloud.nextcloud.nextcloudClientName
+import works.merc.keryx.app.data.cloud.nextcloud.revokeNextcloudAppPassword
+import works.merc.keryx.app.data.cloud.oauthAccessToken
 import works.merc.keryx.app.domain.AuthorizationLauncher
 import works.merc.keryx.app.domain.CloudSession
 import works.merc.keryx.app.domain.CustomUriRedirectTransport
 import works.merc.keryx.app.domain.DefaultAuthorizationLauncher
+import works.merc.keryx.app.domain.LoginPageLauncher
 import works.merc.keryx.app.domain.OAuthCallbackParams
 import works.merc.keryx.app.domain.OAuthConnectFlow
 import works.merc.keryx.app.domain.SettingsRepository
@@ -31,16 +38,16 @@ internal fun dropboxProvider(
 ): CloudSession.Provider {
     val auth: CloudAuthManager = DropboxAuthManager(client)
     return CloudSession.Provider(
-        clientId = BuildConfig.DROPBOX_APP_KEY,
+        isConfigured = BuildConfig.DROPBOX_APP_KEY.isNotEmpty(),
         tokenStorage = tokenStorage,
-        authManager = auth,
         connectFlow = OAuthConnectFlow(
             authManager = auth,
             clientId = BuildConfig.DROPBOX_APP_KEY,
             transport = CustomUriRedirectTransport(callbackFlow),
             authorizationLauncher = authorizationLauncher,
         ),
-        createStorage = { tokenProvider -> DropboxStorage(client, tokenProvider) },
+        lifecycle = CloudSession.CredentialLifecycle.OAuth(clientId = BuildConfig.DROPBOX_APP_KEY, authManager = auth),
+        createStorage = { credentials -> DropboxStorage(client, oauthAccessToken(credentials)) },
     )
 }
 
@@ -57,24 +64,49 @@ internal fun oneDriveProvider(
 ): CloudSession.Provider {
     val auth: CloudAuthManager = OneDriveAuthManager(client)
     return CloudSession.Provider(
-        clientId = BuildConfig.ONEDRIVE_CLIENT_ID,
+        isConfigured = BuildConfig.ONEDRIVE_CLIENT_ID.isNotEmpty(),
         tokenStorage = tokenStorage,
-        authManager = auth,
         connectFlow = OAuthConnectFlow(
             authManager = auth,
             clientId = BuildConfig.ONEDRIVE_CLIENT_ID,
             transport = CustomUriRedirectTransport(callbackFlow),
             authorizationLauncher = authorizationLauncher,
         ),
-        createStorage = { tokenProvider -> OneDriveStorage(client, tokenProvider) },
+        lifecycle = CloudSession.CredentialLifecycle.OAuth(clientId = BuildConfig.ONEDRIVE_CLIENT_ID, authManager = auth),
+        createStorage = { credentials -> OneDriveStorage(client, oauthAccessToken(credentials)) },
+    )
+}
+
+/**
+ * Nextcloud: Login Flow v2 (no OAuth, no redirect — the flow polls the server) for an app password
+ * used as HTTP Basic credentials, on every platform. Configured in every build: it needs no
+ * build-time key, since the user names their own server. The app password does not expire, so its
+ * lifecycle is [CloudSession.CredentialLifecycle.Static], revoked on disconnect through the server's
+ * own `DELETE /ocs/v2.php/core/apppassword`.
+ */
+internal fun nextcloudProvider(
+    client: HttpClient,
+    tokenStorage: TokenStorage,
+    loginPageLauncher: LoginPageLauncher,
+): CloudSession.Provider {
+    val clientName = nextcloudClientName()
+    return CloudSession.Provider(
+        isConfigured = true,
+        tokenStorage = tokenStorage,
+        connectFlow = NextcloudLoginFlow(client, loginPageLauncher, userAgent = clientName),
+        lifecycle = CloudSession.CredentialLifecycle.Static(
+            revoke = { credentials -> revokeNextcloudAppPassword(client, credentials, clientName) },
+        ),
+        createStorage = { credentials -> NextcloudStorage(client, credentials) },
     )
 }
 
 /**
  * Registers the DI singles every platform's own `platformModule` shares: the OAuth callback flow
  * both `main.kt`'s (desktop) / `MainActivity`'s (Android) / the Apple app's own OS URI routing and
- * the custom-URI connect transport deliver into, and the [CloudSession] built over Dropbox +
- * OneDrive (both custom-URI providers, identical on every platform that offers them) plus whatever
+ * the custom-URI connect transport deliver into, the [NextcloudServerProbe] the Nextcloud server
+ * dialog checks an address with, and the [CloudSession] built over Dropbox + OneDrive (both
+ * custom-URI providers, identical on every platform that offers them), Nextcloud, plus whatever
  * [extraProviders] this platform alone supports.
  *
  * In `commonMain` (this function is called from `PlatformModule.desktop.kt`,
@@ -94,23 +126,30 @@ internal fun oneDriveProvider(
  * @param authorizationLauncher How Dropbox/OneDrive's connect flow opens the authorize URL —
  *   the system browser on desktop/Android (the default), or the Apple app's own launcher (an
  *   `ASWebAuthenticationSession`, wired by Swift through [works.merc.keryx.app.sdk.KeryxSdk.start]).
+ * @param loginPageLauncher How Nextcloud's Login Flow v2 shows its sign-in page and gets back from
+ *   it — each platform's own (see [LoginPageLauncher]). No default: a platform must decide how its
+ *   sign-in page is dismissed.
  */
 fun Module.cloudSessionSingles(
     tokenStorage: (CloudStorageType) -> TokenStorage,
     extraProviders: (client: HttpClient, callbackFlow: MutableSharedFlow<OAuthCallbackParams>) -> Map<CloudStorageType, CloudSession.Provider>,
+    loginPageLauncher: LoginPageLauncher,
     authorizationLauncher: AuthorizationLauncher = DefaultAuthorizationLauncher,
 ) {
     // Shared by each platform's own OS URI routing and the custom-URI (Dropbox/OneDrive) connect
     // transport.
     single<MutableSharedFlow<OAuthCallbackParams>> { MutableSharedFlow(replay = 0, extraBufferCapacity = 1) }
 
+    single { NextcloudServerProbe(get()) }
+
     single {
         val client = get<HttpClient>()
         val callbackFlow = get<MutableSharedFlow<OAuthCallbackParams>>()
 
         CloudSession(
-            // Dropbox first, extras (e.g. desktop's Google Drive) in the middle, OneDrive last —
-            // matching CloudStorageType's own declaration order, which drives the UI display order.
+            // Dropbox first, extras (e.g. desktop's Google Drive) in the middle, then OneDrive and
+            // Nextcloud. The UI display order comes from CloudStorageType's own declaration order
+            // (CloudStorageAvailability.available), not from this map.
             providers = buildMap {
                 put(
                     CloudStorageType.DROPBOX,
@@ -120,6 +159,10 @@ fun Module.cloudSessionSingles(
                 put(
                     CloudStorageType.ONEDRIVE,
                     oneDriveProvider(client, callbackFlow, tokenStorage(CloudStorageType.ONEDRIVE), authorizationLauncher),
+                )
+                put(
+                    CloudStorageType.NEXTCLOUD,
+                    nextcloudProvider(client, tokenStorage(CloudStorageType.NEXTCLOUD), loginPageLauncher),
                 )
             },
             selectedType = {

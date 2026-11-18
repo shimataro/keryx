@@ -2,7 +2,7 @@
 
 [日本語](sync-architecture.ja.md)
 
-Target: cloud sync (Dropbox / OneDrive / Google Drive). Implementation is in `domain/SyncRepository.kt`,
+Target: cloud sync (Dropbox / OneDrive / Google Drive / Nextcloud). Implementation is in `domain/SyncRepository.kt`,
 `domain/MergeSql.kt`, `domain/MergeFailureClassifier.kt`, `domain/MergeSchema.kt`, `domain/SnapshotSql.kt`,
 `platform/DatabaseMerger`, `platform/DatabaseSnapshot`.
 
@@ -22,14 +22,14 @@ Target: cloud sync (Dropbox / OneDrive / Google Drive). Implementation is in `do
 /keryx-YYYYMMDD-HHMMSS.db.gz.bak       ← archive left behind by a cloud-data reset (never pruned)
 ```
 
-Conflict prevention is done via a revision check on upload — Dropbox: `rev`, a real server-side compare-and-set (409 on mismatch); Google Drive: the file's `version` field, compared client-side before writing (mitigated by the sync retry loop); OneDrive: the DriveItem `eTag`, sent via `If-Match` (412 on mismatch). No lock file is used.
+Conflict prevention is done via a revision check on upload — Dropbox: `rev`, a real server-side compare-and-set (409 on mismatch); Google Drive: the file's `version` field, compared client-side before writing (mitigated by the sync retry loop); OneDrive: the DriveItem `eTag`, sent via `If-Match` (412 on mismatch); Nextcloud: the WebDAV `ETag`, sent verbatim via `If-Match` (412 on mismatch, 423 while another write holds the file's lock — see "Nextcloud (Login Flow v2)"). No lock file is used. On Nextcloud these files live in the `/Keryx/` folder of the user's own files rather than an app folder.
 
 ## Sync Flow (`SyncRepository.sync()`)
 
 1. `CloudStorage.metadata(CLOUD_DB_GZ_PATH)` fetches the compressed file's revision — or `null` when it does not
    exist yet remotely, in which case step 1a below runs. This is the only existence/revision check the sync makes;
    it costs no extra round trip, since every provider's metadata response already carries the revision (Dropbox's
-   `get_metadata` `rev`, Drive's name-lookup `version`, Graph's item `eTag`).
+   `get_metadata` `rev`, Drive's name-lookup `version`, Graph's item `eTag`, Nextcloud's `PROPFIND` `getetag`).
    - **1a. Compressed file absent** — `CloudStorage.metadata(CLOUD_DB_PATH)` checks the legacy fallback.
      - **Both absent (true first sync ever)**: the local DB is exported, compressed, and uploaded via create-only
        (`createFresh`), and the sync ends. If `createFresh` finds the file already exists after all (a concurrent
@@ -412,9 +412,9 @@ Google Drive.
 - **No client id in the build.** The Android OAuth client is matched by package name + signing
   certificate SHA-1, registered in the Cloud Console (see [build.md](build.md)); nothing is read
   from `BuildConfig`. A build signed with an unregistered key therefore fails at `authorize()` time
-  rather than at build time. `CloudSession.Provider.clientId` still has to be non-empty (it doubles
-  as "is this backend configured in this build"), so `PlayServicesGoogleDriveBackend` passes the
-  placeholder `"play-services"` — not an OAuth client id.
+  rather than at build time. With no client id to check, `PlayServicesGoogleDriveBackend` reports
+  `CloudSession.Provider.isConfigured` as `true` — whether Google Drive is offered at all is the
+  device gate below.
 - **Gated on the device, not on the distribution channel.** `CloudStorageAvailability.googleDriveAvailable`
   asks the registered `AndroidGoogleDriveBackend` (`:androidGms`'s implementation answers
   `GoogleApiAvailability.isGooglePlayServicesAvailable(...) == SUCCESS`), evaluated once per
@@ -425,9 +425,10 @@ Google Drive.
   a play-flavored APK can be sideloaded and a github-flavored one runs fine where Play services
   exists, the same reasoning `AndroidUpdateInstaller` applies to `REQUEST_INSTALL_PACKAGES`.
 - **Token lifecycle inside `CloudSession`.** Because there is no refresh token, the ordinary
-  stored-token path would fall through to `validAccessToken`'s "expired with no refresh token"
-  branch and hand out a token that is already dead. `CloudSession.Provider.accessTokenProvider`
-  overrides the token supply for exactly this case: each cloud request asks Play services again
+  stored-token path (`CloudSession.CredentialLifecycle.OAuth`) would fall through to its "expired with
+  no refresh token" branch and hand out a token that is already dead. The provider's
+  `CloudSession.CredentialLifecycle.PlatformOwned` lifecycle replaces the token supply for exactly
+  this case: each cloud request asks Play services again
   (with `allowUserInteraction = false`, since a request — least of all the `WorkManager` background
   sync — must never open a consent screen on its own). The connect's token is still written to
   `KeystoreTokenStorage`, but only so `connectedType()` reports the account as connected after a
@@ -523,8 +524,8 @@ desktop's.
   convention as every other provider/platform pair, so a build with no Apple client configured
   simply doesn't offer Google Drive, the same way an unconfigured Dropbox key hides Dropbox.
 - **Tokens and refresh.** Unlike Android's Play-services path, the Apple app owns a real refresh
-  token, stored through `KeychainTokenStorage` like Dropbox/OneDrive — there is no Play-services-style
-  `accessTokenProvider` override here.
+  token, stored through `KeychainTokenStorage` like Dropbox/OneDrive — its lifecycle is the ordinary
+  `CloudSession.CredentialLifecycle.OAuth`, not the Play-services-style `PlatformOwned` one.
 
 ### OAuth authorization on Apple (`ASWebAuthenticationSession`)
 
@@ -552,9 +553,85 @@ opens a browser directly:
 - If the user cancels the session, Swift cancels the connect flow's own coroutine (its `Task`);
   `OAuthConnectFlow` has no separate cancel path of its own to call.
 
+### Nextcloud (Login Flow v2)
+
+Nextcloud is not reached through OAuth and has no app-only folder; everything about it lives in
+`data/cloud/nextcloud/`.
+
+- **The server.** The user enters the server's address in a dialog
+  (`presentation/settings/NextcloudServerController`, shared by both UIs and every connect route:
+  setup, connect, switch, reconnect). `normalizeNextcloudUrl` adds `https://` to an address with no
+  scheme, rejects any other scheme (`http://` included) and any address carrying credentials, a query
+  or a fragment, and cuts a URL pasted from the browser back to the server's base (`…/index.php/…`,
+  `/login`, trailing slashes). `NextcloudServerProbe` then requires `GET {base}/status.php` to answer
+  200 with `installed: true`, without following redirects — a 3xx counts as "no Nextcloud here". Each
+  failure has its own `ErrorKind` (HTTPS required / not found / unreachable), carried by
+  `NextcloudServerException`. Only certificates the OS trusts are accepted. A reconnect starts the
+  dialog from the stored server (`CloudSyncController.reconnectServerUrl`, read before the reconnect
+  clears the credentials). Choosing Nextcloud while another provider is connected asks for the server
+  only after the switch is confirmed, and cancelling the dialog leaves the current connection alone.
+- **Sign-in (`NextcloudLoginFlow`).** `POST {base}/index.php/login/v2` returns a sign-in page and a
+  poll token/endpoint. The page opens through a `domain/LoginPageLauncher` — the system browser on
+  desktop and Android (`BrowserLoginPageLauncher`), an `ASWebAuthenticationSession` with no callback
+  scheme on Apple (`KeryxSdk.start`'s `openLoginPage` / `closeLoginPage`). The flow then posts the
+  token to the poll endpoint every second (`NEXTCLOUD_LOGIN_POLL_INTERVAL_MS`): 404 until the user has
+  granted access, then 200 once with `server`, `loginName` and `appPassword`. The server forgets the
+  request after 20 minutes (`NEXTCLOUD_LOGIN_TIMEOUT_MS`); a failed poll in between is simply retried.
+  `loginName` need not be the account's user id, which the WebDAV paths need, so the id is read from
+  OCS `GET /ocs/v1.php/cloud/user` (`ocs.data.id`). The base, the sign-in page, the poll endpoint and
+  the granted `server` must all be HTTPS; an app password the flow cannot finish with (no user id) is
+  revoked again. However the flow ends, `LoginPageLauncher.close()` runs once the page was opened:
+  Apple cancels the session, desktop brings its window back to the front (a browser tab cannot be
+  closed from outside), Android starts its own launch intent with `CLEAR_TOP` so its `singleTask`
+  task returns over the Custom Tab. While the sign-in is pending, both UIs say it is waiting for the
+  browser, since it can take up to the full 20 minutes. The User-Agent names the device to the server
+  (`Keryx (Android)`, …), which becomes the app password's name in the account's "Devices & sessions".
+- **Storage (`NextcloudStorage`).** The sync files live in `/Keryx/` under the user's own files
+  (`{server}/remote.php/dav/files/{userId}/Keryx/keryx.db.gz`, …); every request carries the app
+  password as HTTP Basic credentials and is refused unless the stored server URL is HTTPS. Redirects
+  are not followed. `metadata` is a Depth-0 `PROPFIND` for `getetag` (matched by local name, whatever
+  the namespace prefix; 404 → absent), `download` a `GET` whose `ETag` is the revision, `upload` a
+  `PUT` with the expected revision passed through verbatim as `If-Match`.
+- **Revisions.** The revision is the file's ETag, which Nextcloud compares byte for byte, quotes
+  included. An `If-Match` that does not match (or names a file that is not there) answers 412 — with no expected
+  revision the `PUT` sends no `If-Match` at all and writes unconditionally — and a concurrent overwrite holding the
+  file's lock 423 — both are `SyncConflictException`. The written revision is read from the write's
+  own `OC-ETag` / `ETag` header (`headerRevOrConflictOr` in `CloudStorage.kt`), never from a follow-up
+  request.
+- **Create without overwriting.** Nextcloud does not apply `If-None-Match: *` atomically, so it cannot
+  guard the first upload. `create` instead makes sure `/Keryx` exists (`MKCOL`; 405 means it already
+  does), uploads to a temporary `/Keryx/.upload-<uuid>.tmp`, then `MOVE`s it onto the real name with
+  `Overwrite: F` — an existing destination answers 412 (a conflict) instead of being overwritten, and
+  one another write holds locked answers 423 (likewise a conflict), and
+  the window in which two devices can both believe they are creating the file shrinks from the whole
+  upload to the move itself. A 423 from the `MKCOL` or the temporary upload (another write holding a
+  lock on `/Keryx` or that path) is a conflict too, left to the sync's retry rather than reported as a
+  storage error. The temporary file is deleted again whenever the move does not happen. One
+  whose delete also fails stays in `/Keryx`: `CloudStorage` has no listing API to find it by later,
+  which is accepted.
+- **Rename.** `MOVE` with `Overwrite: F` and a full-URL `Destination`: a missing source (404) counts as
+  done, and an occupied destination (412) is a storage error, so `archiveCloudDb` falls back to its
+  delete.
+- **Revocation.** The app password does not expire, so the provider's lifecycle is `Static`;
+  disconnecting calls `DELETE /ocs/v2.php/core/apppassword` (with `OCS-APIREQUEST: true`), and the
+  local credentials are cleared whether or not that succeeds.
+- **Scope.** The app password reaches the whole account, not just `/Keryx` — Nextcloud has no
+  app-folder scope like the other providers'. The connect dialog and `PRIVACY.md` say so, along with
+  how to revoke it and, on Nextcloud 36 or later, how to limit it to file access.
+- **Side effects on the server.** Every upload adds a version (the files_versions app) and an Activity
+  entry; a desktop Nextcloud client that syncs the user's files also downloads `/Keryx` unless it is
+  excluded there. `PRIVACY.md` and the README carry the user-facing guidance.
+- **Local network on Apple.** Reaching a server on the local network shows iOS's (and macOS 15's)
+  local-network permission prompt, whose text is `NSLocalNetworkUsageDescription`, localized through
+  `InfoPlist.xcstrings` (see "String Catalog for the Apple app" in [build.md](build.md)).
+
 ### Token Storage
 
-**Per-provider separate `TokenStorage` instances** are constructed in DI (`platformModule`) (do not share a single instance across providers; `SecurityCliTokenStorage`/`KeystoreTokenStorage` cache results per instance, so sharing would break). Keychain account name and fallback file name are derived from `CloudStorageType.id` (`"dropbox"`, `"google_drive"`, `"onedrive"`).
+**Per-provider separate `TokenStorage` instances** are constructed in DI (`platformModule`) (do not share a single instance across providers; `SecurityCliTokenStorage`/`KeystoreTokenStorage` cache results per instance, so sharing would break). Keychain account name and fallback file name are derived from `CloudStorageType.id` (`"dropbox"`, `"google_drive"`, `"onedrive"`, `"nextcloud"`).
+
+**Stored format.** Every store holds the provider's `CloudCredentials` (`data/cloud/CloudCredentials.kt`) as JSON through `CloudCredentialsSerializer`, which picks the shape from the keys (an `appPassword` key means `AppPasswordCredentials`, anything else `OAuthTokens`) and writes no class discriminator. `OAuthTokens` is therefore stored exactly as it was before `CloudCredentials` existed, and tokens saved by an older build keep loading. Do not switch to the default sealed-class serializer: it requires a `"type"` key, so every stored token would fail to decode and the user would silently find the provider disconnected.
+
+**Credential lifecycles.** Each `CloudSession.Provider` says how its stored credentials stay valid and are revoked through a `CloudSession.CredentialLifecycle`. `OAuth` (Dropbox, OneDrive, and Google Drive on desktop and Apple) renews an expired access token with the stored refresh token, saves the renewed tokens, and revokes the access token on disconnect. `PlatformOwned` (Google Drive on Android) asks the platform for a fresh access token on every request, never refreshes or saves anything, and revokes the stored access token on disconnect — see "Google Drive on Android". `Static` (Nextcloud) hands out credentials that never expire (an app password) exactly as stored and calls the provider's own revoke on disconnect — for Nextcloud, deleting the app password on the server; see "Nextcloud (Login Flow v2)".
 
 `KEYCHAIN_SERVICE` (`works.merc.keryx`, `data/cloud/KeychainCoordinates.kt`) is shared by every desktop OS.
 
@@ -642,8 +719,8 @@ opens a browser directly:
     case that most needed the warning.
   - **Backup exclusion.** Both the `.enc` and the plaintext-fallback `.json` files are excluded
     from Android's auto backup/device-transfer (`AndroidManifest.xml`'s
-    `dataExtractionRules`/`fullBackupContent`) — a long-lived OAuth refresh token should never ride
-    along in a backup, and the Keystore-encrypted file couldn't be usefully restored to a different
+    `dataExtractionRules`/`fullBackupContent`) — a long-lived OAuth refresh token (or Nextcloud's
+    app password, which reaches the whole account) should never ride along in a backup, and the Keystore-encrypted file couldn't be usefully restored to a different
     device anyway.
 
 ### Future Work (not yet supported)
@@ -659,6 +736,6 @@ Startup cache cleanup **soft-deletes** articles past the retention period (stamp
 `SyncRepository.resetCloudData()` is the recovery path for a cloud DB the app cannot use. It does **not** delete the cloud file outright: `archiveCloudDb()` first renames it to a timestamped path via `CloudStorage.rename()` (`core/CloudBackupPath.kt`'s `cloudBackupPath(clock.nowMillis())`, e.g. `/keryx-20260811-103000.db.gz.bak`, formatted in UTC so the name is deterministic for a fixed instant regardless of device time zone), then `createFresh()` re-uploads a snapshot of the local DB as the new `/keryx.db.gz`. The archive is never automatically pruned — `CloudStorage` has no listing API, and removing that mechanism entirely would defeat the point of keeping a way back to a mistaken reset or a merge bug that only *looked* like corruption.
 
 - **Only `CLOUD_DB_GZ_PATH` is ever touched by a reset.** The legacy `CLOUD_DB_PATH` fallback is deliberately left alone even if present, so it keeps working as a rollback path. This also means a reset self-heals even a merge failure whose real cause was corruption in the legacy file during a migration attempt (see "Compressed Upload / Legacy Fallback" above): the fresh, valid `.gz` created here immediately becomes what every subsequent sync reads, and the corrupt legacy file is simply never looked at again.
-- **`rename` semantics** (`CloudStorage.rename`, implemented per-provider — Dropbox `files/move_v2` with `autorename=false`, Google Drive a metadata `PATCH` on the file id resolved by name lookup, Microsoft Graph a metadata `PATCH` on the app-folder item): idempotent when the source is already absent (`Result.Ok`, so a reset on an already-clean cloud folder still proceeds to `createFresh`), and fails rather than overwriting when the destination already exists.
+- **`rename` semantics** (`CloudStorage.rename`, implemented per-provider — Dropbox `files/move_v2` with `autorename=false`, Google Drive a metadata `PATCH` on the file id resolved by name lookup, Microsoft Graph a metadata `PATCH` on the app-folder item, Nextcloud a WebDAV `MOVE` with `Overwrite: F`): idempotent when the source is already absent (`Result.Ok`, so a reset on an already-clean cloud folder still proceeds to `createFresh`), and fails rather than overwriting when the destination already exists.
 - **Delete fallback**: if the rename itself fails for a storage reason (e.g. an occupied archive name), `archiveCloudDb()` falls back to `cloud.delete(CLOUD_DB_GZ_PATH)` so a reset can never become permanently blocked. A `CloudAuthException` is the one exception *not* retried as a delete — the same missing credentials would fail identically.
 - **Backup path naming**: deliberately not derived from `CLOUD_DB_GZ_PATH` (`CLOUD_DB_BACKUP_PREFIX`/`CLOUD_DB_BACKUP_SUFFIX` in `core/Constants.kt`), so the archive's basename never matches Google Drive's `name = 'keryx.db.gz'` lookup or OneDrive's basename addressing — otherwise `CloudStorage.metadata(CLOUD_DB_GZ_PATH)` would see the archive too.

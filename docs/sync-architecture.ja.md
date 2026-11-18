@@ -2,7 +2,7 @@
 
 [English](sync-architecture.md)
 
-対象: クラウドストレージ同期（Dropbox / OneDrive / Google Drive）。実装は `domain/SyncRepository.kt`,
+対象: クラウドストレージ同期（Dropbox / OneDrive / Google Drive / Nextcloud）。実装は `domain/SyncRepository.kt`,
 `domain/MergeSql.kt`, `domain/MergeFailureClassifier.kt`, `domain/MergeSchema.kt`, `domain/SnapshotSql.kt`,
 `platform/DatabaseMerger`, `platform/DatabaseSnapshot`。
 
@@ -33,14 +33,14 @@
 /keryx-YYYYMMDD-HHMMSS.db.gz.bak       ← クラウドデータのリセットで退避される旧ファイル（自動削除されない）
 ```
 
-競合防止はアップロード時のリビジョンチェックで行う — Dropbox: `rev`、サーバー側の compare-and-set（不一致時 409）。Google Drive: ファイルの `version`、クライアント側で比較後に書き込み（同期のリトライで担保）。OneDrive: DriveItem の `eTag` を `If-Match` で送信（不一致時 412）。lock ファイルは使わない。
+競合防止はアップロード時のリビジョンチェックで行う — Dropbox: `rev`、サーバー側の compare-and-set（不一致時 409）。Google Drive: ファイルの `version`、クライアント側で比較後に書き込み（同期のリトライで担保）。OneDrive: DriveItem の `eTag` を `If-Match` で送信（不一致時 412）。Nextcloud: WebDAV の `ETag` をそのまま `If-Match` で送信（不一致時 412、別の書き込みがファイルのロックを持っている間は 423——「Nextcloud（Login Flow v2）」参照）。lock ファイルは使わない。Nextcloud では、これらのファイルはアプリフォルダーではなく利用者自身のファイルの `/Keryx/` フォルダーに置く。
 
 ## 同期フロー（`SyncRepository.sync()`）
 
 1. `CloudStorage.metadata(CLOUD_DB_GZ_PATH)` で圧縮ファイルのリビジョンを取得する。クラウドにまだ存在
    しなければ `null` が返り、その場合は手順1aへ進む。同期が行う存在・リビジョンチェックはこれだけであり、
    **追加のネットワーク往復は発生しない** — 3 プロバイダともメタデータ応答に元々リビジョンが含まれている
-   （Dropbox `get_metadata` の `rev` / Drive の名前検索が返す `version` / Graph のアイテムの `eTag`）。
+   （Dropbox `get_metadata` の `rev` / Drive の名前検索が返す `version` / Graph のアイテムの `eTag` / Nextcloud の `PROPFIND` が返す `getetag`）。
    - **1a. 圧縮ファイルが無い場合** — `CloudStorage.metadata(CLOUD_DB_PATH)` でレガシーフォールバックを確認する。
      - **両方とも無い（真の初回同期）**: ローカル DB をエクスポート・圧縮し、create-only で
        アップロードして（`createFresh`）終了する。もし `createFresh` の時点で実はファイルが既に存在
@@ -614,9 +614,9 @@ Google Drive も提供しない。
 - **ビルドにクライアント ID を持たない。** Android OAuth クライアントはパッケージ名 + 署名証明書の
   SHA-1 で照合される（Cloud Console への登録手順は [build.ja.md](build.ja.md) 参照）ため、
   `BuildConfig` から読む値は無い。したがって未登録の署名鍵でビルドした場合、ビルド時ではなく
-  `authorize()` の失敗として現れる。`CloudSession.Provider.clientId` は「このビルドでこのバックエンドが
-  設定済みか」の判定も兼ねるため非空である必要があり、`PlayServicesGoogleDriveBackend` は
-  プレースホルダ `"play-services"` を渡す（OAuth クライアント ID ではない）。
+  `authorize()` の失敗として現れる。確認すべきクライアント ID が無いので、`PlayServicesGoogleDriveBackend`
+  は `CloudSession.Provider.isConfigured` を `true` とする — Google Drive を選択肢に出すかどうかは、次の
+  端末での判定が決める。
 - **配信チャネルではなく端末で判定する。** `CloudStorageAvailability.googleDriveAvailable` は
   登録済みの `AndroidGoogleDriveBackend` に問い合わせる（`:androidGms` の実装は
   `GoogleApiAvailability.isGooglePlayServicesAvailable(...) == SUCCESS` を返す）。これをプロセスごとに
@@ -627,9 +627,9 @@ Google Drive も提供しない。
   APK もサイドロードされうるし、github フレーバーの APK も Play 開発者サービスのある端末で問題なく動く。
   `AndroidUpdateInstaller` が `REQUEST_INSTALL_PACKAGES` に適用しているのと同じ考え方。
 - **`CloudSession` 内でのトークンのライフサイクル。** リフレッシュトークンが無いため、通常の
-  保存トークン経路では `validAccessToken` の「期限切れでリフレッシュトークンが無い」分岐に落ち、
-  すでに失効したトークンを返してしまう。`CloudSession.Provider.accessTokenProvider` はまさにこの
-  ケースのためにトークン供給を上書きする: クラウドリクエストのたびに Play 開発者サービスへ問い合わせる
+  保存トークン経路（`CloudSession.CredentialLifecycle.OAuth`）では「期限切れでリフレッシュトークンが
+  無い」分岐に落ち、すでに失効したトークンを返してしまう。このプロバイダのライフサイクル
+  `CloudSession.CredentialLifecycle.PlatformOwned` は、まさにこのケースのためにトークン供給を置き換える: クラウドリクエストのたびに Play 開発者サービスへ問い合わせる
   （`allowUserInteraction = false`。リクエスト、まして `WorkManager` のバックグラウンド同期が
   独断で同意画面を開いてはならないため）。接続時のトークンは従来どおり `KeystoreTokenStorage` に
   書くが、これは再起動後も `connectedType()` が「接続済み」と報告できるようにするためだけであり、
@@ -721,8 +721,8 @@ Apple 版（`:shared` の appleMain。macOS と iOS が対象）は、Android �
   「ID が空なら選択肢を隠す」という規約に従うので、Apple 用クライアントを設定していないビルドでは
   Google Drive が単純に表示されない（未設定の Dropbox キーで Dropbox が隠れるのと同じ）。
 - **トークンとリフレッシュ。** Android の Play 開発者サービス経路とは異なり、Apple 版は本物のリフレッシュ
-  トークンを持ち、Dropbox・OneDrive と同じく `KeychainTokenStorage` に保存する — Play 開発者サービス風の
-  `accessTokenProvider` による上書きはここには無い。
+  トークンを持ち、Dropbox・OneDrive と同じく `KeychainTokenStorage` に保存する — ライフサイクルは通常の
+  `CloudSession.CredentialLifecycle.OAuth` であり、Play 開発者サービス風の `PlatformOwned` ではない。
 
 ### Apple 版での OAuth 認可（`ASWebAuthenticationSession`）
 
@@ -749,13 +749,90 @@ URI スキームを OS に登録せず、ブラウザも自分では開かない
 - ユーザーがセッションをキャンセルした場合は、Swift 側が接続フロー自身のコルーチン（`Task`）をキャンセル
   する。`OAuthConnectFlow` 自体には別途呼び出すキャンセル経路は無い。
 
+### Nextcloud（Login Flow v2）
+
+Nextcloud には OAuth を使わず、アプリ専用フォルダーもない。関連する実装はすべて `data/cloud/nextcloud/` にある。
+
+- **サーバー。** 利用者はダイアログでサーバーのアドレスを入力する（`presentation/settings/NextcloudServerController`。
+  両 UI と、すべての接続経路——セットアップ・接続・切り替え・再接続——が共有する）。`normalizeNextcloudUrl` は、
+  スキームのないアドレスに `https://` を付け、それ以外のスキーム（`http://` を含む）や、認証情報・クエリ・フラグメントを
+  含むアドレスを拒否し、ブラウザから貼り付けた URL をサーバーのベース（`…/index.php/…`、`/login`、末尾のスラッシュを
+  除いたもの）まで切り詰める。続いて `NextcloudServerProbe` が、`GET {base}/status.php` が 200 と `installed: true` を
+  返すことを、リダイレクトを追わずに確かめる（3xx は「Nextcloud が見つからない」として扱う）。失敗にはそれぞれ専用の
+  `ErrorKind`（HTTPS が必要 / 見つからない / 到達できない）があり、`NextcloudServerException` が運ぶ。証明書は OS が
+  信頼するものだけを受け付ける。再接続では、保存済みのサーバー（`CloudSyncController.reconnectServerUrl`。再接続が
+  認証情報を消す前に読む）をダイアログの初期値にする。他のプロバイダーに接続中に Nextcloud を選んだ場合は、切り替えの
+  確認が済んでからサーバーを尋ね、ダイアログをキャンセルすれば今の接続はそのまま残る。
+- **サインイン（`NextcloudLoginFlow`）。** `POST {base}/index.php/login/v2` がサインインページとポーリング用の
+  トークン・エンドポイントを返す。ページは `domain/LoginPageLauncher` で開く——デスクトップと Android ではシステムの
+  ブラウザ（`BrowserLoginPageLauncher`）、Apple ではコールバックスキームなしの `ASWebAuthenticationSession`
+  （`KeryxSdk.start` の `openLoginPage` / `closeLoginPage`）。その後フローは、毎秒（`NEXTCLOUD_LOGIN_POLL_INTERVAL_MS`）
+  トークンをポーリング用エンドポイントに POST する。利用者がアクセスを許可するまでは 404、許可すると一度だけ 200 で
+  `server`・`loginName`・`appPassword` が返る。サーバーは 20 分（`NEXTCLOUD_LOGIN_TIMEOUT_MS`）でこの要求を忘れる。
+  途中のポーリングの失敗は単に再試行する。`loginName` は WebDAV のパスに必要なユーザー ID と一致するとは限らないので、
+  ID は OCS の `GET /ocs/v1.php/cloud/user`（`ocs.data.id`）から読む。ベース、サインインページ、ポーリング用
+  エンドポイント、許可された `server` はすべて HTTPS でなければならない。フローが最後まで進めなかった（ユーザー ID が
+  読めなかった）アプリパスワードは失効させる。フローがどう終わっても、ページを開いたあとは `LoginPageLauncher.close()`
+  を呼ぶ：Apple はセッションを取り消し、デスクトップはウィンドウを前面に戻し（ブラウザのタブは外から閉じられない）、
+  Android は自身の起動 intent を `CLEAR_TOP` 付きで開始して、`singleTask` のタスクを Custom Tab の上に戻す。
+  サインインを待っている間は、最長 20 分かかりうるため、両 UI ともブラウザでのサインインを待っていることを表示する。
+  User-Agent はデバイスをサーバーに名乗るもの（`Keryx (Android)` など）で、アカウントの「デバイスとセッション」に
+  アプリパスワードの名前として出る。
+- **ストレージ（`NextcloudStorage`）。** 同期ファイルは利用者自身のファイルの `/Keryx/` に置く
+  （`{server}/remote.php/dav/files/{userId}/Keryx/keryx.db.gz` など）。すべてのリクエストにアプリパスワードを HTTP
+  Basic の認証情報として付け、保存済みのサーバー URL が HTTPS でなければ送らない。リダイレクトは追わない。
+  `metadata` は `getetag` を求める Depth 0 の `PROPFIND`（名前空間の接頭辞に関係なくローカル名で照合する。404 →
+  存在しない）、`download` は `ETag` をリビジョンとする `GET`、`upload` は期待するリビジョンをそのまま `If-Match` に
+  入れた `PUT`。
+- **リビジョン。** リビジョンはファイルの ETag で、Nextcloud は引用符も含めて完全一致で比較する。`If-Match` が一致
+  しない（またはファイルがない）と 412（期待するリビジョンがなければ `If-Match` を送らず無条件に `PUT` する）、ファイルのロックを持つ同時上書きがあると 423 になり、どちらも
+  `SyncConflictException`。書き込んだリビジョンは書き込み自身の応答の `OC-ETag` / `ETag` ヘッダーから読み
+  （`CloudStorage.kt` の `headerRevOrConflictOr`）、後続のリクエストからは決して読まない。
+- **上書きしない作成。** Nextcloud は `If-None-Match: *` をアトミックに適用しないので、初回アップロードの保護に使えない。
+  代わりに `create` は `/Keryx` があることを確かめ（`MKCOL`。405 はすでにあるという意味）、一時名
+  `/Keryx/.upload-<uuid>.tmp` にアップロードしてから、`Overwrite: F` 付きの `MOVE` で本来の名前に移す——移動先が
+  すでにあれば上書きせず 412（競合）、別の書き込みが移動先をロックしていれば 423（同じく競合）になり、2 台がともに自分がファイルを作っていると思い込める隙間が、アップロード
+  全体から移動の瞬間だけに縮む。`MKCOL` や一時ファイルへのアップロードが 423（別の書き込みが `/Keryx` かそのパスを
+  ロックしている）を返した場合も競合とし、ストレージエラーとして報告せず同期のリトライに任せる。
+  移動が行われなかった場合は一時ファイルを削除する。その削除にも失敗したものは
+  `/Keryx` に残る：`CloudStorage` にはあとでそれを見つけるための一覧 API がないためで、これは受容している。
+- **リネーム。** `Overwrite: F` と完全な URL の `Destination` を付けた `MOVE`。移動元がない（404）場合は完了とみなし、
+  移動先が埋まっている（412）場合はストレージエラーにする。これにより `archiveCloudDb` は削除へのフォールバックに進む。
+- **失効。** アプリパスワードには期限がないので、ライフサイクルは `Static`。連携の解除では
+  `DELETE /ocs/v2.php/core/apppassword`（`OCS-APIREQUEST: true` 付き）を呼び、その成否にかかわらずローカルの認証情報を
+  消す。
+- **権限範囲。** アプリパスワードは `/Keryx` だけでなくアカウント全体にアクセスできる——Nextcloud には他のプロバイダー
+  のようなアプリフォルダーのスコープがない。接続ダイアログと `PRIVACY.md` でそのことと、取り消し方、Nextcloud 36 以降で
+  ファイルへのアクセスだけに制限する方法を示す。
+- **サーバー上の副作用。** アップロードのたびに版（files_versions アプリ）とアクティビティの記録が増える。利用者の
+  ファイルを同期しているデスクトップ版 Nextcloud クライアントは、そちらで除外しない限り `/Keryx` もダウンロードする。
+  利用者向けの案内は `PRIVACY.md` と README にある。
+- **Apple でのローカルネットワーク。** ローカルネットワーク上のサーバーに接続すると、iOS（と macOS 15）がローカル
+  ネットワーク利用の許可ダイアログを出す。その説明文は `NSLocalNetworkUsageDescription` で、`InfoPlist.xcstrings` で
+  ローカライズする（[build.ja.md](build.ja.md) の「Apple アプリ用の String Catalog」を参照）。
+
 ### トークン保存先
 
 **プロバイダーごとに別インスタンス**の `TokenStorage` を DI（`platformModule`）で構築する（1 インスタンスを
 複数プロバイダーで共有しない。`SecurityCliTokenStorage`/`KeystoreTokenStorage` は結果をインスタンスに
 キャッシュするため共有すると壊れる）。
 Keychain のアカウント名とフォールバックファイル名は `CloudStorageType.id` から導出する（Dropbox は `"dropbox"` で
-従来のハードコード値と一致するため既存トークンの移行は不要。Google Drive は `"google_drive"`、OneDrive は `"onedrive"`）。
+従来のハードコード値と一致するため既存トークンの移行は不要。Google Drive は `"google_drive"`、OneDrive は `"onedrive"`、Nextcloud は `"nextcloud"`）。
+
+**保存形式。** どの保存先も、プロバイダーの `CloudCredentials`（`data/cloud/CloudCredentials.kt`）を
+`CloudCredentialsSerializer` で JSON にして保存する。このシリアライザはキーで種類を判定し（`appPassword` キーが
+あれば `AppPasswordCredentials`、なければ `OAuthTokens`）、クラスの discriminator を書かない。そのため `OAuthTokens`
+は `CloudCredentials` 導入前とまったく同じ形で保存され、古いビルドが保存したトークンもそのまま読める。sealed
+クラスの既定のシリアライザに切り替えてはならない。既定のものは `"type"` キーを必須とするため、保存済みのトークンが
+すべてデコードできなくなり、利用者は気付かないうちにプロバイダーが未接続になってしまう。
+
+**認証情報のライフサイクル。** 各 `CloudSession.Provider` は、保存した認証情報をどう有効に保ち、どう失効させるかを
+`CloudSession.CredentialLifecycle` で示す。`OAuth`（Dropbox、OneDrive、デスクトップと Apple の Google Drive）は、
+期限切れのアクセストークンを保存済みのリフレッシュトークンで更新して保存し直し、切断時にアクセストークンを失効させる。
+`PlatformOwned`（Android の Google Drive）は、リクエストのたびにプラットフォームから新しいアクセストークンをもらい、
+リフレッシュも保存も行わず、切断時に保存済みのアクセストークンを失効させる（「Android での Google Drive」参照）。
+`Static`（Nextcloud）は、期限のない認証情報（アプリパスワード）を保存したまま渡し、切断時にプロバイダー自身の失効処理を呼ぶ
+——Nextcloud ではサーバー上のアプリパスワードを削除する。「Nextcloud（Login Flow v2）」参照。
 
 `KEYCHAIN_SERVICE`（`works.merc.keryx`、`data/cloud/KeychainCoordinates.kt`）はデスクトップの全 OS で共通。
 
@@ -850,8 +927,8 @@ Keychain のアカウント名とフォールバックファイル名は `CloudS
     まさに最も警告が必要なケースで `SECURE` を返してしまっていた。
   - **バックアップからの除外。** `.enc` ファイルと平文フォールバックの `.json` ファイルはどちらも
     Android の自動バックアップ/デバイス間転送から除外している（`AndroidManifest.xml` の
-    `dataExtractionRules`/`fullBackupContent`）——長寿命の OAuth リフレッシュトークンをバックアップに
-    乗せるべきではなく、また Keystore 暗号化されたファイルはそもそも別端末に復元しても役に立たない
+    `dataExtractionRules`/`fullBackupContent`）——長寿命の OAuth リフレッシュトークン（や、アカウント全体に
+    アクセスできる Nextcloud のアプリパスワード）をバックアップに乗せるべきではなく、また Keystore 暗号化されたファイルはそもそも別端末に復元しても役に立たない
     ため。
 
 ### 今後の課題（未対応）
@@ -873,6 +950,6 @@ Keychain のアカウント名とフォールバックファイル名は `CloudS
 `SyncRepository.resetCloudData()` は、アプリが使用できないクラウドDBからの復旧手段である。クラウド上のファイルをいきなり削除はしない — `archiveCloudDb()` がまず `CloudStorage.rename()` でタイムスタンプ付きパスへリネームする（`core/CloudBackupPath.kt` の `cloudBackupPath(clock.nowMillis())`、例: `/keryx-20260811-103000.db.gz.bak`。端末のタイムゾーンに関わらず同じ瞬間なら同じ名前になるよう UTC で整形）。その後 `createFresh()` がローカルDBのスナップショットを新しい `/keryx.db.gz` として再アップロードする。退避ファイルは自動削除されない — `CloudStorage` に一覧取得APIが無いことに加え、この仕組みを取り除くと「誤判定によるリセット」や「破損に見えただけのマージバグ」からの復旧手段自体が失われてしまう。
 
 - **リセットが触れるのは `CLOUD_DB_GZ_PATH` のみ**である。レガシーの `CLOUD_DB_PATH` フォールバックは存在していても意図的に一切手を触れない — ロールバック経路として使えるままにしておくため。これにより、移行の途中で（レガシーファイルの破損が真因の）マージ失敗が起きた場合でもリセットが自己修復として機能する（上記「圧縮アップロード / レガシーフォールバック」参照）: ここで作られる新しく有効な `.gz` が以降のあらゆる同期で参照される正本になり、破損したレガシーファイルは二度と参照されない。
-- **`rename` の意味論**（`CloudStorage.rename`、プロバイダごとに実装 — Dropbox は `files/move_v2`（`autorename=false`）、Google Drive は名前検索で解決したファイルIDへのメタデータ `PATCH`、Microsoft Graph はアプリフォルダ内アイテムへのメタデータ `PATCH`）: リネーム元が既に存在しない場合は冪等に `Result.Ok`（クラウドフォルダが既にきれいな状態でのリセットも `createFresh` まで進む）。リネーム先が既に存在する場合は上書きせず失敗する。
+- **`rename` の意味論**（`CloudStorage.rename`、プロバイダごとに実装 — Dropbox は `files/move_v2`（`autorename=false`）、Google Drive は名前検索で解決したファイルIDへのメタデータ `PATCH`、Microsoft Graph はアプリフォルダ内アイテムへのメタデータ `PATCH`、Nextcloud は `Overwrite: F` 付きの WebDAV `MOVE`）: リネーム元が既に存在しない場合は冪等に `Result.Ok`（クラウドフォルダが既にきれいな状態でのリセットも `createFresh` まで進む）。リネーム先が既に存在する場合は上書きせず失敗する。
 - **削除へのフォールバック**: リネーム自体がストレージ側の理由（退避先が既に存在する等）で失敗した場合、`archiveCloudDb()` は `cloud.delete(CLOUD_DB_GZ_PATH)` にフォールバックし、リセットが恒久的に行き詰まることを防ぐ。`CloudAuthException` だけは削除へリトライしない — 同じ資格情報の欠如で削除も同様に失敗するため。
 - **退避ファイル名**: あえて `CLOUD_DB_GZ_PATH` から派生させていない（`core/Constants.kt` の `CLOUD_DB_BACKUP_PREFIX`/`CLOUD_DB_BACKUP_SUFFIX`）。退避ファイルのベース名が Google Drive の `name = 'keryx.db.gz'` 検索や OneDrive のベース名アドレッシングに一致してしまうと、`CloudStorage.metadata(CLOUD_DB_GZ_PATH)` が退避ファイルまで拾ってしまうため。

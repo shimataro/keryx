@@ -4,6 +4,8 @@ import android.os.Build
 
 actual val isMacOs: Boolean = false
 
+actual val platformOsName: String = "Android"
+
 /** Android's primary pointer is touch. */
 actual val isTouchPrimary: Boolean = true
 
