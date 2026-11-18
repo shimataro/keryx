@@ -281,9 +281,12 @@ class SettingsViewModelTest {
 
         // Once it has finished, the guard is released: a later check runs again.
         vm.checkForUpdate()
+        // Also waits for the launched check itself to finish: the request is counted before it is
+        // answered, so its resumption can still be waiting in the queue — and nothing runs the queue
+        // after this, so tearDown's cancelAndJoin would then wait on it forever.
         awaitConditionBlocking {
             dispatcher.runQueued()
-            requestCount == 2
+            requestCount == 2 && vm.viewModelScope.coroutineContext.job.children.none { it.isActive }
         }
     }
 
