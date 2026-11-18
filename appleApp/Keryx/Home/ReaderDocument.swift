@@ -50,7 +50,9 @@ struct ReaderDocumentKey: Hashable {
     let feedName: String?
     let feedFaviconUrl: String?
     let colorScheme: ColorScheme
-    let fontSizeScale: Double
+    /// The resolved reader font scale (`ReaderPageView.readerFontScale`), so a change to either
+    /// source — the app setting on macOS, the system text size on iOS — rebuilds the document.
+    let fontScale: Float
 }
 
 /// A reader document ready to load.

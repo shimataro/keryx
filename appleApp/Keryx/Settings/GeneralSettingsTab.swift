@@ -16,13 +16,18 @@ struct GeneralSettingsTab: View {
             }
             .pickerStyle(.segmented)
 
-            Picker(L("settings_font_size"), selection: fontScaleBinding(preferences.fontSizeScale)) {
+            // Only the macOS reader reads this setting: iOS has none of its own, since its reader
+            // follows the system text size (Dynamic Type) like the rest of the app — see
+            // `ReaderPageView.readerFontScale`.
+            #if os(macOS)
+            Picker(L("apple_settings_reader_font_size"), selection: fontScaleBinding(preferences.fontSizeScale)) {
                 Text(L("settings_font_small")).tag(0.85)
                 Text(L("settings_font_medium")).tag(1.0)
                 Text(L("settings_font_large")).tag(1.2)
                 Text(L("settings_font_xlarge")).tag(1.4)
             }
             .pickerStyle(.menu)
+            #endif
 
             Picker(L("settings_refresh_interval"), selection: refreshIntervalBinding(preferences.refreshIntervalMinutes)) {
                 Text(L("settings_refresh_min15")).tag(Int32(15))
@@ -58,9 +63,11 @@ struct GeneralSettingsTab: View {
         Binding(get: { value }, set: { preferences.controller.setThemeMode(mode: $0) })
     }
 
+    #if os(macOS)
     private func fontScaleBinding(_ value: Double) -> Binding<Double> {
         Binding(get: { value }, set: { preferences.controller.setFontScale(scale: $0) })
     }
+    #endif
 
     private func refreshIntervalBinding(_ value: Int32) -> Binding<Int32> {
         Binding(
