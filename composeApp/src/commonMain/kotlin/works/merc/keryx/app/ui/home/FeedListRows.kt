@@ -549,7 +549,7 @@ private fun FeedErrorIndicator(gone: Boolean) {
  * Whether the drop boundary a drag is hovering lands inside a feed group — the feeds of folder
  * [folderId] (`null` = the no-folder group), whose ids are [feedIds] — so that group's header lights up.
  */
-private fun DropBoundary?.highlightsFeedGroup(folderId: String?, feedIds: Set<String>): Boolean = when (this) {
+internal fun DropBoundary?.highlightsFeedGroup(folderId: String?, feedIds: Set<String>): Boolean = when (this) {
     is DropBoundary.BeforeFeed -> feedId in feedIds
     is DropBoundary.AppendFeeds -> this.folderId == folderId
     is DropBoundary.BeforeFolder, DropBoundary.AppendFolders, null -> false
