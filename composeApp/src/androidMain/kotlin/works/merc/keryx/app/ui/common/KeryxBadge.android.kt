@@ -12,7 +12,12 @@ import org.jetbrains.compose.resources.DrawableResource
 @Composable
 internal actual fun KeryxBadgedIcon(icon: DrawableResource, contentDescription: String, count: Int) {
     // The count is in the icon's contentDescription; see the expect's KDoc.
-    BadgedBox(badge = { if (count > 0) Badge(Modifier.clearAndSetSemantics {}) { Text(count.toString()) } }) {
+    BadgedBox(badge = { KeryxCountBadge(count, Modifier.clearAndSetSemantics {}) }) {
         KeryxIcon(icon, contentDescription = contentDescription)
     }
+}
+
+@Composable
+internal actual fun KeryxCountBadge(count: Int, modifier: Modifier) {
+    if (count > 0) Badge(modifier) { Text(count.toString()) }
 }

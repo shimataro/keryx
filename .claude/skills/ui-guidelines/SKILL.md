@@ -59,6 +59,18 @@ content whose position must stay fixed (e.g. a title `Text`).
   gets shrunk back down to `8.dp` with no error. Use
   `Modifier.requiredSize(x)` when the child is meant to overflow its
   container's declared bounds.
+- **A count after a `weight(1f)` label is the exception: it may draw
+  nothing at zero, with no reserved slot.** The feed rows' unread counts
+  (`CountBadge`) and the notification center row's `KeryxCountBadge`
+  (`SidebarRow`'s `trailing`) work this way. The weighted label absorbs the
+  width the count takes or gives back, so nothing moves — not the elements
+  before the label, and not those after the count that sit at the row's end
+  (a folder row's touch `DragHandle`). A reserved slot could not keep the size
+  fixed anyway, since a count widens with its number of digits. What it costs
+  instead: the label's room shrinks when a count appears, so at a very large
+  font scale it may truncate — accepted. Not covered: a data-dependent element
+  *before* the weighted label (the `ArticleRow` star incident above), or a row with
+  no weighted element to absorb the change; those reserve their slot as usual.
 - **Prefer disabled over hidden.** When a control's availability depends on
   state (an action needs a selection, a precondition isn't met yet, a
   feature is temporarily unavailable), render it in a disabled/inactive
@@ -132,7 +144,22 @@ not in global chrome:
   and choosing Unread already clear the kept read rows (`external-spec.md` §7).
 - Notifications — not in any toolbar: `NotificationCenterRow`, a `SidebarRow`
   in `FeedListPane`'s fixed footer (above Android's settings row), always
-  shown so it stays in one place, its count drawn only above zero. The history
+  shown so it stays in one place, its count drawn only above zero — as a
+  `KeryxCountBadge` pill (through `SidebarRow`'s `trailing` slot), not the
+  feed rows' plain `CountBadge`, so it matches the drawer button's badge and
+  never reads as one more unread count; the bell is tinted by the most severe
+  notification (`notificationBellTone`: `error` for a warning or an error,
+  `primary` for new-version notices alone) — except while the row holds
+  keyboard focus and is highlighted, when it takes the selection's content
+  color, since the severity colors lose their contrast on the selection
+  background — and an alert's level is reported as the button's
+  `stateDescription` (`notificationAlertStateDescription`), the bell itself
+  staying decorative, so the tint is not the only sign. Desktop's AWT
+  accessibility bridge drops `stateDescription`
+  (`accessibilityBridgeReadsStateDescription`), so there the level also goes
+  into the button's `contentDescription`, spelled out with the row's name and
+  count (`notificationRowAlertAccessibleName`), since that name replaces the
+  row's text. The history
   is empty most of the time, so a permanent toolbar slot for it was wasted room;
   a sidebar row costs little and, unlike a row that comes and goes, never
   changes the list's height. The bell lived
@@ -1418,12 +1445,14 @@ side, Android's own Material 3 ripple/shapes/components on the other:
   — see the `KeryxTextField` bullet below for why that's the right call on
   that platform. `KeryxBadgedIcon` (`ui/common/KeryxBadge.kt`, expect/actual) —
   the count badge overlaid on an icon (currently only `ArticleListTopBar`'s
-  drawer button, carrying the notification center's count) — follows
+  drawer button, carrying the notification center's count), and
+  `KeryxCountBadge`, the same pill on its own (`NotificationCenterRow`'s
+  count, so the row visibly matches the drawer button) — follow
   the same split: desktop's `actual` draws a
   hand-rolled `Box`/`Text` pill (`error` fill, `onError` text), Android's
   `actual` uses M3's own `BadgedBox`/`Badge`. Don't add a raw `Box`/`Text` pill
   or a raw `BadgedBox`/`Badge` at a `commonMain` call site — use
-  `KeryxBadgedIcon`.
+  `KeryxBadgedIcon` / `KeryxCountBadge`.
 - **`KeryxTextField`** (`ui/common/KeryxTextField.kt`, expect/actual): the
   replacement for M3's `OutlinedTextField` for every text input — a flat,
   thin-bordered field on desktop, plain M3 on Android (same "why fight the

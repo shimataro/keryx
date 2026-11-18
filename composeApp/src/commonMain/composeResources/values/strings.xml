@@ -135,6 +135,7 @@
     <string name="home_syncing">Syncing…</string>
     <string name="home_sync_auth_failed">Sign-in expired — reconnect in Settings</string>
     <string name="home_notifications">Notifications</string>
+    <string name="home_notifications_alert_accessible_name">Notifications, %1$d, %2$s</string>
     <string name="home_open_site">Open site</string>
     <string name="home_no_article_selected">Select an article</string>
     <string name="home_search">Search articles</string>

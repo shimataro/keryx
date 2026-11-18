@@ -6,6 +6,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
@@ -25,6 +28,8 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
@@ -32,6 +37,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.requestFocus
 import androidx.compose.ui.test.v2.runDesktopComposeUiTest
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -50,6 +56,7 @@ import works.merc.keryx.app.domain.NotificationCenter
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.presentation.home.HomeViewModel
 import works.merc.keryx.app.presentation.home.NotificationAlerts
+import works.merc.keryx.app.presentation.home.NotificationBellTone
 import works.merc.keryx.app.ui.i18n.resolveNotificationText
 
 /**
@@ -367,6 +374,146 @@ class NotificationCenterPlacementTest {
 
             // Both notifications render in the panel.
             assertEquals(2, onAllNodesWithText(shown()).fetchSemanticsNodes().size)
+        }
+    }
+
+    /** A node's [SemanticsProperties.Text] value made of [parts], in order. */
+    private fun textOf(vararg parts: String): List<AnnotatedString> = parts.map(::AnnotatedString)
+
+    private fun centerOf(vararg levels: AppNotificationLevel): NotificationCenter {
+        val center = NotificationCenter()
+        levels.forEachIndexed { i, level ->
+            center.add(AppNotification(id = "n$i", level = level, text = notificationText, timestampMillis = 0L, action = null))
+        }
+        return center
+    }
+
+    @Test
+    fun theRowsCountIsABadgeKeptInTheRowsSemanticsAndAbsentWhenEmpty() = runDesktopComposeUiTest {
+        // The pill (KeryxCountBadge) is drawn instead of the feed rows' plain count, but its number
+        // still reads with the row's label; an empty center draws no "0".
+        var count by mutableStateOf(2)
+        val center = newCenter(2)
+        val notifVm = NotificationCenterViewModel(center, NotificationAlerts(center))
+        setContent {
+            KoinIsolatedContext(context = remember { isolatedKoin() }) {
+                NotificationCenterRow(notifVm = notifVm, count = count)
+            }
+        }
+        waitForIdle()
+        onNodeWithText(rowLabel).assert(SemanticsMatcher.expectValue(SemanticsProperties.Text, textOf(rowLabel, "2")))
+
+        count = 0
+        waitForIdle()
+        onNodeWithText(rowLabel).assert(SemanticsMatcher.expectValue(SemanticsProperties.Text, textOf(rowLabel)))
+    }
+
+    @Test
+    fun theBellIsTintedByTheMostSevereNotification() = runDesktopComposeUiTest {
+        // Same count, different levels: only the bell's tint tells the rows apart. The empty row is
+        // drawn with the same count too, so it differs from the others in the bell alone.
+        val empty = NotificationCenter()
+        val info = centerOf(AppNotificationLevel.INFO, AppNotificationLevel.INFO)
+        val warning = centerOf(AppNotificationLevel.INFO, AppNotificationLevel.WARNING)
+        val error = centerOf(AppNotificationLevel.ERROR, AppNotificationLevel.INFO)
+        setContent {
+            KoinIsolatedContext(context = remember { isolatedKoin() }) {
+                Column {
+                    for ((tag, center) in listOf("empty" to empty, "info" to info, "warning" to warning, "error" to error)) {
+                        Box(Modifier.testTag(tag)) {
+                            NotificationCenterRow(notifVm = NotificationCenterViewModel(center, NotificationAlerts(center)), count = 2)
+                        }
+                    }
+                }
+            }
+        }
+        waitForIdle()
+        fun capture(tag: String) = pixelsOf(onNodeWithTag(tag).captureToImage().toPixelMap())
+
+        assertNotEquals(capture("empty"), capture("info"), "new-version notices tint the bell unlike an empty center")
+        assertNotEquals(capture("empty"), capture("warning"), "a warning tints the bell unlike an empty center")
+        assertNotEquals(capture("info"), capture("warning"), "a warning tints the bell unlike new-version notices alone")
+        assertEquals(capture("warning"), capture("error"), "warnings and errors share the error color")
+    }
+
+    @Test
+    fun anAlertsLevelIsNamedToAssistiveTechnologyNotLeftToTheTintAlone() = runDesktopComposeUiTest {
+        // `Res.string.notification_level_warning` / `notification_level_error`, reported as the
+        // button's state (`notificationAlertStateDescription`); the bell itself stays decorative.
+        // Desktop's accessibility bridge drops stateDescription, so on desktop (where this test runs)
+        // the level is also in the button's accessible name, with the row's name and count
+        // (`Res.string.home_notifications_alert_accessible_name`).
+        val warning = centerOf(AppNotificationLevel.INFO, AppNotificationLevel.WARNING)
+        val error = centerOf(AppNotificationLevel.WARNING, AppNotificationLevel.ERROR)
+        val info = centerOf(AppNotificationLevel.INFO)
+        setContent {
+            KoinIsolatedContext(context = remember { isolatedKoin() }) {
+                Column {
+                    for ((tag, center) in listOf("warning" to warning, "error" to error, "info" to info)) {
+                        Box(Modifier.testTag(tag)) {
+                            NotificationCenterRow(notifVm = NotificationCenterViewModel(center, NotificationAlerts(center)), count = center.items.value.size)
+                        }
+                    }
+                }
+            }
+        }
+        waitForIdle()
+        fun rowIn(tag: String) = onNode(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Button) and hasAnyAncestor(hasTestTag(tag)))
+
+        rowIn("warning").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "警告"))
+        rowIn("error").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "エラー"))
+        rowIn("info").assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.StateDescription))
+        rowIn("warning").assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, listOf("通知、2、警告")))
+        rowIn("error").assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, listOf("通知、2、エラー")))
+        rowIn("info").assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.ContentDescription))
+        // The bell carries no description of its own: the only one in each row is the button's.
+        for (tag in listOf("warning", "error", "info")) {
+            assertEquals(
+                0,
+                onAllNodes(hasAnyAncestor(hasTestTag(tag)) and SemanticsMatcher.keyIsDefined(SemanticsProperties.ContentDescription) and !SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Button), useUnmergedTree = true)
+                    .fetchSemanticsNodes().size,
+                tag,
+            )
+        }
+    }
+
+    @Test
+    fun eachBellToneMapsToItsOwnThemeColor() = runDesktopComposeUiTest {
+        // Distinct colors per role, so swapping the notice and alert colors (or falling back to the
+        // content color) fails.
+        val primary = Color(0xFF1E88E5)
+        val error = Color(0xFFD81B60)
+        val content = Color(0xFF43A047)
+        val tints = mutableMapOf<NotificationBellTone, Color>()
+        setContent {
+            MaterialTheme(colorScheme = lightColorScheme(primary = primary, error = error)) {
+                CompositionLocalProvider(LocalContentColor provides content) {
+                    NotificationBellTone.entries.forEach { tints[it] = bellTint(it) }
+                }
+            }
+        }
+        waitForIdle()
+
+        assertEquals(content, tints[NotificationBellTone.QUIET])
+        assertEquals(primary, tints[NotificationBellTone.NOTICE])
+        assertEquals(error, tints[NotificationBellTone.ALERT])
+    }
+
+    @Test
+    fun dismissingTheNotificationsRemovesTheCountFromTheFeedListRow() = runDesktopComposeUiTest {
+        // Through FeedListPane's own count path (`notificationCountOf`), not a count passed in: the
+        // badge goes once the notifications are actually dismissed.
+        val (driver, db) = inMemoryDb()
+        val center = newCenter(2)
+        val notifVm = NotificationCenterViewModel(center, NotificationAlerts(center))
+        useHomeViewModel(driver, db) { fixture ->
+            setContent { ContentAreaTestHost(fixture.vm, notifVm, notifVm, PaneLayout.Triple, 1) }
+            waitForIdle()
+            onNodeWithText(rowLabel).assert(SemanticsMatcher.expectValue(SemanticsProperties.Text, textOf(rowLabel, "2")))
+
+            center.dismissAll()
+            waitForIdle()
+            onNodeWithText(rowLabel).assert(SemanticsMatcher.expectValue(SemanticsProperties.Text, textOf(rowLabel)))
         }
     }
 }

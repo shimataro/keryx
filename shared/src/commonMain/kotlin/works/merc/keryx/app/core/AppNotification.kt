@@ -3,6 +3,18 @@ package works.merc.keryx.app.core
 enum class AppNotificationLevel { INFO, WARNING, ERROR }
 
 /**
+ * Whether a notification of this level is an *alert* — something that went wrong (`WARNING`,
+ * `ERROR`) rather than a notice (`INFO`: a new version, a finished import). The one place this split
+ * is decided: the transient alert surfaces (`NotificationAlerts`) announce only alerts, and the
+ * notification center's bell takes its alert tone from them (`notificationBellTone`).
+ */
+val AppNotificationLevel.isAlert: Boolean
+    get() = when (this) {
+        AppNotificationLevel.INFO -> false
+        AppNotificationLevel.WARNING, AppNotificationLevel.ERROR -> true
+    }
+
+/**
  * The "next action" a notification offers when the user acts on it (session-only, resolved by the
  * UI). `action` is nullable — `null` means the notification row has no next action.
  *

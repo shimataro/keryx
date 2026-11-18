@@ -26,7 +26,37 @@ struct NotificationCenterRow: View {
     @State private var confirmReset: AppNotification?
     @State private var nowMillis = Date().timeIntervalSince1970 * 1000
 
+    // The count capsule's metrics, scaled with the caption text it holds so it grows with Dynamic
+    // Type instead of crowding the number at large sizes.
+    @ScaledMetric(relativeTo: .caption) private var badgeHorizontalPadding: CGFloat = 6
+    @ScaledMetric(relativeTo: .caption) private var badgeVerticalPadding: CGFloat = 1
+    @ScaledMetric(relativeTo: .caption) private var badgeMinWidth: CGFloat = 18
+    /// The least room between the row's name and its count capsule.
+    private static let badgeLeadingGap: CGFloat = 8
+
     private var unreadCount: Int { notifications.items.count }
+
+    /// The bell's style for the shared `notificationBellTone`: red for an alert, the accent color for
+    /// notices alone, and the row's own style when the notification center is empty.
+    private var bellStyle: AnyShapeStyle {
+        switch NotificationSeverityKt.notificationBellTone(items: notifications.items) {
+        case .alert: return AnyShapeStyle(Color.red)
+        case .notice: return AnyShapeStyle(Color.accentColor)
+        case .quiet: return AnyShapeStyle(.primary)
+        }
+    }
+
+    /// An alert's level in words (`notification_level_warning`/`_error`), or `nil` for notices alone
+    /// and an empty notification center. VoiceOver reads it as the bell's label, ahead of the row's
+    /// name and count ("Warning, Notifications, 2"), so the tint is not the only sign of severity —
+    /// as Compose's own bell content description does.
+    private var alertLevelText: String? {
+        switch NotificationSeverityKt.highestNotificationLevel(items: notifications.items) {
+        case .error: return L("notification_level_error")
+        case .warning: return L("notification_level_warning")
+        case .info, nil: return nil
+        }
+    }
 
     var body: some View {
         Button {
@@ -35,13 +65,33 @@ struct NotificationCenterRow: View {
             // Laid out like a sidebar row: the bell, the name, and the count at the trailing edge
             // where the feed rows show their unread counts.
             HStack {
-                Label(L("home_notifications"), systemImage: "bell")
-                Spacer(minLength: 8)
-                // Only above zero, like the feed rows' unread counts.
+                Label {
+                    Text(L("home_notifications"))
+                } icon: {
+                    // Tinted by the most severe notification, so a warning or an error reads
+                    // differently from a new-version notice (Compose's own `bellTint`).
+                    Image(systemName: "bell")
+                        .foregroundStyle(bellStyle)
+                        .accessibilityLabel(alertLevelText ?? "")
+                        .accessibilityHidden(alertLevelText == nil)
+                }
+                Spacer(minLength: Self.badgeLeadingGap)
+                // Only above zero. A red capsule rather than the feed rows' plain secondary count, so
+                // it does not read as one more unread count (Compose's own `KeryxCountBadge`).
+                // Drawn here because no standard component draws it: `.badge(_:)` on a row shows the
+                // same plain count as the feed rows (`ui-guidelines`' exception 1, no standard
+                // component). It can go once a standard row badge can be shown in red. Built from
+                // standard pieces: system font, `@ScaledMetric`, and the system red with white text,
+                // as `PillLabel`'s white on the accent color.
                 if unreadCount > 0 {
                     Text("\(unreadCount)")
+                        .font(.caption.weight(.semibold))
                         .monospacedDigit()
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, badgeHorizontalPadding)
+                        .padding(.vertical, badgeVerticalPadding)
+                        .frame(minWidth: badgeMinWidth)
+                        .background(Capsule().fill(.red))
                 }
             }
             .padding(.horizontal, 16)
@@ -50,9 +100,9 @@ struct NotificationCenterRow: View {
         }
         .buttonStyle(.plain)
         .help(L("home_notifications"))
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(L("home_notifications"))
-        .accessibilityValue(unreadCount > 0 ? "\(unreadCount)" : "")
+        // One element reading its parts in order: the alert level (when there is one), the name, and
+        // the count.
+        .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isButton)
         .popover(isPresented: $isShowingPopover) {
             popoverContent
