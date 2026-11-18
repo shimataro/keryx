@@ -92,10 +92,10 @@ internal fun registerWindowsUriScheme(
     runCommand: (List<String>) -> Int = { args -> runProcessWithTimeout(args, REG_EXE_TIMEOUT_MS) },
 ) {
     registerWindowsShellOpen(
-        commandKey = "HKEY_CURRENT_USER\\Software\\Classes\\keryx\\shell\\open\\command",
+        commandKey = "HKEY_CURRENT_USER\\Software\\Classes\\$CUSTOM_URI_SCHEME\\shell\\open\\command",
         addCommands = listOf(
-            listOf(REG_EXE, "add", "HKEY_CURRENT_USER\\Software\\Classes\\keryx", "/ve", "/d", "URL:keryx Protocol", "/f"),
-            listOf(REG_EXE, "add", "HKEY_CURRENT_USER\\Software\\Classes\\keryx", "/v", "URL Protocol", "/d", "", "/f"),
+            listOf(REG_EXE, "add", "HKEY_CURRENT_USER\\Software\\Classes\\$CUSTOM_URI_SCHEME", "/ve", "/d", "URL:keryx Protocol", "/f"),
+            listOf(REG_EXE, "add", "HKEY_CURRENT_USER\\Software\\Classes\\$CUSTOM_URI_SCHEME", "/v", "URL Protocol", "/d", "", "/f"),
         ),
         context = "Windows URI scheme",
         prepareFailure = "Could not prepare the Windows URI scheme registry file",

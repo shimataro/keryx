@@ -17,7 +17,7 @@ import java.nio.file.StandardCopyOption
  */
 class FileTokenStorage(
     dirOverride: String? = null,
-    private val fileName: String = ".${CloudStorageType.DROPBOX.id}_tokens.json",
+    private val fileName: String = fallbackTokenFileName(CloudStorageType.DROPBOX),
     private val json: Json = Json { ignoreUnknownKeys = true },
 ) : TokenStorage {
 
@@ -117,3 +117,9 @@ class FileTokenStorage(
         return if (gone) TokenClearOutcome.CLEARED else TokenClearOutcome.DATA_MAY_REMAIN
     }
 }
+
+/**
+ * The name of [type]'s plaintext fallback token file in the data directory —
+ * `.{CloudStorageType.id}_tokens.json` (e.g. `.dropbox_tokens.json`).
+ */
+fun fallbackTokenFileName(type: CloudStorageType): String = ".${type.id}_tokens.json"

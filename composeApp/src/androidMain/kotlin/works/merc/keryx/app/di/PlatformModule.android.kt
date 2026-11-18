@@ -8,6 +8,7 @@ import works.merc.keryx.app.core.AndroidGoogleDriveSupport
 import works.merc.keryx.app.core.CloudStorageAvailability
 import works.merc.keryx.app.core.CloudStorageType
 import works.merc.keryx.app.data.cloud.FileTokenStorage
+import works.merc.keryx.app.data.cloud.fallbackTokenFileName
 import works.merc.keryx.app.data.cloud.KeystoreTokenStorage
 import works.merc.keryx.app.data.cloud.TokenStorage
 import works.merc.keryx.app.domain.OsNotificationSink
@@ -25,7 +26,7 @@ import works.merc.keryx.app.platform.update.AndroidUpdateInstaller
  * `PlatformModule.desktop.kt`) even though the encryption mechanism differs.
  */
 private fun providerTokenStorage(type: CloudStorageType): TokenStorage =
-    KeystoreTokenStorage(fallback = FileTokenStorage(fileName = ".${type.id}_tokens.json"), account = type.id)
+    KeystoreTokenStorage(fallback = FileTokenStorage(fileName = fallbackTokenFileName(type)), account = type.id)
 
 /**
  * Android `platformModule`. Dropbox and OneDrive are wired the same way as desktop (PKCE public

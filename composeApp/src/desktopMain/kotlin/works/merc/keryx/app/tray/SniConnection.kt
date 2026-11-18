@@ -76,7 +76,7 @@ internal class SniConnection private constructor(
      */
     private val actionInvokedHandler: AutoCloseable? = runCatching {
         connection.addSigHandler(FreedesktopNotifications.ActionInvoked::class.java) { signal ->
-            if (signal.actionKey == "default") _notificationActionInvoked.tryEmit(signal.id)
+            if (signal.actionKey == NOTIFICATION_DEFAULT_ACTION) _notificationActionInvoked.tryEmit(signal.id)
         }
     }.onFailure { Log.warn(LOG_TAG, "Could not watch for notification clicks", it) }.getOrNull()
 

@@ -58,7 +58,7 @@ private fun placementFromSaved(value: String): WindowPlacement = when (value) {
 private fun placementToSaved(placement: WindowPlacement): String = when (placement) {
     WindowPlacement.Maximized -> WINDOW_PLACEMENT_MAXIMIZED
     WindowPlacement.Fullscreen -> WINDOW_PLACEMENT_FULLSCREEN
-    else -> WINDOW_PLACEMENT_FLOATING
+    WindowPlacement.Floating -> WINDOW_PLACEMENT_FLOATING
 }
 
 /**

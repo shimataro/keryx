@@ -57,7 +57,6 @@ import works.merc.keryx.app.domain.OAuthCallbackParams
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.UpdateRepository
-import works.merc.keryx.app.domain.UpdateState
 import works.merc.keryx.app.domain.backgroundUpdateLoop
 import works.merc.keryx.app.domain.parseOAuthUri
 import works.merc.keryx.app.platform.AppDirs
@@ -93,7 +92,6 @@ import works.merc.keryx.app.ui.theme.updateLookAndFeel
 import java.awt.Dimension
 import java.awt.Taskbar
 import java.io.File
-import java.net.URI
 import java.util.concurrent.atomic.AtomicReference
 import javax.swing.SwingUtilities
 

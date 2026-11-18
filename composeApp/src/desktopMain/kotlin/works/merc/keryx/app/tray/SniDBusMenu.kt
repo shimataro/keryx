@@ -84,11 +84,11 @@ internal class SniDBusMenu(
     val updateRequests: SharedFlow<Unit> = _updateRequests
 
     /**
- * Provides the D-Bus object path for this menu.
- *
- * @return The menu's D-Bus object path.
- */
-override fun getObjectPath(): String = objectPath
+     * Provides the D-Bus object path for this menu.
+     *
+     * @return The menu's D-Bus object path.
+     */
+    override fun getObjectPath(): String = objectPath
 
     /** The revision the host would currently be told about. Exposed for tests. */
     val currentRevision: Int get() = desired.get().revision
@@ -177,10 +177,10 @@ override fun getObjectPath(): String = objectPath
         events.filterNot { handleEvent(it.id, it.eventId) }.map { it.id }
 
     /**
- * Determines whether the menu state has changed since the last layout was served.
- *
- * @return `true` if the current state differs from the last served state, `false` otherwise.
- */
+     * Determines whether the menu state has changed since the last layout was served.
+     *
+     * @return `true` if the current state differs from the last served state, `false` otherwise.
+     */
     override fun AboutToShow(id: Int): Boolean = desired.get().state != lastServed.get()
 
     /**
