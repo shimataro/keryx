@@ -74,60 +74,6 @@ internal const val SEARCH_ARTICLE_CHANGE_DEBOUNCE_MS = 100L
 
 private const val TAG = "HomeViewModel"
 
-/**
- * Debounced FTS results tagged with the query/filter that produced them (see
- * [HomeViewModel.searching]).
- */
-private data class SearchSnapshot(
-    val query: String,
-    val filter: ArticleFilter,
-    val results: List<ArticleSearchResult>,
-)
-
-/**
- * The filter and narrowing a displayed list was produced from. The list's flows catch up with a
- * filter or mode change asynchronously, so for a moment the rows on screen can still belong to the
- * previous one — [HomeViewModel.markAllRead] waits until this matches the current selection.
- */
-private data class ListScope(val filter: ArticleFilter, val narrowing: ListNarrowing)
-
-/** Rows tagged with the [ListScope] that produced them. */
-private data class ScopedRows<T>(val rows: List<T>, val scope: ListScope)
-
-/**
- * [HomeViewModel.articles] together with the filter its rows were produced from (null before the
- * list first loads). `filter` and `articles` are separate flows whose emissions can reach a UI in
- * either order, so a UI that acts on a filter switch against the rows — the iOS list scrolling back
- * to the top — waits for rows whose [filter] is the new one rather than acting on the previous
- * filter's rows.
- */
-class FilteredArticleRows internal constructor(val filter: ArticleFilter?, val rows: List<ArticleListRow>)
-
-/** [HomeViewModel.searchResults] together with the filter the search was scoped to — see [FilteredArticleRows]. */
-class FilteredSearchResults internal constructor(val filter: ArticleFilter, val rows: List<ArticleSearchResult>)
-
-/**
- * What the article list shows for a search — its rows and their title highlights — built from one
- * snapshot so the two never disagree. Compared by identity: a new instance is a new snapshot.
- */
-class SearchListDisplay internal constructor(results: List<ArticleSearchResult>) {
-    val rows: List<ArticleListRow> = results.map { it.article }
-    val titleMarkedById: Map<String, String> = results.associate { it.article.id to it.titleMarked }
-}
-
-/**
- * Search results tagged with the [ListScope] that produced them, plus what the article list shows
- * for them. The [display] is built once here, when the snapshot is produced, rather than on every
- * read of the list on screen — the reader's swipe asks for its rows on every drag event. [display]
- * is a body property, so it stays out of [equals]: it is derived from [rows] alone.
- */
-private data class ScopedSearchResults(val rows: List<ArticleSearchResult>, val scope: ListScope) {
-    val display: SearchListDisplay = SearchListDisplay(rows)
-}
-
-private fun narrowingFor(mode: ArticleListMode) =
-    ListNarrowing(unreadOnly = mode == ArticleListMode.Unread, starredOnly = mode == ArticleListMode.Starred)
-
 @OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
 class HomeViewModel(
     private val feedRepository: FeedRepository,
