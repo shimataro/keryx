@@ -88,4 +88,44 @@ class DerivedStateFlowTest {
         assertEquals(listOf(1, 0, 1), received)
         job.cancel()
     }
+
+    @Test
+    fun derivedReadsTheTransformOfTheSourceOnEveryRead() {
+        val doubled = a.derived { it * 2 }
+
+        assertEquals(2, doubled.value)
+        a.value = 21 // no collector, no dispatch in between
+        assertEquals(42, doubled.value)
+        assertEquals(listOf(42), doubled.replayCache)
+    }
+
+    @Test
+    fun derivedCollectorsDropEmissionsEqualToThePreviousOne() = runTest(UnconfinedTestDispatcher()) {
+        val parity = a.derived { it % 2 }
+        val received = mutableListOf<Int>()
+        val job = launch { parity.collect { received += it } }
+
+        a.value = 3
+        a.value = 4
+        a.value = 6
+        a.value = 7
+
+        assertEquals(listOf(1, 0, 1), received)
+        job.cancel()
+    }
+
+    @Test
+    fun derivedCollectorsUseTheGivenEquivalence() = runTest(UnconfinedTestDispatcher()) {
+        // Everything counts as equivalent: only the first emission reaches the collector.
+        val always = a.derived(areEquivalent = { _, _ -> true }) { it }
+        val received = mutableListOf<Int>()
+        val job = launch { always.collect { received += it } }
+
+        a.value = 2
+        a.value = 3
+
+        assertEquals(listOf(1), received)
+        assertEquals(3, always.value)
+        job.cancel()
+    }
 }
