@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.material3.DrawerState
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
@@ -34,6 +35,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.SaveableStateHolder
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
@@ -43,9 +45,11 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.launch
@@ -406,345 +410,197 @@ fun HomeScreen() {
             LocalSnackbarHostState provides snackbarHostState,
             LocalFallbackReaderScrollHost provides fallbackReaderScrollHost,
         ) {
-        Box(
-            Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)).fillMaxSize()
-                .focusRequester(focusRequester)
-                .focusable()
-                .homeKeyboardShortcuts(
-                    textInputFocused = textInputFocused,
-                    onEscape = { dragOverlay.cancel() },
-                    // Every handler below reads keyboardPane, not focusedPane directly — it already
-                    // folds in the drawer-open precedence (see HomePaneLayout.kt's keyboardPaneFor),
-                    // so there is exactly one branch to write per handler instead of a
-                    // feedDrawerOpen-guarded when(focusedPane) at each one. onUp/onDown additionally
-                    // branch on focusedTextInput first (see onVerticalKey).
-                    onUp = { onVerticalKey(-1) },
-                    onDown = { onVerticalKey(1) },
-                    onPageUp = { scrollFallbackReaderIfFocused(-1, ArticleScrollUnit.Page) },
-                    onPageDown = { scrollFallbackReaderIfFocused(1, ArticleScrollUnit.Page) },
-                    onHome = { scrollFallbackReaderIfFocused(-1, ArticleScrollUnit.Edge) },
-                    onEnd = { scrollFallbackReaderIfFocused(1, ArticleScrollUnit.Edge) },
-                    onLeft = {
-                        // FeedList -> {} covers the drawer-open case too (keyboardPane resolves to
-                        // FeedList whenever the drawer is open) — there is nothing further left to
-                        // move to from the feed list either way.
-                        when (keyboardPane) {
-                            HomePane.FeedList -> {}
-                            HomePane.ArticleList -> setFocusedPane(HomePane.FeedList)
-                            HomePane.ArticleDetail -> setFocusedPane(HomePane.ArticleList)
-                        }
-                    },
-                    onRight = {
-                        if (feedDrawerOpen) {
-                            // Closing the drawer *is* "advance to the article list" at a narrow
-                            // layout — mirrors selectFilterFromRow's own onSelectionAdvance. This
-                            // must also advance focusedPane itself: at PaneLayout.Dual,
-                            // ArticleListPane's own hamburger (onOpenDrawer) can open the drawer
-                            // without touching focusedPane, which can therefore still be
-                            // ArticleDetail (both panes stay on screen together at Dual) from an
-                            // earlier visit — closing the drawer without this would leave the
-                            // article list unable to receive ↑/↓ afterwards.
-                            setFocusedPane(HomePane.ArticleList)
-                            scope.launch { drawerState.close() }
-                        } else {
-                            when (focusedPane) {
-                                HomePane.FeedList -> {
-                                    if (vm.selectedArticleId.value == null) vm.currentArticles().firstOrNull()?.let { vm.selectArticle(it) }
-                                    setFocusedPane(HomePane.ArticleList)
-                                }
-                                HomePane.ArticleList -> setFocusedPane(HomePane.ArticleDetail)
-                                HomePane.ArticleDetail -> {}
+            Box(
+                Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)).fillMaxSize()
+                    .focusRequester(focusRequester)
+                    .focusable()
+                    .homeKeyboardShortcuts(
+                        textInputFocused = textInputFocused,
+                        onEscape = { dragOverlay.cancel() },
+                        // Every handler below reads keyboardPane, not focusedPane directly — it already
+                        // folds in the drawer-open precedence (see HomePaneLayout.kt's keyboardPaneFor),
+                        // so there is exactly one branch to write per handler instead of a
+                        // feedDrawerOpen-guarded when(focusedPane) at each one. onUp/onDown additionally
+                        // branch on focusedTextInput first (see onVerticalKey).
+                        onUp = { onVerticalKey(-1) },
+                        onDown = { onVerticalKey(1) },
+                        onPageUp = { scrollFallbackReaderIfFocused(-1, ArticleScrollUnit.Page) },
+                        onPageDown = { scrollFallbackReaderIfFocused(1, ArticleScrollUnit.Page) },
+                        onHome = { scrollFallbackReaderIfFocused(-1, ArticleScrollUnit.Edge) },
+                        onEnd = { scrollFallbackReaderIfFocused(1, ArticleScrollUnit.Edge) },
+                        onLeft = {
+                            // FeedList -> {} covers the drawer-open case too (keyboardPane resolves to
+                            // FeedList whenever the drawer is open) — there is nothing further left to
+                            // move to from the feed list either way.
+                            when (keyboardPane) {
+                                HomePane.FeedList -> {}
+                                HomePane.ArticleList -> setFocusedPane(HomePane.FeedList)
+                                HomePane.ArticleDetail -> setFocusedPane(HomePane.ArticleList)
                             }
-                        }
-                    },
-                    onNextArticle = { vm.selectNext() },
-                    onPreviousArticle = { vm.selectPrevious() },
-                    // Null (key left unconsumed) whenever the feed list isn't the keyboard target —
-                    // the same rule that decides whether the menu bar shows these keys.
-                    onFeedListRename = if (feedListKeysActive) ({ feedListRenameRequestId++ }) else null,
-                    onFeedListDelete = if (feedListKeysActive) ({ feedListDeleteRequestId++ }) else null,
-                    onSearch = { focusSearch() },
-                    onKeyboardEngaged = { keyboardEngaged = true },
-                    // Same rule the article list's own pull gesture uses, plus the list actually
-                    // being on screen (not the reader alone, not behind the open drawer), so the
-                    // shortcut exists exactly where the gesture can be made.
-                    onRefreshList = if (
-                        pullRefreshAvailable(isTouchPrimary, searchActive, hasNoFeeds = feeds.isEmpty()) &&
-                        articleListOnScreen(paneLayout, focusedPane, feedDrawerOpen)
-                    ) {
-                        vm::pullToRefresh
-                    } else {
-                        null
-                    },
-                ),
-        ) {
-            // Wraps both the Triple and narrow-layout branches below (and FeedDragGhost) in one
-            // place, rather than duplicating the provide call in each branch, where it would be
-            // easy to add a new branch later and forget it.
-            CompositionLocalProvider(LocalKeyboardEngaged provides keyboardEngaged) {
-            BoxWithConstraints(Modifier.fillMaxSize()) {
-                val layout = paneLayoutFor(maxWidth)
-                LaunchedEffect(layout) {
-                    paneLayout = layout
-                    // At Triple, FeedListPane's own field is permanent, so the bar is always
-                    // "open" there. Dropping below Triple keeps it open only if there's a query to
-                    // keep showing — otherwise an idle bar would reappear at a narrower width for
-                    // no reason (see HomeViewModel.searchBarVisible's own KDoc).
-                    vm.setSearchBarVisible(layout == PaneLayout.Triple || vm.searchQuery.value.isNotEmpty())
-                }
-                // Clamps focusedPane for a narrow layout exactly once, on the first frame with a
-                // real (post-layout) width — a transient pre-layout frame reports maxWidth == 0.dp,
-                // which paneLayoutFor resolves to Single regardless of the eventual layout, and
-                // clamping against that would misfire even on desktop. See initialPaneFor's own
-                // KDoc for why restoring straight into ArticleDetail at a narrow layout is wrong;
-                // this effect fires whenever maxWidth changes, but the body is gated by
-                // initialPaneClamped so it only runs once per composition instance.
-                LaunchedEffect(maxWidth) {
-                    if (!initialPaneClamped && maxWidth > 0.dp) {
-                        initialPaneClamped = true
-                        val clamped = initialPaneFor(layout, focusedPane)
-                        if (clamped != focusedPane) setFocusedPane(clamped)
-                        // A one-time nudge into the drawer for the dead end it exists to remove —
-                        // see shouldAutoOpenFeedDrawer's own KDoc. Runs in the same once-per-session
-                        // effect as the clamp above, so a later resize/rotation/feed deletion can't
-                        // re-trigger it.
-                        if (shouldAutoOpenFeedDrawer(layout, vm.cloudConnected.value, vm.hasAnyFeed())) {
-                            drawerState.open()
-                        }
-                    }
-                }
-                // BackHandler is always called (its own `enabled` gates the actual interception).
-                // homeBackAction is false (None) at PaneLayout.Triple (visiblePanes never changes
-                // there — desktop's WINDOW_MIN_WIDTH never resolves to anything else, see
-                // TRIPLE_PANE_MIN_WIDTH's KDoc), so the app's default (OS back gesture /
-                // Alt+F4-equivalent) is left alone there. It is also None at PaneLayout.Dual depth
-                // 1->2 while the search bar is closed (visiblePanes' sliding window shows the same
-                // two panes at both depths), so a back press that would produce no visible change
-                // falls through instead of being swallowed — but CloseSearchBar still applies there
-                // while the bar is open, since closing it always changes what's on screen.
-                val backAction = homeBackAction(layout, focusedPane.ordinal + 1, searchBarVisible)
-                // The drawer's own back handling lives in ModalDrawerSheet(drawerState = ...) ->
-                // PredictiveBackHandler(enabled = drawerState.isOpen) — this gate makes this
-                // BackHandler stand down while it's open, independent of registration order, so
-                // the drawer always wins a back press over whatever's behind it (the only case
-                // where the two could otherwise race is Dual + the search bar open + the drawer
-                // open). Both handlers below are composed unconditionally with mutually exclusive
-                // `enabled` flags: closing the search bar stays a plain back, while popping the
-                // reader (PopPane, PaneLayout.Single only) previews the article list behind it
-                // during Android's predictive back gesture and commits through goBack(). It also
-                // stands down while a committed gesture is still animating out (acceptsNewGesture),
-                // so a second back can't pop past the article list.
-                BackHandler(enabled = backAction == HomeBackAction.CloseSearchBar && !drawerState.isOpen) { goBack() }
-                PredictiveBackHandler(
-                    enabled = backAction == HomeBackAction.PopPane &&
-                        !drawerState.isOpen &&
-                        readerBackAccepting,
-                ) { progress -> readerBack.handle(progress) }
-
-                if (layout == PaneLayout.Triple) {
-                    // Dual/Triple keep the selection highlight: the selected row's pane stays on
-                    // screen alongside the pane it opened. (Single's narrow-only suppression lives
-                    // in the drawer branch below, alongside its own drawer-content override.)
-                    CompositionLocalProvider(LocalRowSelectionVisible provides true) {
-                    val dividerWidth = PANE_DIVIDER_WIDTH.dp
-                    // coerceAtLeast(0.dp): with WINDOW_MIN_WIDTH >= TRIPLE_PANE_MIN_WIDTH, this
-                    // shouldn't go negative in steady state, but a transient pre-layout frame
-                    // (maxWidth == 0) must not produce a negative Dp, which Modifier.width() rejects.
-                    val availableForPanes = (maxWidth - dividerWidth * 2 - DETAIL_PANE_MIN_WIDTH.dp).coerceAtLeast(0.dp)
-                    val (displayedFeedWidth, displayedArticleWidth) =
-                        triplePaneWidths(availableForPanes, feedListPaneWidth.dp, articleListPaneWidth.dp)
-
-                    Row(Modifier.fillMaxSize()) {
-                        FeedListPane(
-                            vm,
-                            focused = keyboardPane == HomePane.FeedList && keyboardNavActive,
-                            dragOverlay = dragOverlay,
-                            onActivated = { activatePane(HomePane.FeedList) },
-                            modifier = Modifier.width(displayedFeedWidth),
-                            onAddFeedClick = { openAddFeed() },
-                            onTextInputFocusChange = { feedListTextInput = it },
-                            renameSelectedRequestId = feedListRenameRequestId,
-                            deleteSelectedRequestId = feedListDeleteRequestId,
-                            notifVm = notifVm,
-                        )
-                        ResizableDivider(onDrag = { deltaPx ->
-                            layoutVm.setFeedListPaneWidth(feedListPaneWidth + with(density) { deltaPx.toDp().value })
-                        })
-                        ArticleListPane(
-                            vm,
-                            focused = keyboardPane == HomePane.ArticleList && keyboardNavActive,
-                            onActivated = { activatePane(HomePane.ArticleList) },
-                            modifier = Modifier.width(displayedArticleWidth),
-                            notifVm = notifVm,
-                            onAddFeedClick = { openAddFeed() },
-                            onCopyArticleUrl = copyArticleRowUrl,
-                            onOpenArticleInBrowser = openArticleRowInBrowser,
-                            onShareArticle = shareArticleRow,
-                        )
-                        ResizableDivider(onDrag = { deltaPx ->
-                            layoutVm.setArticleListPaneWidth(articleListPaneWidth + with(density) { deltaPx.toDp().value })
-                        })
-                        ArticleDetailPane(
-                            vm,
-                            modifier = Modifier.weight(1f),
-                            onActivated = { activatePane(HomePane.ArticleDetail) },
-                            copyPulse = urlCopier.pulse,
-                            onCopyUrl = copyArticleRowUrl,
-                            onOpenInBrowser = openArticleRowInBrowser,
-                            onShare = shareArticleRow,
-                        )
-                    }
-                    }
-                } else {
-                    // Single/Dual: the feed list is a modal navigation drawer rather than an
-                    // on-screen pane (see HomePaneLayout.kt's feedListIsDrawer) — no resizable
-                    // dividers (nothing to drag on a phone/narrow window) and so no persisted pane
-                    // widths for the two panes NarrowPaneRow does show. Where both are on screen
-                    // (Dual) it sizes them the same way the Triple branch above does: the article
-                    // list at a fixed width capped at its own default (dualPaneArticleListWidth),
-                    // the reader taking whatever is left. See HomePaneLayout.kt's visiblePanes for
-                    // what those panes are at each depth, and NarrowPaneRow for why they're emitted
-                    // from fixed positions there rather than iterated over (it is what preserves
-                    // each pane's scroll position across the stack's comings and goings).
-                    val visible = visiblePanes(layout, focusedPane.ordinal + 1)
-                    ModalNavigationDrawer(
-                        drawerState = drawerState,
-                        // ModalNavigationDrawer claims the whole root Box for an edge-swipe-to-open
-                        // gesture, which would otherwise fight the reader's own swipe-to-navigate
-                        // (ArticleSwipeNav) for the same horizontal drag. Open: always enabled, so
-                        // a swipe-to-dismiss and a scrim tap both still close it. Closed: only
-                        // where the reader isn't on screen to swipe (Single's article list depth) —
-                        // Dual and Single's article-detail depth open the drawer via the hamburger
-                        // button only. dragOverlay.item == null additionally guards a feed drag in
-                        // progress inside the drawer from being misread as this same gesture.
-                        // An article row's own swipe (articleRowSwipe) is a child of this drawer, so
-                        // it claims a horizontal drag that starts on a row first: there the drag acts
-                        // on the row, and only a drag started off the rows opens the drawer.
-                        gesturesEnabled = dragOverlay.item == null &&
-                            (drawerState.isOpen || HomePane.ArticleDetail !in visible),
-                        drawerContent = {
-                            // The drawer's whole purpose is showing *where you are* — the current
-                            // feed/folder/tag/quick-filter selection must stay highlighted while
-                            // it's open, exactly like Gmail highlighting the current label. The
-                            // Single-only suppression above doesn't apply here: this is an overlay
-                            // the user is looking at right now, not a screen navigated away from.
-                            CompositionLocalProvider(LocalRowSelectionVisible provides true) {
-                                ModalDrawerSheet(
-                                    drawerState = drawerState,
-                                    modifier = Modifier.width(drawerSheetWidth(maxWidth)),
-                                ) {
-                                    FeedListPane(
-                                        vm,
-                                        focused = keyboardPane == HomePane.FeedList && keyboardNavActive,
-                                        dragOverlay = dragOverlay,
-                                        onActivated = { returnKeyboardFocusToRoot() },
-                                        onAddFeedClick = { openAddFeed() },
-                                        onTextInputFocusChange = { feedListTextInput = it },
-                                        renameSelectedRequestId = feedListRenameRequestId,
-                                        deleteSelectedRequestId = feedListDeleteRequestId,
-                                        notifVm = notifVm,
-                                        onNotificationNavigated = { scope.launch { drawerState.close() } },
-                                        onSelectionAdvance = {
-                                            // Also advances focusedPane, not just the drawer: at
-                                            // PaneLayout.Dual, closing the drawer without this could
-                                            // leave focusedPane stuck at whatever it was before the
-                                            // drawer opened (e.g. ArticleDetail), and the article
-                                            // list unable to receive ↑/↓ afterwards. Single always
-                                            // resolves ArticleList already (the drawer is only
-                                            // reachable from that depth there), so this is a no-op there.
-                                            setFocusedPane(HomePane.ArticleList)
-                                            scope.launch { drawerState.close() }
-                                        },
-                                    )
+                        },
+                        onRight = {
+                            if (feedDrawerOpen) {
+                                // Closing the drawer *is* "advance to the article list" at a narrow
+                                // layout — mirrors selectFilterFromRow's own onSelectionAdvance. This
+                                // must also advance focusedPane itself: at PaneLayout.Dual,
+                                // ArticleListPane's own hamburger (onOpenDrawer) can open the drawer
+                                // without touching focusedPane, which can therefore still be
+                                // ArticleDetail (both panes stay on screen together at Dual) from an
+                                // earlier visit — closing the drawer without this would leave the
+                                // article list unable to receive ↑/↓ afterwards.
+                                setFocusedPane(HomePane.ArticleList)
+                                scope.launch { drawerState.close() }
+                            } else {
+                                when (focusedPane) {
+                                    HomePane.FeedList -> {
+                                        if (vm.selectedArticleId.value == null) vm.currentArticles().firstOrNull()?.let { vm.selectArticle(it) }
+                                        setFocusedPane(HomePane.ArticleList)
+                                    }
+                                    HomePane.ArticleList -> setFocusedPane(HomePane.ArticleDetail)
+                                    HomePane.ArticleDetail -> {}
                                 }
                             }
                         },
-                    ) {
-                        // Single: tapping a row navigates away from it (drills into the article
-                        // list, or the article detail), so a lingering selection highlight there
-                        // would mark a row the user can no longer see — see
-                        // LocalRowSelectionVisible's own KDoc. Dual keeps it: both panes it shows
-                        // stay on screen throughout.
-                        CompositionLocalProvider(LocalRowSelectionVisible provides (layout != PaneLayout.Single)) {
-                        NarrowPaneRow(
-                            visible,
-                            maxWidth,
-                            Modifier.fillMaxSize(),
-                            paneState,
-                            listBehind = readerBackListBehind,
-                            backGesture = { readerBack.gesture },
-                        ) { pane, paneModifier ->
-                            when (pane) {
-                                HomePane.FeedList ->
-                                    error("The feed list is a drawer at a narrow PaneLayout, never a NarrowPaneRow pane.")
-                                HomePane.ArticleList -> ArticleListPane(
-                                    vm,
-                                    focused = keyboardPane == HomePane.ArticleList && keyboardNavActive,
-                                    onActivated = { activatePane(HomePane.ArticleList) },
-                                    modifier = paneModifier,
-                                    notifVm = notifVm,
-                                    // No-op at PaneLayout.Dual — mirrors ArticleListPane's own
-                                    // KDoc on this parameter ("No-op at PaneLayout.Triple, where
-                                    // every pane is already visible and there is nowhere to advance
-                                    // to"), which applies here just as much: Dual's visiblePanes
-                                    // never changes with depth (both panes are already on screen),
-                                    // so advancing focusedPane to ArticleDetail here would only
-                                    // leave the tapped article-list row unable to receive ↑/↓
-                                    // afterwards with nothing to show for it on screen.
-                                    onSelectionAdvance = {
-                                        if (layout == PaneLayout.Single) setFocusedPane(HomePane.ArticleDetail)
-                                    },
-                                    onOpenDrawer = { scope.launch { drawerState.open() } },
-                                    onExitSearch = ::goBack,
-                                    onTextInputFocusChange = { articleListTextInput = it },
-                                    // Only while the bar is closed: once already open, there is
-                                    // nowhere further to advance to (see ArticleListTopBar's own
-                                    // KDoc on onSearchClick). Doesn't advance the navigation stack —
-                                    // the field lives on this same pane. setFocusedPane is still
-                                    // required at PaneLayout.Dual: the search icon's own onClick
-                                    // never reaches paneActivation (a separate, unchained click
-                                    // handler — see ArticleListPaneContent), so without this,
-                                    // focusedPane could still be ArticleDetail (both panes are on
-                                    // screen at Dual) and homeBackAction would never resolve to
-                                    // CloseSearchBar.
-                                    onSearchClick = {
-                                        setFocusedPane(HomePane.ArticleList)
-                                        vm.setSearchBarVisible(true)
-                                        vm.requestSearchFocus()
-                                    },
-                                    returnRipplePulse = readerBackListPulse(articleReturnRipplePulse, readerBackListBehind),
-                                    onAddFeedClick = { openAddFeed() },
-                                    onCopyArticleUrl = copyArticleRowUrl,
-                                    onOpenArticleInBrowser = openArticleRowInBrowser,
-                                    onShareArticle = shareArticleRow,
-                                )
-                                HomePane.ArticleDetail -> ArticleDetailPane(
-                                    vm,
-                                    modifier = paneModifier,
-                                    onActivated = { activatePane(HomePane.ArticleDetail) },
-                                    copyPulse = urlCopier.pulse,
-                                    onCopyUrl = copyArticleRowUrl,
-                                    onOpenInBrowser = openArticleRowInBrowser,
-                                    onShare = shareArticleRow,
-                                    // Only where the article list isn't on screen beside this one
-                                    // to return to — PaneLayout.Single's article-detail depth. At
-                                    // Dual the reader is a permanent neighbor of the article list,
-                                    // like Gmail's own tablet reading pane, with no back button —
-                                    // swipeNavigation below is what still lets it move between
-                                    // articles there.
-                                    onNavigateUp = if (HomePane.ArticleList !in visible) ::goBack else null,
-                                    swipeNavigation = articleSwipeNavigation,
-                                )
+                        onNextArticle = { vm.selectNext() },
+                        onPreviousArticle = { vm.selectPrevious() },
+                        // Null (key left unconsumed) whenever the feed list isn't the keyboard target —
+                        // the same rule that decides whether the menu bar shows these keys.
+                        onFeedListRename = if (feedListKeysActive) ({ feedListRenameRequestId++ }) else null,
+                        onFeedListDelete = if (feedListKeysActive) ({ feedListDeleteRequestId++ }) else null,
+                        onSearch = { focusSearch() },
+                        onKeyboardEngaged = { keyboardEngaged = true },
+                        // Same rule the article list's own pull gesture uses, plus the list actually
+                        // being on screen (not the reader alone, not behind the open drawer), so the
+                        // shortcut exists exactly where the gesture can be made.
+                        onRefreshList = if (
+                            pullRefreshAvailable(isTouchPrimary, searchActive, hasNoFeeds = feeds.isEmpty()) &&
+                            articleListOnScreen(paneLayout, focusedPane, feedDrawerOpen)
+                        ) {
+                            vm::pullToRefresh
+                        } else {
+                            null
+                        },
+                    ),
+            ) {
+                // Wraps both the Triple and narrow-layout branches below (and FeedDragGhost) in one
+                // place, rather than duplicating the provide call in each branch, where it would be
+                // easy to add a new branch later and forget it.
+                CompositionLocalProvider(LocalKeyboardEngaged provides keyboardEngaged) {
+                    BoxWithConstraints(Modifier.fillMaxSize()) {
+                        val layout = paneLayoutFor(maxWidth)
+                        LaunchedEffect(layout) {
+                            paneLayout = layout
+                            // At Triple, FeedListPane's own field is permanent, so the bar is always
+                            // "open" there. Dropping below Triple keeps it open only if there's a query to
+                            // keep showing — otherwise an idle bar would reappear at a narrower width for
+                            // no reason (see HomeViewModel.searchBarVisible's own KDoc).
+                            vm.setSearchBarVisible(layout == PaneLayout.Triple || vm.searchQuery.value.isNotEmpty())
+                        }
+                        // Clamps focusedPane for a narrow layout exactly once, on the first frame with a
+                        // real (post-layout) width — a transient pre-layout frame reports maxWidth == 0.dp,
+                        // which paneLayoutFor resolves to Single regardless of the eventual layout, and
+                        // clamping against that would misfire even on desktop. See initialPaneFor's own
+                        // KDoc for why restoring straight into ArticleDetail at a narrow layout is wrong;
+                        // this effect fires whenever maxWidth changes, but the body is gated by
+                        // initialPaneClamped so it only runs once per composition instance.
+                        LaunchedEffect(maxWidth) {
+                            if (!initialPaneClamped && maxWidth > 0.dp) {
+                                initialPaneClamped = true
+                                val clamped = initialPaneFor(layout, focusedPane)
+                                if (clamped != focusedPane) setFocusedPane(clamped)
+                                // A one-time nudge into the drawer for the dead end it exists to remove —
+                                // see shouldAutoOpenFeedDrawer's own KDoc. Runs in the same once-per-session
+                                // effect as the clamp above, so a later resize/rotation/feed deletion can't
+                                // re-trigger it.
+                                if (shouldAutoOpenFeedDrawer(layout, vm.cloudConnected.value, vm.hasAnyFeed())) {
+                                    drawerState.open()
+                                }
                             }
                         }
+                        // BackHandler is always called (its own `enabled` gates the actual interception).
+                        // homeBackAction is false (None) at PaneLayout.Triple (visiblePanes never changes
+                        // there — desktop's WINDOW_MIN_WIDTH never resolves to anything else, see
+                        // TRIPLE_PANE_MIN_WIDTH's KDoc), so the app's default (OS back gesture /
+                        // Alt+F4-equivalent) is left alone there. It is also None at PaneLayout.Dual depth
+                        // 1->2 while the search bar is closed (visiblePanes' sliding window shows the same
+                        // two panes at both depths), so a back press that would produce no visible change
+                        // falls through instead of being swallowed — but CloseSearchBar still applies there
+                        // while the bar is open, since closing it always changes what's on screen.
+                        val backAction = homeBackAction(layout, focusedPane.ordinal + 1, searchBarVisible)
+                        // The drawer's own back handling lives in ModalDrawerSheet(drawerState = ...) ->
+                        // PredictiveBackHandler(enabled = drawerState.isOpen) — this gate makes this
+                        // BackHandler stand down while it's open, independent of registration order, so
+                        // the drawer always wins a back press over whatever's behind it (the only case
+                        // where the two could otherwise race is Dual + the search bar open + the drawer
+                        // open). Both handlers below are composed unconditionally with mutually exclusive
+                        // `enabled` flags: closing the search bar stays a plain back, while popping the
+                        // reader (PopPane, PaneLayout.Single only) previews the article list behind it
+                        // during Android's predictive back gesture and commits through goBack(). It also
+                        // stands down while a committed gesture is still animating out (acceptsNewGesture),
+                        // so a second back can't pop past the article list.
+                        BackHandler(enabled = backAction == HomeBackAction.CloseSearchBar && !drawerState.isOpen) { goBack() }
+                        PredictiveBackHandler(
+                            enabled = backAction == HomeBackAction.PopPane &&
+                                !drawerState.isOpen &&
+                                readerBackAccepting,
+                        ) { progress -> readerBack.handle(progress) }
+
+                        if (layout == PaneLayout.Triple) {
+                            TriplePaneContent(
+                                vm = vm,
+                                layoutVm = layoutVm,
+                                notifVm = notifVm,
+                                maxWidth = maxWidth,
+                                feedListPaneWidth = feedListPaneWidth,
+                                articleListPaneWidth = articleListPaneWidth,
+                                keyboardPane = keyboardPane,
+                                keyboardNavActive = keyboardNavActive,
+                                dragOverlay = dragOverlay,
+                                feedListRenameRequestId = feedListRenameRequestId,
+                                feedListDeleteRequestId = feedListDeleteRequestId,
+                                urlCopier = urlCopier,
+                                copyArticleRowUrl = copyArticleRowUrl,
+                                shareArticleRow = shareArticleRow,
+                                onActivatePane = ::activatePane,
+                                onAddFeedClick = { openAddFeed() },
+                                onFeedListTextInputChange = { feedListTextInput = it },
+                            )
+                        } else {
+                            NarrowPaneContent(
+                                vm = vm,
+                                notifVm = notifVm,
+                                layout = layout,
+                                maxWidth = maxWidth,
+                                focusedPane = focusedPane,
+                                drawerState = drawerState,
+                                paneState = paneState,
+                                readerBack = readerBack,
+                                readerBackListBehind = readerBackListBehind,
+                                scope = scope,
+                                keyboardPane = keyboardPane,
+                                keyboardNavActive = keyboardNavActive,
+                                dragOverlay = dragOverlay,
+                                feedListRenameRequestId = feedListRenameRequestId,
+                                feedListDeleteRequestId = feedListDeleteRequestId,
+                                articleReturnRipplePulse = articleReturnRipplePulse,
+                                urlCopier = urlCopier,
+                                copyArticleRowUrl = copyArticleRowUrl,
+                                shareArticleRow = shareArticleRow,
+                                articleSwipeNavigation = articleSwipeNavigation,
+                                onReturnKeyboardFocusToRoot = { returnKeyboardFocusToRoot() },
+                                onActivatePane = ::activatePane,
+                                onSetFocusedPane = ::setFocusedPane,
+                                onBack = ::goBack,
+                                onAddFeedClick = { openAddFeed() },
+                                onFeedListTextInputChange = { feedListTextInput = it },
+                                onArticleListTextInputChange = { articleListTextInput = it },
+                            )
                         }
                     }
+                    // Last child of the root Box, so the floating drag chip paints above every pane.
+                    FeedDragGhost(dragOverlay)
                 }
             }
-            // Last child of the root Box, so the floating drag chip paints above every pane.
-            FeedDragGhost(dragOverlay)
-            }
-        }
         }
         LaunchedEffect(Unit) { focusRequester.requestFocus() }
     }
@@ -783,6 +639,269 @@ fun HomeScreen() {
     }
 
     PendingNotificationActionHost(vm, notifVm, paneLayout, onFocusPane = { setFocusedPane(it) })
+}
+
+/**
+ * [HomeScreen]'s [PaneLayout.Triple] branch: the feed list, article list and reader side by side,
+ * separated by [ResizableDivider]s. Every piece of state it shows is owned by [HomeScreen] (hoisted
+ * outside its `BoxWithConstraints` so it survives a layout flip) and passed in; this only lays the
+ * panes out.
+ */
+@Composable
+private fun TriplePaneContent(
+    vm: HomeViewModel,
+    layoutVm: HomeLayoutViewModel,
+    notifVm: NotificationCenterViewModel,
+    maxWidth: Dp,
+    feedListPaneWidth: Double,
+    articleListPaneWidth: Double,
+    keyboardPane: HomePane,
+    keyboardNavActive: Boolean,
+    dragOverlay: FeedDragOverlayState,
+    feedListRenameRequestId: Int,
+    feedListDeleteRequestId: Int,
+    urlCopier: ArticleUrlCopier,
+    copyArticleRowUrl: (ArticleListRow) -> Unit,
+    shareArticleRow: ((ArticleListRow) -> Unit)?,
+    onActivatePane: (HomePane) -> Unit,
+    onAddFeedClick: () -> Unit,
+    onFeedListTextInputChange: (HomeTextInput?) -> Unit,
+) {
+    val density = LocalDensity.current
+    // Dual/Triple keep the selection highlight: the selected row's pane stays on screen alongside
+    // the pane it opened. (Single's narrow-only suppression lives in NarrowPaneContent, alongside
+    // its own drawer-content override.)
+    CompositionLocalProvider(LocalRowSelectionVisible provides true) {
+        val dividerWidth = PANE_DIVIDER_WIDTH.dp
+        // coerceAtLeast(0.dp): with WINDOW_MIN_WIDTH >= TRIPLE_PANE_MIN_WIDTH, this
+        // shouldn't go negative in steady state, but a transient pre-layout frame
+        // (maxWidth == 0) must not produce a negative Dp, which Modifier.width() rejects.
+        val availableForPanes = (maxWidth - dividerWidth * 2 - DETAIL_PANE_MIN_WIDTH.dp).coerceAtLeast(0.dp)
+        val (displayedFeedWidth, displayedArticleWidth) =
+            triplePaneWidths(availableForPanes, feedListPaneWidth.dp, articleListPaneWidth.dp)
+
+        Row(Modifier.fillMaxSize()) {
+            FeedListPane(
+                vm,
+                focused = keyboardPane == HomePane.FeedList && keyboardNavActive,
+                dragOverlay = dragOverlay,
+                onActivated = { onActivatePane(HomePane.FeedList) },
+                modifier = Modifier.width(displayedFeedWidth),
+                onAddFeedClick = onAddFeedClick,
+                onTextInputFocusChange = onFeedListTextInputChange,
+                renameSelectedRequestId = feedListRenameRequestId,
+                deleteSelectedRequestId = feedListDeleteRequestId,
+                notifVm = notifVm,
+            )
+            ResizableDivider(onDrag = { deltaPx ->
+                layoutVm.setFeedListPaneWidth(feedListPaneWidth + with(density) { deltaPx.toDp().value })
+            })
+            ArticleListPane(
+                vm,
+                focused = keyboardPane == HomePane.ArticleList && keyboardNavActive,
+                onActivated = { onActivatePane(HomePane.ArticleList) },
+                modifier = Modifier.width(displayedArticleWidth),
+                notifVm = notifVm,
+                onAddFeedClick = onAddFeedClick,
+                onCopyArticleUrl = copyArticleRowUrl,
+                onOpenArticleInBrowser = openArticleRowInBrowser,
+                onShareArticle = shareArticleRow,
+            )
+            ResizableDivider(onDrag = { deltaPx ->
+                layoutVm.setArticleListPaneWidth(articleListPaneWidth + with(density) { deltaPx.toDp().value })
+            })
+            ArticleDetailPane(
+                vm,
+                modifier = Modifier.weight(1f),
+                onActivated = { onActivatePane(HomePane.ArticleDetail) },
+                copyPulse = urlCopier.pulse,
+                onCopyUrl = copyArticleRowUrl,
+                onOpenInBrowser = openArticleRowInBrowser,
+                onShare = shareArticleRow,
+            )
+        }
+    }
+}
+
+/**
+ * [HomeScreen]'s narrow-layout branch ([PaneLayout.Single] / [PaneLayout.Dual]): the feed list as
+ * a modal navigation drawer, and the article list and reader hosted by [NarrowPaneRow].
+ * [drawerState], [paneState] and [readerBack] are [HomeScreen]'s own, hoisted outside its
+ * `BoxWithConstraints` so they survive a Triple<->narrow layout flip — never remember them here.
+ */
+@Composable
+private fun NarrowPaneContent(
+    vm: HomeViewModel,
+    notifVm: NotificationCenterViewModel,
+    layout: PaneLayout,
+    maxWidth: Dp,
+    focusedPane: HomePane,
+    drawerState: DrawerState,
+    paneState: SaveableStateHolder,
+    readerBack: ReaderBackController,
+    readerBackListBehind: Boolean,
+    scope: CoroutineScope,
+    keyboardPane: HomePane,
+    keyboardNavActive: Boolean,
+    dragOverlay: FeedDragOverlayState,
+    feedListRenameRequestId: Int,
+    feedListDeleteRequestId: Int,
+    articleReturnRipplePulse: Int,
+    urlCopier: ArticleUrlCopier,
+    copyArticleRowUrl: (ArticleListRow) -> Unit,
+    shareArticleRow: ((ArticleListRow) -> Unit)?,
+    articleSwipeNavigation: ArticleSwipeNavigation,
+    onReturnKeyboardFocusToRoot: () -> Unit,
+    onActivatePane: (HomePane) -> Unit,
+    onSetFocusedPane: (HomePane) -> Unit,
+    onBack: () -> Unit,
+    onAddFeedClick: () -> Unit,
+    onFeedListTextInputChange: (HomeTextInput?) -> Unit,
+    onArticleListTextInputChange: (HomeTextInput?) -> Unit,
+) {
+    // Single/Dual: the feed list is a modal navigation drawer rather than an
+    // on-screen pane (see HomePaneLayout.kt's feedListIsDrawer) — no resizable
+    // dividers (nothing to drag on a phone/narrow window) and so no persisted pane
+    // widths for the two panes NarrowPaneRow does show. Where both are on screen
+    // (Dual) it sizes them the same way TriplePaneContent does: the article
+    // list at a fixed width capped at its own default (dualPaneArticleListWidth),
+    // the reader taking whatever is left. See HomePaneLayout.kt's visiblePanes for
+    // what those panes are at each depth, and NarrowPaneRow for why they're emitted
+    // from fixed positions there rather than iterated over (it is what preserves
+    // each pane's scroll position across the stack's comings and goings).
+    val visible = visiblePanes(layout, focusedPane.ordinal + 1)
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        // ModalNavigationDrawer claims the whole root Box for an edge-swipe-to-open
+        // gesture, which would otherwise fight the reader's own swipe-to-navigate
+        // (ArticleSwipeNav) for the same horizontal drag. Open: always enabled, so
+        // a swipe-to-dismiss and a scrim tap both still close it. Closed: only
+        // where the reader isn't on screen to swipe (Single's article list depth) —
+        // Dual and Single's article-detail depth open the drawer via the hamburger
+        // button only. dragOverlay.item == null additionally guards a feed drag in
+        // progress inside the drawer from being misread as this same gesture.
+        // An article row's own swipe (articleRowSwipe) is a child of this drawer, so
+        // it claims a horizontal drag that starts on a row first: there the drag acts
+        // on the row, and only a drag started off the rows opens the drawer.
+        gesturesEnabled = dragOverlay.item == null &&
+            (drawerState.isOpen || HomePane.ArticleDetail !in visible),
+        drawerContent = {
+            // The drawer's whole purpose is showing *where you are* — the current
+            // feed/folder/tag/quick-filter selection must stay highlighted while
+            // it's open, exactly like Gmail highlighting the current label. The
+            // Single-only suppression below doesn't apply here: this is an overlay
+            // the user is looking at right now, not a screen navigated away from.
+            CompositionLocalProvider(LocalRowSelectionVisible provides true) {
+                ModalDrawerSheet(
+                    drawerState = drawerState,
+                    modifier = Modifier.width(drawerSheetWidth(maxWidth)),
+                ) {
+                    FeedListPane(
+                        vm,
+                        focused = keyboardPane == HomePane.FeedList && keyboardNavActive,
+                        dragOverlay = dragOverlay,
+                        onActivated = onReturnKeyboardFocusToRoot,
+                        onAddFeedClick = onAddFeedClick,
+                        onTextInputFocusChange = onFeedListTextInputChange,
+                        renameSelectedRequestId = feedListRenameRequestId,
+                        deleteSelectedRequestId = feedListDeleteRequestId,
+                        notifVm = notifVm,
+                        onNotificationNavigated = { scope.launch { drawerState.close() } },
+                        onSelectionAdvance = {
+                            // Also advances focusedPane, not just the drawer: at
+                            // PaneLayout.Dual, closing the drawer without this could
+                            // leave focusedPane stuck at whatever it was before the
+                            // drawer opened (e.g. ArticleDetail), and the article
+                            // list unable to receive ↑/↓ afterwards. Single always
+                            // resolves ArticleList already (the drawer is only
+                            // reachable from that depth there), so this is a no-op there.
+                            onSetFocusedPane(HomePane.ArticleList)
+                            scope.launch { drawerState.close() }
+                        },
+                    )
+                }
+            }
+        },
+    ) {
+        // Single: tapping a row navigates away from it (drills into the article
+        // list, or the article detail), so a lingering selection highlight there
+        // would mark a row the user can no longer see — see
+        // LocalRowSelectionVisible's own KDoc. Dual keeps it: both panes it shows
+        // stay on screen throughout.
+        CompositionLocalProvider(LocalRowSelectionVisible provides (layout != PaneLayout.Single)) {
+            NarrowPaneRow(
+                visible,
+                maxWidth,
+                Modifier.fillMaxSize(),
+                paneState,
+                listBehind = readerBackListBehind,
+                backGesture = { readerBack.gesture },
+            ) { pane, paneModifier ->
+                when (pane) {
+                    HomePane.FeedList ->
+                        error("The feed list is a drawer at a narrow PaneLayout, never a NarrowPaneRow pane.")
+                    HomePane.ArticleList -> ArticleListPane(
+                        vm,
+                        focused = keyboardPane == HomePane.ArticleList && keyboardNavActive,
+                        onActivated = { onActivatePane(HomePane.ArticleList) },
+                        modifier = paneModifier,
+                        notifVm = notifVm,
+                        // No-op at PaneLayout.Dual — mirrors ArticleListPane's own
+                        // KDoc on this parameter ("No-op at PaneLayout.Triple, where
+                        // every pane is already visible and there is nowhere to advance
+                        // to"), which applies here just as much: Dual's visiblePanes
+                        // never changes with depth (both panes are already on screen),
+                        // so advancing focusedPane to ArticleDetail here would only
+                        // leave the tapped article-list row unable to receive ↑/↓
+                        // afterwards with nothing to show for it on screen.
+                        onSelectionAdvance = {
+                            if (layout == PaneLayout.Single) onSetFocusedPane(HomePane.ArticleDetail)
+                        },
+                        onOpenDrawer = { scope.launch { drawerState.open() } },
+                        onExitSearch = onBack,
+                        onTextInputFocusChange = onArticleListTextInputChange,
+                        // Only while the bar is closed: once already open, there is
+                        // nowhere further to advance to (see ArticleListTopBar's own
+                        // KDoc on onSearchClick). Doesn't advance the navigation stack —
+                        // the field lives on this same pane. setFocusedPane is still
+                        // required at PaneLayout.Dual: the search icon's own onClick
+                        // never reaches paneActivation (a separate, unchained click
+                        // handler — see ArticleListPaneContent), so without this,
+                        // focusedPane could still be ArticleDetail (both panes are on
+                        // screen at Dual) and homeBackAction would never resolve to
+                        // CloseSearchBar.
+                        onSearchClick = {
+                            onSetFocusedPane(HomePane.ArticleList)
+                            vm.setSearchBarVisible(true)
+                            vm.requestSearchFocus()
+                        },
+                        returnRipplePulse = readerBackListPulse(articleReturnRipplePulse, readerBackListBehind),
+                        onAddFeedClick = onAddFeedClick,
+                        onCopyArticleUrl = copyArticleRowUrl,
+                        onOpenArticleInBrowser = openArticleRowInBrowser,
+                        onShareArticle = shareArticleRow,
+                    )
+                    HomePane.ArticleDetail -> ArticleDetailPane(
+                        vm,
+                        modifier = paneModifier,
+                        onActivated = { onActivatePane(HomePane.ArticleDetail) },
+                        copyPulse = urlCopier.pulse,
+                        onCopyUrl = copyArticleRowUrl,
+                        onOpenInBrowser = openArticleRowInBrowser,
+                        onShare = shareArticleRow,
+                        // Only where the article list isn't on screen beside this one
+                        // to return to — PaneLayout.Single's article-detail depth. At
+                        // Dual the reader is a permanent neighbor of the article list,
+                        // like Gmail's own tablet reading pane, with no back button —
+                        // swipeNavigation below is what still lets it move between
+                        // articles there.
+                        onNavigateUp = if (HomePane.ArticleList !in visible) onBack else null,
+                        swipeNavigation = articleSwipeNavigation,
+                    )
+                }
+            }
+        }
+    }
 }
 
 /**
