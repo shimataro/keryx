@@ -1,6 +1,5 @@
 package works.merc.keryx.app.ui.home
 
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -15,7 +14,6 @@ import works.merc.keryx.app.presentation.home.HomeViewModel
 import works.merc.keryx.app.presentation.home.isDuplicateFolderName
 import works.merc.keryx.app.presentation.home.isDuplicateTagName
 import works.merc.keryx.app.resources.Res
-import works.merc.keryx.app.resources.common_cancel
 import works.merc.keryx.app.resources.common_delete
 import works.merc.keryx.app.resources.home_add_folder
 import works.merc.keryx.app.resources.home_add_tag
@@ -29,7 +27,7 @@ import works.merc.keryx.app.resources.home_new_tag_hint
 import works.merc.keryx.app.resources.home_tag_name_duplicate
 import works.merc.keryx.app.resources.home_unsubscribe_body
 import works.merc.keryx.app.resources.home_unsubscribe_title
-import works.merc.keryx.app.ui.common.KeryxAlertDialog
+import works.merc.keryx.app.ui.common.KeryxConfirmDialog
 
 /**
  * The feed-list sidebar's modal dialogs: add tag, add folder, the delete/unsubscribe confirmations.
@@ -81,13 +79,12 @@ internal fun FeedListDialogs(
         )
     }
     confirmingDeleteTag?.let { tag ->
-        KeryxAlertDialog(
-            onDismissRequest = { onConfirmingDeleteTagChange(null) },
+        KeryxConfirmDialog(
             title = stringResource(Res.string.home_delete_tag_menu),
-            text = { Text(stringResource(Res.string.home_delete_tag_confirm, tag.name)) },
+            body = stringResource(Res.string.home_delete_tag_confirm, tag.name),
             confirmText = stringResource(Res.string.common_delete),
             onConfirm = { vm.deleteTag(tag.id); onConfirmingDeleteTagChange(null) },
-            dismissText = stringResource(Res.string.common_cancel),
+            onDismiss = { onConfirmingDeleteTagChange(null) },
             destructive = true,
         )
     }
@@ -109,25 +106,23 @@ internal fun FeedListDialogs(
         )
     }
     confirmingDeleteFolder?.let { folder ->
-        KeryxAlertDialog(
-            onDismissRequest = { onConfirmingDeleteFolderChange(null) },
+        KeryxConfirmDialog(
             title = stringResource(Res.string.home_delete_folder_menu),
-            text = { Text(stringResource(Res.string.home_delete_folder_confirm, folder.name)) },
+            body = stringResource(Res.string.home_delete_folder_confirm, folder.name),
             confirmText = stringResource(Res.string.common_delete),
             onConfirm = { vm.deleteFolder(folder.id); onConfirmingDeleteFolderChange(null) },
-            dismissText = stringResource(Res.string.common_cancel),
+            onDismiss = { onConfirmingDeleteFolderChange(null) },
             destructive = true,
         )
     }
     confirmingUnsubscribeFeed?.let { feed ->
         val displayName = feed.displayTitle()
-        KeryxAlertDialog(
-            onDismissRequest = { onConfirmingUnsubscribeFeedChange(null) },
+        KeryxConfirmDialog(
             title = stringResource(Res.string.home_unsubscribe_title, displayName),
-            text = { Text(stringResource(Res.string.home_unsubscribe_body)) },
+            body = stringResource(Res.string.home_unsubscribe_body),
             confirmText = stringResource(Res.string.common_delete),
             onConfirm = { vm.unsubscribeFeed(feed.id); onConfirmingUnsubscribeFeedChange(null) },
-            dismissText = stringResource(Res.string.common_cancel),
+            onDismiss = { onConfirmingUnsubscribeFeedChange(null) },
             destructive = true,
         )
     }

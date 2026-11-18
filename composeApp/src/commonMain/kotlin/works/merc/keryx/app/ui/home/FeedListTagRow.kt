@@ -17,7 +17,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
@@ -27,7 +26,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import org.jetbrains.compose.resources.stringResource
 import works.merc.keryx.app.data.local.db.Tags
@@ -195,19 +193,14 @@ internal fun TagRow(
                 }
                 // Same weighted slot either way, so the color dot on the left and the count badge on
                 // the right never move when editing starts or ends.
-                if (editingName) {
-                    Box(Modifier.weight(1f)) {
-                        InlineRenameField(
-                            value = tag.name,
-                            onCommit = onRenameCommit,
-                            onCancel = onRenameCancel,
-                            blockingError = nameError,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                    }
-                } else {
-                    Text(tag.name, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
+                EditableRowName(
+                    editing = editingName,
+                    label = tag.name,
+                    editValue = tag.name,
+                    onCommit = onRenameCommit,
+                    onCancel = onRenameCancel,
+                    blockingError = nameError,
+                )
             }
         }
         if (count > 0) CountBadge(count, selected, focused, isDropTarget, onContainerColor = MaterialTheme.colorScheme.onTertiaryContainer)

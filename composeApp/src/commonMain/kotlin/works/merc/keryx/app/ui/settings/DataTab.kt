@@ -17,7 +17,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
@@ -28,10 +27,8 @@ import works.merc.keryx.app.presentation.settings.OpmlOperation
 import works.merc.keryx.app.presentation.settings.OpmlRequest
 import works.merc.keryx.app.presentation.settings.OpmlResult
 import works.merc.keryx.app.ui.common.FlatTonalButton
-import works.merc.keryx.app.ui.common.KeryxIcon
 import works.merc.keryx.app.ui.common.KeryxIcons
 import works.merc.keryx.app.ui.common.SegmentedControl
-import works.merc.keryx.app.ui.common.SmallSpinner
 import works.merc.keryx.app.ui.i18n.opmlImportedText
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.settings_cache
@@ -172,14 +169,6 @@ private fun OpmlActionButton(
     onClick: () -> Unit,
 ) {
     FlatTonalButton(onClick = onClick, enabled = enabled) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            if (running) {
-                SmallSpinner(size = 18.dp)
-            } else {
-                KeryxIcon(icon, contentDescription = null, modifier = Modifier.size(18.dp))
-            }
-            Spacer(Modifier.width(8.dp))
-            Text(label)
-        }
+        GlyphLabel(label) { BusyGlyph(busy = running, icon = icon, size = 18.dp) }
     }
 }

@@ -3,6 +3,7 @@ package works.merc.keryx.app.ui.setup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -34,12 +35,11 @@ import works.merc.keryx.app.platform.VerticalScrollbarIfNeeded
 import works.merc.keryx.app.presentation.setup.SetupController
 import works.merc.keryx.app.presentation.setup.SetupPhase
 import works.merc.keryx.app.ui.common.FlatTonalButton
-import works.merc.keryx.app.ui.common.KeryxAlertDialog
+import works.merc.keryx.app.ui.common.KeryxConfirmDialog
 import works.merc.keryx.app.ui.common.KeryxRaisedSurface
 import works.merc.keryx.app.ui.settings.NextcloudServerDialog
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.common_abort
-import works.merc.keryx.app.resources.common_cancel
 import works.merc.keryx.app.resources.setup_abort_connect_confirm_body
 import works.merc.keryx.app.resources.setup_abort_connect_confirm_title
 import works.merc.keryx.app.resources.setup_auth_failed
@@ -100,69 +100,41 @@ fun SetupScreen(onComplete: () -> Unit) {
             val enabled = phase != SetupPhase.CONNECTING
 
             // Local-only card
-            KeryxRaisedSurface(modifier = Modifier.widthIn(max = 420.dp)) {
-                Column(
-                    Modifier.padding(20.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
+            SetupOptionCard(
+                title = stringResource(Res.string.setup_local_only),
+                description = stringResource(Res.string.setup_local_desc),
+            ) {
+                FlatTonalButton(
+                    onClick = { vm.chooseLocalOnly(onComplete) },
+                    enabled = enabled,
+                    modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Text(
-                        stringResource(Res.string.setup_local_only),
-                        style = MaterialTheme.typography.titleMedium,
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        stringResource(Res.string.setup_local_desc),
-                        style = MaterialTheme.typography.bodySmall,
-                        textAlign = TextAlign.Center,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.height(12.dp))
-                    FlatTonalButton(
-                        onClick = { vm.chooseLocalOnly(onComplete) },
-                        enabled = enabled,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text(stringResource(Res.string.setup_local_action))
-                    }
+                    Text(stringResource(Res.string.setup_local_action))
                 }
             }
 
             if (vm.availableCloudTypes.isNotEmpty()) {
                 Spacer(Modifier.height(12.dp))
-                KeryxRaisedSurface(modifier = Modifier.widthIn(max = 420.dp)) {
-                    Column(
-                        Modifier.padding(20.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        Text(
-                            stringResource(Res.string.setup_cloud_sync_section_title),
-                            style = MaterialTheme.typography.titleMedium,
-                        )
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            stringResource(Res.string.setup_cloud_sync_section_desc),
-                            style = MaterialTheme.typography.bodySmall,
-                            textAlign = TextAlign.Center,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Spacer(Modifier.height(12.dp))
-                        vm.availableCloudTypes.forEachIndexed { index, type ->
-                            FlatTonalButton(
-                                onClick = {
-                                    if (type.requiresServerUrl) {
-                                        askingServerForId = type.id
-                                    } else {
-                                        vm.connect(type, onDone = onComplete)
-                                    }
-                                },
-                                enabled = enabled,
-                                modifier = Modifier.fillMaxWidth(),
-                            ) {
-                                Text(stringResource(type.setupTitle()))
-                            }
-                            if (index != vm.availableCloudTypes.lastIndex) {
-                                Spacer(Modifier.height(8.dp))
-                            }
+                SetupOptionCard(
+                    title = stringResource(Res.string.setup_cloud_sync_section_title),
+                    description = stringResource(Res.string.setup_cloud_sync_section_desc),
+                ) {
+                    vm.availableCloudTypes.forEachIndexed { index, type ->
+                        FlatTonalButton(
+                            onClick = {
+                                if (type.requiresServerUrl) {
+                                    askingServerForId = type.id
+                                } else {
+                                    vm.connect(type, onDone = onComplete)
+                                }
+                            },
+                            enabled = enabled,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(stringResource(type.setupTitle()))
+                        }
+                        if (index != vm.availableCloudTypes.lastIndex) {
+                            Spacer(Modifier.height(8.dp))
                         }
                     }
                 }
@@ -214,13 +186,44 @@ fun SetupScreen(onComplete: () -> Unit) {
     }
 
     if (confirmingAbortConnect) {
-        KeryxAlertDialog(
-            onDismissRequest = { confirmingAbortConnect = false },
+        KeryxConfirmDialog(
             title = stringResource(Res.string.setup_abort_connect_confirm_title),
-            text = { Text(stringResource(Res.string.setup_abort_connect_confirm_body)) },
+            body = stringResource(Res.string.setup_abort_connect_confirm_body),
             confirmText = stringResource(Res.string.common_abort),
             onConfirm = { vm.cancelConnect(); confirmingAbortConnect = false },
-            dismissText = stringResource(Res.string.common_cancel),
+            onDismiss = { confirmingAbortConnect = false },
         )
+    }
+}
+
+/** Widest a setup option card grows, so its text keeps a readable line length on a wide window. */
+private val SETUP_CARD_MAX_WIDTH = 420.dp
+
+/** One of the setup screen's option cards: a [title], a centered [description], then [content]. */
+@Composable
+private fun SetupOptionCard(
+    title: String,
+    description: String,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    KeryxRaisedSurface(modifier = Modifier.widthIn(max = SETUP_CARD_MAX_WIDTH)) {
+        Column(
+            Modifier.padding(20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                title,
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                description,
+                style = MaterialTheme.typography.bodySmall,
+                textAlign = TextAlign.Center,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(12.dp))
+            content()
+        }
     }
 }

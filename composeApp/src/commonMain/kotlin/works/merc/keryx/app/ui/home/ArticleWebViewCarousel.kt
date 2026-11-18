@@ -20,7 +20,6 @@ import io.github.kdroidfilter.webview.web.WebView
 import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.domain.ArticleListRow
 import works.merc.keryx.app.domain.ArticleReaderRow
-import works.merc.keryx.app.domain.displayTitle
 import works.merc.keryx.app.presentation.article.ArticleHtmlTheme
 
 /**
@@ -146,9 +145,7 @@ internal fun ArticleWebViewSlot(
     // Resolved from this page's own row, so a neighbour in a mixed list (All Feeds, a folder, a tag)
     // names its own feed. Keyed by value: a feeds emission that leaves this page's name and favicon
     // alone does not rebuild — and so reload — its document.
-    val bylineFeed = bylineFeeds[row.feed_id]
-    val bylineFeedName = bylineFeed?.displayTitle()
-    val bylineFaviconUrl = bylineFeed?.favicon_url
+    val (bylineFeedName, bylineFaviconUrl) = bylineFeeds.readerByline(row.feed_id)
     val document = remember(theme, row, full, bylineFeedName, bylineFaviconUrl, strings) {
         readerDocument(
             theme, row, full, bylineFeedName, bylineFaviconUrl,

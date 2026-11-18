@@ -8,6 +8,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import org.jetbrains.compose.resources.DrawableResource
+import org.jetbrains.compose.resources.stringResource
+import works.merc.keryx.app.resources.Res
+import works.merc.keryx.app.resources.common_cancel
 
 /**
  * Drop-in replacement for `androidx.compose.material3.AlertDialog`. Desktop's `actual` renders in
@@ -43,6 +46,32 @@ expect fun KeryxAlertDialog(
     modal: Boolean = true,
     destructive: Boolean = false,
 )
+
+/**
+ * The app's plain yes/no confirmation: a [KeryxAlertDialog] with a [title], a one-paragraph [body],
+ * a confirm button named after the action, and the common "Cancel" as its dismiss button. Pass
+ * [destructive] for a confirmation whose action deletes or resets something (see
+ * [KeryxAlertDialog]'s own `destructive`).
+ */
+@Composable
+internal fun KeryxConfirmDialog(
+    title: String,
+    body: String,
+    confirmText: String,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+    destructive: Boolean = false,
+) {
+    KeryxAlertDialog(
+        onDismissRequest = onDismiss,
+        title = title,
+        text = { Text(body) },
+        confirmText = confirmText,
+        onConfirm = onConfirm,
+        dismissText = stringResource(Res.string.common_cancel),
+        destructive = destructive,
+    )
+}
 
 /** One tab (category) in a [KeryxTabDialog]: a stable [id] used for selection/dispatch, a localized
  * [label] (shown with the icon — under it in desktop's tab bar, beside it in Android's category
