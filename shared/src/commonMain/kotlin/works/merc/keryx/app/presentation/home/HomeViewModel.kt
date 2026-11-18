@@ -62,6 +62,7 @@ import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.TagRepository
 import works.merc.keryx.app.presentation.DerivedStateFlow
 import works.merc.keryx.app.presentation.ManualSync
+import works.merc.keryx.app.presentation.derived
 import works.merc.keryx.app.presentation.sameListOrBothEmpty
 
 /**
@@ -171,11 +172,7 @@ class HomeViewModel(
             .flowOn(dispatcher)
             .stateIn(viewModelScope, started, null)
 
-    val feeds: StateFlow<List<Feeds>> = DerivedStateFlow(
-        { feedsSnapshot.value.orEmpty() },
-        feedsSnapshot.map { it.orEmpty() },
-        areEquivalent = ::sameListOrBothEmpty,
-    )
+    val feeds: StateFlow<List<Feeds>> = feedsSnapshot.derived(::sameListOrBothEmpty) { it.orEmpty() }
 
     /**
      * [feeds], minus the emissions that change only `etag` / `last_modified` / `updated_at`
@@ -463,18 +460,13 @@ class HomeViewModel(
             .flowOn(dispatcher)
             .stateIn(viewModelScope, started, null)
 
-    val articles: StateFlow<List<ArticleListRow>> = DerivedStateFlow(
-        { articlesSnapshot.value?.rows.orEmpty() },
-        articlesSnapshot.map { it?.rows.orEmpty() },
-        areEquivalent = ::sameListOrBothEmpty,
-    )
+    val articles: StateFlow<List<ArticleListRow>> =
+        articlesSnapshot.derived(::sameListOrBothEmpty) { it?.rows.orEmpty() }
 
     /** [articles] paired with the filter its rows belong to — see [FilteredArticleRows]. */
-    val articlesWithFilter: StateFlow<FilteredArticleRows> = DerivedStateFlow(
-        { articlesSnapshot.value.toFilteredArticleRows() },
-        articlesSnapshot.map { it.toFilteredArticleRows() },
+    val articlesWithFilter: StateFlow<FilteredArticleRows> = articlesSnapshot.derived(
         areEquivalent = { old, new -> old.filter == new.filter && sameListOrBothEmpty(old.rows, new.rows) },
-    )
+    ) { it.toFilteredArticleRows() }
 
     private fun ScopedRows<ArticleListRow>?.toFilteredArticleRows() =
         FilteredArticleRows(this?.scope?.filter, this?.rows.orEmpty())
@@ -783,17 +775,12 @@ class HomeViewModel(
             ScopedSearchResults(emptyList(), ListScope(_rawSearchResults.value.filter, narrowing.value)),
         )
 
-    val searchResults: StateFlow<List<ArticleSearchResult>> = DerivedStateFlow(
-        { searchResultsSnapshot.value.rows },
-        searchResultsSnapshot.map { it.rows },
-    )
+    val searchResults: StateFlow<List<ArticleSearchResult>> = searchResultsSnapshot.derived { it.rows }
 
     /** [searchResults] paired with the filter the search was scoped to — see [FilteredSearchResults]. */
-    val searchResultsWithFilter: StateFlow<FilteredSearchResults> = DerivedStateFlow(
-        { searchResultsSnapshot.value.toFilteredSearchResults() },
-        searchResultsSnapshot.map { it.toFilteredSearchResults() },
+    val searchResultsWithFilter: StateFlow<FilteredSearchResults> = searchResultsSnapshot.derived(
         areEquivalent = { old, new -> old.filter == new.filter && sameListOrBothEmpty(old.rows, new.rows) },
-    )
+    ) { it.toFilteredSearchResults() }
 
     private fun ScopedSearchResults.toFilteredSearchResults() = FilteredSearchResults(scope.filter, rows)
 
@@ -802,10 +789,7 @@ class HomeViewModel(
      * flow, so the article list can never render rows from one search update with highlights from
      * another, and does not map the results a second time.
      */
-    val searchListDisplay: StateFlow<SearchListDisplay> = DerivedStateFlow(
-        { searchResultsSnapshot.value.display },
-        searchResultsSnapshot.map { it.display },
-    )
+    val searchListDisplay: StateFlow<SearchListDisplay> = searchResultsSnapshot.derived { it.display }
 
     /** The scope of the rows on screen — see [ListScope]; null before the article list first loads. */
     private fun displayedScope(): ListScope? =

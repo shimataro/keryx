@@ -858,9 +858,9 @@ class FeedRepository(
 }
 
 /**
- * Iterates over a reordered feed-id list and writes [newSortOrder]/[newSortOrderUpdatedAt]
- * only for feeds whose sort order actually changed. The caller provides [onFeedId] for any
- * extra action on the feed being moved/inserted (e.g. folder update).
+ * Iterates over the reordered feed-id list [newOrder] and writes the new sort order (stamped with
+ * [now]) only for feeds whose order differs from [previousSortOrderOf]. [feedId], the feed being
+ * moved/inserted, is skipped; the caller provides [onFeedId] for its own write (e.g. folder update).
  *
  * @return The new sort order of [feedId].
  */

@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.map
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.data.local.db.Tags
+import works.merc.keryx.app.data.local.db.WatchAllActive
 
 /** Tags and feed↔tag assignments. Tag attach/detach is a soft-delete. */
 class TagRepository(
@@ -28,9 +29,7 @@ class TagRepository(
      * @return A flow emitting a map from feed IDs to their attached tag IDs.
      */
     fun watchFeedTagMap(): Flow<Map<String, Set<String>>> =
-        feedTags.watchAllActive().asFlow().mapToList(dispatcher).map { rows ->
-            rows.groupBy({ it.feed_id }, { it.tag_id }).mapValues { it.value.toSet() }
-        }
+        feedTags.watchAllActive().asFlow().mapToList(dispatcher).map(::groupTagIdsByFeed)
 
     /**
      * Watches the active tag IDs assigned to a feed.
@@ -57,7 +56,7 @@ class TagRepository(
      * @return A map from feed IDs to their associated tag IDs.
      */
     fun getFeedTagMap(): Map<String, Set<String>> =
-        feedTags.watchAllActive().executeAsList().groupBy({ it.feed_id }, { it.tag_id }).mapValues { it.value.toSet() }
+        groupTagIdsByFeed(feedTags.watchAllActive().executeAsList())
 
     /**
      * Creates or reactivates a tag with the specified name and color.
@@ -94,3 +93,7 @@ class TagRepository(
         syncScheduler.scheduleSync()
     }
 }
+
+/** Active feed-to-tag assignment rows grouped into a map from feed id to its tag ids. */
+private fun groupTagIdsByFeed(rows: List<WatchAllActive>): Map<String, Set<String>> =
+    rows.groupBy({ it.feed_id }, { it.tag_id }).mapValues { it.value.toSet() }

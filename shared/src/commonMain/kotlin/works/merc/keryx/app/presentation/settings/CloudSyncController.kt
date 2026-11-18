@@ -37,6 +37,7 @@ import works.merc.keryx.app.platform.UnrestrictedNetworkConditionMonitor
 import works.merc.keryx.app.presentation.DerivedStateFlow
 import works.merc.keryx.app.presentation.ManualSync
 import works.merc.keryx.app.presentation.ManualSyncEdge
+import works.merc.keryx.app.presentation.derived
 import works.merc.keryx.app.presentation.formatTimestamp
 
 /**
@@ -131,10 +132,7 @@ class CloudSyncController(
      * [ManualSync.connected]: [connectedType] is non-null. Derived on read (see [canSyncNow]'s
      * init), so it can never disagree with [connectedType] or [canSyncNow].
      */
-    override val connected: StateFlow<Boolean> = DerivedStateFlow(
-        compute = { _connectedType.value != null },
-        changes = _connectedType.map { it != null },
-    )
+    override val connected: StateFlow<Boolean> = _connectedType.derived { it != null }
 
     /**
      * [ManualSync.disabledByAuth]: the same flag as [lastSyncAuthFailed]. [canSyncNowNow] is false
@@ -167,10 +165,7 @@ class CloudSyncController(
      * The current [LocalSettings.syncOnMeteredNetwork] value, for the setting's switch. Written
      * through `PreferencesController.setSyncOnMeteredNetwork`, the one setter for it.
      */
-    val syncOnMeteredNetwork: StateFlow<Boolean> = DerivedStateFlow(
-        compute = { settingsRepository.localSettings.value.syncOnMeteredNetwork },
-        changes = settingsRepository.localSettings.map { it.syncOnMeteredNetwork },
-    )
+    val syncOnMeteredNetwork: StateFlow<Boolean> = settingsRepository.localSettings.derived { it.syncOnMeteredNetwork }
 
     /**
      * True while an automatic sync is waiting for a network that allows it — the connected
