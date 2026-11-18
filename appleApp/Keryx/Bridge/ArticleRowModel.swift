@@ -121,8 +121,8 @@ enum ArticleRowMenuState {
 
     /// The row menu's items, in the Article menu's order and grouping (`HomeCommands.swift`), like
     /// Compose's `articleRowMenuEntries`. Every UI's row menu — macOS's SwiftUI `.contextMenu` and the
-    /// iOS cell's `UIMenu` (`ArticleRowContextMenu`) — draws exactly this list, and runs each item
-    /// through `ArticleRowMenu.perform`.
+    /// iOS list's `UIMenu` (`ArticleRowMenu.configuration`) — draws exactly this list, and runs each
+    /// item through `ArticleRowMenu.perform`.
     ///
     /// The read item is labelled from the state after the open (`articleReadAfterContextMenuOpen`), and
     /// each item requests the explicit state its label promises rather than toggling — otherwise "Mark as

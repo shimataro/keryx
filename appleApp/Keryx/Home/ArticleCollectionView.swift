@@ -3,24 +3,6 @@ import KeryxShared
 import SwiftUI
 import UIKit
 
-/// A scroll `ArticleListView` asks `ArticleCollectionView` for, carried out once per `generation`.
-struct ArticleListScrollRequest: Equatable {
-    enum Kind: Equatable {
-        /// Bring a row into view (`ArticleListScrollGate.Target`).
-        case reveal(ArticleListScrollGate.Target)
-        /// The new-articles pill's jump to the fresh end.
-        case freshEnd(newestFirst: Bool)
-    }
-
-    var generation = 0
-    var kind: Kind?
-
-    /// The next request, replacing this one.
-    func next(_ kind: Kind) -> ArticleListScrollRequest {
-        ArticleListScrollRequest(generation: generation + 1, kind: kind)
-    }
-}
-
 /// The iOS article list: a `UICollectionView` list rather than SwiftUI's `List`, as the sidebar is.
 ///
 /// - A scroll runs at once against the rows the list holds, or waits — only the latest — until the

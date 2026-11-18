@@ -3,8 +3,9 @@ import SwiftUI
 
 /// What an article row draws: the unread dot and star, the favicon, the title, the feed and date, and
 /// the selection or return-flash fill behind them. `ArticleRowView` wraps it in its button, and the
-/// iOS row menu shows it as the menu's preview (`ArticleRowContextMenu`), so the two always match.
-/// It reads nothing from the SwiftUI environment, so a preview hosted outside the list draws the same.
+/// iOS row menu shows it as the menu's preview (`ArticleRowMenu.configuration`), so the two always
+/// match. It reads nothing from the SwiftUI environment, so a preview hosted outside the list draws
+/// the same.
 struct ArticleRowLabel: View {
     let model: ArticleRowModel
     let isSelected: Bool

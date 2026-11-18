@@ -19,9 +19,6 @@ struct ArticleListView: View {
     /// Pushes the reader when the split view is collapsed (iPhone); a no-op otherwise. A row is a
     /// plain button rather than a `List` selection, so nothing navigates to the reader by itself.
     let onOpenArticle: () -> Void
-    /// Bumped by `HomeView` each time a phone-width split view brings this list forward from the
-    /// sidebar; every change rebuilds `content` (see its `.id` in `body`). Unused on macOS.
-    let remountGeneration: Int
 
     /// The selection is drawn strongly only while this window is key (AppKit's own rule for a
     /// source list's selection), on top of the article list holding the pane focus.
@@ -102,7 +99,7 @@ struct ArticleListView: View {
                 // and is not scrolled out from under.
                 .onChange(of: topResetInput, initial: true) { _, input in
                     if let first = topReset.update(input) {
-                        requestScroll(ArticleListScrollGate.Target(rowId: first))
+                        requestScroll(ArticleListScrollRequest.Target(rowId: first))
                     }
                 }
                 // Only when the user selected an article (`selectionRevealRequests`) and it is off-screen
@@ -111,7 +108,7 @@ struct ArticleListView: View {
                 // (a selection found tombstoned), which must not scroll the list.
                 .onChange(of: home.selectionRevealRequests) { _, _ in
                     guard let id = home.selectedArticleId else { return }
-                    requestScroll(ArticleListScrollGate.Target(rowId: id, onlyIfOffScreen: true))
+                    requestScroll(ArticleListScrollRequest.Target(rowId: id, onlyIfOffScreen: true))
                 }
                 .onChange(of: showsRows) { _, shows in
                     // The article restored from the previous session is already selected before
@@ -120,7 +117,7 @@ struct ArticleListView: View {
                     guard !didShowFirstRows, shows else { return }
                     didShowFirstRows = true
                     guard let id = home.selectedArticleId else { return }
-                    requestScroll(ArticleListScrollGate.Target(rowId: id))
+                    requestScroll(ArticleListScrollRequest.Target(rowId: id))
                 }
             #endif
         }
@@ -614,9 +611,9 @@ struct ArticleListView: View {
     }
 
     #if os(iOS)
-    /// Whether the list is showing rows — see `ArticleListScrollGate.listShowsRows`.
+    /// Whether the list is showing rows — see `ArticleListScrollRequest.listShowsRows`.
     private var showsRows: Bool {
-        ArticleListScrollGate.listShowsRows(
+        ArticleListScrollRequest.listShowsRows(
             bodyIsContent: home.listBody == .content,
             rowCount: displayedRows.count,
             searchActive: home.searchActive,
@@ -626,7 +623,7 @@ struct ArticleListView: View {
 
     /// Every scroll but the pill's goes through here; `ArticleCollectionView` carries it out once
     /// the list can, against the rows it holds by then.
-    private func requestScroll(_ target: ArticleListScrollGate.Target) {
+    private func requestScroll(_ target: ArticleListScrollRequest.Target) {
         scrollRequest = scrollRequest.next(.reveal(target))
     }
     #endif

@@ -220,7 +220,7 @@ targets:
       - path: Keryx/Home/ReaderPageInputs.swift
       - path: Keryx/Home/ArticleTableRevealTracker.swift
       - path: Keryx/Home/ArticleListTopReset.swift
-      - path: Keryx/Home/ArticleListScrollGate.swift
+      - path: Keryx/Home/ArticleListScrollRequest.swift
       - path: Keryx/Home/ReaderProcessRecovery.swift
       - path: Keryx/Home/ReaderScrollPosition.swift
       - path: Keryx/Home/ReaderScrollIndicator.swift
@@ -234,7 +234,6 @@ targets:
       - path: Keryx/Home/RefreshStatus.swift
       - path: Keryx/Home/AbandonableRefresh.swift
       - path: Keryx/Home/AlertToastAnnouncement.swift
-      - path: Keryx/Home/ArticleListRemount.swift
       - path: Keryx/Home/FeedListDropPresentation.swift
       - path: Keryx/Home/SidebarDialogState.swift
       - path: Keryx/Settings/SettingsNavigation.swift
