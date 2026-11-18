@@ -136,8 +136,9 @@ not in global chrome:
   `KeryxCountBadge` pill (through `SidebarRow`'s `trailing` slot), not the
   feed rows' plain `CountBadge`, so it matches the drawer button's badge and
   never reads as one more unread count; the bell is tinted by the most severe
-  notification (`highestNotificationLevel`: `error` for a warning or an error,
-  `primary` for new-version notices alone). The history
+  notification (`notificationBellTone`: `error` for a warning or an error,
+  `primary` for new-version notices alone), and an alert's level is named to
+  assistive technology with the row so the tint is not the only sign. The history
   is empty most of the time, so a permanent toolbar slot for it was wasted room;
   a sidebar row costs little and, unlike a row that comes and goes, never
   changes the list's height. The bell lived
