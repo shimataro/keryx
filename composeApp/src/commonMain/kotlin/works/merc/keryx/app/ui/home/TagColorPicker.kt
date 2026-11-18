@@ -118,7 +118,7 @@ private fun ColorSwatch(color: Color, hex: String?, isSelected: Boolean, onClick
     Box(
         Modifier
             .testTag(tagColorSwatchTestTag(hex))
-            .size(if (isTouchPrimary) 48.dp else SWATCH_VISIBLE_SIZE)
+            .size(if (isTouchPrimary) TOUCH_TARGET_MIN_SIZE else SWATCH_VISIBLE_SIZE)
             .selectable(selected = isSelected, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
@@ -150,5 +150,5 @@ internal fun colorFromHex(hex: String?): Color {
     return runCatching {
         val v = clean.toLong(16)
         if (clean.length <= 6) Color(0xFF000000 or v) else Color(v)
-    }.getOrDefault(Color(0xFF9E9E9E))
+    }.getOrElse { colorFromHex(TAG_COLOR_NONE_HEX) }
 }

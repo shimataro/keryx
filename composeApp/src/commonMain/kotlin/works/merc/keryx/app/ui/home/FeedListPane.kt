@@ -320,7 +320,6 @@ internal fun FeedListPane(
         openDeleteDialogForSelection()
     }
     val activeBoundaryState = remember { mutableStateOf<DropBoundary?>(null) }
-    var activeBoundary by activeBoundaryState
     val draggedFeedIdState = remember { mutableStateOf<String?>(null) }
     var draggedFeedId by draggedFeedIdState
     val hoveredAttachTagIdState = remember { mutableStateOf<String?>(null) }

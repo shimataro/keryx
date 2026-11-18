@@ -10,7 +10,6 @@ import androidx.compose.ui.window.MenuBar
 import androidx.compose.ui.window.MenuScope
 import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.koinInject
-import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.domain.UpdateRepository
 import works.merc.keryx.app.onUpdateMenuItemClicked
 import works.merc.keryx.app.platform.BrowserOpener
@@ -20,6 +19,7 @@ import works.merc.keryx.app.presentation.home.HomeViewModel
 import works.merc.keryx.app.presentation.home.canOpenInBrowser
 import works.merc.keryx.app.presentation.home.hasUsableUrl
 import works.merc.keryx.app.presentation.home.resolveFeedListSelectionTarget
+import works.merc.keryx.app.presentation.home.selectedFeedFor
 import works.merc.keryx.app.presentation.menu.computeMenuUiState
 import works.merc.keryx.app.presentation.settings.OpmlRequest
 import works.merc.keryx.app.presentation.settings.OpmlTransferController
@@ -149,7 +149,7 @@ internal fun FrameWindowScope.AppMenuBar(
     // `LayoutUpdated` traffic on Linux stays at exactly the tray's own existing rate.
     val updateState by updateRepository.state.collectAsState()
 
-    val selectedFeed = (filter as? ArticleFilter.Feed)?.let { f -> feeds.find { it.id == f.feedId } }
+    val selectedFeed = selectedFeedFor(filter, feeds)
     // Rename/delete act on any selected feed list item, so they resolve the same feed/folder/tag
     // target `FeedListPane` uses to decide which dialog to open.
     val selectionTarget = resolveFeedListSelectionTarget(filter, feeds, folders, tags)

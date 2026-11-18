@@ -64,6 +64,7 @@ import works.merc.keryx.app.presentation.home.HomeViewModel
 import works.merc.keryx.app.presentation.home.buildOrderedFeedListRows
 import works.merc.keryx.app.presentation.home.hasUsableUrl
 import works.merc.keryx.app.presentation.home.nextFeedListRow
+import works.merc.keryx.app.presentation.home.selectedFeedFor
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.common_ok
 import works.merc.keryx.app.resources.notification_detail_title
@@ -348,8 +349,7 @@ fun HomeScreen() {
 
     // Same live-read-at-call-time pattern as openSelectedInBrowser/copySelectedUrl, resolving the
     // selected feed the same way AppMenuBar does (filter.value against the already-collected feeds).
-    fun selectedFeedForMenu(): Feeds? =
-        (vm.filter.value as? ArticleFilter.Feed)?.let { f -> feeds.find { it.id == f.feedId } }
+    fun selectedFeedForMenu(): Feeds? = selectedFeedFor(vm.filter.value, feeds)
     fun copySelectedFeedLink(link: (Feeds) -> String?) {
         selectedFeedForMenu()?.let(link)?.takeIf { hasUsableUrl(it) }?.let(copyUrl)
     }
@@ -578,7 +578,7 @@ fun HomeScreen() {
                             notifVm = notifVm,
                             onAddFeedClick = { openAddFeed() },
                             onCopyArticleUrl = copyArticleRowUrl,
-                            onOpenArticleInBrowser = { openInBrowserIfAllowed(it.url) },
+                            onOpenArticleInBrowser = openArticleRowInBrowser,
                             onShareArticle = shareArticleRow,
                         )
                         ResizableDivider(onDrag = { deltaPx ->
@@ -590,7 +590,7 @@ fun HomeScreen() {
                             onActivated = { activatePane(HomePane.ArticleDetail) },
                             copyPulse = urlCopier.pulse,
                             onCopyUrl = copyArticleRowUrl,
-                            onOpenInBrowser = { openInBrowserIfAllowed(it.url) },
+                            onOpenInBrowser = openArticleRowInBrowser,
                             onShare = shareArticleRow,
                         )
                     }
@@ -715,7 +715,7 @@ fun HomeScreen() {
                                     returnRipplePulse = readerBackListPulse(articleReturnRipplePulse, readerBackListBehind),
                                     onAddFeedClick = { openAddFeed() },
                                     onCopyArticleUrl = copyArticleRowUrl,
-                                    onOpenArticleInBrowser = { openInBrowserIfAllowed(it.url) },
+                                    onOpenArticleInBrowser = openArticleRowInBrowser,
                                     onShareArticle = shareArticleRow,
                                 )
                                 HomePane.ArticleDetail -> ArticleDetailPane(
@@ -724,7 +724,7 @@ fun HomeScreen() {
                                     onActivated = { activatePane(HomePane.ArticleDetail) },
                                     copyPulse = urlCopier.pulse,
                                     onCopyUrl = copyArticleRowUrl,
-                                    onOpenInBrowser = { openInBrowserIfAllowed(it.url) },
+                                    onOpenInBrowser = openArticleRowInBrowser,
                                     onShare = shareArticleRow,
                                     // Only where the article list isn't on screen beside this one
                                     // to return to — PaneLayout.Single's article-detail depth. At
