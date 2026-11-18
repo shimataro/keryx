@@ -20,7 +20,7 @@ struct GeneralSettingsTab: View {
             // follows the system text size (Dynamic Type) like the rest of the app — see
             // `ReaderPageView.readerFontScale`.
             #if os(macOS)
-            Picker(L("settings_font_size"), selection: fontScaleBinding(preferences.fontSizeScale)) {
+            Picker(L("apple_settings_reader_font_size"), selection: fontScaleBinding(preferences.fontSizeScale)) {
                 Text(L("settings_font_small")).tag(0.85)
                 Text(L("settings_font_medium")).tag(1.0)
                 Text(L("settings_font_large")).tag(1.2)

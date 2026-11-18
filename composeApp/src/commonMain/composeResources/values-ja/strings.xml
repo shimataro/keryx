@@ -415,6 +415,7 @@
          and iOS updates through the App Store. -->
     <string name="apple_menu_check_for_updates">アップデートを確認…</string>
     <string name="apple_settings_auto_check_updates">アップデートを自動的に確認</string>
+    <string name="apple_settings_reader_font_size">記事の文字サイズ</string>
     <string name="apple_update_check_failed_title">アップデートを確認できませんでした</string>
     <string name="apple_update_check_failed_unavailable">新しいバージョンを準備中の可能性があります。しばらくしてから、もう一度お試しください。</string>
     <string name="apple_update_check_failed_offline">インターネット接続を確認してから、もう一度お試しください。</string>
