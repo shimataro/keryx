@@ -427,14 +427,13 @@ struct HomeView: View {
         // IME) ever sees it, and ↑/↓ would move the selection underneath the sheet. Mirrors the menu
         // bar's own `HomeCommands.bareKeysActive` guard.
         if sidebarDialogs.isPresenting { return .ignored }
-        #if os(macOS)
-        // While a text input (the search field, a row's name editor) holds an IME's uncommitted
-        // text, the keys belong to the IME: ↑/↓ pick a conversion candidate and Return commits it.
-        // This handler sees them first, so without this ↑/↓ would end the conversion and hand focus
-        // to the article list. Checks the first responder rather than `focusedPane`, which cannot
-        // see the search field's focus before macOS 15 (`SearchFocusModifier`).
+        // While a text input (the search field — the sidebar's on macOS, the article list's on iOS —
+        // or a row's name editor) holds an IME's uncommitted text, the keys belong to the IME: ↑/↓
+        // pick a conversion candidate and Return commits it. On macOS this handler sees them first,
+        // so without this ↑/↓ would end the conversion and hand focus to the article list (iOS: see
+        // `TextInputComposition`). Checks the first responder rather than `focusedPane`, which
+        // cannot see the search field's focus before macOS 15 / iOS 18 (`SearchFocusModifier`).
         if TextInputComposition.isComposingInKeyWindow { return .ignored }
-        #endif
         guard let (key, modifiers) = mapKey(press) else { return .ignored }
         guard let shortcut = HomeShortcutsKt.homeShortcutFor(
             key: key,
