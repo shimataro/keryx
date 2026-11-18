@@ -307,7 +307,7 @@ Play 開発者サービスの無い端末とまったく同じ状態で、UI は
 | OPML のインポートを終える | `presentation/settings/OpmlTransferController.kt` の `importBegun`（`tryBegin` で確保済みのインポートを実行し、必ず `finish` する。キャンセル時は結果なし） | `OpmlTransferController.importDocument`、Compose の `SettingsViewModel.importOpml`（ファイル選択の後）、SwiftUI の `OpmlTransferObservable`（パネルの `importOpml(from:)` と、開かれたファイルの `importDocument(_:)`。コントローラが断った要求は捨てずに戻す） |
 | 待っている OPML の要求で設定 ▸ データを開く | `presentation/settings/OpmlTransferController.kt` の `shouldPresentOpmlRequest`（要求が待っていて、何も実行中でない） | Compose の `App.kt` と SwiftUI の `OpmlRequestPresenter`（`OpmlTransferObservable.shouldPresentRequest` 経由） |
 | 記事行メニューの既読ラベル | `presentation/home/ArticleListModel.kt` の `articleReadAfterContextMenuOpen`（メニューを開いた時点で既読か: もともと既読か、開いたときに行が選択された） | Compose の `articleRowMenuEntries` と SwiftUI の `ArticleRowMenuState.items`（直接呼ぶ）。各 UI は、自分の開き方で行が選択されたかどうかだけを求める（macOS の SwiftUI は `ArticleRowMenuState.opensBySelecting` で、`.selectsOnContextMenu` が選択に使うのと同じポインタのホバーから求める。iOS の長押しは行を選択しない） |
-| 記事行メニュー（SwiftUI） | `Bridge/ArticleRowModel.swift` の `ArticleRowMenuState.items`（項目、順序、ラベル、有効・無効、区切り）と `Home/ArticleRowMenu.swift` の `ArticleRowMenu.perform`（項目の動作） | macOS の `ArticleRowView` の `.contextMenu` と、iOS の `ArticleRowContextMenu` の `UIMenu` |
+| 記事行メニュー（SwiftUI） | `Bridge/ArticleRowModel.swift` の `ArticleRowMenuState.items`（項目、順序、ラベル、有効・無効、区切り）と `Home/ArticleRowMenu.swift` の `ArticleRowMenu.perform`（項目の動作） | macOS の `ArticleRowView` の `.contextMenu` と、記事一覧のコレクションビュー（`ArticleCollectionView`）が出す、iOS の `ArticleRowMenu.configuration` の `UIMenu` |
 | 記事 URL のコピー（判定） | `presentation/home/ArticleListModel.kt` の `articleUrlCopyPlan` → `ArticleUrlCopyPlan`（クリップボードに書き込むか、リーダーの ✓ を光らせるか、アプリ内で確認を出すか。最後のものは共有の `platformShowsOwnCopyConfirmation` と、そのプラットフォームで ✓ が確認になるかどうかから決まる: OS が確認を出すなら出さない、デスクトップでは ✓ が光らないときだけ、タッチ端末では毎回） | Compose の `ArticleUrlCopier.copy` と SwiftUI の `ArticleUrlCopy.perform`（`HomeObservable.copyArticleUrl`）。どちらもその結果を実行するだけ |
 | 記事 URL のコピー（Compose） | `ui/home/ArticleUrlCopier.kt` の `ArticleUrlCopier.copy`（クリップボード、リーダーの ✓ の pulse、Android のスナックバー） | リーダーのコピーボタン、⌘/Ctrl+Shift+C、メニューバー、記事行のコンテキストメニュー |
 | 記事の共有（Compose、Android） | `ui/home/ArticleSharer.kt` の `ArticleSharer`（`canShare` / `share`。どちらも `:shared` の `canShareArticleUrl` に従い、後者は `platform/ShareSheet` の expect を呼ぶ。Android は `ACTION_SEND` を `Intent.createChooser` で包む）。`platformSupportsShare` が `false` のプラットフォーム（デスクトップ）では `rememberArticleSharer` が `null` を返し、どの経路も表示しない | リーダーの共有ボタン、記事行の長押しメニュー |
@@ -1873,7 +1873,7 @@ HIG が「表示中のビューの検索」に勧める位置であり、メー�
   フォルダーなしのフィードの間、フォルダーはフォルダーの間。タグ配下のフィードのコピーとタグ自体は動かさない）。
   `SidebarReorderTargets` が共有の `reorderTargetWithinScope` で移動先を求め、ドロップ完了時と同じ更新を適用する。
   動かせる方向は `SidebarRowContent` に含めるので、並べ替えで隣の行の選択肢が変われば、その行が再構成される。
-- **引っ張って更新。** サイドバーを引き下げる（`UIRefreshControl`。フィードがあるときだけ付く）と、全フィードを更新して
+- **引っ張って更新。** サイドバーを引き下げる（記事一覧と共有する `ListPullToRefresh` を通した `UIRefreshControl`。フィードがあるときだけ付く）と、全フィードを更新して
   同期する（`HomeViewModel.pullToRefreshAll()`。「すべて更新」と同じ処理で、`pullRefreshingFilters` には `All`
   フィルターとして記録される）。インジケーターは更新が終わるまで出続け、続く同期の完了は待たない。iOS ではナビゲーションバーの「すべて更新」
   ボタンの代わりになる（同期・追加・設定のボタンは残る）。iPad のキーボードでは、Feed メニューの ⌘R も使える。
@@ -1926,7 +1926,8 @@ HIG が「表示中のビューの検索」に勧める位置であり、メー�
 ### 記事一覧（macOS）
 
 macOS の記事一覧は、SwiftUI の `List` ではなく、行の高さを固定した `NSTableView` である
-（`Home/ArticleTableView.swift`、`NSViewRepresentable`）。iOS は `List` のまま。
+（`Home/ArticleTableView.swift`、`NSViewRepresentable`）。iOS は `UICollectionView` のリストを使う
+（「記事一覧（iOS）」）。
 
 - **理由。** macOS の `List` も中身は `NSTableView` だが、行の高さは自動計算で、変更を反映するときに、先頭に
   見えている行より上に挿入された行をすべて計測する（`_keepTopRowStableAtLeastOnce` の中の
@@ -1965,19 +1966,18 @@ macOS の記事一覧は、SwiftUI の `List` ではなく、行の高さを固�
 スワイプ」）。先頭側からは既読/未読、末尾側からはスターの付け外し。各辺に出す操作とその実行は `:shared` で
 1 か所に決め（`ArticleSwipeActions.kt`、`HomeViewModel.performSwipeAction`）、各 UI は見せ方だけを受け持つ。
 
-- **iOS。** `List` の行の `.swipeActions(edge:allowsFullSwipe: true)` で、各辺にボタンを 1 つ出す
-  （`Home/ArticleListView.swift`）。`ArticleSwipeActionStyle` が記号、色、ラベルを返す。記号は操作後の状態を
-  表す（スターを外す操作だけは、Mail の旗を外す `flag.slash` にならって `star.slash`）。色はアクセント
-  カラーと、スターは Mail の旗と同じオレンジ（ボタンのアイコンは常に白で、行の星の黄色ではコントラストが
-  約 1.5:1 しかないため）。ラベルはコンテキストメニューと同じもの。ボタンはアイコンだけ（`.labelStyle(.iconOnly)`）で、ラベルは
-  VoiceOver 用に残す。ボタンは UIKit が VoiceOver のアクションとして公開する。
-  - *行の長押しメニューは、SwiftUI の `.contextMenu` ではなく UIKit。* 指を置いている間に行そのものを
+- **iOS。** 記事一覧のコレクションビューが、リスト構成のスワイプの提供元から各辺に `UIContextualAction` を
+  1 つ返し、フルスワイプでも実行する（`Home/ArticleCollectionView.swift`）。`ArticleSwipeActionStyle` が記号、
+  色、ラベルを返す。記号は操作後の状態を表す（スターを外す操作だけは、Mail の旗を外す `flag.slash` に
+  ならって `star.slash`）。色はアクセントカラーと、スターは Mail の旗と同じオレンジ（ボタンのアイコンは常に
+  白で、行の星の黄色ではコントラストが約 1.5:1 しかないため）。ラベルはコンテキストメニューと同じもの。
+  ボタンはアイコンだけで、タイトルは VoiceOver のラベルとして残り、UIKit がアクションとして公開する。
+  - *行の長押しメニューは、コレクションビューのデリゲートを通す。* 指を置いている間に行そのものを
     ハイライトするメニューでは、押してから遅れて認識されたスワイプが、ジャンプして始まる
-    （[known-issues.ja.md](known-issues.ja.md) の「iOS: スワイプを始めると行がジャンプする」）。
-    `.contextMenu` には、ほかのものをハイライトさせる指定がない。そこで、行の背後に置いた
-    `ArticleRowContextMenu` が `List` 自身の `UICollectionViewCell` を見つけ、`UIContextMenuInteraction` を
-    付ける。ハイライトは `ContextMenuPressHighlight` の透明なビュー、プレビューは行の見た目
-    （`ArticleRowLabel`）。項目と動作は macOS と同じ（`ArticleRowMenuState.items`、`ArticleRowMenu.perform`）。
+    （[known-issues.ja.md](known-issues.ja.md) の「iOS: スワイプを始めると行がジャンプする」）。そこで
+    デリゲートは、ハイライトを `ContextMenuPressHighlight` の透明なビューに向け、プレビューに行の見た目
+    （`ArticleRowLabel`）を出す（`ArticleRowMenu.configuration`）。項目と動作は macOS と同じ
+    （`ArticleRowMenuState.items`、`ArticleRowMenu.perform`）。
 - **macOS。** 記事テーブルの `tableView(_:rowActionsForRow:edge:)` が各辺に `NSTableViewRowAction` を 1 つ
   返す（`Home/ArticleTableView.swift`）。Mail のメッセージ一覧と同じ仕組みで、ボタンの描画、行のスライド、
   フルスワイプは AppKit が行う。AppKit は行アクションのボタンをタイトルの幅まで広げる（「既読にする」で
@@ -2021,17 +2021,50 @@ regular 幅（iPad、横向きの大きい iPhone）では、サイドバーと�
 暗くした。macOS と違い、別のペインにフォーカスがあっても薄くしない。タッチ操作ではフォーカスが副次的に移るだけで、
 同じくタッチ主体の Android も薄くしない（`external-spec.ja.md` §9）。
 
-### 記事一覧のスクロール（iOS）
+### 記事一覧（iOS）
 
-iOS の記事一覧は SwiftUI の `List` で、`ScrollViewProxy.scrollTo` でスクロールする。フィルタを切り替えると
-先頭に戻るが、それは画面上の行が新しいフィルタのものになってからに限る（`Home/ArticleListTopReset.swift`、
-`KeryxTests` でテスト）。`HomeObservable.filter` と行は別々のフローで、どちらが先とも限らずに届くため、
-切り替えた直後の一覧はまだ前のフィルタの行を持っていることがある。その行を狙ったスクロールは実行時点の
-行に対して行われ、新しい行が同じ更新で着地して目標がその範囲外になる（前の一覧の先頭行を、空のフォルダに
-対して）と、`UICollectionView` が例外を投げてアプリがクラッシュする。そこで行はそれを生んだフィルタと
-対で届き（`HomeViewModel.articlesWithFilter` / `searchResultsWithFilter`）、画面上の行が現在のフィルタの
-ものかを `HomeObservable.articleRowsMatchFilter` / `searchRowsMatchFilter` が示す。切り替えへの対応は
-一度きりで、後から届いたリフレッシュで一覧がスクロールすることはない。
+iOS の記事一覧は、SwiftUI の `List` ではなく、サイドバーと同じ UIKit の `UICollectionView` のリストである
+（`Home/ArticleCollectionView.swift`、`UIViewControllerRepresentable` で包む。「サイドバー（iOS）」も参照）。
+`ArticleListView` は、ツールバー、検索欄、空の状態、新着の知らせのボタンといった周りのものを受け持ち、
+iOS では行の部分だけを差し替える。`List` にしない理由は次のとおり。
+
+- **スクロールを、一覧が持っている行に対して行う。** `List` は `ScrollViewProxy.scrollTo` でスクロールし、
+  SwiftUI はそれを後のレイアウトで、その時点で変わっているかもしれない行に対して行う
+  （[known-issues.ja.md](known-issues.ja.md) の「iOS: 記事一覧に戻ると `UICollectionView` でクラッシュした」）。
+- **スピナー（refresh control）が一覧自身のもの。** SwiftUI は `.refreshable` の一覧のスピナーを
+  ナビゲーションバーの下にぶら下げ、列が pop されると外していた。そのため、iPhone の幅でサイドバーから
+  戻るたびに一覧を作り直す必要があり、スクロール位置が失われていた。
+- **長押しメニューのハイライトの対象を指定できる。** コレクションビューのデリゲートを通す
+  （「記事行のスワイプ」）。
+
+仕組みは次のとおり。
+
+- **行。** リスト構成（`.plain`、区切り線なし）と、記事 ID をキーにした差分データソース。各セルは行の
+  `ArticleRowView` を `UIHostingConfiguration` で載せ、行が変わったときだけ描き直す。行の描画、選択中の塗り、
+  タップは、macOS のテーブルと同じく SwiftUI のまま。中身が変わったときは、画面上の行だけを描き直す。
+- **バーの下まで広げる。** 一覧はナビゲーションバーとツールバーの下まで広げ（`.ignoresSafeArea()`）、
+  UIKit のナビゲーションスタックの一覧と同じ配置にする。`setContentScrollView` で、バーが一覧のスクロールに
+  付いてくる。バーの下から始めると、検索欄の引き出し（iOS 17・18）とスピナーが上の余白を互いに戻し合い、
+  引き下げのスピナーがちらついた。
+- **下に引いて更新。** サイドバーと共有する `ListPullToRefresh` が、`PullToRefreshAvailability` が許す間
+  `UIRefreshControl` を付け、引かれたスピナーを出したまま `HomeObservable.pullToRefresh` を実行する。
+- **表示中の行。** 画面上の行を、表示順に、間引いて報告する。スクロールや行の変化に合わせて報告し、一覧が
+  ウインドウの外（記事詳細の下）にある間は空にする。
+- **スクロール。** `ArticleListView` は `ArticleListScrollRequest` でスクロールを依頼する。フィルタの切り替えに
+  よる先頭への移動、画面外の選択（キーボードや記事詳細のスワイプ）、最初に行が出たときの復元した選択、
+  新着の知らせのボタンによる移動の 4 つ。コントローラーは、一覧が画面に出た後で最新の依頼だけを実行する
+  （出る前は、ナビゲーションバーの高さがまだ余白に入っていない）。行がなくなっていれば捨てる。画面に
+  完全に見えている行へはスクロールしない。まだ表示していない行の高さは見積もりなので、スクロールで画面に
+  出た行が実際の高さになった後に、もう一度だけスクロールする。先頭にある一覧は、上の余白が決まるまで
+  先頭に留まる。
+
+フィルタを切り替えると先頭に戻るが、それは画面上の行が新しいフィルタのものになってからに限る
+（`Home/ArticleListTopReset.swift`、`KeryxTests` でテスト）。`HomeObservable.filter` と行は別々のフローで、
+どちらが先とも限らずに届くため、切り替えた直後の一覧はまだ前のフィルタの行を持っていることがある。そこで
+行はそれを生んだフィルタと対で届き（`HomeViewModel.articlesWithFilter` / `searchResultsWithFilter`）、画面上の
+行が現在のフィルタのものかを `HomeObservable.articleRowsMatchFilter` / `searchRowsMatchFilter` が示す。
+切り替えへの対応は一度きりで、後から届いたリフレッシュで一覧がスクロールすることはない。サイドバーで同じ
+項目を選び直すのは切り替えではないので、一覧はそのままの位置に留まる。
 
 ### 記事一覧のタイトル（iOS）
 

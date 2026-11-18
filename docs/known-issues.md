@@ -796,107 +796,11 @@ assembly, and the race is a property of the CI runner's environment (Spotlight i
 mounted volume), not of anything this app configures. A retry is the only available mitigation
 short of GitHub or the JDK addressing it upstream.
 
-## iOS: the article list's pull-to-refresh spinner is missing after returning from the sidebar
-
-**Status**: worked around, not fixed — external (SwiftUI) defect. At a phone width,
-`HomeView` rebuilds the article list each time the collapsed split view brings it forward from the
-sidebar (`ArticleListView.remountGeneration`), and the list rebuilds itself once more when it is first
-put into a window (`ArticleListView.attachedToWindow`). The cost is that a list brought back from the
-sidebar starts at the top rather than where it was scrolled to — as NetNewsWire's article list does
-on the same route.
-
-### Symptom
-
-On an iPhone, pull the article list to refresh, wait for it to finish, go back to the feed list, and
-pick the same item again. Pulling the list now refreshes and syncs as
-usual, but no spinner appears; the list is simply pulled down and springs back.
-
-A related symptom has the same origin: the first pull after launch left the list resting tens of
-points short of the top (the top of the list still partly under the navigation bar), about three
-times in five.
-
-Both were diagnosed on the iOS 27 simulator with Xcode 27; that is where they were last seen, not a
-range they are known to be limited to. See "Re-checking after an iOS or Xcode update" below. They
-were diagnosed with an earlier layout in which the article list had a heading row of its own; the
-list now uses the standard inline navigation title and has no heading, and has not been re-measured
-since.
-
-### Diagnosis
-
-Temporary logging walked every window's view hierarchy 300 ms into each pull. SwiftUI hosts a
-`.refreshable` list's control as a `PlatformRefreshControlProxy` in a container just under the
-navigation bar, outside the list's own `UICollectionView`. On the first pull it is there, spinning.
-After the column has been popped and pushed again, no refresh control exists anywhere in the
-hierarchy, yet `HomeObservable.pullToRefresh()` still runs. SwiftUI keeps the same list (the same
-selection means no identity change) and never re-attaches the control it dropped.
-
-The list a phone-width split view pushes for the first time also has its control under the navigation
-bar, and that is where the related symptom comes from: when the control finishes, the top content
-inset shrinks from 176 to 116 but the offset settles at about −58 to −76 instead of −116. A list built
-once its column is in the navigation stack gets the control inside its own `UICollectionView`, and
-there the offset follows the inset. Both kinds of list are the navigation bar's tracked content
-scroll view (`contentScrollView(for: .top)`), so the bar's own scroll-edge behavior is unaffected.
-The inset and offset figures above were measured with the earlier layout that had a heading row,
-not with the current inline title.
-
-### Ruled out
-
-- **A view drawn over the control** (the layering bug fixed for the sidebar's `UIRefreshControl` in
-  `SidebarCollectionView.swift`). The control is absent, not hidden.
-- **A stale control state** (alpha, hidden, frame). The same reason.
-- **A regression in this app.** The missing spinner predates the app's own article-list heading and
-  pull-to-refresh handling.
-- **Re-attaching only the action.** `EnvironmentValues.refresh` is read-only, so the action cannot be
-  removed and restored without changing the list's identity.
-- **Returning from the reader.** The control survives that route, so the list is not rebuilt there and
-  keeps its exact position and the return flash.
-- **The pinned header or `.contentMargins(.top, 0)`** of the earlier layout, for the first-pull
-  offset. Without the margin it still occurred, and with the header as an ordinary first row the list
-  still rested short of the top. This was measured with that earlier layout; the current one has
-  neither, and has not been re-measured.
-- **Rebuilding as the first push starts** (when `compactColumn` changes). The column is not in a
-  window yet, and the rebuilt list still gets its control under the navigation bar.
-- **Rebuilding a fixed 500 ms after the first push.** It works, but resets a list the reader has
-  already started scrolling.
-- **Scrolling a rebuilt list back to the row that was topmost.** A `scrollTo` right after the rebuild,
-  with the topmost row tracked through `onGeometryChange`, made a touched row jump for a moment when
-  the list was then scrolled. Starting at the top avoids it.
-
-### The workaround
-
-`HomeView` bumps `articleListRemountGeneration` when `compactColumn` goes from `.sidebar` to
-`.content` at a compact width (the condition is `ArticleListRemount`, covered by `KeryxTests`);
-`ArticleListView` applies it as part of the content's `.id`, so the rebuilt list gets a fresh
-control. The other part is `attachedToWindow`, set once when `WindowAttachmentProbe` (outside the
-rebuilt content) first reports being put into a window — as the first push starts showing the
-column, before the list can be touched.
-
-### What a real fix would need
-
-A SwiftUI fix that re-attaches the control when the column comes back, and settles the offset with
-the inset when a control under the navigation bar finishes. Once those ship for every supported iOS
-version, drop `remountGeneration`, `attachedToWindow`, `WindowAttachmentProbe` and
-`ArticleListRemount`, so the list keeps its scroll position again.
-
-### Re-checking after an iOS or Xcode update
-
-Run this after raising the minimum iOS version or moving to a new Xcode, rather than trusting the
-version above indefinitely. Remove `ListIdentity` from the `.id` in `ArticleListView.body` (leaving
-the probe and the generation in place), build, and on an iPhone simulator check both symptoms:
-
-1. Pull the article list, go back to the feed list, pick the same item, and pull again: does the
-   spinner appear?
-2. Launch, pull the article list once, and let the refresh finish, five times over: does the list
-   always come back to rest at the top, its first row fully below the navigation bar?
-
-If both hold on every supported iOS version, remove the workaround as above and delete this entry.
-If either fails, restore the `.id` and update the version this entry was last seen on.
-
 ## iOS: going back to the article list crashed in `UICollectionView`
 
-**Status**: mitigated, cause not confirmed. Scrolls no longer reach a list that is not on screen
-(`Home/ArticleListScrollGate.swift`), but the crash was never reproduced, so whether that stops it is
-unknown.
+**Status**: no longer reachable by design, cause not confirmed. Since the article list became a
+`UICollectionView`, no pending scroll is left for UIKit to validate (see "What changed" below); the crash
+was never reproduced, so whether that is what stops it is unknown. The entry stays until that is known.
 
 ### Symptom
 
@@ -907,12 +811,12 @@ process launched. SwiftUI's `UpdateCoalescingCollectionView.updateContent()` ask
 stack but `main`, and the report does not hold the exception's message, so the index path and row count are
 unknown. The Kotlin GC threads were idle.
 
-The reader's swipe pager is a `UIPageViewController`, not a collection view, so the `List` of the article list
-is the only SwiftUI collection view in this layout.
+The reader's swipe pager is a `UIPageViewController`, not a collection view, so the `List` the article list
+then was is the only SwiftUI collection view in this layout.
 
 ### What was ruled out
 
-Measured on the iOS 26.3 simulator. The first four rows made the pop from code, the last two with an edge swipe
+Measured on the iOS 26.3 simulator, with the article list still a SwiftUI `List`. The first four rows made the pop from code, the last two with an edge swipe
 driven by a UI test:
 
 | Scenario | Result |
@@ -926,26 +830,18 @@ driven by a UI test:
 
 So a pending scroll made stale by rows shrinking is not enough on its own.
 
-### Not yet tried
+### What changed
 
-iOS 26.5, a device, and rows growing while the list is hidden.
+The article list is now a `UICollectionView` list, as the sidebar is (`Home/ArticleCollectionView.swift`;
+see "Article list (iOS)" in [app-architecture.md](app-architecture.md)). `ScrollViewProxy.scrollTo` is no
+longer used: the controller carries a scroll out at once with `scrollToItem`, against the rows its data source
+holds at that moment, and only once the list is on screen; until then only the latest scroll waits, and one
+whose row is gone by then is dropped. Nothing is left pending inside UIKit for a later layout to validate.
 
-### Remaining risk
+### Re-checking
 
-On a list that is on screen, a `scrollTo` and a row change can still land in the same update: there is no
-callback for when a `scrollTo` has been carried out, so the two cannot be strictly kept apart.
-
-The gate also opens as the pop starts, not when it ends. On the simulator, a held scroll was carried out about
-half a second before the pop finished, and in a cancelled edge swipe it was carried out and the list then left
-the screen again. So a held scroll can still reach the list during the transition the crash happened in. Waiting
-for the transition to finish would close this, but a row swiped off screen would then jump after the pop, with
-its return flash mostly over, so it is left to the real fix below.
-
-### What a real fix would need
-
-Moving the article list from a SwiftUI `List` to a `UICollectionView`, as the sidebar already is:
-`scrollToItem` then runs synchronously against rows the app knows, with nothing left pending. It has to carry
-over the rows, swipe actions and pull-to-refresh, so it is a task of its own.
+If a crash with the same stack is reported from a build with this change, the cause is elsewhere: reopen this
+entry with the new report.
 
 ## macOS: dropping a folder between folders crashed inside SwiftUI
 
@@ -1115,9 +1011,9 @@ sidebar, a plain `UICollectionView` list with UIKit's own context menu, did it t
 - **This app's own code.** The minimal app above has the jump, and taking out the measuring code
   changed nothing.
 - **The row's `Button`.** Replacing it with a tap gesture kept the jump.
-- **Rebuilding the list or a scroll made just before** (`ArticleListView.attachedToWindow`,
-  `remountGeneration`, `ArticleListScrollGate`), and the return flash. The jump happened just as often
-  long after any of them.
+- **Rebuilding the list or a scroll made just before** (the `List`'s rebuild on window attachment and
+  on return from the sidebar, and its held scrolls, since removed with the `List`), and the return
+  flash. The jump happened just as often long after any of them.
 - **Moving the menu from the row to the `List`.** The jump went away only while the menu could not
   open (the list had no selection); once it could, the jump came back.
 - **SwiftUI redrawing the row during the swipe.** No row was redrawn during any swipe measured.
@@ -1142,15 +1038,12 @@ own preview shows the row instead. Since nothing visible is highlighted, the row
 while the menu is up and comes back as the menu closes. Otherwise it would show beside the preview
 where the background is only dimmed, not blurred (iPad).
 
-- **Article list** (`ArticleRowContextMenu`): SwiftUI's `.contextMenu` cannot be told where to point
-  its highlight, so on iOS the row's menu is a `UIContextMenuInteraction` on the `List`'s own cell.
-  - The cell is found by walking up the view tree from a view behind the row, and `ArticleRowLabel` is
-    hosted as the menu's preview.
-  - This relies on SwiftUI's `List` being backed by a `UICollectionView` whose cells are
-    `UICollectionViewCell`s. If no cell is found, the row has no menu and a fault is logged once.
-  - macOS keeps SwiftUI's `.contextMenu`.
-- **Sidebar** (`SidebarCollectionViewController`): the collection view's own menu, with the highlight
-  and dismissal previews returned from its delegate, and an image of the cell as the preview.
+- **Article list** (`ArticleCollectionViewController`): the collection view's own menu, with the
+  highlight and dismissal previews returned from its delegate, and the row's look (`ArticleRowLabel`)
+  hosted as the preview. SwiftUI's `.contextMenu` cannot be told where to point its highlight; while
+  the list was a SwiftUI `List`, the workaround had to find the `List`'s own cell by walking up the view
+  tree. macOS keeps SwiftUI's `.contextMenu`.
+- **Sidebar** (`SidebarCollectionViewController`): the same, with an image of the cell as the preview.
 
 The one visible difference is the press itself: the row no longer swells slightly while the finger is
 down, before the menu opens.
@@ -1164,16 +1057,16 @@ With the workaround, a slow swipe moved at most 3 pt in one frame on every swipe
 
 ### What a real fix would need
 
-A fix in UIKit or SwiftUI, so that a swipe that starts on a row with a context menu moves the row from
-its first frame, whatever the menu highlights. The workaround could then go, and the article list's
-menu could go back to SwiftUI's `.contextMenu`.
+A fix in UIKit, so that a swipe that starts on a row with a context menu moves the row from its first
+frame, whatever the menu highlights. The workaround could then go.
 
 ### Re-checking after an iOS or Xcode update
 
 On each new iOS release, check on a simulator whether the workaround is still needed:
 
-1. Take out the highlight and dismissal previews: put the article row back on SwiftUI's
-   `.contextMenu`, and remove the sidebar's `highlightPreviewForItemAt` / `dismissalPreviewForItemAt`.
+1. Take out the highlight and dismissal previews: remove `highlightPreviewForItemAt` /
+   `dismissalPreviewForItemAt` from both collection views (`ArticleCollectionView`,
+   `SidebarCollectionView`).
 2. Swipe a row slowly, starting the move about half a second after touching it. Or record it with
    `xcrun simctl io <device> recordVideo` and step through the frames.
 3. If the row follows the finger from the start, with no part of its leading edge cut away first, the

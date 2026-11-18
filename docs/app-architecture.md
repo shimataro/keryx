@@ -324,7 +324,7 @@ Examples in the code today:
 | Finish an OPML import | `presentation/settings/OpmlTransferController.kt`'s `importBegun` (run an import already held by `tryBegin`; always `finish` it, with no result when cancelled) | `OpmlTransferController.importDocument`, Compose's `SettingsViewModel.importOpml` (after the picker) and SwiftUI's `OpmlTransferObservable` (the panel's `importOpml(from:)` and an opened file's `importDocument(_:)`, which puts a request the controller refuses back rather than dropping it) |
 | Open Settings ▸ Data for a waiting OPML request | `presentation/settings/OpmlTransferController.kt`'s `shouldPresentOpmlRequest` (a request is waiting and nothing runs) | Compose's `App.kt` and SwiftUI's `OpmlRequestPresenter` (through `OpmlTransferObservable.shouldPresentRequest`) |
 | Article row menu's read label | `presentation/home/ArticleListModel.kt`'s `articleReadAfterContextMenuOpen` (read once the menu is open: already read, or the open selected the row) | Compose's `articleRowMenuEntries` and SwiftUI's `ArticleRowMenuState.items` (calling it directly); each UI only works out whether its own open selected the row (SwiftUI on macOS: `ArticleRowMenuState.opensBySelecting`, from the same pointer hover `.selectsOnContextMenu` selects on; on iOS a long press never selects) |
-| Article row menu (SwiftUI) | `Bridge/ArticleRowModel.swift`'s `ArticleRowMenuState.items` (the items, their order, labels, enablement and groups) and `Home/ArticleRowMenu.swift`'s `ArticleRowMenu.perform` (what an item does) | macOS's `.contextMenu` in `ArticleRowView` and iOS's `UIMenu` in `ArticleRowContextMenu` |
+| Article row menu (SwiftUI) | `Bridge/ArticleRowModel.swift`'s `ArticleRowMenuState.items` (the items, their order, labels, enablement and groups) and `Home/ArticleRowMenu.swift`'s `ArticleRowMenu.perform` (what an item does) | macOS's `.contextMenu` in `ArticleRowView` and iOS's `UIMenu` from `ArticleRowMenu.configuration`, which the article list's collection view (`ArticleCollectionView`) shows |
 | Copy article URL (decision) | `presentation/home/ArticleListModel.kt`'s `articleUrlCopyPlan` → `ArticleUrlCopyPlan` (write the clipboard? flash the reader's ✓? confirm in-app? — the last from the shared `platformShowsOwnCopyConfirmation` and whether the ✓ confirms on this platform: never where the OS confirms, on a desktop only when the ✓ does not flash, on a touch platform every copy) | Compose's `ArticleUrlCopier.copy` and SwiftUI's `ArticleUrlCopy.perform` (`HomeObservable.copyArticleUrl`), which only carry it out |
 | Copy article URL (Compose) | `ui/home/ArticleUrlCopier.kt`'s `ArticleUrlCopier.copy` — clipboard, the reader's ✓ pulse and Android's snackbar | The reader's copy button, ⌘/Ctrl+Shift+C, the menu bar and the article row's context menu |
 | Share an article (Compose, Android) | `ui/home/ArticleSharer.kt`'s `ArticleSharer` — `canShare` / `share`, both on `:shared`'s `canShareArticleUrl`, the latter calling the `platform/ShareSheet` expect (Android: `Intent.createChooser` around `ACTION_SEND`). `rememberArticleSharer` returns `null` where `platformSupportsShare` is `false` (desktop), which leaves every route out | The reader's share button and the article row's long-press menu |
@@ -1954,8 +1954,8 @@ list forward (`CompactSearchNavigation`).
   tag and tags themselves never move). `SidebarReorderTargets` resolves the landing position with the shared
   `reorderTargetWithinScope` and the move applies the mutation a completed drop would; the availability is part
   of `SidebarRowContent`, so a reorder that changes a neighbour's options reconfigures that row.
-- **Pull to refresh.** Pulling the sidebar down (`UIRefreshControl`, present only while there are feeds)
-  refreshes every feed and syncs, through `HomeViewModel.pullToRefreshAll()` — the same cycle as Refresh All,
+- **Pull to refresh.** Pulling the sidebar down (`UIRefreshControl` through `ListPullToRefresh`, shared
+  with the article list; present only while there are feeds) refreshes every feed and syncs, through `HomeViewModel.pullToRefreshAll()` — the same cycle as Refresh All,
   tracked as the `All` filter in `pullRefreshingFilters` — and the indicator stays up until the refresh
   finishes, not through the sync that follows. It
   replaces the navigation bar's Refresh All button on iOS (which keeps Sync, Add and Settings); an iPad
@@ -2014,7 +2014,8 @@ item gets overwritten. As in Notes, the collection view therefore takes the dele
 ### Article list (macOS)
 
 The macOS article list is an `NSTableView` with one fixed row height
-(`Home/ArticleTableView.swift`, an `NSViewRepresentable`), not SwiftUI's `List`; iOS keeps its `List`.
+(`Home/ArticleTableView.swift`, an `NSViewRepresentable`), not SwiftUI's `List`; iOS uses a
+`UICollectionView` list instead (see "Article list (iOS)").
 
 - **Why.** The macOS `List` is itself an `NSTableView`, but with automatic row heights, and applying a
   change measures every row inserted above the top visible one (`_doAutomaticRowHeightsForInsertedAndVisibleRows`
@@ -2058,20 +2059,19 @@ article rows"): read/unread from the leading edge, star/unstar from the trailing
 edge shows and what it does are decided once in `:shared` (`ArticleSwipeActions.kt`,
 `HomeViewModel.performSwipeAction`); each UI only presents it.
 
-- **iOS.** The `List` row's `.swipeActions(edge:allowsFullSwipe: true)`, one button per edge
-  (`Home/ArticleListView.swift`); `ArticleSwipeActionStyle` supplies the symbols (the state the action
-  leaves the article in, except unstar, which is `star.slash` as Mail's unflag is `flag.slash`), the
-  colors (the accent color, and orange for star as Mail's flag: the button's icon is always white, and
-  the row's star yellow left it at about 1.5:1) and the context menu's labels. The buttons are icon-only (`.labelStyle(.iconOnly)`), the label left to
-  VoiceOver, which UIKit exposes the buttons to as actions.
-  - *The row's long-press menu is UIKit, not SwiftUI's `.contextMenu`.* A menu that highlights the row
-    itself while the finger is down makes a swipe recognized late in the press start with a jump
-    ("iOS: a row jumps when a swipe starts" in [known-issues.md](known-issues.md)), and `.contextMenu`
-    cannot be told to highlight anything else. So `ArticleRowContextMenu`, a view behind the row, finds
-    the `List`'s own `UICollectionViewCell` and gives it a `UIContextMenuInteraction` whose highlight is
-    `ContextMenuPressHighlight`'s clear view and whose preview is the row's look (`ArticleRowLabel`).
-    The items and their actions are the same as macOS's (`ArticleRowMenuState.items`,
-    `ArticleRowMenu.perform`).
+- **iOS.** The article list's collection view returns one `UIContextualAction` per edge from its list
+  configuration's swipe providers (`Home/ArticleCollectionView.swift`), with a full swipe running it;
+  `ArticleSwipeActionStyle` supplies the symbols (the state the action leaves the article in, except
+  unstar, which is `star.slash` as Mail's unflag is `flag.slash`), the colors (the accent color, and
+  orange for star as Mail's flag: the button's icon is always white, and the row's star yellow left it
+  at about 1.5:1) and the context menu's labels. The buttons show only the icon; the title stays the
+  action's VoiceOver label, which UIKit exposes as an action.
+  - *The row's long-press menu goes through the collection view's delegate.* A menu that highlights the
+    row itself while the finger is down makes a swipe recognized late in the press start with a jump
+    ("iOS: a row jumps when a swipe starts" in [known-issues.md](known-issues.md)), so the delegate
+    points the highlight at `ContextMenuPressHighlight`'s clear view and shows the row's look
+    (`ArticleRowLabel`) as the preview (`ArticleRowMenu.configuration`). The items and their actions are
+    the same as macOS's (`ArticleRowMenuState.items`, `ArticleRowMenu.perform`).
 - **macOS.** The article table's `tableView(_:rowActionsForRow:edge:)` returns one
   `NSTableViewRowAction` per edge (`Home/ArticleTableView.swift`), as Mail's message list does; AppKit
   draws them, slides the row and runs a full swipe. AppKit widens a row action's button to fit its
@@ -2117,19 +2117,53 @@ light mode, the same as the Compose app's selection — but `#00796B` in dark mo
 dimmed when another pane holds the focus: touch input moves the focus as a side effect, and Android,
 touch-first too, does not dim either (`external-spec.md` §9).
 
-### Article list scrolling (iOS)
+### Article list (iOS)
 
-The iOS article list is a SwiftUI `List`, scrolled with `ScrollViewProxy.scrollTo`. A filter switch
-goes back to the top, but only once the rows on screen belong to the new filter
+The iOS article list is a UIKit `UICollectionView` list rather than SwiftUI's `List`
+(`Home/ArticleCollectionView.swift`, wrapped in a `UIViewControllerRepresentable`), as the sidebar is
+(see "Sidebar (iOS)"). `ArticleListView` keeps everything around it — the toolbar, the search field,
+the empty states and the new-articles pill — and only swaps the rows on iOS. Why it is not a `List`:
+
+- **Scrolls run against the rows the list holds.** A `List` scrolls through `ScrollViewProxy.scrollTo`,
+  which SwiftUI carries out in a later layout, against rows that may have changed by then ("iOS: going
+  back to the article list crashed in `UICollectionView`" in [known-issues.md](known-issues.md)).
+- **The refresh control is the list's own.** SwiftUI hung a `.refreshable` list's control under the
+  navigation bar and dropped it once the column was popped, so the list had to be rebuilt each time a
+  phone-width split view brought it back from the sidebar, which lost its scroll position.
+- **The long-press menu is told where to point its highlight**, through the collection view's delegate
+  (see "Article row swipe").
+
+How it works:
+
+- **Rows.** A list configuration (`.plain`, no separators) over a diffable data source keyed by article
+  id. Each cell hosts the row's `ArticleRowView` through `UIHostingConfiguration`, redrawn only when the
+  row changes, so the row's drawing, selection fill and tap stay SwiftUI's, as in the macOS table. A
+  content change re-renders only the rows on screen.
+- **Under the bars.** The list is laid out under the navigation bar and the toolbar
+  (`.ignoresSafeArea()`), as a UIKit list in a navigation stack is, and `setContentScrollView` lets the
+  bar follow its scrolling. Laid out below the bar instead, the search field's drawer (iOS 17 and 18)
+  and the refresh control kept resetting each other's top inset, and the pull's spinner flickered.
+- **Pull to refresh.** `ListPullToRefresh`, shared with the sidebar, puts a `UIRefreshControl` on the
+  list while `PullToRefreshAvailability` allows it and runs `HomeObservable.pullToRefresh` with the
+  pulled spinner up.
+- **Visible rows.** The rows on screen are reported, in display order and debounced, as the scroll moves
+  or the rows change; none while the list is out of its window (under the reader).
+- **Scrolls.** `ArticleListView` asks for a scroll through `ArticleListScrollRequest`: a filter switch's
+  reset, an off-screen selection (keyboard or the reader's swipe), the restored selection once rows first
+  show, and the new-articles pill's jump. The controller carries the latest one out once the list has
+  appeared — before that, the navigation bar's height is not yet part of its insets — and drops one whose
+  row is gone. A row already fully on screen is not scrolled to. Rows never shown have estimated heights,
+  so a scroll is repeated once after the rows it brought on screen have sized themselves. A list resting
+  at the top stays there while its top inset settles.
+
+A filter switch goes back to the top, but only once the rows on screen belong to the new filter
 (`Home/ArticleListTopReset.swift`, tested in `KeryxTests`): `HomeObservable.filter` and the rows arrive
 on separate flows, in either order, so right after a switch the list can still hold the previous
-filter's rows. A scroll aimed at one of them is carried out against the rows the list has by then, and
-when the new rows land in the same update with the target past their end (the previous list's first
-row, into an empty folder), `UICollectionView` raises an exception and the app crashes. The rows
-therefore come paired with the filter that produced them — `HomeViewModel.articlesWithFilter` /
-`searchResultsWithFilter` — and `HomeObservable.articleRowsMatchFilter` / `searchRowsMatchFilter`
-say whether the rows on screen are the current filter's. The switch is carried out once; a refresh
-landing later never scrolls the list.
+filter's rows. The rows therefore come paired with the filter that produced them —
+`HomeViewModel.articlesWithFilter` / `searchResultsWithFilter` — and
+`HomeObservable.articleRowsMatchFilter` / `searchRowsMatchFilter` say whether the rows on screen are the
+current filter's. The switch is carried out once; a refresh landing later never scrolls the list.
+Picking the same item again from the sidebar is not a switch, so the list stays where it was.
 
 ### Article list title (iOS)
 
