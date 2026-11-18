@@ -86,10 +86,9 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
     private(set) var deferredState: SidebarRenderState?
 
     /// The long-press menu's clear highlight, so a press that turns into a swipe does not make the row
-    /// jump (see `ContextMenuPressHighlight`).
-    private let pressHighlight = ContextMenuPressHighlight()
-    /// The cell whose menu is opening or open, hidden behind the menu's preview.
-    private weak var contextMenuCell: UICollectionViewCell?
+    /// jump (see `ContextMenuPressHighlight`). The whole cell is hidden behind the menu's preview, since
+    /// its background and accessories are outside its content view.
+    private let pressHighlight = ContextMenuPressHighlight(hiding: { $0 })
 
     init(home: HomeObservable, actions: SidebarCollectionActions) {
         self.home = home
@@ -543,7 +542,7 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
               let key = item.selectionKey,
               let menu = actions.menu(item) else { return nil }
         let cell = collectionView.cellForItem(at: indexPaths[0])
-        contextMenuCell = cell
+        pressHighlight.pressed(cell)
         // Drawn now: by the time the preview is asked for, the cell is already hidden.
         let image = cell.flatMap(Self.image(of:))
         return UIContextMenuConfiguration(identifier: key as NSString, previewProvider: {
@@ -556,7 +555,7 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
         contextMenuConfiguration configuration: UIContextMenuConfiguration,
         highlightPreviewForItemAt indexPath: IndexPath
     ) -> UITargetedPreview? {
-        collectionView.cellForItem(at: indexPath).flatMap(pressHighlight.preview(in:))
+        pressHighlight.highlightPreview(in: collectionView.cellForItem(at: indexPath))
     }
 
     func collectionView(
@@ -564,17 +563,15 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
         contextMenuConfiguration configuration: UIContextMenuConfiguration,
         dismissalPreviewForItemAt indexPath: IndexPath
     ) -> UITargetedPreview? {
-        (collectionView.cellForItem(at: indexPath) ?? contextMenuCell).flatMap(pressHighlight.preview(in:))
+        pressHighlight.dismissalPreview(in: collectionView.cellForItem(at: indexPath))
     }
 
-    /// The whole cell is hidden, since its background and accessories are outside its content view.
     func collectionView(
         _ collectionView: UICollectionView,
         willDisplayContextMenu configuration: UIContextMenuConfiguration,
         animator: (any UIContextMenuInteractionAnimating)?
     ) {
-        guard let contextMenuCell else { return }
-        ContextMenuPressHighlight.hideRow(contextMenuCell, animator: animator)
+        pressHighlight.menuWillDisplay(animator: animator)
     }
 
     func collectionView(
@@ -582,8 +579,7 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
         willEndContextMenuInteraction configuration: UIContextMenuConfiguration,
         animator: (any UIContextMenuInteractionAnimating)?
     ) {
-        guard let contextMenuCell else { return }
-        ContextMenuPressHighlight.showRow(contextMenuCell, animator: animator)
+        pressHighlight.menuWillEnd(animator: animator)
     }
 
     /// An image of `cell` for the menu's preview. An image rather than

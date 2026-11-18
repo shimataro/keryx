@@ -112,9 +112,8 @@ final class ArticleCollectionViewController: UIViewController, UICollectionViewD
     private let pullToRefresh = ListPullToRefresh()
     private var lastReportedIds: [String]?
 
-    private let pressHighlight = ContextMenuPressHighlight()
-    /// The cell whose menu is opening or open, hidden behind the menu's preview.
-    private weak var contextMenuCell: UICollectionViewCell?
+    /// The row is drawn entirely in the cell's content view (the selection fill included).
+    private let pressHighlight = ContextMenuPressHighlight(hiding: { $0.contentView })
 
     init(scrollGeneration: Int) {
         self.scrollGeneration = scrollGeneration
@@ -368,7 +367,7 @@ final class ArticleCollectionViewController: UIViewController, UICollectionViewD
     ) -> UIContextMenuConfiguration? {
         guard indexPaths.count == 1, let row = row(at: indexPaths[0]) else { return nil }
         let cell = collectionView.cellForItem(at: indexPaths[0])
-        contextMenuCell = cell
+        pressHighlight.pressed(cell)
         return ArticleRowMenu.configuration(
             for: row.model,
             isSelected: row.isSelected,
@@ -384,7 +383,7 @@ final class ArticleCollectionViewController: UIViewController, UICollectionViewD
         contextMenuConfiguration configuration: UIContextMenuConfiguration,
         highlightPreviewForItemAt indexPath: IndexPath
     ) -> UITargetedPreview? {
-        collectionView.cellForItem(at: indexPath).flatMap(pressHighlight.preview(in:))
+        pressHighlight.highlightPreview(in: collectionView.cellForItem(at: indexPath))
     }
 
     func collectionView(
@@ -392,17 +391,15 @@ final class ArticleCollectionViewController: UIViewController, UICollectionViewD
         contextMenuConfiguration configuration: UIContextMenuConfiguration,
         dismissalPreviewForItemAt indexPath: IndexPath
     ) -> UITargetedPreview? {
-        (collectionView.cellForItem(at: indexPath) ?? contextMenuCell).flatMap(pressHighlight.preview(in:))
+        pressHighlight.dismissalPreview(in: collectionView.cellForItem(at: indexPath))
     }
 
-    /// The row is drawn entirely in the cell's content view (the selection fill included).
     func collectionView(
         _ collectionView: UICollectionView,
         willDisplayContextMenu configuration: UIContextMenuConfiguration,
         animator: (any UIContextMenuInteractionAnimating)?
     ) {
-        guard let content = contextMenuCell?.contentView else { return }
-        ContextMenuPressHighlight.hideRow(content, animator: animator)
+        pressHighlight.menuWillDisplay(animator: animator)
     }
 
     func collectionView(
@@ -410,8 +407,7 @@ final class ArticleCollectionViewController: UIViewController, UICollectionViewD
         willEndContextMenuInteraction configuration: UIContextMenuConfiguration,
         animator: (any UIContextMenuInteractionAnimating)?
     ) {
-        guard let content = contextMenuCell?.contentView else { return }
-        ContextMenuPressHighlight.showRow(content, animator: animator)
+        pressHighlight.menuWillEnd(animator: animator)
     }
 }
 #endif
