@@ -470,7 +470,7 @@ class NotificationCenterPlacementTest {
         for (tag in listOf("warning", "error", "info")) {
             assertEquals(
                 0,
-                onAllNodes(hasAnyAncestor(hasTestTag(tag)) and SemanticsMatcher.keyIsDefined(SemanticsProperties.ContentDescription) and SemanticsMatcher.keyNotDefined(SemanticsProperties.Role), useUnmergedTree = true)
+                onAllNodes(hasAnyAncestor(hasTestTag(tag)) and SemanticsMatcher.keyIsDefined(SemanticsProperties.ContentDescription) and !SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Button), useUnmergedTree = true)
                     .fetchSemanticsNodes().size,
                 tag,
             )
