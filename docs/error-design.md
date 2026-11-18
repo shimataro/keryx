@@ -184,7 +184,9 @@ Status labels that are not messages (a notification's level, such as "Error") ar
   button carries — rather than the feed rows' plain number, so it never reads as one more unread
   count, and the bell takes the color of the most severe notification (the error color for a warning
   or an error, the accent color for new-version notices alone; the shared
-  `presentation/home/NotificationSeverity.kt`'s `notificationBellTone`). An alert's level is also read
+  `presentation/home/NotificationSeverity.kt`'s `notificationBellTone`). While the Compose row holds
+  keyboard focus and is highlighted, the bell takes the highlight's content color instead, since the
+  severity colors cannot keep their contrast on the selection background. An alert's level is also read
   out with the row ("Warning, Notifications, 2"), so the severity does not rest on color alone. Clicking the row opens the list above it — a
   bottom sheet on Android, a sheet at an iPhone's compact width. The row is
   `ui/home/NotificationCenterRow.kt` in Compose and `NotificationCenterRow.swift` in SwiftUI. It takes

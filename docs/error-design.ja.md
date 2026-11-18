@@ -185,7 +185,9 @@ SwiftUI アプリは String Catalog で。唯一の例外は新着記事の OS �
   ような素の数字ではなく、ドロワーボタンと同じ赤いピルのバッジで表示する。これで、未読数の一つと
   見間違えないようにする。ベルのアイコンは、最も重い通知のレベルの色にする（警告とエラーは error 色、
   新バージョンのお知らせだけなら accent 色。共有の `presentation/home/NotificationSeverity.kt` の
-  `notificationBellTone` で決める）。警告やエラーがあるときは、そのレベルも行と一緒に読み上げる
+  `notificationBellTone` で決める）。ただし Compose の行がキーボードフォーカスでハイライトされている
+  間は、ベルはハイライトのコンテンツ色になる。選択背景の上では重大度の色がコントラストを保てないため
+  である。警告やエラーがあるときは、そのレベルも行と一緒に読み上げる
   （「警告、通知、2」）。重大度を色だけで伝えないためである。行を押すと、行の上に
   一覧を開く。Android ではボトムシート、iPhone の狭い幅ではシートになる。行の実装は、Compose が
   `ui/home/NotificationCenterRow.kt`、SwiftUI が `NotificationCenterRow.swift` にある。履歴はほとんどの
