@@ -28,6 +28,17 @@ struct NotificationCenterRow: View {
 
     private var unreadCount: Int { notifications.items.count }
 
+    /// The bell's style for the most severe notification, from the shared `highestNotificationLevel`:
+    /// red for a warning or an error, the accent color for new-version notices alone, and the row's
+    /// own style when the notification center is empty.
+    private var bellStyle: AnyShapeStyle {
+        switch NotificationSeverityKt.highestNotificationLevel(items: notifications.items) {
+        case .error, .warning: return AnyShapeStyle(Color.red)
+        case .info: return AnyShapeStyle(Color.accentColor)
+        default: return AnyShapeStyle(.primary)
+        }
+    }
+
     var body: some View {
         Button {
             isShowingPopover = true
@@ -35,13 +46,26 @@ struct NotificationCenterRow: View {
             // Laid out like a sidebar row: the bell, the name, and the count at the trailing edge
             // where the feed rows show their unread counts.
             HStack {
-                Label(L("home_notifications"), systemImage: "bell")
+                Label {
+                    Text(L("home_notifications"))
+                } icon: {
+                    // Tinted by the most severe notification, so a warning or an error reads
+                    // differently from a new-version notice (Compose's own `bellTint`).
+                    Image(systemName: "bell")
+                        .foregroundStyle(bellStyle)
+                }
                 Spacer(minLength: 8)
-                // Only above zero, like the feed rows' unread counts.
+                // Only above zero. A red capsule rather than the feed rows' plain secondary count, so
+                // it does not read as one more unread count (Compose's own `KeryxCountBadge`).
                 if unreadCount > 0 {
                     Text("\(unreadCount)")
+                        .font(.caption.weight(.semibold))
                         .monospacedDigit()
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 1)
+                        .frame(minWidth: 18)
+                        .background(Capsule().fill(.red))
                 }
             }
             .padding(.horizontal, 16)
