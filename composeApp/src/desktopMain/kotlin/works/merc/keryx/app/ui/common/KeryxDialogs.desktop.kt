@@ -62,6 +62,7 @@ import androidx.compose.ui.window.DialogWindowScope
 import androidx.compose.ui.window.WindowDecoration
 import org.koin.compose.koinInject
 import works.merc.keryx.app.core.Log
+import works.merc.keryx.app.data.local.LocalSettings
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.platform.isMacOs
 import works.merc.keryx.app.platform.LocalNativeWindow
@@ -222,6 +223,49 @@ private const val LOG_TAG = "KeryxDialogs"
  * subscribed on its own so unrelated settings changes don't recompose the dialog content. */
 private data class DialogThemePrefs(val themeMode: String, val fontScale: Double)
 
+/** Projects [LocalSettings] onto the [DialogThemePrefs] the dialog's [KeryxTheme] reads. */
+private fun LocalSettings.toDialogThemePrefs(): DialogThemePrefs = DialogThemePrefs(themeMode, fontSizeScale)
+
+/**
+ * Preview-key handler for [DesktopModalWindow]: Escape (on key-down) invokes [onDismiss] and
+ * consumes the event; every other key passes through.
+ */
+private fun escapeDismissHandler(onDismiss: () -> Unit): (KeyEvent) -> Boolean = { keyEvent ->
+    if (keyEvent.type == KeyEventType.KeyDown && keyEvent.key == Key.Escape) {
+        onDismiss()
+        true
+    } else {
+        false
+    }
+}
+
+/**
+ * One-time native chrome setup for a [DesktopModalWindow]'s [window], returning the title-bar
+ * allowance to provide as [LocalDialogTitleBarAllowance].
+ *
+ * Minimizing/zooming a modal one-off dialog isn't meaningful; only "close" and
+ * "drag to move" (both native window behaviors) are wanted. Suppressed via the
+ * macOS-specific client properties since there's no cross-platform Compose API for this
+ * (Windows dialogs conventionally don't show minimize/maximize buttons to begin with).
+ * On macOS this also merges the title bar into the content background, per-dialog
+ * (a local equivalent of main.kt's WindowChrome.titleBarInsetDp, since each dialog is its
+ * own independent OS window rather than sharing the main window's chrome state).
+ */
+private fun setupDialogChrome(window: Window, initialWidth: Dp): Dp {
+    val rootPane = (window as? RootPaneContainer)?.rootPane
+    rootPane?.putClientProperty("apple.awt.windowMinimizable", false)
+    rootPane?.putClientProperty("apple.awt.windowZoomable", false)
+    // Floor, not the primary defense — see MIN_DIALOG_HEIGHT's doc. Same Dp/AWT-point
+    // space applyWindowGeometry's own rounding uses, so the two floors agree.
+    window.minimumSize = Dimension(initialWidth.value.roundToInt(), MIN_DIALOG_HEIGHT.value.roundToInt())
+    return if (isMacOs) {
+        rootPane?.applyMacMergedTitleBar()
+        MAC_TITLE_BAR_HEIGHT
+    } else {
+        DECORATION_HEIGHT_ALLOWANCE
+    }
+}
+
 /**
  * Renders [content] in a real, separate, natively-decorated, non-resizable OS window (title bar
  * with close button, draggable) instead of a Compose `Popup` — see [KeryxAlertDialog] for why.
@@ -284,38 +328,13 @@ private fun DesktopModalWindow(
         readyToShow = true
     }
 
-    val onPreviewKey: (KeyEvent) -> Boolean = { keyEvent ->
-        if (keyEvent.type == KeyEventType.KeyDown && keyEvent.key == Key.Escape) {
-            onDismissRequest()
-            true
-        } else {
-            false
-        }
-    }
+    val onPreviewKey: (KeyEvent) -> Boolean = escapeDismissHandler(onDismissRequest)
 
     // Shared window content so the modal and modeless DialogWindow overloads render identically.
     val dialogContent: @Composable DialogWindowScope.() -> Unit = {
-        // Minimizing/zooming a modal one-off dialog isn't meaningful; only "close" and
-        // "drag to move" (both native window behaviors) are wanted. Suppressed via the
-        // macOS-specific client properties since there's no cross-platform Compose API for this
-        // (Windows dialogs conventionally don't show minimize/maximize buttons to begin with).
-        // On macOS this block also merges the title bar into the content background, per-dialog
-        // (a local equivalent of main.kt's WindowChrome.titleBarInsetDp, since each dialog is its
-        // own independent OS window rather than sharing the main window's chrome state).
-        val titleBarAllowanceDp = remember(window) {
-            val rootPane = (window as? RootPaneContainer)?.rootPane
-            rootPane?.putClientProperty("apple.awt.windowMinimizable", false)
-            rootPane?.putClientProperty("apple.awt.windowZoomable", false)
-            // Floor, not the primary defense — see MIN_DIALOG_HEIGHT's doc. Same Dp/AWT-point
-            // space applyWindowGeometry's own rounding uses, so the two floors agree.
-            window.minimumSize = Dimension(initialWidth.value.roundToInt(), MIN_DIALOG_HEIGHT.value.roundToInt())
-            if (isMacOs) {
-                rootPane?.applyMacMergedTitleBar()
-                MAC_TITLE_BAR_HEIGHT
-            } else {
-                DECORATION_HEIGHT_ALLOWANCE
-            }
-        }
+        // Native chrome (no minimize/zoom, macOS merged title bar, minimum size) — applied once
+        // per window; see setupDialogChrome.
+        val titleBarAllowanceDp = remember(window) { setupDialogChrome(window, initialWidth) }
 
         CompositionLocalProvider(
             LocalDialogWindowOwner provides window,
@@ -327,10 +346,10 @@ private fun DesktopModalWindow(
             val settingsRepository = koinInject<SettingsRepository>()
             val themePrefs by remember(settingsRepository) {
                 settingsRepository.localSettings
-                    .map { DialogThemePrefs(it.themeMode, it.fontSizeScale) }
+                    .map { it.toDialogThemePrefs() }
                     .distinctUntilChanged()
             }.collectAsState(
-                initial = settingsRepository.getLocalSettings().let { DialogThemePrefs(it.themeMode, it.fontSizeScale) },
+                initial = settingsRepository.getLocalSettings().toDialogThemePrefs(),
             )
 
             KeryxTheme(themeMode = themePrefs.themeMode, fontScale = themePrefs.fontScale.toFloat()) {
