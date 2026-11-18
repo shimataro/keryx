@@ -43,10 +43,7 @@ struct ArticleRowView: View, Equatable {
     }
 
     var body: some View {
-        Button(action: onSelect) {
-            ArticleRowLabel(model: model, isSelected: isSelected, isReturnFlashing: isReturnFlashing, paneFocused: paneFocused)
-        }
-        .buttonStyle(.plain)
+        tappableLabel
         .accessibilityValue(stateAccessibilityValue)
         // The selection is otherwise only a background fill, which VoiceOver cannot see.
         .accessibilityAddTraits(isSelected ? .isSelected : [])
@@ -67,6 +64,30 @@ struct ArticleRowView: View, Equatable {
                 .disabled(!item.isEnabled)
             }
         }
+        #endif
+    }
+
+    private var label: ArticleRowLabel {
+        ArticleRowLabel(model: model, isSelected: isSelected, isReturnFlashing: isReturnFlashing, paneFocused: paneFocused)
+    }
+
+    /// The row and how a tap reaches `onSelect`.
+    ///
+    /// On iOS the tap is the list's own cell selection (`ArticleCollectionViewController`'s
+    /// `didSelectItemAt`), not a `Button`: a button inside the hosted cell would take a tap before
+    /// UIKit sees it, so a tap on another row while a row's swipe actions are open would select that
+    /// row instead of only closing the actions, as UIKit's lists do. VoiceOver still gets one
+    /// activatable element, as the button gave it.
+    @ViewBuilder
+    private var tappableLabel: some View {
+        #if os(iOS)
+        label
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction { onSelect() }
+        #else
+        Button(action: onSelect) { label }
+            .buttonStyle(.plain)
         #endif
     }
 
