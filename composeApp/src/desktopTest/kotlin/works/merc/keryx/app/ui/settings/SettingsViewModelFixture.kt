@@ -33,6 +33,7 @@ import works.merc.keryx.app.awaitConditionBlocking
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.CloudStorageType
 import works.merc.keryx.app.core.Result
+import works.merc.keryx.app.data.cloud.CloudStorage
 import works.merc.keryx.app.data.cloud.DropboxAuthManager
 import works.merc.keryx.app.data.cloud.OAuthTokens
 import works.merc.keryx.app.data.local.FtsManager
@@ -46,6 +47,7 @@ import works.merc.keryx.app.data.remote.UpdateDownloader
 import works.merc.keryx.app.domain.ActivityCenter
 import works.merc.keryx.app.domain.ArticleRepository
 import works.merc.keryx.app.domain.AvailableUpdate
+import works.merc.keryx.app.domain.CloudConnectFlow
 import works.merc.keryx.app.domain.CloudConnectionService
 import works.merc.keryx.app.domain.FeedRepository
 import works.merc.keryx.app.domain.FolderRepository
@@ -241,6 +243,12 @@ class SettingsViewModelFixture {
         // Where the OpmlTransferController runs an import; a test can supply a HoldingDispatcher to
         // keep a cancelled import from stopping until it says so.
         opmlImportDispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
+        // The one provider the cloud session offers (Dropbox unless a test needs another row).
+        cloudType: CloudStorageType = CloudStorageType.DROPBOX,
+        // What connecting that provider does; the default completes with a token at once.
+        connectFlow: CloudConnectFlow = FakeCloudConnectFlow(Result.Ok(OAuthTokens("AT"))),
+        // The storage syncs run against; null (the default) means no provider, so a sync is a no-op.
+        cloudStorage: CloudStorage? = null,
     ): SettingsViewModel {
         val clock = Clock { 0L }
         val syncScheduler = SyncScheduler {}
@@ -272,7 +280,7 @@ class SettingsViewModelFixture {
             driver = driver,
             db = db,
             ftsManager = FtsManager(driver),
-            cloudProvider = { null },
+            cloudProvider = { cloudStorage },
             clock = clock,
             scope = syncScope,
             activityCenter = ActivityCenter(),
@@ -287,7 +295,8 @@ class SettingsViewModelFixture {
             tokenStorage = FakeTokenStorage(),
             authManager = authManager,
             clock = clock,
-            connectFlow = FakeCloudConnectFlow(Result.Ok(OAuthTokens("AT"))),
+            type = cloudType,
+            connectFlow = connectFlow,
         )
         val cloudSyncController = CloudSyncController(
             cloudSession, syncRepository, CloudConnectionService(cloudSession, settingsRepository, syncRepository), ActivityCenter(),
