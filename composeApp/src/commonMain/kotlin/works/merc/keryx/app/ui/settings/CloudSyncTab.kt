@@ -248,12 +248,48 @@ internal fun CloudSyncTabContent(vm: SettingsViewModel) {
         )
     }
 
+    CloudSyncDialogs(
+        vm = vm,
+        connectedType = connectedType,
+        askingServer = askingServer,
+        setAskingServer = { askingServer = it },
+        confirmingDisconnect = confirmingDisconnect,
+        setConfirmingDisconnect = { confirmingDisconnect = it },
+        confirmingAbortConnect = confirmingAbortConnect,
+        setConfirmingAbortConnect = { confirmingAbortConnect = it },
+        confirmingResetCloudData = confirmingResetCloudData,
+        setConfirmingResetCloudData = { confirmingResetCloudData = it },
+        confirmingSwitchTo = confirmingSwitchTo,
+        setConfirmingSwitchTo = { confirmingSwitchTo = it },
+    )
+}
+
+/**
+ * [CloudSyncTabContent]'s dialogs: the server-address dialog and the confirmations for disconnect,
+ * abort-connect, reset and switch. Each shows while its value is set; the state stays owned by
+ * [CloudSyncTabContent] and is written back through the setters.
+ */
+@Composable
+private fun CloudSyncDialogs(
+    vm: SettingsViewModel,
+    connectedType: CloudStorageType?,
+    askingServer: ServerDialogRequest?,
+    setAskingServer: (ServerDialogRequest?) -> Unit,
+    confirmingDisconnect: CloudStorageType?,
+    setConfirmingDisconnect: (CloudStorageType?) -> Unit,
+    confirmingAbortConnect: CloudStorageType?,
+    setConfirmingAbortConnect: (CloudStorageType?) -> Unit,
+    confirmingResetCloudData: Boolean,
+    setConfirmingResetCloudData: (Boolean) -> Unit,
+    confirmingSwitchTo: CloudStorageType?,
+    setConfirmingSwitchTo: (CloudStorageType?) -> Unit,
+) {
     askingServer?.let { request ->
         NextcloudServerDialog(
             initialUrl = request.initialUrl,
-            onDismiss = { askingServer = null },
+            onDismiss = { setAskingServer(null) },
             onConfirmed = { connectRequest ->
-                askingServer = null
+                setAskingServer(null)
                 when (request.kind) {
                     ServerDialogKind.CONNECT -> vm.connect(request.type, connectRequest)
                     ServerDialogKind.RECONNECT -> vm.reconnect(connectRequest)
@@ -267,8 +303,8 @@ internal fun CloudSyncTabContent(vm: SettingsViewModel) {
             title = stringResource(Res.string.settings_cloud_disconnect_confirm_title, type.brandLabel()),
             body = stringResource(Res.string.settings_cloud_disconnect_confirm_body),
             confirmText = stringResource(type.disconnectLabel()),
-            onConfirm = { vm.disconnect(); confirmingDisconnect = null },
-            onDismiss = { confirmingDisconnect = null },
+            onConfirm = { vm.disconnect(); setConfirmingDisconnect(null) },
+            onDismiss = { setConfirmingDisconnect(null) },
         )
     }
     confirmingAbortConnect?.let { type ->
@@ -276,14 +312,14 @@ internal fun CloudSyncTabContent(vm: SettingsViewModel) {
             title = stringResource(Res.string.settings_cloud_abort_connect_confirm_title, type.brandLabel()),
             body = stringResource(Res.string.settings_cloud_abort_connect_confirm_body),
             confirmText = stringResource(Res.string.common_abort),
-            onConfirm = { vm.cancelConnect(); confirmingAbortConnect = null },
-            onDismiss = { confirmingAbortConnect = null },
+            onConfirm = { vm.cancelConnect(); setConfirmingAbortConnect(null) },
+            onDismiss = { setConfirmingAbortConnect(null) },
         )
     }
     if (confirmingResetCloudData) {
         ResetCloudDataConfirmDialog(
-            onConfirm = { vm.resetCloudData(); confirmingResetCloudData = false },
-            onDismiss = { confirmingResetCloudData = false },
+            onConfirm = { vm.resetCloudData(); setConfirmingResetCloudData(false) },
+            onDismiss = { setConfirmingResetCloudData(false) },
         )
     }
     confirmingSwitchTo?.let { type ->
@@ -296,16 +332,16 @@ internal fun CloudSyncTabContent(vm: SettingsViewModel) {
             ),
             confirmText = stringResource(Res.string.settings_cloud_switch_confirm_action),
             onConfirm = {
-                confirmingSwitchTo = null
+                setConfirmingSwitchTo(null)
                 // The server is asked for only once the switch is confirmed; cancelling that dialog
                 // leaves the current connection alone.
                 if (type.requiresServerUrl) {
-                    askingServer = ServerDialogRequest(type, ServerDialogKind.SWITCH, "")
+                    setAskingServer(ServerDialogRequest(type, ServerDialogKind.SWITCH, ""))
                 } else {
                     vm.switchTo(type)
                 }
             },
-            onDismiss = { confirmingSwitchTo = null },
+            onDismiss = { setConfirmingSwitchTo(null) },
         )
     }
 }
