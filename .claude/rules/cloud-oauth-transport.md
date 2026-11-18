@@ -53,6 +53,11 @@ constraint already documented for Dropbox and is accepted.
   `AuthorizationClient` (`data/cloud/PlayServicesGoogleDriveAuth.kt`), which hands the app an access
   token directly. **This rule does not apply to it** — there is no transport choice to make. See
   `docs/sync-architecture.md`'s "Google Drive on Android".
+- **Nextcloud** is not OAuth at all, so **this rule does not apply to it**: it signs in with Login
+  Flow v2 (the browser shows the server's own login page, and the app polls the server until an app
+  password is granted). There is no redirect to capture and no `OAuthRedirectTransport`; the login
+  page is opened and closed through `domain/LoginPageLauncher` instead. See
+  `docs/sync-architecture.md`'s "Nextcloud (Login Flow v2)".
 - Android registers the shared `keryx://oauth2/callback` scheme declaratively via an
   `AndroidManifest.xml` `intent-filter` on `MainActivity` (no runtime registration step, unlike
   Windows/Linux), and forwards the redirect through `dispatchOAuthCallbackIfPresent` into the same

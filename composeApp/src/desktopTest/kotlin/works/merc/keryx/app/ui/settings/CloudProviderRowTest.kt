@@ -455,4 +455,67 @@ class CloudProviderRowTest {
         waitForIdle()
         onNodeWithText("null").assertIsDisplayed()
     }
+
+    @Test
+    fun statusTextAsksToFinishTheSignInWhileNextcloudConnects() = runDesktopComposeUiTest {
+        setContent {
+            Box(Modifier.width(640.dp)) {
+                val text = cloudProviderRowStatusText(
+                    type = CloudStorageType.NEXTCLOUD,
+                    connectedType = null,
+                    disconnecting = false,
+                    syncing = false,
+                    syncPhase = SyncPhase.IDLE,
+                    connectingType = CloudStorageType.NEXTCLOUD,
+                )
+                Text(text ?: "null")
+            }
+        }
+        waitForIdle()
+        onNodeWithText("ブラウザで Nextcloud へのサインインを完了してください。").assertIsDisplayed()
+    }
+
+    @Test
+    fun statusTextStaysEmptyWhileAnOAuthProviderConnects() = runDesktopComposeUiTest {
+        setContent {
+            Box(Modifier.width(640.dp)) {
+                val text = cloudProviderRowStatusText(
+                    type = CloudStorageType.DROPBOX,
+                    connectedType = null,
+                    disconnecting = false,
+                    syncing = false,
+                    syncPhase = SyncPhase.IDLE,
+                    connectingType = CloudStorageType.DROPBOX,
+                )
+                Text(text ?: "null")
+            }
+        }
+        waitForIdle()
+        onNodeWithText("null").assertIsDisplayed()
+    }
+
+    @Test
+    fun aNextcloudRowIsNamedByItsBrandAlone() = runDesktopComposeUiTest {
+        setContent {
+            Box(Modifier.width(640.dp)) {
+                CloudProviderRow(
+                    type = CloudStorageType.NEXTCLOUD,
+                    connected = false,
+                    connecting = false,
+                    canCancel = false,
+                    idleEnabled = true,
+                    failed = false,
+                    iconOnly = false,
+                    onSelect = {},
+                    onCancel = {},
+                    onDisconnect = {},
+                    onResetCloudData = {},
+                    onReconnect = {},
+                )
+            }
+        }
+        waitForIdle()
+        onNodeWithText("Nextcloud").assertIsDisplayed()
+        onNodeWithText("連携する").assertIsEnabled()
+    }
 }

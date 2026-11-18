@@ -5,13 +5,22 @@ import SwiftUI
 /// doc. Shown by `KeryxApp` while `SettingsRepository.isSetupComplete()` is false.
 struct SetupView: View {
     let oauthCoordinator: OAuthSessionCoordinator
+    /// Builds the Nextcloud server sheet's state machine (`KeryxSdk.newNextcloudServerController`).
+    let makeServerController: (String) -> NextcloudServerController
     let onDone: () -> Void
 
     @State private var setup: SetupObservable
     @State private var showAbortConfirm = false
+    @State private var serverPrompt: NextcloudServerPrompt?
 
-    init(controller: SetupController, oauthCoordinator: OAuthSessionCoordinator, onDone: @escaping () -> Void) {
+    init(
+        controller: SetupController,
+        oauthCoordinator: OAuthSessionCoordinator,
+        makeServerController: @escaping (String) -> NextcloudServerController,
+        onDone: @escaping () -> Void
+    ) {
         self.oauthCoordinator = oauthCoordinator
+        self.makeServerController = makeServerController
         self.onDone = onDone
         self._setup = State(initialValue: SetupObservable(controller: controller))
     }
@@ -58,6 +67,9 @@ struct SetupView: View {
         } message: {
             Text(L("setup_abort_connect_confirm_body"))
         }
+        .sheet(item: $serverPrompt) { prompt in
+            NextcloudServerSheet(prompt: prompt, makeController: makeServerController) { serverPrompt = nil }
+        }
     }
 
     private var contentPadding: EdgeInsets {
@@ -94,7 +106,15 @@ struct SetupView: View {
                     optionCard(title: L("setup_cloud_sync_section_title"), desc: L("setup_cloud_sync_section_desc")) {
                         ForEach(setup.controller.availableCloudTypes, id: \.self) { type in
                             Button {
-                                setup.controller.connect(type: type) { onDone() }
+                                if type.requiresServerUrl {
+                                    // Ask for the server first; the sheet starts the connect once
+                                    // the address passed, and cancelling it connects nothing.
+                                    serverPrompt = NextcloudServerPrompt(initialUrl: "") { request in
+                                        setup.controller.connect(type: type, request: request) { onDone() }
+                                    }
+                                } else {
+                                    setup.controller.connect(type: type, request: CloudConnectRequest.companion.NONE) { onDone() }
+                                }
                             } label: {
                                 Text(L(providerKey(type)))
                                     .frame(maxWidth: .infinity)
@@ -111,7 +131,9 @@ struct SetupView: View {
             if setup.phase == .connecting {
                 VStack(spacing: 8) {
                     ProgressView()
-                    Text(L("setup_connecting"))
+                    // A browser sign-in the app only learns of by polling can take a while, so say
+                    // what it waits for — matches Compose's own `SetupScreen`.
+                    Text(L(setup.connectingType?.requiresServerUrl == true ? "nextcloud_login_waiting" : "setup_connecting"))
                     if setup.canCancelConnect {
                         Button(L("common_cancel")) { showAbortConfirm = true }
                     }
@@ -152,6 +174,7 @@ struct SetupView: View {
         case .dropbox: return "setup_dropbox"
         case .googleDrive: return "setup_google_drive"
         case .onedrive: return "setup_onedrive"
+        case .nextcloud: return "setup_nextcloud"
         }
     }
 }

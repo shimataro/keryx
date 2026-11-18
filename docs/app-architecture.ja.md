@@ -37,10 +37,11 @@
                SqliteFile, UntrustedText, UpdateDistribution
     data/local/   DatabaseDriverFactory(expect), FtsManager, FtsSearch, LocalSettings(Store)
     data/remote/  FeedFetcher, FeedParser, FeedDiscovery, FaviconResolver, UrlResolver, FeedModels, UpdateDownloader, ReleaseFeedSource（アプリ内アップデート——後述の「アプリ内アップデート」参照）
-    data/cloud/   CloudStorage, CloudAuthManager, DropboxStorage, DropboxAuthManager, GoogleDriveStorage, GoogleDriveAuthManager, OneDriveStorage, OneDriveAuthManager, Pkce, TokenStorage, OAuthTokens,
+    data/cloud/   CloudStorage, CloudAuthManager, DropboxStorage, DropboxAuthManager, GoogleDriveStorage, GoogleDriveAuthManager, OneDriveStorage, OneDriveAuthManager, Pkce, TokenStorage, OAuthTokens, CloudCredentials (+ AppPasswordCredentials, CloudCredentialsSerializer),
                   CloudFileTransfer, SecretStoreTokenStorage
+    data/cloud/nextcloud/  NextcloudStorage（WebDAV）, NextcloudLoginFlow（Login Flow v2）, NextcloudServerProbe（status.php）, normalizeNextcloudUrl, revokeNextcloudAppPassword — sync-architecture.ja.md の「Nextcloud（Login Flow v2）」参照
     data/opml/    OpmlCodec
-    domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport（interface + CustomUri）, AuthorizationLauncher（interface + schemeOf。`OAuthConnectFlow` が認可 URL をどう開くか——デスクトップ/Android は既定でシステムのブラウザ、Apple アプリは Swift に委ねる。下記「KeryxSdk」参照）, OAuthCallbackParams, OAuthUriParser（parseOAuthUri。すべての `keryx://`・ループバックのリダイレクト処理が共有）, StartupMaintenanceTasks（runStartupMaintenance/checkForUpdateAndNotify/maybeRebuildFtsIndex）, BackgroundRefreshLoop（backgroundUpdateLoop——デスクトップ版自身のポーリングループ。Apple 版の `KeryxSdk.startMaintenance()` も使う。Android は `WorkManager` でスケジュールするため、これに相当するものはない）, RefreshCycleRunner（すべての更新経路が共有する 更新 → 通知 → 同期 のサイクル）, NetworkUsagePolicy（現在の回線でどの自動通信を許可するか——sync-architecture.ja.md の「ネットワークゲート」参照）, UpdateChecker/UpdateRepository/UpdateAsset/UpdateInstallPolicy/UpdateInstaller（expect 相当の interface）/AvailableUpdate/UpdateState（アプリ内アップデート——下記「アプリ内アップデート」参照）
+    domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport（interface + CustomUri）, AuthorizationLauncher（interface + schemeOf。`OAuthConnectFlow` が認可 URL をどう開くか——デスクトップ/Android は既定でシステムのブラウザ、Apple アプリは Swift に委ねる。下記「KeryxSdk」参照）, LoginPageLauncher（インターフェース + BrowserLoginPageLauncher — Nextcloud の Login Flow v2 がサインインページを表示し、そこから戻る方法）, OAuthCallbackParams, OAuthUriParser（parseOAuthUri。すべての `keryx://`・ループバックのリダイレクト処理が共有）, StartupMaintenanceTasks（runStartupMaintenance/checkForUpdateAndNotify/maybeRebuildFtsIndex）, BackgroundRefreshLoop（backgroundUpdateLoop——デスクトップ版自身のポーリングループ。Apple 版の `KeryxSdk.startMaintenance()` も使う。Android は `WorkManager` でスケジュールするため、これに相当するものはない）, RefreshCycleRunner（すべての更新経路が共有する 更新 → 通知 → 同期 のサイクル）, NetworkUsagePolicy（現在の回線でどの自動通信を許可するか——sync-architecture.ja.md の「ネットワークゲート」参照）, UpdateChecker/UpdateRepository/UpdateAsset/UpdateInstallPolicy/UpdateInstaller（expect 相当の interface）/AvailableUpdate/UpdateState（アプリ内アップデート——下記「アプリ内アップデート」参照）
     di/           SharedModule（sharedModule + updateModule + presentationModule）と HttpClientFactory［:shared］、AppModule（+ expect platformModule）と ImageLoaderSetup［:composeApp］
     presentation/ ［:shared］すべての UI が共有する、UI フレームワーク非依存の画面状態：home/（HomeViewModel——ホーム画面の
                   フィルタ・選択・記事リスト・検索・未読のみ・新着の状態と操作。ArticleContentCache、HomeRefreshController、
@@ -100,9 +101,9 @@
     Vector Drawable XML — Compose Multiplatform の SVG デコーダはデスクトップ/iOS 専用で Android では
     実行時にクラッシュするため。VectorDrawable XML は `painterResource` が全ターゲットで描画できる唯一の
     *ベクター*形式——ビットマップ資産（`app_icon.png`、トレイの PNG 群）は対象外）
-    クラウド連携先（Dropbox、OneDrive、Google Drive）には、どこにもアイコンやロゴを使わない。セットアップと設定 ▸
+    クラウド連携先（Dropbox、OneDrive、Google Drive、Nextcloud）には、どこにもアイコンやロゴを使わない。セットアップと設定 ▸
     クラウド同期では、Apple アプリを含む全プラットフォームで名前の文字だけで示す。OneDrive のアイコンは Microsoft が
-    別途ライセンスしており（Microsoft 365 Trademark Guidelines）、3 社とも許可なく認めている文字での表記に揃えると、
+    別途ライセンスしており（Microsoft 365 Trademark Guidelines）、どの連携先も許可なく認めている文字での表記に揃えると、
     見た目も揃うため。
   jvmCommonMain/kotlin/…/  デスクトップと Android の両方が共有する actual（どちらのプラットフォーム
     API にも依存しない）: Gzip, Sha1, Sha256, SecureRandom（secureRandomBytes）, ContentDigest, FileTokenStorage,
@@ -145,10 +146,11 @@
     AppDirs/BrowserOpener/ClipboardEntries（AndroidAppContext 経由 — KeryxApplication.onCreate
     で一度だけ設定される静的 Context ホルダ。再開中の Activity も弱参照で追跡しており、BrowserOpener は
     http(s) リンクの Custom Tab（androidx.browser）を application context ではなくその Activity から
-    起動する。起動方法の判定自体は commonMain の純粋関数 `browserLaunchKind`）, PlatformModule（Ktor OkHttp エンジン、Dropbox/OneDrive
+    起動する。起動方法の判定自体は commonMain の純粋関数 `browserLaunchKind`）, PlatformModule（Ktor OkHttp エンジン、Dropbox/OneDrive/Nextcloud
     プロバイダに加え、アプリが `AndroidGoogleDriveBackend` を登録していて Play 開発者サービスが使える
     端末では Google Drive も登録した CloudSession — 下記 Provider/DI 参照。加えて AndroidNotificationSink、[background-update.ja.md](background-update.ja.md) 参照）,
-    CloudStorageAvailability（Dropbox/OneDrive は BuildConfig のキーを見るが、Google Drive は
+    CloudStorageAvailability（Dropbox/OneDrive は BuildConfig のキーを見る。Nextcloud はキーが不要で、F-Droid 版を含め
+    常に利用できる。Google Drive は
     ビルド時のクライアント ID ではなく Play 開発者サービス経由のため、プロセスごとに一度だけ
     `AndroidGoogleDriveBackend.isAvailable`（`:androidGms` の `GoogleApiAvailability`。バックエンド未登録
     なら利用不可）で判定する — sync-architecture.ja.md の「Android での Google Drive」参照）,
@@ -301,6 +303,7 @@ Play 開発者サービスの無い端末とまったく同じ状態で、UI は
 | 操作 | 唯一の実装 | それを呼ぶ経路 |
 | --- | --- | --- |
 | 今すぐ同期 | `presentation/ManualSync.kt`（`canSyncNow` / `syncNow`。加えて、操作を出すかどうかの `connected` と、ツールチップが示す無効の理由 `disabledByAuth`）。実装は `CloudSyncController` | Home のツールバーのボタンとフィードメニュー（`HomeViewModel` 経由）、SwiftUI の `Commands`、設定 ▸ クラウド同期 |
+| Nextcloud への接続（サーバーのアドレス） | `presentation/settings/NextcloudServerController.kt`（正規化と `status.php` の確認 → `CloudConnectRequest`）。続けてその request で `SetupController.connect` / `CloudSyncController.connect` / `switchTo` / `reconnect` | セットアップと設定 ▸ クラウド同期（接続、確認後の切り替え、`reconnectServerUrl` を初期値にした再接続）。Compose（`NextcloudServerDialog`）と SwiftUI（`NextcloudServerSheet`）の両方 |
 | 設定を開く | `ui/navigation/SettingsOpenRequests.kt`（`request` / `requestIfReachable`。Home が表示されるまで保留し、解放するのは `App.kt` だけ。タブが `null` なら既定の入口 — Android はカテゴリ一覧、デスクトップは先頭タブ — で、通知・アップデート項目・OPML はタブを指定する） | アプリケーションメニューの「設定…」/ ⌘,（と Android のフィード一覧の設定行）、通知の `ShowSettingsTab` 行、トレイ / Help メニューの更新項目、OPML のインポート/エクスポート |
 | メニュー項目の有効/無効 | `presentation/menu/MenuState.kt` の `computeMenuUiState` → `MenuUiState` のフラグ | デスクトップのメニューバー（`AppMenuBar.kt`）と SwiftUI の `Commands`（`HomeCommands.swift`、`KeryxSdk.menuState` 経由） |
 | 既読 / スターの設定 | `HomeViewModel.setRead` / `setStarred`（指定した状態の書き込みと、その楽観的なピン留め） | 特定の状態を設定するすべての経路（例: 記事行のコンテキストメニュー） |
@@ -429,11 +432,17 @@ drop テーブルとして渡している。
 
 ### CloudSession / SyncRepository
 
-`CloudSession` が現在の `CloudStorage`（デスクトップは Dropbox / OneDrive / Google Drive、Android も
-同じ 3 つだが Google Drive は Play 開発者サービスのある端末のみ）を提供し、アクセストークンの自動
+`CloudSession` が現在の `CloudStorage`（デスクトップは Dropbox / OneDrive / Google Drive / Nextcloud、Android と Apple も
+同じ 4 つだが、Google Drive は Android では Play 開発者サービスのある端末のみ、Apple ではクライアント ID を設定したビルドのみ）を提供し、アクセストークンの自動
 リフレッシュを担う。ただし Android の Google Drive だけは例外で、トークンを所有するのは本アプリでは
-なく Play 開発者サービスであるため、プロバイダ自身が `CloudSession.Provider.accessTokenProvider` で
-供給し、リフレッシュは一切行わない — sync-architecture.ja.md の「Android での Google Drive」参照。
+なく Play 開発者サービスであるため、プロバイダ自身がライフサイクル
+`CloudSession.CredentialLifecycle.PlatformOwned` で供給し、リフレッシュは一切行わない — sync-architecture.ja.md の「Android での Google Drive」参照。
+各プロバイダーの `CloudSession.CredentialLifecycle` は次の 3 つのいずれか。`OAuth` は期限切れのアクセストークンを
+保存済みのリフレッシュトークンで更新し、切断時にアクセストークンを失効させる。`PlatformOwned` はリクエストのたびに
+プラットフォームから新しいアクセストークンをもらい、何もリフレッシュしない。`Static`（Nextcloud）は期限のない認証情報
+（アプリパスワード）を保存したまま渡し、切断時にプロバイダー自身の失効処理を呼ぶ。`CloudSession.serverUrlOf` はアプリパスワード
+方式のプロバイダーの接続先サーバーを読み、Nextcloud の再接続はそれを初期値として示す。
+sync-architecture.ja.md の「認証情報のライフサイクル」参照。
 `SyncRepository` はダウンロード → マージ（`DatabaseMerger`）→ 新記事の増分索引（`indexMissing`）→
 `VACUUM INTO` スナップショット生成（`DatabaseSnapshot`、コピー側で `articles_fts` を除外）→ アップロード
 （rev チェック）、のフローとデバウンス（`SyncScheduler`）を実装する。ライブ DB の FTS は触らない。
@@ -500,8 +509,12 @@ commonTest でカバーされる。デスクトップ側からは一度も呼ば
 `appModule`（commonMain）にリポジトリ・サービス・ViewModel を登録——desktop と Android 共通。
 `platformModule` は各プラットフォームが個別に持つ: desktop 版は HttpClient・TokenStorage・CloudSession・
 CloudConnectFlow・`OsNotificationSink`・`UpdateInstaller` を登録し、Android 版は Android 固有の実装
-（OkHttp ベースの HttpClient、`KeystoreTokenStorage`、Dropbox と OneDrive に加え、Play 開発者サービスが
+（OkHttp ベースの HttpClient、`KeystoreTokenStorage`、Dropbox・OneDrive・Nextcloud に加え、Play 開発者サービスが
 利用できる環境でのみ Google Drive も持つ `CloudSession` 等——上記「Android」各節参照）を登録する。
+各プラットフォームの `platformModule` は、Nextcloud 用に自分の `LoginPageLauncher` を `cloudSessionSingles` に渡す：
+デスクトップはブラウザで開き、終わったらメインウィンドウを前面に戻す（`main.kt` の `activationRequests`）。Android は
+Custom Tab で開き、アプリのタスクをその上に戻す（`bringAppTaskToFront`）。Apple は、Swift が `KeryxSdk.start` に渡す
+`openLoginPage` / `closeLoginPage` クロージャ（コールバックスキームなしの `ASWebAuthenticationSession`）を包む。
 ViewModel はアプリスコープの `single` として登録し、`koinInject()` で取得する。
 
 ### 記事リーダー（ネイティブ WebView）
@@ -1603,7 +1616,8 @@ SwiftUI アプリは、共有 Kotlin コードを Kotlin/Native の framework �
 - Swift 側は、共有 state holder の `StateFlow` を薄い `@Observable` アダプタ経由で購読する。
 - **ローカライズ済みテキストは UI 層で解決し、共有コードでは決して解決しない。** 共有コードはメッセージ ID と引数を出力する。
   Compose アプリは Compose Resources で、SwiftUI アプリは同じ `strings.xml` から生成した String Catalog で解決するので、2 つの
-  ロケールのソースは 1 つに保たれる。
+  ロケールのソースは 1 つに保たれる。Info.plist の利用目的の説明文（ローカルネットワーク利用の許可ダイアログの文言）も同じファイルから
+  `InfoPlist.xcstrings` に生成する——[build.ja.md](build.ja.md) の「Apple アプリ用の String Catalog」を参照。
 
 ### `:shared` の Apple ターゲット
 
@@ -2135,10 +2149,10 @@ iOS 27.1 シミュレーターで計測した結果と、そこから決めた�
 インポートを要求するだけで、Home がそれを表示したときに設定 ▸ データが実行する。Apple アプリはこうした文書を
 その場で開く（`LSSupportsOpeningDocumentsInPlace`）ため、`AppModel.importOpenedOpml(url:)` は元のファイル（iCloud Drive 上の
 未ダウンロードのものもありうる）を `NSFileCoordinator` で読んでから、その内容を渡す。この読み取りはメインアクター外で行うため、
-ダウンロード待ちで UI が止まることはない。`completeConnect(type, tokens)` と
+ダウンロード待ちで UI が止まることはない。`completeConnect(type, credentials)` と
 `tearDownConnection(type)` は、`domain/CloudConnectionService.kt`
 （どの UI の接続・切断も従うべき順序を保持し、Compose の設定画面・セットアップ画面とも共有している）を包む
-`suspend` 関数：`completeConnect` はトークンを保存し、プロバイダーを選択し、同期を始める前にローカル設定を
+`suspend` 関数：`completeConnect` は認証情報を保存し、プロバイダーを選択し、同期を始める前にローカル設定を
 フラッシュする。`tearDown` は切断（トークンを失効）し、同期失敗状態とプロバイダーごとの同期マーカーを消去し、
 プロバイダーの選択を解除する。対話的な OAuth フローの待機と初回同期の開始は各 UI に残る。
 `CloudConnectionService` 自体の呼び出しは Keychain でブロックしうるので——下記の `prepareSearchIndex()` と同様に

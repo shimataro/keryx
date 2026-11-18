@@ -10,14 +10,14 @@ A lightweight, simple RSS reader that provides the same feed subscription experi
 
 - Simple, stylish, high-speed UI/UX
 - Local-first (no account required, data stays on the device)
-- Cross-device sync via cloud storage (Dropbox / OneDrive / Google Drive)
+- Cross-device sync via cloud storage (Dropbox / OneDrive / Google Drive) or the user's own Nextcloud server
 
 ## 2. Supported Platforms
 
 | Platform | Support |
 | --- | --- |
 | Windows / Linux | ✅ Compose Multiplatform (current) |
-| Android | ✅ Compose Multiplatform (current; cloud sync supports Dropbox / OneDrive, plus Google Drive on any device with working Google Play services — installed, enabled and up to date — see §4 and [sync-architecture.md](sync-architecture.md); the F-Droid build contains no Play services and so has no Google Drive at all, and no in-app update — see §4 and §7) |
+| Android | ✅ Compose Multiplatform (current; cloud sync supports Dropbox / OneDrive / Nextcloud, plus Google Drive on any device with working Google Play services — installed, enabled and up to date — see §4 and [sync-architecture.md](sync-architecture.md); the F-Droid build contains no Play services and so has no Google Drive at all, and no in-app update — see §4 and §7) |
 | iOS / iPadOS | ✅ Native SwiftUI app (current; iOS / iPadOS 17 or later, distributed through the App Store), sharing its logic with the other platforms via `:shared` — no interim Compose build; see "Apple Native Apps (SwiftUI)" in [app-architecture.md](app-architecture.md) |
 | macOS | ✅ Native SwiftUI app (current; Apple Silicon, macOS 14 or later, distributed through the Mac App Store and as a Developer ID build on GitHub Releases), sharing its logic via `:shared`. It replaced the Compose macOS build, which is no longer released and remains for internal verification only; see "Apple Native Apps (SwiftUI)" in [app-architecture.md](app-architecture.md) |
 
@@ -27,8 +27,8 @@ RSS 2.0 / Atom 1.0 (RSS 1.0/RDF parsed loosely). JSON Feed will come after α.
 
 ## 4. Sync Method
 
-- No account registration in Keryx. The user's own cloud storage (Dropbox / OneDrive / Google Drive)
-  is used as the sync bus. Only one active connection is allowed at a time; the user selects and
+- No account registration in Keryx. The user's own cloud storage (Dropbox / OneDrive / Google Drive,
+  or a Nextcloud server the user runs or has an account on) is used as the sync bus. Only one active connection is allowed at a time; the user selects and
   switches providers (no simultaneous connections).
 - **OneDrive supports personal Microsoft accounts only** — work/school accounts cannot be connected.
   See "Cloud Authentication" in [sync-architecture.md](sync-architecture.md).
@@ -36,6 +36,16 @@ RSS 2.0 / Atom 1.0 (RSS 1.0/RDF parsed loosely). JSON Feed will come after α.
   up to date. Android uses Google's Play services `AuthorizationClient`; devices without working Play
   services, and the F-Droid build, are not offered Google Drive. The same account and sync file are
   shared with desktop. See "Google Drive on Android" in [sync-architecture.md](sync-architecture.md).
+- **Nextcloud** is reached at a server address the user enters, over **HTTPS only** — a `http://`
+  address is refused — with a certificate the operating system trusts. The address is checked before
+  sign-in starts; the user then signs in on the server's own page in the browser (two-factor
+  authentication and single sign-on included), which issues Keryx an app password. That app password
+  can reach the **whole Nextcloud account**, unlike the other providers' app-only folders — the
+  connect dialog says so, and how to revoke it or (on Nextcloud 36 or later) limit it to file access.
+  Keryx itself only ever reads and writes the `Keryx` folder in the user's files. Disconnecting
+  asks the server to revoke the app password, on a best-effort basis: if the server cannot be reached
+  the app password stays valid there, and the user revokes it under the server's Devices & sessions. Nextcloud is offered on every platform and in every build,
+  the F-Droid build included. See "Nextcloud (Login Flow v2)" in [sync-architecture.md](sync-architecture.md).
 - The sync file format, `VACUUM INTO` snapshot, excluded local-only tables/indexes, OAuth details,
   token storage, and merge behavior are described in [sync-architecture.md](sync-architecture.md).
 - Sync targets: subscription list, folders, read state, stars, tag structure, article body, global
@@ -71,9 +81,11 @@ Details are in [sync-architecture.md](sync-architecture.md).
 
 ## 6. Setup Flow
 
-On first launch, choose local-only / cloud sync (Dropbox / OneDrive / Google Drive — on Android,
-Google Drive appears only where Google Play services is installed, enabled and up to date, see §4). When cloud is selected, after OAuth authentication, if existing
-data exists in the cloud it is automatically merged (imported) during the initial sync.
+On first launch, choose local-only / cloud sync (Dropbox / OneDrive / Google Drive / Nextcloud — on
+Android, Google Drive appears only where Google Play services is installed, enabled and up to date, see
+§4). Choosing Nextcloud first asks for the server address (§4). When cloud is selected, after
+authentication, if existing data exists in the cloud it is automatically merged (imported) during the
+initial sync.
 
 ## 7. Basic Features
 
@@ -351,7 +363,8 @@ the menu bar, context menus, tray menu, and file dialogs. Platform-specific choi
 - No server operated by the developer, no account registration required. Keryx contacts only
   servers directly relevant to the feature in use (each subscribed feed and its favicon, GitHub
   for update checks/downloads except in the builds a store updates — App Store, Mac App Store,
-  Google Play, F-Droid — and, only if connected, Dropbox/OneDrive/Google Drive), always
+  Google Play, F-Droid — and, only if connected, Dropbox/OneDrive/Google Drive or the user's own
+  Nextcloud server), always
   straight from the device; see [PRIVACY.md](../PRIVACY.md)'s "Network requests this app makes"
   for the full list. Keryx's own communication
   (cloud sync, update checks, update downloads) always uses HTTPS; a subscribed feed is fetched
@@ -360,7 +373,7 @@ the menu bar, context menus, tray menu, and file dialogs. Platform-specific choi
   reader keeps the articles either side of the one on screen ready to swipe to (§9), so their
   content — including any images or embedded content they contain — is fetched before they are
   opened, exactly as it would be on opening them. Nothing about them is marked read.
-- Each cloud provider's token (Dropbox, OneDrive, Google Drive) is stored separately in platform secure storage.
+- Each cloud provider's token (Dropbox, OneDrive, Google Drive) — or, for Nextcloud, its app password — is stored separately in platform secure storage.
   On macOS: the app's data-protection Keychain, with no file fallback. On Windows/Linux: Credential Manager / Secret Service via
   java-keyring, or, inside the Snap package specifically, a local store encrypted with a per-app key from the
   desktop's Secret portal (via libsecret, not java-keyring) — falling back to a file in the data directory when
@@ -377,7 +390,7 @@ the menu bar, context menus, tray menu, and file dialogs. Platform-specific choi
 | HTTP | Ktor client (CIO on desktop, OkHttp on Android) |
 | RSS/HTML/XML parsing | ksoup |
 | Serialization / datetime | kotlinx-serialization / kotlinx-datetime |
-| Cloud sync | Ktor + Dropbox / OneDrive (Microsoft Graph) / Google Drive REST API (OAuth PKCE + refresh token) |
+| Cloud sync | Ktor + Dropbox / OneDrive (Microsoft Graph) / Google Drive REST API (OAuth PKCE + refresh token); Nextcloud WebDAV (Login Flow v2 app password, HTTP Basic) |
 | i18n | Compose Resources |
 | Testing | kotlin-test + kotlinx-coroutines-test + Ktor MockEngine |
 | Build | Gradle 9.7.1 (Kotlin 2.4.10 / Compose Multiplatform 1.11.1 / JDK 25 toolchain) |

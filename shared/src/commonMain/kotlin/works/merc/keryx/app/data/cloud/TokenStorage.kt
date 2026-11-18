@@ -1,32 +1,34 @@
 package works.merc.keryx.app.data.cloud
 
 /**
- * Persists a cloud provider's OAuth tokens in the OS secure store (Keychain /
- * Credential Manager / Secret Service). One instance is created per provider —
- * they must not be shared, since some implementations cache the loaded value.
- * The provider is distinguished by a per-instance account/file name derived from
+ * Persists a cloud provider's credentials ([CloudCredentials] — OAuth tokens or an app password)
+ * in the OS secure store (Keychain / Credential Manager / Secret Service). One instance is created
+ * per provider — they must not be shared, since some implementations cache the loaded value. The
+ * provider is distinguished by a per-instance account/file name derived from
  * [works.merc.keryx.app.core.CloudStorageType.id].
  */
 interface TokenStorage {
     /**
-     * Persists [tokens]. Implementations never throw — a backend failure degrades to the
+     * Persists [credentials]. Implementations never throw — a backend failure degrades to the
      * plaintext-file fallback instead (see `SECURITY.md`), so the connect flow can never be
      * aborted by a storage problem.
      *
-     * @return where the tokens actually ended up. Not a success/failure flag: of the three
+     * @return where the credentials actually ended up. Not a success/failure flag: of the three
      * outcomes only [TokenSaveOutcome.NOT_PERSISTED] means nothing was written, and even then the
      * caller's in-memory session keeps working until the app exits.
      */
-    fun save(tokens: OAuthTokens): TokenSaveOutcome
-    fun load(): OAuthTokens?
+    fun save(credentials: CloudCredentials): TokenSaveOutcome
+
+    /** The stored credentials, or null when nothing (decodable) is stored. Never throws. */
+    fun load(): CloudCredentials?
 
     /**
-     * Removes the tokens from every store this instance manages — its own, plus the plaintext
+     * Removes the credentials from every store this instance manages — its own, plus the plaintext
      * fallback it wraps, if any. Implementations never throw.
      *
      * @return whether anything readable may still be left behind. A caller cannot infer this from
      * [load] returning null afterwards: the plaintext fallback reports a file whose JSON no longer
-     * decodes as "nothing stored", yet the token text inside it stays perfectly readable on disk.
+     * decodes as "nothing stored", yet the credential text inside it stays perfectly readable on disk.
      * Only the store that attempted the removal can tell those two apart, which is why the answer
      * is reported from here rather than re-derived by the caller.
      *
@@ -40,7 +42,7 @@ interface TokenStorage {
 }
 
 /**
- * Where a [TokenStorage.save] left the tokens. The two facts a caller needs — whether they survive
+ * Where a [TokenStorage.save] left the credentials. The two facts a caller needs — whether they survive
  * a restart, and whether anything readable is left on disk — are folded into one closed set
  * because only these three combinations are reachable.
  */
@@ -59,7 +61,7 @@ enum class TokenSaveOutcome {
 
     /**
      * Not persisted anywhere — the secure store could not be reached and the fallback write failed
-     * too. The tokens work for this session only; the user has to connect the account again after
+     * too. The credentials work for this session only; the user has to connect the account again after
      * a restart.
      */
     NOT_PERSISTED,
@@ -75,7 +77,7 @@ enum class TokenClearOutcome {
     CLEARED,
 
     /**
-     * A removal did not take effect, so the tokens may still be readable. Typically a `File.delete()`
+     * A removal did not take effect, so the credentials may still be readable. Typically a `File.delete()`
      * that returned false, leaving the plaintext fallback file — and the long-lived refresh token
      * inside it — in place.
      */

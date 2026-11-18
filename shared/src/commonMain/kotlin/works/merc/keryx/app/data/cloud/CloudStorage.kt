@@ -35,10 +35,27 @@ internal suspend fun <T> withCloudToken(
     accessTokenProvider: suspend () -> String?,
     providerName: String,
     block: suspend (String) -> Result<T>,
+): Result<T> = withCloudCredential(accessTokenProvider, providerName, block)
+
+/**
+ * Executes [block] with the credential [credentialProvider] supplies — an access token, or a
+ * provider's own credentials type — and maps a missing credential to [CloudAuthException] and any
+ * failure thrown by [block] to [CloudStorageException].
+ *
+ * @param credentialProvider Supplies the credential, or `null` when not connected.
+ * @param providerName The cloud provider name used in authentication and storage error messages.
+ * @param block The operation to execute with the credential.
+ * @return The result produced by [block], or an error when no credential is available or [block] throws.
+ * @throws CancellationException If the coroutine is cancelled while executing the operation.
+ */
+internal suspend fun <C : Any, T> withCloudCredential(
+    credentialProvider: suspend () -> C?,
+    providerName: String,
+    block: suspend (C) -> Result<T>,
 ): Result<T> {
-    val token = accessTokenProvider() ?: return Result.Err(CloudAuthException("Not connected to $providerName"))
+    val credential = credentialProvider() ?: return Result.Err(CloudAuthException("Not connected to $providerName"))
     return try {
-        block(token)
+        block(credential)
     } catch (e: CancellationException) {
         // Never swallow coroutine cancellation (e.g. a debounced sync superseded by a newer
         // one) — rethrow so it unwinds silently instead of being mis-logged as a sync error.
@@ -90,6 +107,32 @@ internal suspend fun HttpResponse.writtenMetaOrConflictOr(
 }
 
 /**
+ * Maps a file-write response whose revision travels in a response header (WebDAV's `ETag`) to that
+ * revision, a sync conflict, or a storage error — the header-based sibling of
+ * [writtenMetaOrConflictOr], for the same reason: the revision comes from the write itself, never
+ * from a follow-up request that could observe another device's later write.
+ *
+ * @param providerName The name of the cloud storage provider.
+ * @param revHeaders The response headers that may carry the written revision, read in order; the
+ *   first one present wins.
+ * @param conflictStatuses The HTTP statuses the provider uses to report a lost write guard.
+ * @return The written revision, a conflict, or a mapped storage error.
+ */
+internal suspend fun HttpResponse.headerRevOrConflictOr(
+    providerName: String,
+    revHeaders: List<String>,
+    conflictStatuses: Set<Int>,
+): Result<CloudFileMeta> = when {
+    status.isSuccess() -> {
+        val rev = revHeaders.firstNotNullOfOrNull { name -> headers[name]?.takeIf { it.isNotBlank() } }
+            ?: return Result.Err(CloudStorageException("Missing ETag in upload response"))
+        Result.Ok(CloudFileMeta(rev))
+    }
+    status.value in conflictStatuses -> Result.Err(SyncConflictException())
+    else -> cloudStorageError(providerName, status.value, bodyAsText())
+}
+
+/**
  * Maps an HTTP response to success for a 2xx or a 404, or a cloud storage error otherwise — for an
  * idempotent delete/rename, where an already-absent item counts as done.
  *
@@ -107,7 +150,8 @@ internal fun Json.topLevelString(body: String, key: String): String? =
 
 /**
  * Abstraction over a cloud storage backend used as the sync bus. Implemented by
- * [DropboxStorage], [GoogleDriveStorage], and [OneDriveStorage].
+ * [DropboxStorage], [GoogleDriveStorage], [OneDriveStorage], and
+ * [works.merc.keryx.app.data.cloud.nextcloud.NextcloudStorage].
  */
 interface CloudStorage {
     /** Verifies the current credentials are valid. */

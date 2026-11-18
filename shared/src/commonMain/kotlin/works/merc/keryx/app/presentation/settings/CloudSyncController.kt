@@ -25,6 +25,7 @@ import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.runCatchingUnlessCancelled
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.domain.ActivityCenter
+import works.merc.keryx.app.domain.CloudConnectRequest
 import works.merc.keryx.app.domain.CloudConnectionService
 import works.merc.keryx.app.domain.CloudSession
 import works.merc.keryx.app.domain.SettingsRepository
@@ -321,13 +322,15 @@ class CloudSyncController(
      * disconnecting is always a safe exit regardless of what a sync is doing.
      *
      * @param type The cloud storage provider to connect to.
+     * @param request What the user supplied first — the checked server address for a provider that
+     *   [CloudStorageType.requiresServerUrl]; [CloudConnectRequest.NONE] otherwise.
      */
-    fun connect(type: CloudStorageType) {
+    fun connect(type: CloudStorageType, request: CloudConnectRequest = CloudConnectRequest.NONE) {
         viewModelScope.launch {
             val connected = try {
                 _connectingType.value = type
                 _connectFailedType.value = null
-                runConnectFlow(type)
+                runConnectFlow(type, request)
             } finally {
                 _connectingType.value = null
             }
@@ -347,7 +350,7 @@ class CloudSyncController(
      * and always after this function returns — see [connect]'s KDoc for why sync is deliberately
      * kept out of [connectingType].
      */
-    private suspend fun runConnectFlow(type: CloudStorageType): Boolean {
+    private suspend fun runConnectFlow(type: CloudStorageType, request: CloudConnectRequest): Boolean {
         val flow = cloudSession.connectFlow(type)
         if (flow == null) {
             _connectFailedType.value = type
@@ -356,6 +359,7 @@ class CloudSyncController(
         val result = coroutineScope {
             awaitCancellableConnect(
                 flow,
+                request,
                 onJobChange = { authorizationJob = it },
                 onCanCancelChange = { _canCancelConnect.value = it },
             )
@@ -422,10 +426,23 @@ class CloudSyncController(
      * succeed with a token the provider has already rejected (see
      * `data/cloud/PlayServicesGoogleDriveAuth.kt`). The same shape as [switchTo], differing only in
      * connecting back to the provider it just tore down.
+     *
+     * @param request As for [connect]. For a provider that [CloudStorageType.requiresServerUrl], the
+     *   UI asks for the server again first, starting from [reconnectServerUrl].
      */
-    fun reconnect() {
+    fun reconnect(request: CloudConnectRequest = CloudConnectRequest.NONE) {
         val type = _connectedType.value ?: return
-        tearDownAndConnect(from = type, to = type)
+        tearDownAndConnect(from = type, to = type, request = request)
+    }
+
+    /**
+     * The server the connected provider's stored credentials point at (Nextcloud), or null. Read it
+     * before [reconnect] — the reconnect starts by clearing those credentials — to fill the server
+     * dialog with the address the user last connected to. A secure-store read, so on [dispatcher].
+     */
+    suspend fun reconnectServerUrl(): String? {
+        val type = _connectedType.value ?: return null
+        return withContext(dispatcher) { cloudSession.serverUrlOf(type) }
     }
 
     /**
@@ -451,18 +468,21 @@ class CloudSyncController(
      * once a provider is already connected (`CloudSyncTab`'s onSelect routes a no-provider-yet
      * selection through [connect] directly instead) — the guard below is a no-op for every real
      * caller, matching [resetCloudData]'s own style.
+     *
+     * @param request As for [connect]. The UI asks for it (the server dialog) only after the user
+     *   confirmed the switch, and cancelling that dialog never reaches here — the old connection stays.
      */
-    fun switchTo(newType: CloudStorageType) {
+    fun switchTo(newType: CloudStorageType, request: CloudConnectRequest = CloudConnectRequest.NONE) {
         val oldType = _connectedType.value ?: return
-        tearDownAndConnect(from = oldType, to = newType)
+        tearDownAndConnect(from = oldType, to = newType, request = request)
     }
 
     /** Tears down the connection to [from], then [connect]s to [to] — shared by [reconnect] and [switchTo]. */
-    private fun tearDownAndConnect(from: CloudStorageType, to: CloudStorageType) {
+    private fun tearDownAndConnect(from: CloudStorageType, to: CloudStorageType, request: CloudConnectRequest) {
         viewModelScope.launch {
             _connectingType.value = to
             tearDownConnection(from)
-            connect(to)
+            connect(to, request)
         }
     }
 

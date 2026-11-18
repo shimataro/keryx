@@ -125,4 +125,24 @@ class SecretStoreTokenStorageTest {
 
         assertEquals(TokenClearOutcome.DATA_MAY_REMAIN, storage.clear())
     }
+
+    @Test
+    fun saveWritesOAuthTokensInTheLegacyFormatWithNoDiscriminator() {
+        val storage = FakeSecretBackend(RecordingTokenStorage(), storeResult = true)
+
+        storage.save(SOME_TOKENS)
+
+        assertEquals("""{"accessToken":"at","refreshToken":"rt","expiresAtMillis":1000}""", storage.storedPayload)
+    }
+
+    @Test
+    fun appPasswordCredentialsRoundTripThroughTheBackend() {
+        val credentials = AppPasswordCredentials("https://cloud.example.com", "alice", "alice", "pw")
+        val writer = FakeSecretBackend(RecordingTokenStorage(), storeResult = true)
+        writer.save(credentials)
+
+        val reader = FakeSecretBackend(RecordingTokenStorage(), loadResult = writer.storedPayload)
+
+        assertEquals(credentials, reader.load())
+    }
 }

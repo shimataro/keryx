@@ -37,6 +37,7 @@ import works.merc.keryx.app.core.DiscoveredFeedLink
 import works.merc.keryx.app.core.FeedNotFoundException
 import works.merc.keryx.app.core.decodeArticleFilter
 import works.merc.keryx.app.core.encode
+import works.merc.keryx.app.data.cloud.CloudCredentials
 import works.merc.keryx.app.data.cloud.DropboxAuthManager
 import works.merc.keryx.app.data.cloud.OAuthTokens
 import works.merc.keryx.app.presentation.settings.FakeManualSync
@@ -101,14 +102,14 @@ import kotlin.test.assertTrue
 
 /** In-memory [TokenStorage] fake (never actually used since appKey is empty in these tests). */
 private class HomeViewModelTestTokenStorage : TokenStorage {
-    private var stored: OAuthTokens? = null
+    private var stored: CloudCredentials? = null
 
-    override fun save(tokens: OAuthTokens): TokenSaveOutcome {
-        stored = tokens
+    override fun save(credentials: CloudCredentials): TokenSaveOutcome {
+        stored = credentials
         return TokenSaveOutcome.SECURE
     }
 
-    override fun load(): OAuthTokens? = stored
+    override fun load(): CloudCredentials? = stored
 
     override fun clear(): TokenClearOutcome {
         stored = null

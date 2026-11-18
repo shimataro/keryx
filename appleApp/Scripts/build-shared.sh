@@ -1,7 +1,7 @@
 #!/bin/sh
 # Xcode "Run Script" build phase: (re)builds the KeryxShared XCFramework for the active
-# configuration and regenerates the String Catalog, before the Swift compile step that links
-# against them. See docs/build.md's "Building the SwiftUI app" for the full explanation.
+# configuration and regenerates the String Catalogs (Localizable and InfoPlist), before the Swift
+# compile step that links against them. See docs/build.md's "Building the SwiftUI app" for the full explanation.
 set -eu
 
 REPO_ROOT="$(cd "$SRCROOT/.." && pwd)"
@@ -13,7 +13,8 @@ REPO_ROOT="$(cd "$SRCROOT/.." && pwd)"
 if [ "${KERYX_SKIP_SHARED_BUILD:-}" = "1" ]; then
     for output in \
         "$REPO_ROOT/shared/build/XCFrameworks/release/KeryxShared.xcframework" \
-        "$REPO_ROOT/composeApp/build/generated/stringCatalog/Localizable.xcstrings"; do
+        "$REPO_ROOT/composeApp/build/generated/stringCatalog/Localizable.xcstrings" \
+        "$REPO_ROOT/composeApp/build/generated/stringCatalog/InfoPlist.xcstrings"; do
         if [ ! -e "$output" ]; then
             echo "error: KERYX_SKIP_SHARED_BUILD=1 but $output does not exist. Build it with ./gradlew :shared:assembleKeryxSharedReleaseXCFramework :composeApp:generateStringCatalog first." >&2
             exit 1

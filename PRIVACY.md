@@ -73,10 +73,11 @@ account, or to your computer — which are channels Keryx's developer has no acc
 not exclude its files from them. Your cloud-sync tokens (below) are kept in the Keychain and are
 not shared through iCloud Keychain; an encrypted device backup may restore them to a new device.
 
-## Optional cloud sync (Dropbox / OneDrive / Google Drive)
+## Optional cloud sync (Dropbox / OneDrive / Google Drive / Nextcloud)
 
 Cloud sync is off by default. If you choose to connect Dropbox, OneDrive, or
-Google Drive (one provider active at a time), here is exactly what happens:
+Google Drive (one provider active at a time), here is exactly what happens (for
+Nextcloud, see "Nextcloud" below):
 
 - **Availability:** all three providers are supported on desktop. On Android, Dropbox
   and OneDrive are always available; Google Drive is available on any device with
@@ -133,6 +134,43 @@ Google Drive (one provider active at a time), here is exactly what happens:
   or Google Drive — you can remove that yourself from your cloud storage
   account if you wish.
 
+### Nextcloud
+
+Instead of a cloud service, you can sync through a Nextcloud server you run or have an account on.
+It works differently from the three providers above, so here is what that means:
+
+- **Availability:** on every platform and in every build, including the F-Droid build — it needs
+  nothing from the app's build or from Google Play services.
+- **The server you name:** you type the server's address when you connect. Keryx only connects to it
+  over HTTPS, with a certificate your operating system trusts; it refuses a plain `http://` address.
+  Before you sign in, Keryx asks the server's public `status.php` whether it is a Nextcloud server.
+- **Authentication** uses Nextcloud's own login flow: you sign in on your server's own page in the
+  browser (or, on iOS, iPadOS and macOS, the system's secure sign-in sheet), with whatever your server
+  requires — two-factor authentication or single sign-on included — so Keryx never sees your password.
+  The server then issues Keryx an **app password**, named after your device (for example
+  `Keryx (Android)`). Everything happens directly between your device and your server.
+- **What that app password can reach:** unlike the other providers' app-only folders, a Nextcloud app
+  password can access **your whole Nextcloud account**. Keryx itself only ever reads and writes the
+  `Keryx` folder in your files — the sync file, a temporary upload file it may leave there if an upload
+  is interrupted, and the archive a reset of the sync data leaves (see "Data retention & deletion"). You
+  can see and revoke the app password at any time in your server's Settings ▸ Security ▸ Devices &
+  sessions; on Nextcloud 36 or later you can also limit it to file access there.
+- **What syncs, and what never syncs,** is the same as for the providers above.
+- **Credential storage:** the app password is stored exactly like the other providers' tokens (above),
+  and is likewise excluded from Android's automatic backup and device transfer. It is only ever sent to
+  the server that issued it — the one Nextcloud's login flow names when it hands the app password over,
+  normally the address you entered, and always over HTTPS.
+- **On your server:** every sync upload is a normal file change there, so your server may keep earlier
+  versions of the sync file (the Versions app) and list each upload in its Activity stream. If a
+  Nextcloud desktop client on one of your computers syncs your files, it downloads the `Keryx` folder
+  too unless you exclude it in that client's selective sync settings.
+- **Local network on iOS, iPadOS and macOS:** if your server is on your local network, iOS (and macOS 15
+  or later) asks once for permission to find and connect to devices on your local network; Keryx uses it
+  only to reach the server you named.
+- **Disconnecting** asks your server to delete the app password, then removes it from your device even
+  if the server could not be reached. As with the other providers, the sync file itself stays in your
+  `Keryx` folder until you delete it.
+
 ## Network requests this app makes
 
 Keryx only talks to servers that are directly relevant to the feature you're using,
@@ -157,6 +195,8 @@ developer:
   it lists from `github.com` / `*.githubusercontent.com` only if you choose to install it.
 - **Dropbox, OneDrive, or Google Drive** — only if you've connected cloud sync,
   as described above.
+- **Your Nextcloud server** — only if you've connected it, or while you are connecting it (its
+  `status.php`, its login flow, and its file and user-information interfaces), as described above.
 - **Content an article itself references** — when you open an article, any external
   resources its own HTML embeds (images, videos, social-media embeds, iframes) are
   loaded directly from their original hosts by the reader view, the same way a normal

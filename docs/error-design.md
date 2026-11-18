@@ -67,7 +67,10 @@ Main subclasses. Most take a leading `message: String` (omitted below): `FeedFet
 message text instead: `FeedDiscoveryException(candidates)` ("Feed links found on page"), `FeedTimeoutException`
 ("Feed request timed out"), `SyncConflictException` ("Sync conflict detected"),
 `SchemaVersionException(localVersion, cloudVersion)`. `UpdateException(stage, message)` is the one exception with
-a `message` parameter that comes *after* its other argument rather than before it.
+a `message` parameter that comes *after* its other argument rather than before it, and
+`NextcloudServerException(problem, message)` — a Nextcloud server address rejected before sign-in — likewise
+takes its `NextcloudServerProblem` first; each problem has its own `ErrorKind` (`NEXTCLOUD_HTTPS_REQUIRED`,
+`NEXTCLOUD_NOT_FOUND`, `NEXTCLOUD_UNREACHABLE`), shown in the server dialog.
 
 There is no dedicated "invalid feed URL" exception — the subscribe path never validates a URL's syntax before
 attempting to fetch it, so a malformed or unsupported URL surfaces as a `FeedFetchException` once the fetch

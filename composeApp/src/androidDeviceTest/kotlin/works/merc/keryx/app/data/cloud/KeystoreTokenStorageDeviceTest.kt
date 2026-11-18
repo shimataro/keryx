@@ -131,6 +131,23 @@ class KeystoreTokenStorageDeviceTest {
         assertEquals(tokens, fixture.storage.load())
     }
 
+    @Test
+    fun appPasswordCredentialsRoundTripThroughRealKeystoreEncryption() {
+        val fixture = newStorage()
+        val credentials = AppPasswordCredentials(
+            serverUrl = "https://cloud.example.com",
+            userId = "alice",
+            loginName = "alice@example.com",
+            appPassword = "app-password",
+        )
+
+        assertEquals(TokenSaveOutcome.SECURE, fixture.storage.save(credentials))
+        // As above: the encrypted file must exist, or load() could be reading the fallback instead.
+        assertTrue(fixture.encryptedFile.exists() && fixture.encryptedFile.length() > 0)
+        assertTrue(!fixture.fallbackFile.exists())
+        assertEquals(credentials, fixture.storage.load())
+    }
+
     /**
      * A successful encrypted save may report [TokenSaveOutcome.SECURE] only once the plaintext
      * copy is actually gone. `clear()` swallows a `File.delete()` that returned false, so a
@@ -164,16 +181,16 @@ class KeystoreTokenStorageDeviceTest {
      * A plaintext fallback whose `clear()` does nothing — the shape [FileTokenStorage] degrades to
      * when `File.delete()` fails and it can only log the failure.
      */
-    private class StubbornFallback(private var tokens: OAuthTokens?) : TokenStorage {
+    private class StubbornFallback(private var tokens: CloudCredentials?) : TokenStorage {
         var clearCalls = 0
             private set
 
-        override fun save(tokens: OAuthTokens): TokenSaveOutcome {
-            this.tokens = tokens
+        override fun save(credentials: CloudCredentials): TokenSaveOutcome {
+            this.tokens = credentials
             return TokenSaveOutcome.PLAINTEXT_FILE
         }
 
-        override fun load(): OAuthTokens? = tokens
+        override fun load(): CloudCredentials? = tokens
 
         override fun clear(): TokenClearOutcome {
             clearCalls++ // deliberately keeps `tokens`: models a delete that failed
@@ -225,10 +242,10 @@ class KeystoreTokenStorageDeviceTest {
         var clearCalls = 0
             private set
 
-        override fun save(tokens: OAuthTokens): TokenSaveOutcome = TokenSaveOutcome.PLAINTEXT_FILE
+        override fun save(credentials: CloudCredentials): TokenSaveOutcome = TokenSaveOutcome.PLAINTEXT_FILE
 
         /** Undecodable content reads back as "nothing stored" — the blind spot this guards. */
-        override fun load(): OAuthTokens? = null
+        override fun load(): CloudCredentials? = null
 
         override fun clear(): TokenClearOutcome {
             clearCalls++ // models a delete that failed on a file load() cannot see
