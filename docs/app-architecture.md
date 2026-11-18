@@ -2105,8 +2105,8 @@ edge shows and what it does are decided once in `:shared` (`ArticleSwipeActions.
   - *A click while actions are showing only closes them.* The rows are hosted SwiftUI buttons, so a
     click on one never reached the table and the actions stayed out. While `rowActionsVisible`,
     `ArticleNSTableView.hitTest` sends a left click on a hosted row to the table, whose `mouseDown`
-    closes the actions and consumes it, as in Mail. The action buttons and a right-click's menu are
-    left alone.
+    closes the actions and consumes it, as in Mail. The action buttons, and the menu a right-click or
+    Control-click opens (a Control-click is a left mouse-down too, so it is let through), are left alone.
 - **Android.** `ui/home/ArticleRowSwipe.kt`'s `Modifier.articleRowSwipe`, applied by `ArticleRow` only
   where `isTouchPrimary`. It is built from modifiers on the row's own node (`pointerInput`, `drawBehind`,
   `absoluteOffset`) rather than M3's `SwipeToDismissBox`, which would add nodes to a row that sits next

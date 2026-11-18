@@ -2008,8 +2008,9 @@ macOS の記事一覧は、SwiftUI の `List` ではなく、行の高さを固�
   - *アクションが出ている間のクリックは、閉じるだけにする。* 行はホストした SwiftUI のボタンなので、
     クリックがテーブルに届かず、アクションが出たまま残っていた。`rowActionsVisible` の間は、
     `ArticleNSTableView.hitTest` がホストした行への左クリックをテーブルに回し、テーブルの `mouseDown` が
-    アクションを閉じてそのクリックを消費する（Mail と同じ）。アクションのボタンと右クリックのメニューには
-    手を付けない。
+    アクションを閉じてそのクリックを消費する（Mail と同じ）。アクションのボタンと、右クリックや
+    Control+クリックで開くメニューには手を付けない（Control+クリックも左クリックとして届くので、振り替えの
+    対象から外す）。
 - **Android。** `ui/home/ArticleRowSwipe.kt` の `Modifier.articleRowSwipe` を、`ArticleRow` が
   `isTouchPrimary` のときだけ付ける。M3 の `SwipeToDismissBox` ではなく、行自身のノードに付ける修飾子
   （`pointerInput`、`drawBehind`、`absoluteOffset`）だけで作る。`SwipeToDismissBox` は、

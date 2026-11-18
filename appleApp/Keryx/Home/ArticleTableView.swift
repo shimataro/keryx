@@ -360,7 +360,8 @@ struct ArticleTableView: NSViewRepresentable {
 ///
 /// While a row's swipe actions are showing, a click on any row only closes them, as in Mail: the
 /// hosted rows' own buttons would otherwise take the click, open that row and leave the actions
-/// out. The action buttons themselves, and a right-click's menu, are left alone.
+/// out. The action buttons themselves, and the menu a right-click or Control-click opens, are left
+/// alone.
 final class ArticleNSTableView: NSTableView {
     var onBackgroundClick: (() -> Void)?
 
@@ -369,7 +370,9 @@ final class ArticleNSTableView: NSTableView {
     /// The two overrides are one behavior: change them together.
     override func hitTest(_ point: NSPoint) -> NSView? {
         let hit = super.hitTest(point)
-        guard rowActionsVisible, NSApp.currentEvent?.type == .leftMouseDown,
+        // A Control-click arrives as a left mouse-down too, but opens the row's menu like a right-click.
+        guard rowActionsVisible, let event = NSApp.currentEvent, event.type == .leftMouseDown,
+              !event.modifierFlags.contains(.control),
               let hit, Self.isInsideHostedRow(hit) else { return hit }
         return self
     }
