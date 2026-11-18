@@ -438,7 +438,8 @@ class NotificationCenterPlacementTest {
 
     @Test
     fun anAlertsLevelIsNamedToAssistiveTechnologyNotLeftToTheTintAlone() = runDesktopComposeUiTest {
-        // `Res.string.notification_level_warning` / `notification_level_error`, read with the row.
+        // `Res.string.notification_level_warning` / `notification_level_error`, reported as the
+        // button's state (`notificationAlertStateDescription`); the bell itself stays decorative.
         val warning = centerOf(AppNotificationLevel.INFO, AppNotificationLevel.WARNING)
         val error = centerOf(AppNotificationLevel.WARNING, AppNotificationLevel.ERROR)
         val info = centerOf(AppNotificationLevel.INFO)
@@ -456,9 +457,12 @@ class NotificationCenterPlacementTest {
         waitForIdle()
         fun rowIn(tag: String) = onNode(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Button) and hasAnyAncestor(hasTestTag(tag)))
 
-        rowIn("warning").assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, listOf("警告")))
-        rowIn("error").assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, listOf("エラー")))
-        rowIn("info").assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.ContentDescription))
+        rowIn("warning").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "警告"))
+        rowIn("error").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "エラー"))
+        rowIn("info").assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.StateDescription))
+        for (tag in listOf("warning", "error", "info")) {
+            rowIn(tag).assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.ContentDescription))
+        }
     }
 
     @Test
@@ -481,5 +485,23 @@ class NotificationCenterPlacementTest {
         assertEquals(content, tints[NotificationBellTone.QUIET])
         assertEquals(primary, tints[NotificationBellTone.NOTICE])
         assertEquals(error, tints[NotificationBellTone.ALERT])
+    }
+
+    @Test
+    fun dismissingTheNotificationsRemovesTheCountFromTheFeedListRow() = runDesktopComposeUiTest {
+        // Through FeedListPane's own count path (`notificationCountOf`), not a count passed in: the
+        // badge goes once the notifications are actually dismissed.
+        val (driver, db) = inMemoryDb()
+        val center = newCenter(2)
+        val notifVm = NotificationCenterViewModel(center, NotificationAlerts(center))
+        useHomeViewModel(driver, db) { fixture ->
+            setContent { ContentAreaTestHost(fixture.vm, notifVm, notifVm, PaneLayout.Triple, 1) }
+            waitForIdle()
+            onNodeWithText(rowLabel).assert(SemanticsMatcher.expectValue(SemanticsProperties.Text, textOf(rowLabel, "2")))
+
+            center.dismissAll()
+            waitForIdle()
+            onNodeWithText(rowLabel).assert(SemanticsMatcher.expectValue(SemanticsProperties.Text, textOf(rowLabel)))
+        }
     }
 }

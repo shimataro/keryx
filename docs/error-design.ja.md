@@ -187,8 +187,9 @@ SwiftUI アプリは String Catalog で。唯一の例外は新着記事の OS �
   新バージョンのお知らせだけなら accent 色。共有の `presentation/home/NotificationSeverity.kt` の
   `notificationBellTone` で決める）。ただし Compose の行がキーボードフォーカスでハイライトされている
   間は、ベルはハイライトのコンテンツ色になる。選択背景の上では重大度の色がコントラストを保てないため
-  である。警告やエラーがあるときは、そのレベルも行と一緒に読み上げる
-  （「警告、通知、2」）。重大度を色だけで伝えないためである。行を押すと、行の上に
+  である。警告やエラーがあるときは、そのレベルも行の名前と件数と一緒に読み上げる
+  （Compose はボタンの状態の説明として、SwiftUI はまとめた要素の中のベルのラベルとして伝える）。重大度を
+  色だけで伝えないためである。行を押すと、行の上に
   一覧を開く。Android ではボトムシート、iPhone の狭い幅ではシートになる。行の実装は、Compose が
   `ui/home/NotificationCenterRow.kt`、SwiftUI が `NotificationCenterRow.swift` にある。履歴はほとんどの
   時間空なので、ツールバーの枠は使わない。また、出たり消えたりせず同じ場所にあるので、上のフィード一覧の

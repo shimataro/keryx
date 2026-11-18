@@ -140,8 +140,9 @@ not in global chrome:
   `primary` for new-version notices alone) — except while the row holds
   keyboard focus and is highlighted, when it takes the selection's content
   color, since the severity colors lose their contrast on the selection
-  background — and an alert's level is named to
-  assistive technology with the row so the tint is not the only sign. The history
+  background — and an alert's level is reported as the button's
+  `stateDescription` (`notificationAlertStateDescription`), the bell itself
+  staying decorative, so the tint is not the only sign. The history
   is empty most of the time, so a permanent toolbar slot for it was wasted room;
   a sidebar row costs little and, unlike a row that comes and goes, never
   changes the list's height. The bell lived
