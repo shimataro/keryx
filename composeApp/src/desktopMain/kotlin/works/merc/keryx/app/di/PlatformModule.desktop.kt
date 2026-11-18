@@ -71,7 +71,7 @@ internal fun providerTokenStorage(type: CloudStorageType, macOs: Boolean, snap: 
 /**
  * Desktop's [LoginPageLauncher] for Nextcloud's Login Flow v2: the sign-in page opens in the default
  * browser, and since a browser tab cannot be closed from here, the end of the sign-in brings the main
- * window back to the front instead (through `main.kt`'s [activationRequests], like the tray's "Show").
+ * window back to the front instead (through [activationRequests], like the tray's "Show").
  */
 internal val desktopLoginPageLauncher: LoginPageLauncher =
     BrowserLoginPageLauncher(returnToApp = { activationRequests.tryEmit(Unit) })

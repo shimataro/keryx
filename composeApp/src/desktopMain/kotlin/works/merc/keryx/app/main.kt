@@ -1,8 +1,6 @@
 package works.merc.keryx.app
 
 import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.foundation.window.WindowDraggableArea
-import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -10,72 +8,49 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.ExperimentalComposeUiApi
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.window.LocalWindowExceptionHandlerFactory
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowState
 import androidx.compose.ui.window.application
-import app.cash.sqldelight.db.SqlDriver
 import io.ktor.client.HttpClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.FlowPreview
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.swing.Swing
 import kotlinx.coroutines.withContext
-import org.jetbrains.compose.resources.getString
 import org.jetbrains.compose.resources.painterResource
 import org.koin.core.context.startKoin
 import org.koin.mp.KoinPlatform
 import works.merc.keryx.app.appmenu.AppMenuBarHost
-import works.merc.keryx.app.appmenu.AppMenuConnection
 import works.merc.keryx.app.core.APP_NAME
-import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.SystemClock
-import works.merc.keryx.app.core.WINDOW_MIN_HEIGHT
-import works.merc.keryx.app.core.WINDOW_MIN_WIDTH
-import works.merc.keryx.app.core.WINDOW_STATE_PERSIST_DEBOUNCE_MS
 import works.merc.keryx.app.data.local.FtsManager
 import works.merc.keryx.app.data.local.LocalSettingsStore
-import works.merc.keryx.app.data.local.findDatabaseTooNew
 import works.merc.keryx.app.di.appModule
 import works.merc.keryx.app.di.configureImageLoader
 import works.merc.keryx.app.di.platformModule
 import works.merc.keryx.app.domain.AppForeground
 import works.merc.keryx.app.domain.ArticleRepository
 import works.merc.keryx.app.domain.NewArticleNotifier
-import works.merc.keryx.app.domain.OAuthCallbackParams
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.UpdateRepository
 import works.merc.keryx.app.domain.backgroundUpdateLoop
-import works.merc.keryx.app.domain.parseOAuthUri
 import works.merc.keryx.app.platform.AppDirs
 import works.merc.keryx.app.platform.LocalNativeWindow
 import works.merc.keryx.app.platform.LocalWindowDragArea
-import works.merc.keryx.app.platform.WindowChrome
-import works.merc.keryx.app.platform.applyMacMergedTitleBar
-import works.merc.keryx.app.platform.paintNativeSurface
-import works.merc.keryx.app.platform.isLinux
 import works.merc.keryx.app.platform.isMacOs
 import works.merc.keryx.app.presentation.home.HomeViewModel
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.app_icon
-import works.merc.keryx.app.resources.database_too_new_message
-import works.merc.keryx.app.resources.database_too_new_title
 import works.merc.keryx.app.resources.tray_icon
 import works.merc.keryx.app.tray.KeryxTray
 import works.merc.keryx.app.tray.NO_NOTIFICATION_MILLIS
-import works.merc.keryx.app.tray.SniConnection
 import works.merc.keryx.app.tray.TrayWindowAction
 import works.merc.keryx.app.tray.trayIconAction
 import works.merc.keryx.app.tray.trayMenuToggleAction
@@ -89,20 +64,9 @@ import works.merc.keryx.app.ui.theme.installLookAndFeel
 import works.merc.keryx.app.ui.theme.keryxSurfaceColor
 import works.merc.keryx.app.ui.theme.resolveDarkTheme
 import works.merc.keryx.app.ui.theme.updateLookAndFeel
-import java.awt.Dimension
 import java.awt.Taskbar
-import java.io.File
 import java.util.concurrent.atomic.AtomicReference
 import javax.swing.SwingUtilities
-
-private const val LOG_TAG = "Main"
-
-// replay = 1 (not extraBufferCapacity): on a cold .opml launch, incomingArg is dispatched — and can
-// finish importing and tryEmit here — before Compose mounts the window and the LaunchedEffect below
-// starts collecting. With replay = 0, a value emitted with no active subscriber is simply dropped
-// (see kotlinx.coroutines SharedFlow docs), which would leave the window hidden if startMinimized is
-// set. replay = 1 guarantees the first subscriber still receives it regardless of ordering.
-internal val activationRequests = MutableSharedFlow<Unit>(replay = 1)
 
 /**
  * Starts the Keryx desktop application and coordinates its initialization, single-instance behavior,
@@ -111,7 +75,7 @@ internal val activationRequests = MutableSharedFlow<Unit>(replay = 1)
  * @param args Command-line arguments, including an optional `keryx://` callback URI or an `.opml`
  * file path.
  */
-@OptIn(FlowPreview::class, ExperimentalComposeUiApi::class)
+@OptIn(ExperimentalComposeUiApi::class)
 fun main(args: Array<String>) {
     // If the OS launched us with a custom-scheme redirect URI or an .opml file path
     // (Windows/Linux), capture it before single-instance coordination.
@@ -126,20 +90,7 @@ fun main(args: Array<String>) {
         System.setProperty("apple.laf.useScreenMenuBar", "true")
     }
 
-    val singleInstanceCoordinator = SingleInstanceCoordinator(File(AppDirs.appDataDir()))
-    if (!singleInstanceCoordinator.tryAcquireLock()) {
-        // Another instance is already running. On macOS the OAuth redirect URI and an opened .opml
-        // file are both delivered via an Apple Event (setOpenURIHandler / setOpenFileHandler), not
-        // argv, so incomingArg is null here and only a plain activation is forwarded — see the
-        // diagnostic note in docs/sync-architecture.md.
-        Log.info(LOG_TAG, "Single-instance lock held by another instance; forwarding activation (hasArg=${incomingArg != null}) and exiting")
-        val forwarded = singleInstanceCoordinator.signalRunningInstance(incomingArg)
-        if (!forwarded) {
-            Log.warn(LOG_TAG, "Failed to forward activation (hasArg=${incomingArg != null}) to the running instance")
-        }
-        return
-    }
-    Log.info(LOG_TAG, "Acquired single-instance lock; running as primary instance from ${currentExecutablePath()}")
+    val singleInstanceCoordinator = acquirePrimaryInstanceOrForward(incomingArg) ?: return
     // startActivationListener is registered after Koin initialization (see below)
     // so we can inject the URI callback flow.
 
@@ -178,40 +129,14 @@ fun main(args: Array<String>) {
     // Open the database before anything can reach it from a background coroutine (an .opml
     // dispatched just below), so a keryx.db migrated by a newer build is reported here, once, rather
     // than failing inside whichever caller happened to touch it first.
-    try {
-        koin.get<SqlDriver>()
-    } catch (e: Exception) {
-        val tooNew = findDatabaseTooNew(e) ?: throw e
-        // Resolved here rather than inside showDatabaseTooNewAndExit so the blocking resource read
-        // stays on this startup path, alongside main()'s other sanctioned runBlocking calls.
-        val (title, message) = runBlocking {
-            getString(Res.string.database_too_new_title) to getString(Res.string.database_too_new_message)
-        }
-        showDatabaseTooNewAndExit(tooNew, title, message)
-    }
+    openDatabaseOrExit(koin)
 
     // Register activation listener now that Koin is ready so we can emit incoming URIs into the
-    // shared callback flow. dispatchOpmlFile resolves its own CoroutineScope/repository/notification
-    // dependencies via koin.get<>() rather than capturing appScope, which is declared further down
-    // (after this point) and would not be in scope here.
-    val callbackFlow = koin.get<MutableSharedFlow<OAuthCallbackParams>>()
-    fun dispatchOAuthCallback(uri: String) {
-        // Do not log the URI itself — it carries the OAuth authorization code.
-        Log.info(LOG_TAG, "OAuth callback URI received")
-        runCatching { callbackFlow.tryEmit(parseOAuthUri(uri)) }
-    }
-    fun dispatchOpmlFile(path: String) {
-        koin.get<CoroutineScope>().launch { handleOpenedOpmlFile(koin, path) }
-    }
-    fun dispatchLaunchArg(arg: String) {
-        when (val launchArg = classifyLaunchArg(arg)) {
-            is LaunchArg.OAuthCallback -> dispatchOAuthCallback(launchArg.uri)
-            is LaunchArg.OpmlFile -> dispatchOpmlFile(launchArg.path)
-            null -> Unit
-        }
-    }
+    // shared callback flow (LaunchArgDispatcher resolves it, and its own .opml-import dependencies,
+    // from Koin — appScope is declared further down and would not be in scope here).
+    val launchArgDispatcher = LaunchArgDispatcher(koin)
     singleInstanceCoordinator.startActivationListener { uri ->
-        if (!uri.isNullOrBlank()) dispatchLaunchArg(uri)
+        if (!uri.isNullOrBlank()) launchArgDispatcher.dispatchLaunchArg(uri)
         activationRequests.tryEmit(Unit)
     }
     // startActivationListener only fires for a *second* launch forwarding to this one — the
@@ -219,7 +144,7 @@ fun main(args: Array<String>) {
     // .opml file-association cold start on Windows/Linux: unlike the OAuth callback (which only
     // ever arrives while Keryx is already running), double-clicking a file when Keryx isn't running
     // yet is the primary way this feature gets used.
-    incomingArg?.let { dispatchLaunchArg(it) }
+    incomingArg?.let { launchArgDispatcher.dispatchLaunchArg(it) }
 
     configureImageLoader(koin.get<HttpClient>(), AppDirs.cacheDir())
 
@@ -286,8 +211,8 @@ fun main(args: Array<String>) {
     // initializes AWT.
     installAppEventHandlers(
         menuController = menuController,
-        onOAuthCallback = ::dispatchOAuthCallback,
-        onOpmlFile = ::dispatchOpmlFile,
+        onOAuthCallback = launchArgDispatcher::dispatchOAuthCallback,
+        onOpmlFile = launchArgDispatcher::dispatchOpmlFile,
         onReopen = { activationRequests.tryEmit(Unit) },
     )
 
@@ -295,25 +220,12 @@ fun main(args: Array<String>) {
     // mimeapps.list). macOS declares both in Info.plist at packaging time, so it needs nothing here.
     registerFileAssociations()
 
-    // Linux: java.awt.SystemTray cannot draw a transparent icon on X11 (XTrayIconPeer fills the
-    // canvas with the component background before drawing, and XSystemTrayPeer never adopts the
-    // tray manager's ARGB visual), so the icon always ends up inside a white box. Use the native
-    // StatusNotifierItem protocol when a host is available; null falls back to the AWT tray.
-    // Resolved here, before the window exists, so the tray is up even with startMinimized.
-    val sniConnection = if (isLinux) SniConnection.tryCreate() else null
-    if (sniConnection != null) {
-        addShutdownHook { sniConnection.close() }
-    }
-
-    // Linux/KDE Global Menu: if the com.canonical.AppMenu.Registrar is present, export the app menu
-    // over D-Bus so it can appear in the top-panel "Application Menu Bar" widget or titlebar button.
-    // null (every non-KDE environment) leaves the in-window menu bar behaving exactly as before.
-    // Independent of the tray (own connection, own lifecycle).
-    val appMenuConnection = if (isLinux) AppMenuConnection.tryCreate() else null
-    val resolvedAppMenuXid = AtomicReference<Long?>(null)
-    if (appMenuConnection != null) {
-        addShutdownHook { appMenuConnection.close(resolvedAppMenuXid.get()) }
-    }
+    // Linux StatusNotifierItem tray and KDE Global Menu (see openLinuxDBusIntegrations); both
+    // resolved here, before the window exists, so the tray is up even with startMinimized.
+    val linuxDBus = openLinuxDBusIntegrations()
+    val sniConnection = linuxDBus.sniConnection
+    val appMenuConnection = linuxDBus.appMenuConnection
+    val resolvedAppMenuXid = linuxDBus.resolvedAppMenuXid
 
     application {
         var windowVisible by remember { mutableStateOf(!saved.startMinimized) }
@@ -363,12 +275,7 @@ fun main(args: Array<String>) {
         // WindowStatePersistence.kt. Also updates latestWindowState on every change (not debounced)
         // so the shutdown hook always has an up-to-date snapshot even if the debounce window hasn't
         // elapsed yet when the JVM exits.
-        LaunchedEffect(windowState) {
-            snapshotFlow { observedWindowState(windowState) }
-                .onEach { latestWindowState.set(it) }
-                .debounce(WINDOW_STATE_PERSIST_DEBOUNCE_MS)
-                .collect { observed -> persistWindowState(observed) }
-        }
+        PersistWindowStateEffect(windowState, latestWindowState, ::persistWindowState)
 
         // Tracks when a new-article notification was last sent, for onTrayAction's recency bias
         // below (trayIconAction). A plain additional collector of the same SharedFlow
@@ -527,22 +434,7 @@ fun main(args: Array<String>) {
                 // dispatched as a coroutine after composition commits) so the chrome switch
                 // happens as early as possible, minimizing the standard-title-bar flash.
                 remember {
-                    window.minimumSize = Dimension(WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT)
-                    // Paint the native window/content-pane with the theme surface so a dark-mode
-                    // launch doesn't flash the platform-default (light) background in the gap between
-                    // the window becoming visible and Compose's first (already-dark) frame. Which of
-                    // the two actually fills the visible pixels is platform/timing dependent, so set
-                    // both (an opaque dark fill is harmless on either).
-                    window.paintNativeSurface(windowSurface)
-                    if (isMacOs) {
-                        // Measure the OS's actual title bar height *before* switching to
-                        // the transparent/merged style, since fullWindowContent changes
-                        // how insets are reported afterward. This adapts automatically
-                        // to whatever the current macOS version/system settings use,
-                        // instead of hardcoding a guessed constant.
-                        WindowChrome.titleBarInsetDp = window.insets.top.toFloat()
-                        window.rootPane.applyMacMergedTitleBar()
-                    }
+                    applyInitialWindowChrome(window, windowSurface)
                     Unit
                 }
 
@@ -648,17 +540,9 @@ fun main(args: Array<String>) {
                     }
                 }
 
-                // macOS integrates the title bar into the content, losing the OS's drag-to-move, so we wrap
-                // the header strip in WindowDraggableArea to restore it. Windows/Linux keep the OS title bar,
-                // so this stays a pass-through (no-op). WindowDraggableArea can only be called within
-                // FrameWindowScope, so we capture that receiver (this@Window) and close over it in the wrapper.
-                val frameScope = this
-                val dragWrapper: @Composable (Modifier, @Composable () -> Unit) -> Unit =
-                    if (isMacOs) {
-                        { mod, dragContent -> with(frameScope) { WindowDraggableArea(mod) { dragContent() } } }
-                    } else {
-                        { _, dragContent -> dragContent() }
-                    }
+                // macOS's merged title bar needs WindowDraggableArea around the header strip to keep
+                // drag-to-move; elsewhere a pass-through (see windowDragWrapper).
+                val dragWrapper = windowDragWrapper(this)
                 CompositionLocalProvider(
                     LocalNativeWindow provides window,
                     LocalWindowDragArea provides dragWrapper,

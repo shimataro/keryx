@@ -525,7 +525,7 @@ Android の Dropbox / OneDrive を指す。残る 1 件は後述の「Android �
 - **Dropbox / OneDrive — カスタム URI スキーム**（`CustomUriRedirectTransport`）:
   - **仕組み。** リダイレクト URI は `keryx://oauth2/callback`。両プロバイダーで共有し `state` で識別
     する。desktop/Android では認可 URL を既定ブラウザーで開き、OS が URL を実行中インスタンスへ配送
-    する（`main.kt` が `parseOAuthUri` して共有 `MutableSharedFlow<OAuthCallbackParams>` に流す）。
+    する（デスクトップの `LaunchArgDispatcher` が `parseOAuthUri` して共有 `MutableSharedFlow<OAuthCallbackParams>` に流す）。
     Apple 版は代わりに `ASWebAuthenticationSession` を使う——詳細は後述の「Apple 版での OAuth 認可」
     を参照。
   - **OneDrive 固有の事情。** Microsoft Identity platform（`consumers` テナント）と Microsoft Graph を
