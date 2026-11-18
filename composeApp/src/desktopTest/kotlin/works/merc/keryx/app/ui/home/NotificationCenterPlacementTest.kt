@@ -34,6 +34,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.requestFocus
 import androidx.compose.ui.test.v2.runDesktopComposeUiTest
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -372,6 +373,9 @@ class NotificationCenterPlacementTest {
         }
     }
 
+    /** A node's [SemanticsProperties.Text] value made of [parts], in order. */
+    private fun textOf(vararg parts: String): List<AnnotatedString> = parts.map(::AnnotatedString)
+
     private fun centerOf(vararg levels: AppNotificationLevel): NotificationCenter {
         val center = NotificationCenter()
         levels.forEachIndexed { i, level ->
@@ -393,11 +397,11 @@ class NotificationCenterPlacementTest {
             }
         }
         waitForIdle()
-        onNodeWithText(rowLabel).assert(SemanticsMatcher.expectValue(SemanticsProperties.Text, listOf(rowLabel, "2").map { androidx.compose.ui.text.AnnotatedString(it) }))
+        onNodeWithText(rowLabel).assert(SemanticsMatcher.expectValue(SemanticsProperties.Text, textOf(rowLabel, "2")))
 
         count = 0
         waitForIdle()
-        onNodeWithText(rowLabel).assert(SemanticsMatcher.expectValue(SemanticsProperties.Text, listOf(androidx.compose.ui.text.AnnotatedString(rowLabel))))
+        onNodeWithText(rowLabel).assert(SemanticsMatcher.expectValue(SemanticsProperties.Text, textOf(rowLabel)))
     }
 
     @Test
