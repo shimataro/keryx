@@ -176,4 +176,22 @@ class ReadStatePinsTest {
         val result = reconciledUnstarredPins(mapOf("a" to pin), mapOf("a" to pin), emptyMap())
         assertTrue(result.isEmpty())
     }
+
+    @Test
+    fun unstarredPinReplacedSinceTheSnapshotIsKeptDespiteStaleFlags() {
+        // A re-starred pin, then unstarred again after the flags were requested: the flags still
+        // say starred, but they predate the write behind the replacement.
+        val old = row("a", isStarred = 1L)
+        val replaced = row("a", isStarred = 0L)
+        val result = reconciledUnstarredPins(mapOf("a" to replaced), mapOf("a" to old), mapOf("a" to flags(isStarred = 1L)))
+        assertSame(replaced, result["a"])
+    }
+
+    @Test
+    fun unstarredPinRePinnedWithAnEqualValueIsKeptDespiteStaleFlags() {
+        val old = row("a", isStarred = 0L)
+        val rePinned = row("a", isStarred = 0L)
+        val result = reconciledUnstarredPins(mapOf("a" to rePinned), mapOf("a" to old), mapOf("a" to flags(isStarred = 1L)))
+        assertSame(rePinned, result["a"])
+    }
 }

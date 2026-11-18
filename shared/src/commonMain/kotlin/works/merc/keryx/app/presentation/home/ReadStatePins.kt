@@ -78,15 +78,17 @@ internal fun reconciledReadPins(
  * @param snapshot The unstarred pins as they were when [flags] was requested.
  * @param flags The current read/star flags of the alive articles among the pinned ids; an id missing
  *   from it is tombstoned (or gone).
- * @return [pinned] minus every pin in [snapshot] whose article's current is_starred no longer matches
- *   the pinned value; pins added since [snapshot] are kept.
+ * @return [pinned] minus every pin unchanged since [snapshot] whose article's current is_starred no
+ *   longer matches the pinned value; pins added or replaced since [snapshot] are kept.
  */
 internal fun reconciledUnstarredPins(
     pinned: Map<String, ArticleListRow>,
     snapshot: Map<String, ArticleListRow>,
     flags: Map<String, ArticleFlags>,
 ): Map<String, ArticleListRow> =
-    // Same idea as the read pin: dropped once the article's current is_starred no
-    // longer matches what was optimistically pinned (deleted, or externally re-starred),
-    // not just once it is deleted.
-    pinned.filterKeys { it !in snapshot || flags[it]?.isStarred == pinned.getValue(it).is_starred }
+    // Same rule as the read pin: a pin added or replaced since the snapshot is kept, since
+    // `flags` was read before the write that justified it was enqueued (an unstar after a
+    // re-star replaces the pin while `flags` still says starred). Otherwise a pin is dropped
+    // once the article's current is_starred no longer matches what was optimistically pinned
+    // (deleted, or externally re-starred), not just once it is deleted.
+    pinned.filterKeys { pinReplacedSince(snapshot[it], pinned.getValue(it)) || flags[it]?.isStarred == pinned.getValue(it).is_starred }
