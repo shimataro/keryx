@@ -5,6 +5,10 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import works.merc.keryx.app.core.Log
+import works.merc.keryx.app.core.runCatchingUnlessCancelled
+
+private const val TAG = "DeletedItemFallback"
 
 /** A feed-list item whose delete this ViewModel has written: an unsubscribed feed, a tag or a folder. */
 internal sealed interface DeletedTarget {
@@ -36,6 +40,11 @@ internal sealed interface DeletedTarget {
  * re-created, and the request is dropped without falling back; if not, the value was stale and the
  * request stays pending. Only the check started for the newest such value is applied, and a check
  * whose request was decided meanwhile (a value lacking the item arrived) is ignored.
+ *
+ * The check is best effort (docs/error-design.md): a read that fails — waiting out the whole
+ * `busy_timeout` behind a sync merge's or refresh's write lock, say, which is when stale values tend
+ * to arrive — is logged and treated as "not live", so the request stays pending and the next value of
+ * [shown] decides it. Propagated, the failure would end the app on Android and Apple.
  *
  * Once dropped, a request is gone, so a deletion that arrives later from elsewhere (a sync merge)
  * never moves the selection (external-spec §9, "Least surprise").
@@ -89,7 +98,12 @@ internal class DeletedItemFallback<T>(
     private fun checkLiveness(request: Pending) {
         val generation = ++request.checkGeneration
         scope.launch {
-            val live = withContext(checkDispatcher) { isLive(request.id) }
+            val live = runCatchingUnlessCancelled {
+                withContext(checkDispatcher) { isLive(request.id) }
+            }.getOrElse { e ->
+                Log.warn(TAG, "Checking whether a deleted feed-list item is live failed", e)
+                false
+            }
             // Ignore a result whose request was decided meanwhile, or that a newer check supersedes.
             if (request !in pending || generation != request.checkGeneration) return@launch
             if (live) pending.remove(request)

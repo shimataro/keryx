@@ -3,6 +3,7 @@ package works.merc.keryx.app.presentation.home
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
@@ -90,6 +91,32 @@ class DeletedItemFallbackTest {
 
         assertEquals(1, fellBack)
         assertEquals(emptyList(), checked)
+        scope.cancel()
+    }
+
+    @Test
+    fun aFailedLivenessCheckIsNotUncaughtAndKeepsTheRequestPending() = runTest {
+        val shown = MutableStateFlow(listOf(Row("t1", "Kotlin"), Row("t2", "Other")))
+        // fallbackFor's scope has no handler; this one records what would otherwise be uncaught.
+        val uncaught = mutableListOf<Throwable>()
+        val dispatcher = UnconfinedTestDispatcher(testScheduler)
+        val scope = CoroutineScope(SupervisorJob() + dispatcher + CoroutineExceptionHandler { _, e -> uncaught += e })
+        val fallback = DeletedItemFallback(
+            scope, shown, dispatcher,
+            isLive = { throw IllegalStateException("[SQLITE_BUSY] The database file is locked") },
+        ) { it.id }
+        var fellBack = 0
+
+        fallback.fallBackOnceHidden("t1") { fellBack++ }
+        // A stale list still showing the item starts a liveness check, which fails.
+        shown.value = listOf(Row("t1", "Kotlin"), Row("t2", "Renamed"))
+        assertEquals(emptyList(), uncaught)
+        assertEquals(0, fellBack)
+
+        // The request stayed pending, so the list that drops the item still falls back, once.
+        shown.value = listOf(Row("t2", "Renamed"))
+        assertEquals(1, fellBack)
+        assertEquals(emptyList(), uncaught)
         scope.cancel()
     }
 }
