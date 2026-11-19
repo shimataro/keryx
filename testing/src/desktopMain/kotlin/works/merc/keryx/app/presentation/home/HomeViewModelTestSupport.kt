@@ -33,6 +33,7 @@ import works.merc.keryx.app.domain.ArticleRepository
 import works.merc.keryx.app.domain.CloudConnectionService
 import works.merc.keryx.app.domain.FeedRepository
 import works.merc.keryx.app.domain.FolderRepository
+import works.merc.keryx.app.domain.LocalWriteFailureReporter
 import works.merc.keryx.app.domain.NewArticleNotifier
 import works.merc.keryx.app.domain.FakeNotificationMessages
 import works.merc.keryx.app.domain.NotificationCenter
@@ -166,6 +167,8 @@ fun newHomeViewModel(
     // The counter of the ViewModel's requested-but-not-yet-run local writes — overridable so a test
     // can observe it.
     pendingLocalWrites: PendingLocalWrites = PendingLocalWrites(),
+    // Where the ViewModel reports a write that failed — overridable so a test can observe it.
+    localWriteFailureReporter: LocalWriteFailureReporter = LocalWriteFailureReporter(NotificationCenter(), clock),
 ): HomeViewModelFixture {
     // A fresh, unique directory per call (not a fixed name shared across every test in this file):
     // LocalSettingsStore persists lastFilter/collapsedFolderIds/etc. to a JSON file there, and a
@@ -230,6 +233,7 @@ fun newHomeViewModel(
             feedRepository, articleRepository, tagRepository, folderRepository, settingsRepository,
             syncRepository, activityCenter, clock, refreshCycleRunner, effectiveManualSync,
             dispatcher, dbWriteDispatcher, pendingLocalWrites,
+            localWriteFailureReporter = localWriteFailureReporter,
         )
         return HomeViewModelFixture(
             vm, driver, syncScope, listOf(fetcherClient, faviconClient, authClient), ownedManualSync,

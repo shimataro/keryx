@@ -63,6 +63,7 @@ import works.merc.keryx.app.domain.ArticleRepository
 import works.merc.keryx.app.domain.toListRow
 import works.merc.keryx.app.domain.FeedRepository
 import works.merc.keryx.app.domain.FolderRepository
+import works.merc.keryx.app.domain.LocalWriteFailureReporter
 import works.merc.keryx.app.domain.NewArticleNotifier
 import works.merc.keryx.app.domain.RefreshCycleRunner
 import works.merc.keryx.app.domain.RefreshOutcome
@@ -310,6 +311,8 @@ class HomeViewModelTest {
         listDispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
         // The counter of the ViewModel's requested-but-not-yet-run read/star writes.
         pendingLocalWrites: PendingLocalWrites = PendingLocalWrites(),
+        // Where a failed write is reported; a test can pass one over its own NotificationCenter.
+        localWriteFailureReporter: LocalWriteFailureReporter = LocalWriteFailureReporter(NotificationCenter(), clock),
     ): HomeViewModel {
         val articleRepository = ArticleRepository(db, FtsSearch(ftsDriver), syncScheduler, clock, Dispatchers.Unconfined)
         // Mirror startup: ensureIndexed() creates articles_fts so the subscribe/refresh path's indexMissing() works.
@@ -359,6 +362,7 @@ class HomeViewModelTest {
             // deterministic assertions; overridable via the dbWriteDispatcher parameter above.
             dbWriteDispatcher,
             pendingLocalWrites,
+            localWriteFailureReporter = localWriteFailureReporter,
         ).also { createdViewModels += it }
     }
 
