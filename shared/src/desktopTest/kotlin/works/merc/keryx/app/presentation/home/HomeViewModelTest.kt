@@ -5560,6 +5560,133 @@ class HomeViewModelTest {
         assertEquals(ArticleFilter.All, vm.filter.value)
     }
 
+    // --- Feed-list writes run on dbWriteDispatcher, never on the caller's (UI) thread ---
+
+    @Test
+    fun unsubscribeFeedWritesOnTheDbWriteDispatcherButResetsTheFilterAtOnce() = runTest {
+        db.insertFeed("f1")
+        val writes = HoldingDispatcher()
+        val vm = newViewModel(dbWriteDispatcher = writes)
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+        vm.selectFilter(ArticleFilter.Feed("f1"))
+        writes.hold()
+
+        vm.unsubscribeFeed("f1")
+
+        // The selection falls back at once; the DB write waits for the write dispatcher.
+        assertEquals(ArticleFilter.All, vm.filter.value)
+        assertNull(db.feedsQueries.getById("f1").executeAsOne().deleted_at)
+
+        writes.release()
+
+        assertNotNull(db.feedsQueries.getById("f1").executeAsOne().deleted_at)
+    }
+
+    @Test
+    fun renameFeedWritesOnTheDbWriteDispatcher() = runTest {
+        db.insertFeed("f1")
+        val writes = HoldingDispatcher()
+        val vm = newViewModel(dbWriteDispatcher = writes)
+        subscribeAll(vm)
+        writes.hold()
+
+        vm.renameFeed("f1", "Renamed")
+
+        assertNull(db.feedsQueries.getById("f1").executeAsOne().custom_title)
+
+        writes.release()
+
+        assertEquals("Renamed", db.feedsQueries.getById("f1").executeAsOne().custom_title)
+    }
+
+    @Test
+    fun feedListStructureActionsWriteOnTheDbWriteDispatcherInOrder() = runTest {
+        db.insertFeed("f1", sortOrder = 0)
+        db.insertFeed("f2", sortOrder = 1)
+        db.insertTag("t1", "Old tag")
+        db.insertTag("t2", "Doomed tag")
+        db.insertFolder("d1", "Old folder", sortOrder = 0)
+        db.insertFolder("d2", "Second folder", sortOrder = 1)
+        db.insertFolder("d3", "Doomed folder", sortOrder = 2)
+        val writes = HoldingDispatcher()
+        val vm = newViewModel(dbWriteDispatcher = writes)
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+        vm.selectFilter(ArticleFilter.Tag("t2"))
+        writes.hold()
+
+        vm.updateTag("t1", "New tag", "#123456")
+        vm.deleteTag("t2")
+        vm.setFeedTag("f1", "t1", attached = true)
+        vm.updateFolder("d1", "New folder")
+        vm.reorderFolders("d2", "d1")
+        vm.moveFeed("f2", "d1")
+        vm.deleteFolder("d3")
+
+        // Nothing has reached the DB yet, but the deleted tag's selection already fell back.
+        assertEquals(ArticleFilter.All, vm.filter.value)
+        assertEquals("Old tag", db.tagsQueries.getById("t1").executeAsOne().name)
+        assertNull(db.tagsQueries.getById("t2").executeAsOne().deleted_at)
+        assertTrue(db.feed_tagsQueries.watchAllActive().executeAsList().isEmpty())
+        assertEquals("Old folder", db.foldersQueries.getById("d1").executeAsOne().name)
+        assertEquals(listOf("d1", "d2", "d3"), db.foldersQueries.watchAll().executeAsList().map { it.id })
+        assertNull(db.feedsQueries.getById("f2").executeAsOne().folder_id)
+        assertNull(db.foldersQueries.getById("d3").executeAsOne().deleted_at)
+        assertEquals(7, writes.queuedCount)
+
+        writes.release()
+
+        assertEquals("New tag", db.tagsQueries.getById("t1").executeAsOne().name)
+        assertEquals("#123456", db.tagsQueries.getById("t1").executeAsOne().color)
+        assertNotNull(db.tagsQueries.getById("t2").executeAsOne().deleted_at)
+        assertEquals(
+            listOf("f1" to "t1"),
+            db.feed_tagsQueries.watchAllActive().executeAsList().map { it.feed_id to it.tag_id },
+        )
+        assertEquals("New folder", db.foldersQueries.getById("d1").executeAsOne().name)
+        assertEquals(listOf("d2", "d1"), db.foldersQueries.watchAll().executeAsList().map { it.id })
+        assertEquals("d1", db.feedsQueries.getById("f2").executeAsOne().folder_id)
+        assertNotNull(db.foldersQueries.getById("d3").executeAsOne().deleted_at)
+    }
+
+    @Test
+    fun createTagAndFolderWriteOnTheDbWriteDispatcher() = runTest {
+        val writes = HoldingDispatcher()
+        val vm = newViewModel(dbWriteDispatcher = writes)
+        subscribeAll(vm)
+        writes.hold()
+
+        vm.createTag("Kotlin")
+        vm.createFolder("Tech")
+
+        assertTrue(db.tagsQueries.watchAll().executeAsList().isEmpty())
+        assertTrue(db.foldersQueries.watchAll().executeAsList().isEmpty())
+
+        writes.release()
+
+        assertEquals(listOf("Kotlin"), db.tagsQueries.watchAll().executeAsList().map { it.name })
+        assertEquals(listOf("Tech"), db.foldersQueries.watchAll().executeAsList().map { it.name })
+    }
+
+    @Test
+    fun createTagAndFolderForAFeedApplyTheNewItemToIt() = runTest {
+        db.insertFeed("f1")
+        val vm = newViewModel()
+        subscribeAll(vm)
+
+        vm.createTag("Kotlin", attachToFeedId = "f1")
+        vm.createFolder("Tech", moveFeedId = "f1")
+
+        val tagId = db.tagsQueries.watchAll().executeAsList().single().id
+        assertEquals(
+            listOf("f1" to tagId),
+            db.feed_tagsQueries.watchAllActive().executeAsList().map { it.feed_id to it.tag_id },
+        )
+        val folderId = db.foldersQueries.watchAll().executeAsList().single().id
+        assertEquals(folderId, db.feedsQueries.getById("f1").executeAsOne().folder_id)
+    }
+
     @Test
     fun deleteTagResetsFilterWhenViewingThatTag() = runTest {
         db.insertTag("t1", "Kotlin")
@@ -5578,9 +5705,8 @@ class HomeViewModelTest {
         val vm = newViewModel()
         subscribeAll(vm)
 
-        val id = vm.createTag("   ")
+        vm.createTag("   ")
 
-        assertNull(id)
         assertTrue(db.tagsQueries.watchAll().executeAsList().isEmpty())
     }
 
@@ -5589,10 +5715,9 @@ class HomeViewModelTest {
         val vm = newViewModel()
         subscribeAll(vm)
 
-        val id = vm.createTag("  Kotlin  ")
+        vm.createTag("  Kotlin  ")
 
-        assertNotNull(id)
-        assertEquals("Kotlin", db.tagsQueries.getById(id).executeAsOne().name)
+        assertEquals("Kotlin", db.tagsQueries.watchAll().executeAsList().single().name)
     }
 
     @Test
@@ -5622,10 +5747,9 @@ class HomeViewModelTest {
         val vm = newViewModel()
         subscribeAll(vm)
 
-        val id = vm.createTag("Kotlin", "#FF0000")
+        vm.createTag("Kotlin", "#FF0000")
 
-        assertNotNull(id)
-        assertEquals("#FF0000", db.tagsQueries.getById(id).executeAsOne().color)
+        assertEquals("#FF0000", db.tagsQueries.watchAll().executeAsList().single().color)
     }
 
     @Test
@@ -5659,9 +5783,8 @@ class HomeViewModelTest {
         val vm = newViewModel()
         subscribeAll(vm)
 
-        val id = vm.createFolder("   ")
+        vm.createFolder("   ")
 
-        assertNull(id)
         assertTrue(db.foldersQueries.watchAll().executeAsList().isEmpty())
     }
 

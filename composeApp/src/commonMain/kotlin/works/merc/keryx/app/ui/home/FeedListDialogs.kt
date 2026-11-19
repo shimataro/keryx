@@ -72,7 +72,7 @@ internal fun FeedListDialogs(
         AddTagPrompt(
             tags = tags,
             onConfirm = { name, color ->
-                vm.createTag(name, color)?.let { vm.setFeedTag(feedId, it, true) }
+                vm.createTag(name, color, attachToFeedId = feedId)
                 onCreatingTagForFeedIdChange(null)
             },
             onDismiss = { onCreatingTagForFeedIdChange(null) },
@@ -99,7 +99,7 @@ internal fun FeedListDialogs(
         AddFolderPrompt(
             folders = folders,
             onConfirm = { name ->
-                vm.createFolder(name)?.let { vm.moveFeed(feedId, it) }
+                vm.createFolder(name, moveFeedId = feedId)
                 onCreatingFolderForFeedIdChange(null)
             },
             onDismiss = { onCreatingFolderForFeedIdChange(null) },

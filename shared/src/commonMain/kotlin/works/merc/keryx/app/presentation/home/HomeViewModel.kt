@@ -88,7 +88,8 @@ class HomeViewModel(
     // The one "Sync now" every route shares (CloudSyncController in production) — see [sync].
     private val manualSync: ManualSync,
     private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
-    // Imperative read/star DB writes run here instead of the UI thread. Single-threaded so writes
+    // Imperative DB writes — read/star, and the feed list's unsubscribe/rename and tag/folder
+    // structure actions — run here instead of the UI thread. Single-threaded so writes
     // stay serialized (one writer, as they were on the UI thread) — the JVM SQLite driver opens a
     // fresh connection per statement, so concurrent writes would contend for the write lock and
     // only avoid SQLITE_BUSY by burning the busy_timeout DatabaseDriverFactory sets. UI state is
@@ -798,6 +799,7 @@ class HomeViewModel(
         selectedRowInstance = _selectedRowInstance,
         currentFilter = { _filter.value },
         selectFilter = { selectFilter(it) },
+        launchWrite = { write -> viewModelScope.launch(dbWriteDispatcher) { write() } },
     )
 
     /** The feed list's collapsed folders — see [FeedListExpansion.collapsedFolderIds]. */
@@ -1690,16 +1692,20 @@ class HomeViewModel(
     }
 
     /**
-     * Unsubscribes from a feed and switches to the all-articles filter if it is selected.
+     * Unsubscribes from a feed and switches to the all-articles filter if it is selected. The DB
+     * write runs on [dbWriteDispatcher]; the filter falls back at once.
      *
      * @param id The identifier of the feed to unsubscribe from.
      */
     fun unsubscribeFeed(id: String) {
-        feedRepository.unsubscribeFeed(id)
+        viewModelScope.launch(dbWriteDispatcher) { feedRepository.unsubscribeFeed(id) }
         if (_filter.value == ArticleFilter.Feed(id)) selectFilter(ArticleFilter.All)
     }
 
-    fun renameFeed(id: String, title: String?) = feedRepository.renameFeed(id, title)
+    /** Sets (or, with `null`, clears) a feed's custom title. The DB write runs on [dbWriteDispatcher]. */
+    fun renameFeed(id: String, title: String?) {
+        viewModelScope.launch(dbWriteDispatcher) { feedRepository.renameFeed(id, title) }
+    }
 
     /**
      * What's in flight right now — feed refreshes, syncs (manual, debounced, or background), and
@@ -1803,8 +1809,22 @@ class HomeViewModel(
     val cloudConnected: StateFlow<Boolean> get() = manualSync.connected
 
     // --- Tag actions ---
+    //
+    // These and the folder actions below write on [dbWriteDispatcher] and return at once (see
+    // [FeedListActions]); the state they show catches up through the DB-backed flows.
 
-    fun createTag(name: String, color: String? = null): String? = feedListActions.createTag(name, color)
+    /**
+     * Creates a tag and, when [attachToFeedId] is given, attaches it to that feed in the same write
+     * (a feed row's "New tag…").
+     *
+     * Blank names are ignored.
+     *
+     * @param name The tag's name (trimmed).
+     * @param color The tag's color, or `null` for none.
+     * @param attachToFeedId The feed to attach the new tag to, or `null` to only create it.
+     */
+    fun createTag(name: String, color: String? = null, attachToFeedId: String? = null) =
+        feedListActions.createTag(name, color, attachToFeedId)
 
     /**
      * Updates a tag with the specified name and color.
@@ -1836,8 +1856,18 @@ class HomeViewModel(
 
     // --- Folder actions ---
 
-    fun createFolder(name: String): String? = feedListActions.createFolder(name)
+    /**
+     * Creates a folder and, when [moveFeedId] is given, moves that feed into it in the same write
+     * (a feed row's "New folder…").
+     *
+     * Blank names are ignored.
+     *
+     * @param name The folder's name (trimmed).
+     * @param moveFeedId The feed to move into the new folder, or `null` to only create it.
+     */
+    fun createFolder(name: String, moveFeedId: String? = null) = feedListActions.createFolder(name, moveFeedId)
 
+    /** Renames a folder. Blank names are ignored. */
     fun updateFolder(id: String, name: String) = feedListActions.updateFolder(id, name)
 
     /**

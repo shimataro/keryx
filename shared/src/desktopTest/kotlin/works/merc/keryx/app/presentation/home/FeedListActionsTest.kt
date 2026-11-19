@@ -8,6 +8,7 @@ import io.ktor.client.plugins.HttpTimeout
 import io.ktor.http.HttpStatusCode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.runBlocking
 import works.merc.keryx.app.InMemoryFaviconMissStore
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.Clock
@@ -49,6 +50,17 @@ class FeedListActionsTest {
     private val selectedRow = MutableStateFlow<FeedListRowSelection>(FeedListRowSelection.All)
     private var filter: ArticleFilter = ArticleFilter.All
     private val selectCalls = mutableListOf<ArticleFilter>()
+
+    // Writes run inline unless [holdWrites] is set — then they queue in [pendingWrites] until
+    // [runPendingWrites], standing in for the ViewModel's serial dbWriteDispatcher.
+    private var holdWrites = false
+    private val pendingWrites = mutableListOf<suspend () -> Unit>()
+
+    private fun runPendingWrites() = runBlocking {
+        val writes = pendingWrites.toList()
+        pendingWrites.clear()
+        writes.forEach { it() }
+    }
     private lateinit var actions: FeedListActions
 
     private fun failingClient() = HttpClient(MockEngine { respond("", HttpStatusCode.NotFound) }) {
@@ -83,6 +95,7 @@ class FeedListActionsTest {
             selectedRow,
             currentFilter = { filter },
             selectFilter = { filter = it; selectCalls += it },
+            launchWrite = { write -> if (holdWrites) pendingWrites += write else runBlocking { write() } },
         )
     }
 
@@ -96,12 +109,12 @@ class FeedListActionsTest {
 
     @Test
     fun createTagRejectsBlankNamesAndTrimsValidOnes() {
-        assertNull(actions.createTag("", null))
-        assertNull(actions.createTag("   ", "#fff"))
+        actions.createTag("", null)
+        actions.createTag("   ", "#fff")
         assertTrue(db.tagsQueries.watchAll().executeAsList().isEmpty())
 
-        val id = assertNotNull(actions.createTag("  News  ", "#fff"))
-        val row = db.tagsQueries.getById(id).executeAsOne()
+        actions.createTag("  News  ", "#fff")
+        val row = db.tagsQueries.watchAll().executeAsList().single()
         assertEquals("News", row.name)
         assertEquals("#fff", row.color)
     }
@@ -119,12 +132,12 @@ class FeedListActionsTest {
 
     @Test
     fun createFolderRejectsBlankNamesAndTrimsValidOnes() {
-        assertNull(actions.createFolder(""))
-        assertNull(actions.createFolder("  \t"))
+        actions.createFolder("")
+        actions.createFolder("  \t")
         assertTrue(db.foldersQueries.watchAll().executeAsList().isEmpty())
 
-        val id = assertNotNull(actions.createFolder("  Tech  "))
-        assertEquals("Tech", db.foldersQueries.getById(id).executeAsOne().name)
+        actions.createFolder("  Tech  ")
+        assertEquals("Tech", db.foldersQueries.watchAll().executeAsList().single().name)
     }
 
     @Test
@@ -302,6 +315,83 @@ class FeedListActionsTest {
         actions.reorderFolders("d2", "d1")
 
         assertEquals(listOf("d2", "d1"), db.foldersQueries.watchAll().executeAsList().map { it.id })
+    }
+
+    // --- Create-and-apply ---
+
+    @Test
+    fun createTagWithAFeedAttachesTheNewTagToIt() {
+        db.insertFeed("f1")
+
+        actions.createTag("News", null, attachToFeedId = "f1")
+
+        val tagId = db.tagsQueries.watchAll().executeAsList().single().id
+        assertEquals(mapOf("f1" to setOf(tagId)), feedTagMap())
+    }
+
+    @Test
+    fun createFolderWithAFeedMovesItIntoTheNewFolder() {
+        db.insertFeed("f1")
+
+        actions.createFolder("Tech", moveFeedId = "f1")
+
+        val folderId = db.foldersQueries.watchAll().executeAsList().single().id
+        assertEquals(folderId, db.feedsQueries.getById("f1").executeAsOne().folder_id)
+    }
+
+    // --- Writes go through launchWrite ---
+
+    @Test
+    fun everyActionReturnsBeforeItsWriteRunsAndUpdatesUiStateAtOnce() {
+        db.insertFeed("f1", sortOrder = 0)
+        db.insertFeed("f2", sortOrder = 1)
+        db.insertTag("t1", "Old tag")
+        db.insertTag("t2", "Doomed tag")
+        db.insertFolder("d1", "Old folder", sortOrder = 0)
+        db.insertFolder("d2", "Second folder", sortOrder = 1)
+        db.insertFolder("d3", "Doomed folder", sortOrder = 2)
+        actions.toggleTagExpanded("t2")
+        expansion.toggleFolder("d3")
+        selectedRow.value = FeedListRowSelection.FeedInTag("f1", "t2")
+        filter = ArticleFilter.Folder("d3")
+        holdWrites = true
+
+        actions.createTag("New", null, attachToFeedId = "f2")
+        actions.updateTag("t1", "Renamed tag", null)
+        actions.deleteTag("t2")
+        actions.setFeedTag("f1", "t1", attached = true)
+        actions.createFolder("Fresh", moveFeedId = "f1")
+        actions.updateFolder("d1", "Renamed folder")
+        actions.deleteFolder("d3")
+        actions.moveFeed("f2", "d1", null)
+        actions.reorderFolders("d2", "d1")
+
+        // UI-side state changed at once…
+        assertEquals(FeedListRowSelection.FeedInFolderGroup("f1"), selectedRow.value)
+        assertEquals(emptySet(), expansion.expandedTagIds.value)
+        assertEquals(emptySet(), expansion.collapsedFolderIds.value)
+        assertEquals(listOf<ArticleFilter>(ArticleFilter.All), selectCalls)
+        // …while the DB is untouched until the queued writes run.
+        assertEquals(9, pendingWrites.size)
+        assertEquals(listOf("Doomed tag", "Old tag"), db.tagsQueries.watchAll().executeAsList().map { it.name }.sorted())
+        assertEquals(emptyMap(), feedTagMap())
+        assertEquals(listOf("d1", "d2", "d3"), db.foldersQueries.watchAll().executeAsList().map { it.id })
+        assertEquals("Old folder", db.foldersQueries.getById("d1").executeAsOne().name)
+        assertNull(db.feedsQueries.getById("f1").executeAsOne().folder_id)
+        assertNull(db.feedsQueries.getById("f2").executeAsOne().folder_id)
+
+        runPendingWrites()
+
+        val newTagId = db.tagsQueries.watchAll().executeAsList().single { it.name == "New" }.id
+        assertEquals("Renamed tag", db.tagsQueries.getById("t1").executeAsOne().name)
+        assertNotNull(db.tagsQueries.getById("t2").executeAsOne().deleted_at)
+        assertEquals(mapOf("f1" to setOf("t1"), "f2" to setOf(newTagId)), feedTagMap())
+        val freshId = db.foldersQueries.watchAll().executeAsList().single { it.name == "Fresh" }.id
+        assertEquals(freshId, db.feedsQueries.getById("f1").executeAsOne().folder_id)
+        assertEquals("Renamed folder", db.foldersQueries.getById("d1").executeAsOne().name)
+        assertNotNull(db.foldersQueries.getById("d3").executeAsOne().deleted_at)
+        assertEquals("d1", db.feedsQueries.getById("f2").executeAsOne().folder_id)
+        assertEquals(listOf("d2", "d1"), db.foldersQueries.watchAll().executeAsList().map { it.id }.filter { it != freshId })
     }
 
     private fun feedTagMap(): Map<String, Set<String>> =
