@@ -803,8 +803,12 @@ class HomeViewModel(
      *
      * Read/star writes ([selectArticle], [toggleRead], [toggleStar], …) are not queued here: they go
      * straight to [dbWriteDispatcher], so one can run while a queued feed-list write is suspended on
-     * that lock. That is harmless — they write only `articles`' read/star columns, which no feed-list
-     * write touches, so the two never order against each other.
+     * that lock. They write only `articles`' read/star columns, which no feed-list write touches —
+     * but marking a whole filter read (All Feeds, a tag or a folder, [markAllRead]) picks its articles
+     * by `feeds`, `feed_tags` and `folder_id` as they stand when it runs, so it can land ahead of a
+     * queued move, tag change or unsubscribe and act on the membership from before it. That is
+     * deliberately left unordered: the queued write has not reached the list yet either, so what is
+     * marked read is what the article list showed when the user asked.
      */
     private val feedListWrites = SerialWriteQueue(viewModelScope, dbWriteDispatcher, pendingLocalWrites)
 
