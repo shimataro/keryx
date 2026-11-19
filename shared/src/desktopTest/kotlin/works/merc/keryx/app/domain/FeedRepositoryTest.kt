@@ -1811,13 +1811,13 @@ class FeedRepositoryTest {
             val repo = newRepo(db, driver, aliasFetcher(alias, target), clock = Clock { 1000L })
             db.insertFeed("f1", now = 500L, url = target)
             db.feedsQueries.updateCacheHeaders("v0", null, 500L, "f1")
-            val ownWrites = mutableMapOf<String, FeedRepository.FeedValues>()
+            val batch = SubscribeBatch()
             val viaAlias = repo.prefetchSubscription(alias) // v1
             val direct = repo.prefetchSubscription(target) // v2, baseline read before the alias's write
 
-            repo.writePrefetchedSubscription(viaAlias, ownWrites = ownWrites)
+            repo.writePrefetchedSubscription(viaAlias, batch = batch)
             assertEquals("v1", db.feedsQueries.getById("f1").executeAsOne().etag)
-            repo.writePrefetchedSubscription(direct, ownWrites = ownWrites)
+            repo.writePrefetchedSubscription(direct, batch = batch)
 
             assertEquals("v2", db.feedsQueries.getById("f1").executeAsOne().etag)
         } finally {
@@ -1838,15 +1838,71 @@ class FeedRepositoryTest {
             val repo = newRepo(db, driver, aliasFetcher(alias, target), clock = Clock { 1000L })
             db.insertFeed("f1", now = 500L, url = target)
             db.feedsQueries.updateCacheHeaders("v0", null, 500L, "f1")
-            val ownWrites = mutableMapOf<String, FeedRepository.FeedValues>()
+            val batch = SubscribeBatch()
             val viaAlias = repo.prefetchSubscription(alias)
             val direct = repo.prefetchSubscription(target)
 
-            repo.writePrefetchedSubscription(viaAlias, ownWrites = ownWrites)
+            repo.writePrefetchedSubscription(viaAlias, batch = batch)
             db.feedsQueries.updateCacheHeaders("refreshed", null, 2000L, "f1")
-            repo.writePrefetchedSubscription(direct, ownWrites = ownWrites)
+            repo.writePrefetchedSubscription(direct, batch = batch)
 
             assertEquals("refreshed", db.feedsQueries.getById("f1").executeAsOne().etag)
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
+     * A refresh that a later entry kept is not the batch's own write: a third entry for the same row
+     * still sees it as someone else's change and keeps it, rather than taking it as the batch's
+     * baseline and overwriting it with an older fetch.
+     */
+    @Test
+    fun writePrefetchedSubscriptionKeepsARefreshAcrossFurtherEntriesOfTheBatch(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val alias = "https://ex.com/old"
+            val target = "https://ex.com/feed"
+            val repo = newRepo(db, driver, aliasFetcher(alias, target), clock = Clock { 1000L })
+            db.insertFeed("f1", now = 500L, url = target)
+            db.feedsQueries.updateCacheHeaders("v0", null, 500L, "f1")
+            val batch = SubscribeBatch()
+            val viaAlias = repo.prefetchSubscription(alias) // v1
+            val second = repo.prefetchSubscription(target) // v2
+            val third = repo.prefetchSubscription(target) // v3
+
+            repo.writePrefetchedSubscription(viaAlias, batch = batch)
+            db.feedsQueries.updateCacheHeaders("refreshed", null, 2000L, "f1")
+            repo.writePrefetchedSubscription(second, batch = batch)
+            assertEquals("refreshed", db.feedsQueries.getById("f1").executeAsOne().etag)
+            repo.writePrefetchedSubscription(third, batch = batch)
+
+            assertEquals("refreshed", db.feedsQueries.getById("f1").executeAsOne().etag)
+        } finally {
+            driver.close()
+        }
+    }
+
+    /** With no other writer in between, the last of several entries for the same row wins. */
+    @Test
+    fun writePrefetchedSubscriptionLetsTheLastOfSeveralEntriesWin(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val alias = "https://ex.com/old"
+            val target = "https://ex.com/feed"
+            val repo = newRepo(db, driver, aliasFetcher(alias, target), clock = Clock { 1000L })
+            db.insertFeed("f1", now = 500L, url = target)
+            db.feedsQueries.updateCacheHeaders("v0", null, 500L, "f1")
+            val batch = SubscribeBatch()
+            val viaAlias = repo.prefetchSubscription(alias) // v1
+            val second = repo.prefetchSubscription(target) // v2
+            val third = repo.prefetchSubscription(target) // v3
+
+            repo.writePrefetchedSubscription(viaAlias, batch = batch)
+            repo.writePrefetchedSubscription(second, batch = batch)
+            repo.writePrefetchedSubscription(third, batch = batch)
+
+            assertEquals("v3", db.feedsQueries.getById("f1").executeAsOne().etag)
         } finally {
             driver.close()
         }
