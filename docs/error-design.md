@@ -54,6 +54,41 @@ Any other DB access propagates as before; a new best-effort one is added to this
 operation the user started — an OPML import or export — that fails is not an exception to this: it is reported
 to the user as that operation's failure, not swallowed.)
 
+## Local Write Failures
+
+A second documented exception to "DB access failure → exception": the local writes the UI hands off and
+returns from at once. Once off the caller's thread such a write has no caller left to throw to — thrown, it
+would end the app on Android and Apple and silently lose the change on desktop. These writes, and only these,
+are therefore caught (cancellation excepted) and reported:
+
+- the feed list's actions — create/rename/delete tag or folder, attach a tag, move a feed, reorder folders,
+  unsubscribe, rename a feed (`presentation/home/SerialWriteQueue`);
+- read/star changes — selecting an article, mark read/unread, star/unstar, mark all read
+  (`HomeViewModel.launchArticleWrite`);
+- global settings (`SettingsRepository.setGlobal`, shown through `PreferencesController`).
+
+Each runs through `domain/LocalWriteFailureReporter.runLocalWrite`, which logs the failure (`Log.error`, with
+the stack trace) and posts one coalesced `ERROR` per kind, `NotificationText.LocalWriteFailed(kind)`, whose next
+action is `ShowInfoDialog` with that kind's explanation. The kind comes from the SQLite result code behind the
+failure (`platform/LocalWriteFailure.kt`'s `localWriteFailureKind`, one `actual` per platform), never from
+message text: `BUSY` (`SQLITE_BUSY`/`SQLITE_LOCKED` — try again), `DISK_FULL` (`SQLITE_FULL` — free up space)
+and `OTHER` (anything else, including a failure with no SQLite code — restart the app). Android's Snackbar and
+iOS's toast announce it like any other `ERROR`.
+
+What the UI showed ahead of the write is then put back to what the DB holds, so the data and the display agree
+again — unless the user has acted on the same item since, in which case that newer action decides:
+
+- **Read/star**: the article's pins, the selection and its read/star intents take the DB's values (re-read
+  behind the write queue), only on articles whose latest read (or star) write is still the failed one. Pins
+  are refreshed rather than dropped, so a row does not vanish from the list; a tombstoned article loses its
+  pins. See "Optimistic read/star pins" in [app-architecture.md](app-architecture.md).
+- **Feed list**: a failed folder or tag delete restores the collapsed/expanded state it forgot. The selection
+  fallback to All is kept — the item is still listed, just not selected. Creating a tag or folder for a feed
+  row is one transaction (`TagRepository.createTagAndAttach`, `FolderRepository.createFolderAndMoveFeed`), so
+  a failure leaves neither half behind. The other actions show nothing ahead of their write.
+- **Global settings**: `PreferencesController` shows the stored value again, unless the same setting has been
+  changed since.
+
 ## Error Types (`core/KeryxException.kt`, `core/Result.kt`)
 
 ```kotlin
@@ -220,6 +255,7 @@ Status labels that are not messages (a notification's level, such as "Error") ar
 | `ShowInfoDialog(detail)` | A feed refresh that reached none of the feeds it covered — every one timed out or got no response at all (`RefreshCycleRunner`, via `reportRefreshOutcome`'s `isUnreachable`) — most likely offline. A feed that answered with an error (an HTTP status, 404/410, an unreadable body) does not count: checking the connection would not help, and the feed list already flags it. Coalesced, so a refresh that keeps failing stays one entry. A manual refresh that joins an automatic cycle whose refresh already ended unreachable (`RefreshCycleRunner.joinAutomaticCycle`) posts it again, since the entry may have been dismissed while that cycle synced and the joining action shows the same failure as its result | Shows an explanatory dialog (cause + fix) without navigating |
 | `ShowInfoDialog(detail)` | Token save left the tokens in the plaintext file (`CloudSession`) — `TokenStorage.save()` returned `TokenSaveOutcome.PLAINTEXT_FILE`, because the OS secure credential store was unreachable or (Android) because a secure write succeeded but a stale plaintext copy could not be deleted | Shows an explanatory dialog (cause + fix) without navigating |
 | `ShowInfoDialog(detail)` | Token save persisted nothing (`CloudSession`) — neither the secure store nor the plaintext fallback file accepted the write (`TokenSaveOutcome.NOT_PERSISTED`), so the account has to be connected again after a restart | Shows an explanatory dialog (cause + fix) without navigating |
+| `ShowInfoDialog(detail)` | A local write the UI had handed off failed (`LocalWriteFailureReporter`, see "Local Write Failures" above) — one entry per `LocalWriteFailureKind`, coalesced, at `ERROR` level | Shows that kind's explanatory dialog (cause + fix) without navigating |
 | `ResetCloudData` | `CloudDataIncompatibleException` | Dedicated inline button → confirmation dialog → archives the cloud DB under a timestamped name, then recreates it (see "Resetting (Archiving) Cloud Data" in [sync-architecture.md](sync-architecture.md)) |
 
 `AppNotification(id, level: INFO|WARNING|ERROR, text: NotificationText, timestampMillis, action)`.
@@ -239,6 +275,7 @@ plain data classes/enums, `AlertKey` (level + text + action) compares them struc
 | `CloudAuthException` / `SchemaVersionException` | ❌ | ✅ |
 | `CloudDataIncompatibleException` (corrupt / incompatible cloud DB / constraint-violating data) | ❌ (further **automatic** syncs are suspended entirely — `SyncTrigger.AUTOMATIC` gate, see "Automatic-Sync Suspension" in [sync-architecture.md](sync-architecture.md) — until a reset or a successful manual sync) | ✅ |
 | `FeedNotFoundException(isGone=true)` | ❌ | ✅ |
+| A failed local write (feed list, read/star, global setting — see "Local Write Failures") | ❌ (the UI is put back; the user makes the change again) | ✅ (one coalesced entry per kind) |
 | `UpdateException` (check/download/verify/install failure) | ❌ (retried only via the user clicking Retry — the Updates settings tab, or the tray/Help menu update item, which opens the Updates tab) | ❌ (surfaced there instead — and in the tray/Help menu item's label — see "In-App Update" in [background-update.md](background-update.md); only the informational "update available"/"ready to install" notices reach the notification center, via `ShowSettingsTab`/`OpenUrl` above) |
 
 \* `FeedFetcher` retries only on an actual timeout, for `FEED_TIMEOUT_RETRY_COUNT` extra attempts — a non-timeout

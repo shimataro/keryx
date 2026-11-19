@@ -1398,6 +1398,21 @@ were read before the write that justified such a pin was enqueued, so they have 
 and a rapid read/unread/read sequence cannot have its newest pin dropped for a not-yet-landed DB
 value.
 
+**A write that fails** (see "Local Write Failures" in [error-design.md](error-design.md)) is reported
+rather than thrown, and its optimistic state is undone by `revertFailedArticleWrite`: the articles'
+flags are re-read through `dbWriteDispatcher` — behind every write queued so far — and each article's
+read-state and unstarred pins, the selection (`_selectedArticle`, `_pendingSelectedRow`) and its
+read/star intent (recorded anew, so a selection still loading its body lays the DB's value over its
+row) take the DB's value for the flag that write set. Pins are replaced with fresh instances rather
+than dropped, so a row shown only through its pin does not vanish from an unread-only or Starred
+list; an article no longer alive loses its pins, as in the reconcile. Search results showing are
+re-run. All of this applies only to articles whose latest write of that kind is still the failed one
+(`ArticleWriteGenerations`, one per flag, stamped by every read or star write): an article the user
+has acted on again since is left to that newer action. The revert waits until the call site has set
+its pins (`ArticleWrite.register`), so it can never run ahead of the state it undoes; if the re-read
+itself fails, only the pins that write set (still the very instances) are dropped, and the next change
+to `articles` reconciles the rest.
+
 A same-filter re-selection leaves both pins, the selection, and the cursor untouched
 (`selectFilter`'s early return above) — reasonable now that the article list is always either an
 on-screen pane (`Triple`/`Dual`) or the one pane a narrow layout keeps on screen except while
