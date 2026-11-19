@@ -61,6 +61,9 @@ private const val RSS = """<?xml version="1.0"?><rss version="2.0"><channel>
  * A feed with no items, so a subscribe performs no article or FTS writes after releasing
  * feedPlacementMutex. Used by the concurrent-subscribe test — see its own comment.
  */
+/** How long the race test's move waits for its concurrent subscribe — see its own comment. */
+private const val MOVE_WAIT_FOR_SUBSCRIBE_MS = 500L
+
 private const val RSS_NO_ITEMS = """<?xml version="1.0"?><rss version="2.0"><channel>
 <title>Feed</title><link>https://ex.com</link>
 </channel></rss>"""
@@ -1903,6 +1906,56 @@ class FeedRepositoryTest {
             move.join()
 
             assertEquals(listOf("f2", "f1"), db.feedsQueries.getByFolder(null).executeAsList().map { it.id })
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
+     * The race the feed placement lock prevents, run for real: a move reads its target group's
+     * order, and a subscribe placing a new feed in the same group gets a chance to run before the
+     * move writes. With the lock the subscribe cannot get in, so the two take different sort_orders;
+     * without it, both would read the same next order and collide.
+     *
+     * The move's clock read (taken after its group read, before its write) starts the subscribe on
+     * another thread and waits up to [MOVE_WAIT_FOR_SUBSCRIBE_MS] for it to finish. A file-backed DB
+     * and a feed with no items, as in [subscribeFeedSerializesSortOrderAllocationAcrossConcurrentCalls].
+     */
+    @Test
+    fun aSubscribeCannotTakeTheSortOrderAConcurrentMoveIntoTheSameGroupIsAboutToWrite(): Unit = runBlocking {
+        val (_, driver, db) = fileDb()
+        try {
+            db.insertFolder("d1", "Kotlin")
+            db.insertFeed("a", sortOrder = 0L)
+            db.insertFeed("b", sortOrder = 1L)
+            db.insertFeed("x", folderId = "d1", sortOrder = 0L)
+            val subscribed = CountDownLatch(1)
+            val subscribeResult = java.util.concurrent.atomic.AtomicReference<Result<Feeds>>()
+            val armed = AtomicBoolean(false)
+            var subscriber: Thread? = null
+            lateinit var repo: FeedRepository
+            val clock = Clock {
+                if (armed.compareAndSet(true, false)) {
+                    subscriber = Thread {
+                        runBlocking { subscribeResult.set(repo.subscribeFeed("https://ex.com/new")) }
+                        subscribed.countDown()
+                    }.apply { start() }
+                    subscribed.await(MOVE_WAIT_FOR_SUBSCRIBE_MS, TimeUnit.MILLISECONDS)
+                }
+                1000L
+            }
+            repo = newRepo(db, driver, fetcherWith { respond(RSS_NO_ITEMS, HttpStatusCode.OK) }, clock = clock)
+
+            armed.set(true)
+            repo.moveFeed("x", null)
+            val thread = assertNotNull(subscriber, "the move never read the clock")
+            thread.join(5_000)
+            assertFalse(thread.isAlive, "subscribeFeed did not finish within 5s")
+            assertIs<Result.Ok<Feeds>>(subscribeResult.get())
+
+            val orders = db.feedsQueries.getByFolder(null).executeAsList().map { it.sort_order }
+            assertEquals(4, orders.size)
+            assertEquals(orders.size, orders.toSet().size, "duplicate sort_orders in the group: $orders")
         } finally {
             driver.close()
         }
