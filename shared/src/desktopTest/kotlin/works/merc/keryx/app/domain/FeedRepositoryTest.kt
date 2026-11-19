@@ -1780,6 +1780,44 @@ class FeedRepositoryTest {
     }
 
     /**
+     * The subscribe's write time is taken once it holds the placement lock, so it is never older than
+     * a write committed while it waited — a refresh's `updated_at` must not be rolled back below its
+     * own time.
+     */
+    @Test
+    fun writePrefetchedSubscriptionStampsTheTimeItGotThePlacementLock(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val url = "https://ex.com/feed"
+            var now = 1000L
+            val placement = Mutex()
+            val repo = newRepo(
+                db, driver,
+                fetcherWith { respond(RSS, HttpStatusCode.OK, headersOf(HttpHeaders.ETag, "fetched-etag")) },
+                clock = Clock { now },
+                feedPlacementMutex = placement,
+            )
+            db.insertFeed("f1", now = 500L, url = url)
+            val prefetched = repo.prefetchSubscription(url)
+            now = 2000L
+            placement.lock()
+            val write = launch(start = CoroutineStart.UNDISPATCHED) { repo.writePrefetchedSubscription(prefetched) }
+            now = 3000L
+            db.feedsQueries.updateCacheHeaders("refreshed", null, 3000L, "f1")
+            now = 4000L
+
+            placement.unlock()
+            write.join()
+
+            val row = db.feedsQueries.getById("f1").executeAsOne()
+            assertTrue(row.updated_at >= 3000L, "updated_at ${row.updated_at} rolled back below the refresh's 3000")
+            assertEquals("refreshed", row.etag)
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
      * A move between the prefetch and its write changes none of the feed values the subscribe
      * writes, so the fetched values are written — the move only bumped the row's `updated_at`. The
      * move itself survives.

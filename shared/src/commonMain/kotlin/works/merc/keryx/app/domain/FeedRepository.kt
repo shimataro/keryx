@@ -276,7 +276,6 @@ class FeedRepository(
         }
         val fetched = subscription.fetched
         val effectiveUrl = subscription.effectiveUrl
-        val now = clock.nowMillis()
 
         // sort_order: a brand-new feed is inserted right after afterFeedId (or, failing that, right
         // before beforeFeedId) within its target folder's group (the "no folder" group, unless the
@@ -288,7 +287,7 @@ class FeedRepository(
         // around while it was unsubscribed).
         val (feedId, wasNewlyCreated) = feedPlacementMutex.withLock {
             doSubscribeFeedWrite(
-                effectiveUrl, folderId, afterFeedId, beforeFeedId, now, subscription.favicon, fetched,
+                effectiveUrl, folderId, afterFeedId, beforeFeedId, subscription.favicon, fetched,
                 subscription.storedBeforeFetch,
             )
         }
@@ -413,11 +412,13 @@ class FeedRepository(
         folderId: String?,
         afterFeedId: String?,
         beforeFeedId: String?,
-        now: Long,
         favicon: String?,
         fetched: FetchedFeed,
         storedBeforeFetch: StoredFeedValues?,
     ): Pair<String, Boolean> {
+        // Taken under the lock, not before waiting for it: a write committed while this call waited
+        // (a refresh, a move) must not end up newer than the time stamped here.
+        val now = clock.nowMillis()
         return db.transactionWithResult {
             // Read under the lock, and decide the id from this read only: a concurrent subscribe of
             // the same url, or a sync merge bringing it in under another device's id, may have
