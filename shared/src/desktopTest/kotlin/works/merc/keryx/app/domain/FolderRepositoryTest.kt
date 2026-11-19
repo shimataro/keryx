@@ -321,6 +321,38 @@ class FolderRepositoryTest {
         }
     }
 
+    /**
+     * The delete's time is taken once it holds the placement lock: a move that files a feed into the
+     * folder while the delete waits commits a newer `folder_updated_at`, and the delete's
+     * unassignment must not be stamped older than it, or a last-write-wins merge keeps that move.
+     */
+    @Test
+    fun deleteFolderStampsTheTimeItGotThePlacementLock(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFolder("d1", "Kotlin", now = 10L)
+            db.insertFeed("f1", now = 10L)
+            var now = 400L
+            val placement = Mutex()
+            val repo = newRepo(db, driver, clock = Clock { now }, placementMutex = placement)
+            placement.lock()
+
+            val delete = launch(start = CoroutineStart.UNDISPATCHED) { repo.deleteFolder("d1") }
+            // A move commits while the delete waits for the lock.
+            db.feedsQueries.updateFolder("d1", 600L, 600L, "f1")
+            now = 900L
+            placement.unlock()
+            delete.join()
+
+            val feed = db.feedsQueries.getById("f1").executeAsOne()
+            assertNull(feed.folder_id)
+            assertEquals(900L, feed.folder_updated_at)
+            assertEquals(900L, db.foldersQueries.getById("d1").executeAsOne().deleted_at)
+        } finally {
+            driver.close()
+        }
+    }
+
     @Test
     fun deleteFolderMovesFeedsToNoFolderGroupAppendingToEndInRelativeOrder() {
         val (driver, db) = inMemoryDb()

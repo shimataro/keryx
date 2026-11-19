@@ -87,10 +87,13 @@ class FolderRepository(
      * @param id The identifier of the folder to delete.
      */
     suspend fun deleteFolder(id: String) {
-        val now = clock.nowMillis()
         // Under the feed placement lock: moving the feeds out appends them to the no-folder group,
         // whose next sort_order a concurrent subscribe or move may be allocating too.
         feedRepository.withFeedPlacementLock {
+            // Taken under the lock, not before waiting for it: a move committed while this call
+            // waited must not end up newer than the unassignment stamped here, or a last-write-wins
+            // merge would keep that feed in the deleted folder.
+            val now = clock.nowMillis()
             db.transaction {
                 feedRepository.moveFeedsOutOfFolderLocked(id, now)
                 folders.softDelete(now, now, id)
