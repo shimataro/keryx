@@ -1784,6 +1784,74 @@ class FeedRepositoryTest {
         }
     }
 
+    /** Redirects [alias] to [target] and answers [target] with ETag `v1`, `v2`, … in fetch order. */
+    private fun aliasFetcher(alias: String, target: String): FeedFetcher {
+        var hits = 0
+        return fetcherWith { request ->
+            if (request.url.toString() == alias) {
+                respond("", HttpStatusCode.MovedPermanently, headersOf(HttpHeaders.Location, target))
+            } else {
+                hits++
+                respond(RSS, HttpStatusCode.OK, headersOf(HttpHeaders.ETag, "v$hits"))
+            }
+        }
+    }
+
+    /**
+     * An OPML import that lists an alias redirecting to an existing feed before that feed itself:
+     * the second entry's prefetch read the row before the alias's write, but that write was the
+     * batch's own, so the second entry's values replace it — the result of importing one at a time.
+     */
+    @Test
+    fun writePrefetchedSubscriptionOverwritesTheBatchsOwnEarlierWriteToTheSameRow(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val alias = "https://ex.com/old"
+            val target = "https://ex.com/feed"
+            val repo = newRepo(db, driver, aliasFetcher(alias, target), clock = Clock { 1000L })
+            db.insertFeed("f1", now = 500L, url = target)
+            db.feedsQueries.updateCacheHeaders("v0", null, 500L, "f1")
+            val ownWrites = mutableMapOf<String, FeedRepository.FeedValues>()
+            val viaAlias = repo.prefetchSubscription(alias) // v1
+            val direct = repo.prefetchSubscription(target) // v2, baseline read before the alias's write
+
+            repo.writePrefetchedSubscription(viaAlias, ownWrites = ownWrites)
+            assertEquals("v1", db.feedsQueries.getById("f1").executeAsOne().etag)
+            repo.writePrefetchedSubscription(direct, ownWrites = ownWrites)
+
+            assertEquals("v2", db.feedsQueries.getById("f1").executeAsOne().etag)
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
+     * The batch's own earlier write is only the baseline: a refresh that changes the row after it is
+     * still newer than the later entry's fetch, and is kept.
+     */
+    @Test
+    fun writePrefetchedSubscriptionKeepsARefreshThatLandedAfterTheBatchsOwnWrite(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val alias = "https://ex.com/old"
+            val target = "https://ex.com/feed"
+            val repo = newRepo(db, driver, aliasFetcher(alias, target), clock = Clock { 1000L })
+            db.insertFeed("f1", now = 500L, url = target)
+            db.feedsQueries.updateCacheHeaders("v0", null, 500L, "f1")
+            val ownWrites = mutableMapOf<String, FeedRepository.FeedValues>()
+            val viaAlias = repo.prefetchSubscription(alias)
+            val direct = repo.prefetchSubscription(target)
+
+            repo.writePrefetchedSubscription(viaAlias, ownWrites = ownWrites)
+            db.feedsQueries.updateCacheHeaders("refreshed", null, 2000L, "f1")
+            repo.writePrefetchedSubscription(direct, ownWrites = ownWrites)
+
+            assertEquals("refreshed", db.feedsQueries.getById("f1").executeAsOne().etag)
+        } finally {
+            driver.close()
+        }
+    }
+
     /**
      * With the row's feed values unchanged since the prefetch read them — here last written at the
      * very time the fetch started — the fetched values are written.

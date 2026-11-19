@@ -66,7 +66,10 @@ class OpmlImporter(
         // entries ahead), but every DB write below runs from this one loop, entry by entry in document
         // order — placement, folder and tags of one entry complete before the next entry's — so the
         // result is the same as fetching one at a time. A prefetch writes nothing to the DB; the reads
-        // that decide the write (the existing row, the feed id, the clock) happen at write time.
+        // that decide the write (the existing row, the feed id, the clock) happen at write time. The
+        // feed values each write stored are kept in ownWrites, so an entry whose prefetch read a row
+        // before an earlier entry of this run wrote it (an alias redirecting to a feed listed after
+        // it) still overwrites that write, as it would one at a time — see writePrefetchedSubscription.
         // supervisorScope rather than coroutineScope: a failing prefetch must surface at its own
         // await, after every earlier entry has been written, not cancel this loop the moment it fails.
         // Leaving the block by an exception (or cancellation) cancels the prefetches still running.
@@ -74,12 +77,13 @@ class OpmlImporter(
             val fetchSlots = Semaphore(FEED_FETCH_CONCURRENCY)
             val prefetches = ArrayDeque<Deferred<Result<FeedRepository.PrefetchedSubscription>>>()
             var nextToPrefetch = 0
+            val ownWrites = mutableMapOf<String, FeedRepository.FeedValues>()
             for (entry in entries) {
                 while (prefetches.size < OPML_PREFETCH_AHEAD && nextToPrefetch < entries.size) {
                     val url = entries[nextToPrefetch++].xmlUrl
                     prefetches.addLast(async { fetchSlots.withPermit { feedRepository.prefetchSubscription(url) } })
                 }
-                val outcome = feedRepository.writePrefetchedSubscription(prefetches.removeFirst().await())
+                val outcome = feedRepository.writePrefetchedSubscription(prefetches.removeFirst().await(), ownWrites = ownWrites)
                 when (val subscribed = outcome.result) {
                     is Result.Ok -> {
                         added++

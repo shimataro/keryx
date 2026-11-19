@@ -266,13 +266,21 @@ class FeedRepository(
      * URL, or two URLs redirecting to the same feed, resolve to the existing row) and stamps the time
      * of the write. (The prefetch's own read, [PrefetchedSubscription.storedBeforeFetch], is only the
      * baseline that tells whether the row's feed values changed in between.)
-     * Parameters as for [subscribeFeedWrite].
+     * Parameters as for [subscribeFeedWrite], plus:
+     *
+     * @param ownWrites The feed values this caller has already written in the same batch, by feed id
+     *   (an [OpmlImporter] run), updated here with what this call writes. A row this batch wrote
+     *   after the prefetch read it — an earlier entry redirecting to the same feed — changed only by
+     *   this batch's own hand, so that write, not the prefetch's read, is the baseline: the later
+     *   entry's fetched values replace it, as they would one entry at a time, while a refresh that
+     *   changed the row after it is still kept. `null` (a single subscribe) keeps no record.
      */
     internal suspend fun writePrefetchedSubscription(
         prefetched: Result<PrefetchedSubscription>,
         folderId: String? = null,
         afterFeedId: String? = null,
         beforeFeedId: String? = null,
+        ownWrites: MutableMap<String, FeedValues>? = null,
     ): FeedWriteOutcome {
         val subscription = prefetched.valueOrElse {
             return FeedWriteOutcome(it, hadArticles = false, wasNewlyCreated = false)
@@ -288,12 +296,16 @@ class FeedRepository(
         // feed being re-subscribed is re-numbered to the end of the group it used to belong to (its
         // old relative position may no longer be meaningful after other feeds in that group moved
         // around while it was unsubscribed).
-        val (feedId, wasNewlyCreated) = feedPlacementMutex.withLock {
+        val written = feedPlacementMutex.withLock {
             doSubscribeFeedWrite(
                 effectiveUrl, folderId, afterFeedId, beforeFeedId, subscription.favicon, fetched,
-                subscription.storedBeforeFetch,
+                subscription.storedBeforeFetch, ownWrites,
             )
         }
+        val feedId = written.feedId
+        val wasNewlyCreated = written.wasNewlyCreated
+        // Recorded only once the transaction has committed, so a rolled-back write leaves no record.
+        ownWrites?.put(feedId, written.values)
         articleRepository.upsertParsed(feedId, fetched.articles)
         syncScheduler.scheduleSync()
         return FeedWriteOutcome(
@@ -407,8 +419,7 @@ class FeedRepository(
 
     /**
      * The locked internals of [subscribeFeedWrite]. Reads the current feed row under the mutex,
-     * decides the feed id and sort order from it, upserts the feed, and returns the feed id and
-     * whether the row was newly created.
+     * decides the feed id and sort order from it, upserts the feed, and returns what it wrote.
      */
     private fun doSubscribeFeedWrite(
         effectiveUrl: String,
@@ -418,7 +429,8 @@ class FeedRepository(
         favicon: String?,
         fetched: FetchedFeed,
         storedBeforeFetch: StoredFeedValues?,
-    ): Pair<String, Boolean> {
+        ownWrites: Map<String, FeedValues>?,
+    ): SubscribeWrite {
         // Taken under the lock, not before waiting for it: a write committed while this call waited
         // (a refresh, a move) must not end up newer than the time stamped here.
         val now = clock.nowMillis()
@@ -458,8 +470,11 @@ class FeedRepository(
                 etag = fetched.etag,
                 lastModified = fetched.lastModified,
             )
-            val storedValues = current?.takeIf { it.deleted_at == null && it.id == storedBeforeFetch?.feedId }?.feedValues
-            val baseline = storedBeforeFetch?.values
+            // This batch's own last write to the row, when there is one, is the newer baseline (see
+            // writePrefetchedSubscription's ownWrites).
+            val ownWrite = current?.let { ownWrites?.get(it.id) }
+            val storedValues = current?.takeIf { it.deleted_at == null && (ownWrite != null || it.id == storedBeforeFetch?.feedId) }?.feedValues
+            val baseline = ownWrite ?: storedBeforeFetch?.values
             val values = if (storedValues == null || baseline == null) {
                 fetchedValues
             } else {
@@ -493,9 +508,12 @@ class FeedRepository(
             // last-wins timestamp so it propagates over another device's refresh on the next sync.
             if (current?.deleted_at != null) feeds.stampResubscribed(now, feedId)
 
-            feedId to (current == null)
+            SubscribeWrite(feedId, wasNewlyCreated = current == null, values)
         }
     }
+
+    /** What [doSubscribeFeedWrite] wrote: the feed's id, whether the row is new, and its feed values. */
+    private class SubscribeWrite(val feedId: String, val wasNewlyCreated: Boolean, val values: FeedValues)
 
     /**
      * Refreshes a feed and indexes any newly fetched articles.
