@@ -6269,6 +6269,33 @@ class HomeViewModelTest {
         assertEquals(1, notifications.items.value.size)
     }
 
+    /**
+     * A tag deleted and recreated within the same millisecond (the fixed clock here), before the list
+     * ever showed it gone, must still show as recreated: its stamp moves forward, so the list value
+     * changes and the delete's pending fallback is dropped. A later deletion from elsewhere then leaves
+     * the selection alone instead of completing that old request.
+     */
+    @Test
+    fun aTagRecreatedInTheSameMillisecondAsItsDeleteDropsThePendingFallback() = runTest {
+        db.insertTag("t1", "Kotlin")
+        val vm = newViewModel()
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+
+        vm.deleteTag("t1")
+        vm.createTag("Kotlin")
+        testScheduler.advanceUntilIdle()
+        assertTrue(vm.tags.value.any { it.id == "t1" })
+        vm.selectFilter(ArticleFilter.Tag("t1"))
+        testScheduler.advanceUntilIdle()
+        // A deletion arriving later, as from a sync merge.
+        db.tagsQueries.softDelete(5L, 5L, "t1")
+        testScheduler.advanceUntilIdle()
+
+        assertTrue(vm.tags.value.none { it.id == "t1" })
+        assertEquals(ArticleFilter.Tag("t1"), vm.filter.value)
+    }
+
     @Test
     fun aDeletionThisViewModelDidNotMakeLeavesTheSelectionAlone() = runTest {
         db.insertTag("t1", "Kotlin")

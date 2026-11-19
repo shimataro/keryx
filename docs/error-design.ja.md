@@ -42,8 +42,9 @@
   （Android の `CursorWindow` に収まらない大きな行など）だと、伝播させれば起動のたびに ViewModel の生成が例外で
   失敗し、Home が開かなくなってしまう。
 - この ViewModel が削除したのに一覧にまだ表示されている項目の、生存チェック（`DeletedItemFallback`。
-  `HomeViewModel` が `getFeedById` / `getTagById` / `getFolderById` で配線する）。項目をまだ含む一覧の値が
-  届いたとき、つまり別の書き込みの直後や同期マージの最中で書き込みロックが握られていそうなときに走るので、
+  `HomeViewModel` が `getFeedById` / `getTagById` / `getFolderById` で配線する）。一覧がまだ項目を表示している
+  ときに削除の切り替えが要求された時点と、項目をまだ含む一覧の値が届くたびに走る。つまり別の書き込みの直後や
+  同期マージの最中で書き込みロックが握られていそうなときに走るので、
   `busy_timeout` を待ち切ることがある。失敗したときは「生きていない」とみなし、選択のフォールバックを
   保留したままにして、次に届く一覧の値で決める。伝播させると、Android と Apple ではアプリが終了する。
 

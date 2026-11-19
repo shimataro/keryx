@@ -17,6 +17,11 @@ through it rather than composing `AppDirs.appDataDir()` with the filename themse
 
 - All tables are managed by SQLDelight (`.sq`). `articles_fts` is created/maintained separately via raw SQL (`FtsManager`).
 - Logical deletion uses `deleted_at` (NULL = alive). Sync timestamp is `updated_at`.
+- A delete and the event that undoes it never share a stamp on the same row. `tags` / `folders` stamp
+  `updated_at`, and `feeds` stamps `deleted_updated_at`, as `MAX(now, previous + 1)` on a soft delete and on a
+  recreation / reactivation (`upsertByName`) or resubscribe (`stampResubscribed`), so the stamps strictly increase
+  even within one millisecond. The sync merge's last-write-wins compares with a strict `>`, so an equal stamp would
+  leave the later event unpropagated — and a recreated row indistinguishable from the one before the delete.
 - Booleans and timestamps are **INTEGER (`Long`)**. Booleans are 0/1; times are Unix milliseconds.
 - Schema version is managed by `PRAGMA user_version` (currently 2). On desktop, `DatabaseDriverFactory`
   drives create/migrate manually off this pragma; on Android, `AndroidSqliteDriver` drives it internally via its own

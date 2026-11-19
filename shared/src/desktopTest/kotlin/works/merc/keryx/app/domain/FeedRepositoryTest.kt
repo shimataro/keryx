@@ -606,6 +606,32 @@ class FeedRepositoryTest {
         }
     }
 
+    /**
+     * An unsubscribe and a resubscribe within the same millisecond still order strictly on
+     * deleted_updated_at, so the sync merge's strict last-write-wins carries each over the one before.
+     */
+    @Test
+    fun unsubscribeAndResubscribeInTheSameMillisecondStampStrictlyIncreasingTimes(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val repo = newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK) }, clock = Clock { 1000L })
+            val id = (repo.subscribeFeed("https://ex.com/feed") as Result.Ok<Feeds>).value.id
+
+            repo.unsubscribeFeed(id)
+            val afterUnsubscribe = db.feedsQueries.getById(id).executeAsOne().deleted_updated_at!!
+            repo.subscribeFeed("https://ex.com/feed")
+            val afterResubscribe = db.feedsQueries.getById(id).executeAsOne().deleted_updated_at!!
+            repo.unsubscribeFeed(id)
+            val afterSecondUnsubscribe = db.feedsQueries.getById(id).executeAsOne().deleted_updated_at!!
+
+            assertEquals(1000L, afterUnsubscribe)
+            assertTrue(afterResubscribe > afterUnsubscribe)
+            assertTrue(afterSecondUnsubscribe > afterResubscribe)
+        } finally {
+            driver.close()
+        }
+    }
+
     @Test
     fun renameFeedWithBlankTitleClearsCustomTitle(): Unit = runBlocking {
         val (driver, db) = inMemoryDb()

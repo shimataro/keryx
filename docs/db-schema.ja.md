@@ -17,6 +17,10 @@
 
 - 全テーブルは SQLDelight（`.sq`）で管理。`articles_fts` のみ生 SQL（`FtsManager`）で別途作成する。
 - 論理削除は `deleted_at`（NULL = 生存）。同期タイムスタンプは `updated_at`。
+- 同じ行で、削除と、それを打ち消す操作に同じ時刻がつくことはない。`tags` / `folders` の `updated_at` と、`feeds` の
+  `deleted_updated_at` は、論理削除と、作り直し・有効化（`upsertByName`）や再購読（`stampResubscribed`）のときに
+  `MAX(今の時刻, 前の値 + 1)` で書くので、1 ミリ秒の中でも必ず増える。同期マージの last-write-wins は厳密な `>` で
+  比べるので、同じ時刻だと後の操作がほかの端末に伝わらず、作り直した行も削除前の行と区別できなくなる。
 - 真偽値・タイムスタンプは **INTEGER（`Long`）**。真偽値は 0/1、時刻は Unix ミリ秒。
 - スキーマバージョンは `PRAGMA user_version`（現在 2）。desktop では `DatabaseDriverFactory` がこのプラグマを見て
   create/migrate を自前で駆動するが、Android では `AndroidSqliteDriver` が自身の `onCreate`/`onUpgrade` コールバック内で

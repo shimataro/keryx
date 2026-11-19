@@ -52,6 +52,32 @@ class TagRepositoryTest {
         }
     }
 
+    /**
+     * A create, a delete and a recreation within the same millisecond still stamp strictly increasing
+     * updated_at, so neither the list value nor the sync merge's strict last-write-wins can mistake the
+     * recreated tag for the one before the delete.
+     */
+    @Test
+    fun deleteAndRecreateInTheSameMillisecondStampStrictlyIncreasingTimes() {
+        val (driver, db) = inMemoryDb()
+        try {
+            val repo = newRepo(db, clock = Clock { 100L })
+            val id = repo.createTag("Kotlin")
+            val created = db.tagsQueries.getById(id).executeAsOne().updated_at
+
+            repo.deleteTag(id)
+            val deleted = db.tagsQueries.getById(id).executeAsOne().updated_at
+            repo.createTag("Kotlin")
+            val recreated = db.tagsQueries.getById(id).executeAsOne().updated_at
+
+            assertEquals(100L, created)
+            assertTrue(deleted > created)
+            assertTrue(recreated > deleted)
+        } finally {
+            driver.close()
+        }
+    }
+
     @Test
     fun createTagReactivatesSoftDeletedTagWithSameNameInsteadOfDuplicating() {
         val (driver, db) = inMemoryDb()

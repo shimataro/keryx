@@ -31,7 +31,8 @@ internal sealed interface DeletedTarget {
  * lacks the item, and otherwise keeps the request pending until a newer value of [shown] lacks it,
  * then falls back and drops the request.
  *
- * A newer value that still has the item is either stale — a list query that read the database before
+ * A value that still has the item — the one at hand when the request is made, or a newer one — is
+ * either stale — a list query that read the database before
  * the delete committed (re-run for an earlier write to the same table, say) and was delivered late —
  * or shows the item re-created in between (a tag or folder of the same name, a feed subscribed again,
  * by this ViewModel or by a sync). Emission order cannot tell the two apart, so the committed state
@@ -75,10 +76,24 @@ internal class DeletedItemFallback<T>(
         scope.launch { shown.collect(::onShown) }
     }
 
-    /** Runs [fallback] once [shown] no longer has the item [id] — see the class KDoc. */
+    /**
+     * Runs [fallback] once [shown] no longer has the item [id] — see the class KDoc.
+     *
+     * When [shown] still has the item, its liveness is checked at once as well as on each newer value:
+     * called once the delete has landed, the value at hand can already show the item re-created (a
+     * write queued right behind the delete — an OPML import, a sync merge — can land, and reach the
+     * list, before this runs). No newer value would then arrive to prompt a check, and the request
+     * would stay pending until some later deletion completed it.
+     */
     fun fallBackOnceHidden(id: String, fallback: () -> Unit) {
         val current = shown.value
-        if (current.none { idOf(it) == id }) fallback() else pending += Pending(id, current, fallback)
+        if (current.none { idOf(it) == id }) {
+            fallback()
+            return
+        }
+        val request = Pending(id, current, fallback)
+        pending += request
+        checkLiveness(request)
     }
 
     private fun onShown(list: List<T>) {

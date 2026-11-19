@@ -44,9 +44,10 @@ and lose more than the access itself is worth. The accesses that are, today:
   next launch too, so a lookup that fails every time (a row too large for Android's `CursorWindow`, say)
   would otherwise throw out of the ViewModel's construction on every launch, and Home would never open.
 - The liveness check of an item this ViewModel deleted that a list still shows (`DeletedItemFallback`, wired
-  in `HomeViewModel` through `getFeedById` / `getTagById` / `getFolderById`). It runs when a list value still
-  showing the item arrives — right after another write or during a sync merge, when a write lock is likely
-  held — so it can wait out the whole `busy_timeout`. A failure is treated as "not live": the pending selection
+  in `HomeViewModel` through `getFeedById` / `getTagById` / `getFolderById`). It runs when the delete's fallback
+  is requested while the list still shows the item, and again whenever a list value still showing it arrives —
+  right after another write or during a sync merge, when a write lock is likely held — so it can wait out the
+  whole `busy_timeout`. A failure is treated as "not live": the pending selection
   fallback stays pending and the next list value decides it. Propagating it would end the app on Android and
   Apple.
 

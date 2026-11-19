@@ -87,6 +87,32 @@ class FolderRepositoryTest {
         }
     }
 
+    /**
+     * A create, a delete and a recreation within the same millisecond still stamp strictly increasing
+     * updated_at, so neither the list value nor the sync merge's strict last-write-wins can mistake the
+     * recreated folder for the one before the delete.
+     */
+    @Test
+    fun deleteAndRecreateInTheSameMillisecondStampStrictlyIncreasingTimes() = runTest {
+        val (driver, db) = inMemoryDb()
+        try {
+            val repo = newRepo(db, driver, clock = Clock { 100L })
+            val id = repo.createFolder("Kotlin")
+            val created = db.foldersQueries.getById(id).executeAsOne().updated_at
+
+            repo.deleteFolder(id)
+            val deleted = db.foldersQueries.getById(id).executeAsOne().updated_at
+            repo.createFolder("Kotlin")
+            val recreated = db.foldersQueries.getById(id).executeAsOne().updated_at
+
+            assertEquals(100L, created)
+            assertTrue(deleted > created)
+            assertTrue(recreated > deleted)
+        } finally {
+            driver.close()
+        }
+    }
+
     @Test
     fun createFolderReactivatesSoftDeletedFolderWithSameNameInsteadOfDuplicating() {
         val (driver, db) = inMemoryDb()
