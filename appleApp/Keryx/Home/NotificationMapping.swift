@@ -14,6 +14,7 @@ func notificationText(_ text: NotificationText) -> String {
     case .tokenStorageNotPersisted: return L("notification_token_storage_not_persisted")
     case .appTranslocated: return L("notification_app_translocated")
     case .refreshFailed: return L("notification_refresh_failed")
+    case .localWriteFailed(let t): return localWriteFailedMessage(t.kind)
     case .updateAvailable(let t): return LF("update_available_notification", t.version)
     case .updateReadyToInstall(let t): return LF("update_ready_notification", t.version)
     }
@@ -28,6 +29,19 @@ func infoDialogText(_ text: InfoDialogText) -> String {
     case .tokenStorageFallback: return L("notification_token_storage_fallback_detail")
     case .tokenStorageNotPersisted: return L("notification_token_storage_not_persisted_detail")
     case .refreshFailed: return L("notification_refresh_failed_detail")
+    case .localWriteFailedBusy: return L("notification_local_write_failed_busy_detail")
+    case .localWriteFailedDiskFull: return L("notification_local_write_failed_disk_full_detail")
+    case .localWriteFailedOther: return L("notification_local_write_failed_other_detail")
+    }
+}
+
+/// The notification-center row text for a local write that failed for `kind` (a plain Kotlin enum,
+/// so the `switch` is exhaustive like `infoDialogText`'s).
+private func localWriteFailedMessage(_ kind: LocalWriteFailureKind) -> String {
+    switch kind {
+    case .busy: return L("notification_local_write_failed_busy")
+    case .diskFull: return L("notification_local_write_failed_disk_full")
+    case .other: return L("notification_local_write_failed_other")
     }
 }
 

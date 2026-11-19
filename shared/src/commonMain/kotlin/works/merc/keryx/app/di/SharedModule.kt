@@ -31,6 +31,7 @@ import works.merc.keryx.app.domain.FeedRepository
 import works.merc.keryx.app.domain.FolderRepository
 import works.merc.keryx.app.domain.NetworkUsagePolicy
 import works.merc.keryx.app.domain.NewArticleNotifier
+import works.merc.keryx.app.domain.LocalWriteFailureReporter
 import works.merc.keryx.app.domain.NotificationCenter
 import works.merc.keryx.app.domain.OpmlImporter
 import works.merc.keryx.app.domain.PendingLocalWrites
@@ -76,6 +77,8 @@ fun sharedModule(): Module = module {
     single { LocalSettingsStore() }
     single<Clock> { SystemClock }
     single { NotificationCenter() }
+    // Reports the local writes the UI hands off and returns from (see LocalWriteFailureReporter).
+    single { LocalWriteFailureReporter(get(), get()) }
     single { ActivityCenter() }
     single { AppForeground() }
     single { NewArticleNotifier(get()) }

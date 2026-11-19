@@ -6,12 +6,19 @@ import org.jetbrains.compose.resources.getPluralString
 import org.jetbrains.compose.resources.getString
 import org.jetbrains.compose.resources.stringResource
 import works.merc.keryx.app.core.InfoDialogText
+import works.merc.keryx.app.core.LocalWriteFailureKind
 import works.merc.keryx.app.core.NotificationText
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.feed_gone_message
 import works.merc.keryx.app.resources.feed_url_changed
 import works.merc.keryx.app.resources.notification_app_translocated
 import works.merc.keryx.app.resources.notification_app_translocated_detail
+import works.merc.keryx.app.resources.notification_local_write_failed_busy
+import works.merc.keryx.app.resources.notification_local_write_failed_busy_detail
+import works.merc.keryx.app.resources.notification_local_write_failed_disk_full
+import works.merc.keryx.app.resources.notification_local_write_failed_disk_full_detail
+import works.merc.keryx.app.resources.notification_local_write_failed_other
+import works.merc.keryx.app.resources.notification_local_write_failed_other_detail
 import works.merc.keryx.app.resources.notification_refresh_failed
 import works.merc.keryx.app.resources.notification_refresh_failed_detail
 import works.merc.keryx.app.resources.notification_token_storage_fallback
@@ -58,6 +65,9 @@ private fun infoDialogTextResource(detail: InfoDialogText): StringResource = whe
     InfoDialogText.TOKEN_STORAGE_NOT_PERSISTED -> Res.string.notification_token_storage_not_persisted_detail
     InfoDialogText.APP_TRANSLOCATED -> Res.string.notification_app_translocated_detail
     InfoDialogText.REFRESH_FAILED -> Res.string.notification_refresh_failed_detail
+    InfoDialogText.LOCAL_WRITE_FAILED_BUSY -> Res.string.notification_local_write_failed_busy_detail
+    InfoDialogText.LOCAL_WRITE_FAILED_DISK_FULL -> Res.string.notification_local_write_failed_disk_full_detail
+    InfoDialogText.LOCAL_WRITE_FAILED_OTHER -> Res.string.notification_local_write_failed_other_detail
 }
 
 /**
@@ -84,4 +94,12 @@ private fun stringResourceOf(text: NotificationText): Pair<StringResource, Array
     NotificationText.TokenStorageNotPersisted -> Res.string.notification_token_storage_not_persisted to emptyArray()
     NotificationText.AppTranslocated -> Res.string.notification_app_translocated to emptyArray()
     NotificationText.RefreshFailed -> Res.string.notification_refresh_failed to emptyArray()
+    is NotificationText.LocalWriteFailed -> localWriteFailedResource(text.kind) to emptyArray()
+}
+
+/** The notification-center row text for a local write that failed for [kind]. */
+private fun localWriteFailedResource(kind: LocalWriteFailureKind): StringResource = when (kind) {
+    LocalWriteFailureKind.BUSY -> Res.string.notification_local_write_failed_busy
+    LocalWriteFailureKind.DISK_FULL -> Res.string.notification_local_write_failed_disk_full
+    LocalWriteFailureKind.OTHER -> Res.string.notification_local_write_failed_other
 }
