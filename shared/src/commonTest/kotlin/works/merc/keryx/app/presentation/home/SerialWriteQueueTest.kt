@@ -50,4 +50,25 @@ class SerialWriteQueueTest {
         assertEquals(listOf("next"), landed)
         scope.cancel()
     }
+
+    @Test
+    fun afterWriteRunsOnlyOnceItsWriteSucceeded() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val scope = CoroutineScope(SupervisorJob() + dispatcher + CoroutineExceptionHandler { _, _ -> })
+        val queue = SerialWriteQueue(scope, dispatcher)
+        val gate = CompletableDeferred<Unit>()
+        val steps = mutableListOf<String>()
+
+        queue.enqueue({ gate.await(); steps += "write" }, { steps += "after" })
+        queue.enqueue({ throw IllegalStateException("write failed") }, { steps += "after failed" })
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(emptyList(), steps)
+
+        gate.complete(Unit)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(listOf("write", "after"), steps)
+        scope.cancel()
+    }
 }

@@ -813,7 +813,7 @@ class HomeViewModel(
         selectedRowInstance = _selectedRowInstance,
         currentFilter = { _filter.value },
         selectFilter = { selectFilter(it) },
-        launchWrite = feedListWrites::enqueue,
+        launchWrite = { write, afterWrite -> feedListWrites.enqueue(write, afterWrite) },
     )
 
     /** The feed list's collapsed folders — see [FeedListExpansion.collapsedFolderIds]. */
@@ -1708,13 +1708,18 @@ class HomeViewModel(
     /**
      * Unsubscribes from a feed and switches to the all-articles filter if it is selected. The DB
      * write is queued behind the feed list's earlier writes ([feedListWrites]); the filter falls back
-     * at once.
+     * at once, and again once the write has landed — until then the feed list still shows the feed,
+     * and selecting it again in between must not leave the selection on an unsubscribed feed.
+     *
+     * Only this action's own write re-checks the selection: a feed removed by a sync merge leaves the
+     * selection alone (external-spec §9, "Least surprise").
      *
      * @param id The identifier of the feed to unsubscribe from.
      */
     fun unsubscribeFeed(id: String) {
-        feedListWrites.enqueue { feedRepository.unsubscribeFeed(id) }
-        if (_filter.value == ArticleFilter.Feed(id)) selectFilter(ArticleFilter.All)
+        val fallBack = { if (_filter.value == ArticleFilter.Feed(id)) selectFilter(ArticleFilter.All) }
+        feedListWrites.enqueue({ feedRepository.unsubscribeFeed(id) }, fallBack)
+        fallBack()
     }
 
     /**
@@ -1856,7 +1861,8 @@ class HomeViewModel(
     fun updateTag(id: String, name: String, color: String?) = feedListActions.updateTag(id, name, color)
 
     /**
-     * Deletes a tag and resets the active filter if it references the deleted tag.
+     * Deletes a tag and resets the active filter if it references the deleted tag — at once, and
+     * again once the queued write has landed (see [unsubscribeFeed] for why, and why only here).
      *
      * @param id The identifier of the tag to delete.
      */
@@ -1889,7 +1895,9 @@ class HomeViewModel(
     fun updateFolder(id: String, name: String) = feedListActions.updateFolder(id, name)
 
     /**
-     * Deletes a folder and removes it from the collapsed-folder state.
+     * Deletes a folder, removes it from the collapsed-folder state and resets the active filter if
+     * it is the deleted folder — at once, and again once the queued write has landed (see
+     * [unsubscribeFeed] for why, and why only here).
      *
      * @param id The identifier of the folder to delete.
      */

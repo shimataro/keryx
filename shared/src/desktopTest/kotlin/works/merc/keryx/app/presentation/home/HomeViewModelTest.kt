@@ -5985,6 +5985,84 @@ class HomeViewModelTest {
         assertEquals(FeedListRowSelection.FeedInFolderGroup("f1"), vm.selectedRowInstance.value)
     }
 
+    // --- A selection moved back onto a deleted item before its delete landed ---
+    //
+    // The delete's write is queued, so the feed list still shows the item until it lands; a
+    // selection made on it in between must fall back once the write has landed, as it did at once.
+
+    @Test
+    fun deleteTagFallsBackAgainWhenTheTagWasReselectedBeforeTheWriteLanded() = runTest {
+        db.insertTag("t1", "Kotlin")
+        val writes = HoldingDispatcher()
+        val vm = newViewModel(dbWriteDispatcher = writes)
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+        writes.hold()
+
+        vm.deleteTag("t1")
+        vm.selectFilter(ArticleFilter.Tag("t1"))
+        writes.release()
+        testScheduler.advanceUntilIdle()
+
+        assertNotNull(db.tagsQueries.getById("t1").executeAsOne().deleted_at)
+        assertEquals(ArticleFilter.All, vm.filter.value)
+    }
+
+    @Test
+    fun deleteTagDemotesATagNestedRowReselectedBeforeTheWriteLanded() = runTest {
+        db.insertFeed("f1")
+        db.insertTag("t1", "Kotlin")
+        db.insertFeedTag("f1", "t1")
+        val writes = HoldingDispatcher()
+        val vm = newViewModel(dbWriteDispatcher = writes)
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+        writes.hold()
+
+        vm.deleteTag("t1")
+        vm.selectFilter(ArticleFilter.Feed("f1"), FeedListRowSelection.FeedInTag("f1", "t1"))
+        writes.release()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(FeedListRowSelection.FeedInFolderGroup("f1"), vm.selectedRowInstance.value)
+    }
+
+    @Test
+    fun deleteFolderFallsBackAgainWhenTheFolderWasReselectedBeforeTheWriteLanded() = runTest {
+        db.insertFolder("d1", "Kotlin")
+        val writes = HoldingDispatcher()
+        val vm = newViewModel(dbWriteDispatcher = writes)
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+        writes.hold()
+
+        vm.deleteFolder("d1")
+        vm.selectFilter(ArticleFilter.Folder("d1"))
+        writes.release()
+        testScheduler.advanceUntilIdle()
+
+        assertNotNull(db.foldersQueries.getById("d1").executeAsOne().deleted_at)
+        assertEquals(ArticleFilter.All, vm.filter.value)
+    }
+
+    @Test
+    fun unsubscribeFeedFallsBackAgainWhenTheFeedWasReselectedBeforeTheWriteLanded() = runTest {
+        db.insertFeed("f1")
+        val writes = HoldingDispatcher()
+        val vm = newViewModel(dbWriteDispatcher = writes)
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+        writes.hold()
+
+        vm.unsubscribeFeed("f1")
+        vm.selectFilter(ArticleFilter.Feed("f1"))
+        writes.release()
+        testScheduler.advanceUntilIdle()
+
+        assertNotNull(db.feedsQueries.getById("f1").executeAsOne().deleted_at)
+        assertEquals(ArticleFilter.All, vm.filter.value)
+    }
+
     // --- Restart persistence / restoration ---
 
     @Test

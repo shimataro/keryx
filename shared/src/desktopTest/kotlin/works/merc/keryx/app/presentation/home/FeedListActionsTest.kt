@@ -95,7 +95,10 @@ class FeedListActionsTest {
             selectedRow,
             currentFilter = { filter },
             selectFilter = { filter = it; selectCalls += it },
-            launchWrite = { write -> if (holdWrites) pendingWrites += write else runBlocking { write() } },
+            launchWrite = { write, afterWrite ->
+                val run: suspend () -> Unit = { write(); afterWrite?.invoke() }
+                if (holdWrites) pendingWrites += run else runBlocking { run() }
+            },
         )
     }
 

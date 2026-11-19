@@ -23,19 +23,33 @@ internal class SerialWriteQueue(
     private val scope: CoroutineScope,
     private val dispatcher: CoroutineDispatcher,
 ) {
-    private val writes = Channel<suspend () -> Unit>(Channel.UNLIMITED)
+    private class Entry(val write: suspend () -> Unit, val afterWrite: (() -> Unit)?)
+
+    private val entries = Channel<Entry>(Channel.UNLIMITED)
 
     init {
         scope.launch(dispatcher) {
-            for (write in writes) {
+            for (entry in entries) {
+                val job = scope.launch(dispatcher) { entry.write() }
                 // join() does not rethrow the write's failure; the failure is the child's own.
-                scope.launch(dispatcher) { write() }.join()
+                job.join()
+                // A failed (or cancelled) job reports isCancelled; its afterWrite is skipped.
+                if (entry.afterWrite != null && !job.isCancelled) scope.launch { entry.afterWrite.invoke() }
             }
         }
     }
 
     /** Queues [write] behind every write enqueued before it and returns at once. */
-    fun enqueue(write: suspend () -> Unit) {
-        writes.trySend(write)
+    fun enqueue(write: suspend () -> Unit) = enqueue(write, afterWrite = null)
+
+    /**
+     * As `enqueue(write)`, then runs [afterWrite] once [write] has completed successfully.
+     *
+     * @param afterWrite Run on [scope]'s own dispatcher (the ViewModel's main thread for a
+     *   `viewModelScope`) rather than [dispatcher] — for UI state that must be checked again after the
+     *   write landed. Skipped when [write] fails; it does not hold back the next write. `null` = none.
+     */
+    fun enqueue(write: suspend () -> Unit, afterWrite: (() -> Unit)?) {
+        entries.trySend(Entry(write, afterWrite))
     }
 }
