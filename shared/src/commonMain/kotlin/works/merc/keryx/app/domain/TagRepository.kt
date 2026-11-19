@@ -67,21 +67,14 @@ class TagRepository(
      */
     fun createTag(name: String, color: String? = null): String {
         val now = clock.nowMillis()
-        val existing = tags.getByName(name).executeAsOneOrNull()
-        val id = createOrReactivateId(existing?.id) { id ->
-            // Reactivates an existing (possibly soft-deleted) tag of the same name in place.
-            tags.upsert(id, name, color ?: existing?.color, existing?.sort_order ?: 0, null, now, existing?.created_at ?: now)
-        }
+        val id = db.transactionWithResult { upsertTagByName(name, color, now) }
         syncScheduler.scheduleSync()
         return id
     }
 
     /**
      * Creates or reactivates a tag ([createTag]) and attaches it to [feedId] ([setFeedTag]) in one
-     * transaction, so a failure leaves neither behind — a feed row's "New tag…". The existing tag of
-     * that name is looked up before the transaction, not inside it: a deferred transaction that reads
-     * and then writes has to upgrade its lock, which SQLite can refuse with an immediate
-     * `SQLITE_BUSY` (see `docs/known-issues.md`).
+     * transaction, so a failure leaves neither behind — a feed row's "New tag…".
      *
      * @param name The tag name.
      * @param color The tag color, or `null` to preserve an existing color or leave a new tag uncolored.
@@ -90,14 +83,23 @@ class TagRepository(
      */
     fun createTagAndAttach(name: String, color: String?, feedId: String): String {
         val now = clock.nowMillis()
-        val existing = tags.getByName(name).executeAsOneOrNull()
         val id = db.transactionWithResult {
-            createOrReactivateId(existing?.id) { id ->
-                tags.upsert(id, name, color ?: existing?.color, existing?.sort_order ?: 0, null, now, existing?.created_at ?: now)
-            }.also { id -> feedTags.upsert(feedId, id, null, now) }
+            upsertTagByName(name, color, now).also { id -> feedTags.upsert(feedId, id, null, now) }
         }
         syncScheduler.scheduleSync()
         return id
+    }
+
+    /**
+     * Creates the tag named [name], or reactivates the existing one in place, and returns its id —
+     * to be called inside a transaction. The statement itself resolves a name conflict (`upsertByName`),
+     * so a same-named row another writer (a sync merge, a concurrent create) inserted just before is
+     * reused rather than failing `UNIQUE(name)`. The id is read only after that write, so the
+     * transaction never reads before it writes (the lock upgrade `docs/known-issues.md` describes).
+     */
+    private fun upsertTagByName(name: String, color: String?, now: Long): String {
+        tags.upsertByName(id = IdGenerator.newId(), name = name, color = color, now = now)
+        return tags.getByName(name).executeAsOne().id
     }
 
     fun updateTag(id: String, name: String, color: String?) {

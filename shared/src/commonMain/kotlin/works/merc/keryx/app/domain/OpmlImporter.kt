@@ -35,10 +35,11 @@ class OpmlImporter(
     // OpmlImporter is a Koin singleton shared by the settings dialog's import button and every
     // .opml file-association open (main.kt's dispatchOpmlFile) — and macOS's setOpenFileHandler
     // dispatches one call per file selected in Finder's "Open With", so concurrent import() calls
-    // are a real possibility. Without this lock, two concurrent runs that reference the same new
-    // folder/tag name race FolderRepository.createFolder / TagRepository.createTag's check-then-act
-    // getByName-then-upsert, which can throw a SQLite UNIQUE constraint violation on
-    // folders.name / tags.name (upsert's ON CONFLICT is on id only, not name).
+    // are a real possibility. This lock runs them one after another, so each run's per-feed folder,
+    // tag and placement writes land as a whole rather than interleaved with another run's — the
+    // later run's document then wins for a feed both list, as it would if they were imported in turn.
+    // (Two runs creating the same folder/tag name no longer need it: createFolder / createTag resolve
+    // a name conflict in the write itself.)
     private val mutex = Mutex()
 
     /**

@@ -4,6 +4,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import works.merc.keryx.app.core.Clock
+import works.merc.keryx.app.SameNameInsertingDriver
+import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
 import works.merc.keryx.app.insertFeedTag
@@ -349,6 +351,65 @@ class TagRepositoryTest {
             assertEquals(listOf("Active"), names)
         } finally {
             driver.close()
+        }
+    }
+
+    @Test
+    fun createTagReactivatingWithAColorReplacesTheExistingColor() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertTag("t1", "Kotlin", now = 10L, deletedAt = 20L, sortOrder = 3L, color = "#000000")
+            val repo = newRepo(db, clock = Clock { 100L })
+
+            val id = repo.createTag("Kotlin", "#ff0000")
+
+            assertEquals("t1", id)
+            val row = db.tagsQueries.getById("t1").executeAsOne()
+            assertEquals("#ff0000", row.color)
+            assertEquals(3L, row.sort_order)
+            assertNull(row.deleted_at)
+        } finally {
+            driver.close()
+        }
+    }
+
+    // --- A same-named tag another writer inserts mid-call (a sync merge, a concurrent create) ---
+
+    @Test
+    fun createTagReusesASameNamedTagInsertedByAnotherWriterInsteadOfFailing() {
+        val (base, _) = inMemoryDb()
+        try {
+            val driver = SameNameInsertingDriver(base, table = "tags", name = "Kotlin", otherId = "cloud-id")
+            val db = KeryxDatabase(driver)
+            val repo = newRepo(db, clock = Clock { 100L })
+
+            val id = repo.createTag("Kotlin", "#ff0000")
+
+            assertTrue(driver.fired)
+            val rows = db.tagsQueries.watchAll().executeAsList()
+            assertEquals(listOf(id), rows.map { it.id })
+            assertEquals("Kotlin", rows.single().name)
+        } finally {
+            base.close()
+        }
+    }
+
+    @Test
+    fun createTagAndAttachReusesASameNamedTagInsertedByAnotherWriterInsteadOfFailing() {
+        val (base, baseDb) = inMemoryDb()
+        try {
+            baseDb.insertFeed("f1")
+            val driver = SameNameInsertingDriver(base, table = "tags", name = "Kotlin", otherId = "cloud-id")
+            val db = KeryxDatabase(driver)
+            val repo = newRepo(db, clock = Clock { 100L })
+
+            val id = repo.createTagAndAttach("Kotlin", null, "f1")
+
+            assertTrue(driver.fired)
+            assertEquals(listOf(id), db.tagsQueries.watchAll().executeAsList().map { it.id })
+            assertEquals(setOf(id), repo.getFeedTagMap()["f1"])
+        } finally {
+            base.close()
         }
     }
 

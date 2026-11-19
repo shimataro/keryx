@@ -19,6 +19,8 @@ import works.merc.keryx.app.data.local.FtsManager
 import works.merc.keryx.app.data.local.FtsSearch
 import works.merc.keryx.app.data.remote.FaviconResolver
 import works.merc.keryx.app.data.remote.FeedFetcher
+import works.merc.keryx.app.SameNameInsertingDriver
+import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
 import works.merc.keryx.app.insertFolder
@@ -467,6 +469,66 @@ class FolderRepositoryTest {
             assertTrue(names.isNotEmpty())
         } finally {
             driver.close()
+        }
+    }
+
+    @Test
+    fun createFolderOfAnActiveFolderNameMovesThatFolderToTheEnd() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFolder("d1", "Kotlin", sortOrder = 0L)
+            db.insertFolder("d2", "Swift", sortOrder = 1L)
+            val repo = newRepo(db, driver, clock = Clock { 100L })
+
+            val id = repo.createFolder("Kotlin")
+
+            assertEquals("d1", id)
+            val row = db.foldersQueries.getById("d1").executeAsOne()
+            assertEquals(2L, row.sort_order)
+            assertEquals(100L, row.updated_at)
+            assertEquals(2, db.foldersQueries.watchAll().executeAsList().size)
+        } finally {
+            driver.close()
+        }
+    }
+
+    // --- A same-named folder another writer inserts mid-call (a sync merge, a concurrent create) ---
+
+    @Test
+    fun createFolderReusesASameNamedFolderInsertedByAnotherWriterInsteadOfFailing() {
+        val (base, _) = inMemoryDb()
+        try {
+            val driver = SameNameInsertingDriver(base, table = "folders", name = "Kotlin", otherId = "cloud-id")
+            val db = KeryxDatabase(driver)
+            val repo = newRepo(db, driver, clock = Clock { 100L })
+
+            val id = repo.createFolder("Kotlin")
+
+            assertTrue(driver.fired)
+            val rows = db.foldersQueries.watchAll().executeAsList()
+            assertEquals(listOf(id), rows.map { it.id })
+            assertEquals("Kotlin", rows.single().name)
+        } finally {
+            base.close()
+        }
+    }
+
+    @Test
+    fun createFolderAndMoveFeedReusesASameNamedFolderInsertedByAnotherWriterInsteadOfFailing() = runTest {
+        val (base, baseDb) = inMemoryDb()
+        try {
+            baseDb.insertFeed("f1")
+            val driver = SameNameInsertingDriver(base, table = "folders", name = "Kotlin", otherId = "cloud-id")
+            val db = KeryxDatabase(driver)
+            val repo = newRepo(db, driver, clock = Clock { 100L })
+
+            val id = repo.createFolderAndMoveFeed("Kotlin", "f1")
+
+            assertTrue(driver.fired)
+            assertEquals(listOf(id), db.foldersQueries.watchAll().executeAsList().map { it.id })
+            assertEquals(id, db.feedsQueries.getById("f1").executeAsOne().folder_id)
+        } finally {
+            base.close()
         }
     }
 

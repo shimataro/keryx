@@ -39,19 +39,16 @@ class FolderRepository(
     /**
      * Creates a folder or reactivates an existing folder with the same name.
      *
+     * Both new folders and reactivated (previously soft-deleted) folders are appended to the end of
+     * the folder list — a soft-deleted folder's old position isn't meaningful anymore since other
+     * folders may have been reordered while it was gone.
+     *
      * @param name The folder name.
      * @return The folder ID.
      */
     fun createFolder(name: String): String {
         val now = clock.nowMillis()
-        val existing = folders.getByName(name).executeAsOneOrNull()
-        // Both new folders and reactivated (previously soft-deleted) folders are appended to the
-        // end of the folder list — a soft-deleted folder's old position isn't meaningful anymore
-        // since other folders may have been reordered while it was gone.
-        val nextSortOrder = folders.nextSortOrder().executeAsOne()
-        val id = createOrReactivateId(existing?.id) { id ->
-            folders.upsert(id, name, nextSortOrder, null, now, existing?.created_at ?: now)
-        }
+        val id = db.transactionWithResult { upsertFolderByName(name, now) }
         syncScheduler.scheduleSync()
         return id
     }
@@ -60,12 +57,11 @@ class FolderRepository(
      * Creates or reactivates a folder ([createFolder]) and moves [feedId] into it in one transaction,
      * so a failure leaves neither behind — a feed row's "New folder…".
      *
-     * Under the feed placement lock, like every other feed placement. Everything it reads is read
-     * before the transaction, not inside it: a deferred transaction that reads and then writes has to
-     * upgrade its lock, which SQLite can refuse with an immediate `SQLITE_BUSY` (see
-     * `docs/known-issues.md`). A new folder is empty, so the feed takes sort order 0 there without
-     * reading the group; only a reactivated folder — which a sync may have left feeds pointing at —
-     * has its group read, so the feed is appended after them.
+     * Under the feed placement lock, like every other feed placement. The feed is appended after the
+     * feeds the folder already holds — none for a new folder, so it takes sort order 0; a reactivated
+     * folder may hold feeds a sync left pointing at it. Every read follows the transaction's first
+     * write, so the transaction never reads before it writes (the lock upgrade
+     * `docs/known-issues.md` describes).
      *
      * @param name The folder name.
      * @param feedId The feed to move into the folder.
@@ -76,17 +72,27 @@ class FolderRepository(
             // Taken under the lock, as in deleteFolder: a placement committed while this call waited
             // must not end up newer than the one stamped here.
             val now = clock.nowMillis()
-            val existing = folders.getByName(name).executeAsOneOrNull()
-            val nextSortOrder = folders.nextSortOrder().executeAsOne()
-            val feedSortOrder = existing?.let { db.feedsQueries.nextSortOrderInGroup(it.id).executeAsOne() } ?: 0L
             db.transactionWithResult {
-                createOrReactivateId(existing?.id) { id ->
-                    folders.upsert(id, name, nextSortOrder, null, now, existing?.created_at ?: now)
-                }.also { id -> db.feedsQueries.updateFolderAndSortOrder(id, feedSortOrder, now, now, now, feedId) }
+                val id = upsertFolderByName(name, now)
+                val feedSortOrder = db.feedsQueries.nextSortOrderInGroup(id).executeAsOne()
+                db.feedsQueries.updateFolderAndSortOrder(id, feedSortOrder, now, now, now, feedId)
+                id
             }
         }
         syncScheduler.scheduleSync()
         return id
+    }
+
+    /**
+     * Creates the folder named [name], or reactivates the existing one in place, appended to the end
+     * of the folder list, and returns its id — to be called inside a transaction. The statement itself
+     * resolves a name conflict (`upsertByName`), so a same-named row another writer (a sync merge, a
+     * concurrent create) inserted just before is reused rather than failing `UNIQUE(name)`. The id is
+     * read only after that write, so the transaction never reads before it writes.
+     */
+    private fun upsertFolderByName(name: String, now: Long): String {
+        folders.upsertByName(id = IdGenerator.newId(), name = name, now = now)
+        return folders.getByName(name).executeAsOne().id
     }
 
     fun updateFolder(id: String, name: String) {

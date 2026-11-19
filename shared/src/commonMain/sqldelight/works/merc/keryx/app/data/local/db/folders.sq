@@ -23,6 +23,17 @@ ON CONFLICT(id) DO UPDATE SET
     name = excluded.name, sort_order = excluded.sort_order,
     deleted_at = excluded.deleted_at, updated_at = excluded.updated_at;
 
+-- Creates the folder named :name, or reactivates the existing one of that name in place (same id,
+-- created_at kept), appending it to the end of the active folders either way. The name conflict is
+-- resolved by the statement itself rather than by a lookup before it, so a row of the same name
+-- that another writer (a sync merge, a concurrent create) inserted in between is reused instead of
+-- failing UNIQUE(name). :id is used only when no row has the name.
+upsertByName:
+INSERT INTO folders (id, name, sort_order, deleted_at, updated_at, created_at)
+VALUES (:id, :name, (SELECT COALESCE(MAX(sort_order), -1) + 1 FROM folders WHERE deleted_at IS NULL), NULL, :now, :now)
+ON CONFLICT(name) DO UPDATE SET
+    sort_order = excluded.sort_order, deleted_at = NULL, updated_at = excluded.updated_at;
+
 softDelete:
 UPDATE folders SET deleted_at = ?, updated_at = ? WHERE id = ?;
 
