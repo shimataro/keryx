@@ -384,9 +384,8 @@ read を行っている箇所:
 
 - `FeedRepository.subscribeFeedWrite`（`FeedRepository.kt`。`getByUrl`/`nextSortOrderInGroup` の後に
   `upsert` を行う `db.transaction {}`）— 今回観測された箇所。
-- `FeedRepository.moveFeedsOutOfFolder`（同一トランザクション内で `nextSortOrderInGroup` を読んでから
-  フィードごとに書き込む）。直接呼ばれる経路に加え、`FolderRepository.deleteFolder` の
-  トランザクション経由でも到達する。
+- `FeedRepository.moveFeedsOutOfFolderLocked`（同一トランザクション内で `nextSortOrderInGroup` を読んでから
+  フィードごとに書き込む）。`FolderRepository.deleteFolder` のトランザクション経由で到達する。
 
 `FeedRepository.moveFeed` と `FolderRepository.reorderFolders` は並び順の read を
 `db.transaction {}` を開く**前**に済ませているため、この形状には当てはまらない。（`moveFeed` は

@@ -79,7 +79,7 @@ class FeedRepository(
 
     // [feedPlacementMutex] guards every read-then-write of `feeds.sort_order` within a group:
     // subscribeFeedWrite's sort-order allocation + upsert + folder assignment, moveFeed's renumbering
-    // of its target group, and moveFeedsOutOfFolder's append to the no-folder group (also reached
+    // of its target group, and moveFeedsOutOfFolderLocked's append to the no-folder group (reached
     // through FolderRepository.deleteFolder, via withFeedPlacementLock). A db.transaction alone isn't
     // enough: SQLite's deferred BEGIN means the nextSortOrderInGroup / getByFolder SELECT doesn't take
     // a write lock, so two overlapping writers could still both read the same stale order before
@@ -360,16 +360,6 @@ class FeedRepository(
     }
 
     /**
-     * Moves all feeds in a folder into the ungrouped feed list while preserving their relative order.
-     *
-     * @param folderId The ID of the folder whose feeds should be moved.
-     * @param now The timestamp to apply to the moved feeds.
-     */
-    suspend fun moveFeedsOutOfFolder(folderId: String, now: Long = clock.nowMillis()) {
-        feedPlacementMutex.withLock { moveFeedsOutOfFolderLocked(folderId, now) }
-    }
-
-    /**
      * Runs [block] holding the feed placement lock (see [feedPlacementMutex]), for a caller that
      * places feeds as part of its own transaction — `FolderRepository.deleteFolder`, which calls
      * [moveFeedsOutOfFolderLocked] inside it.
@@ -377,8 +367,9 @@ class FeedRepository(
     internal suspend fun <T> withFeedPlacementLock(block: () -> T): T = feedPlacementMutex.withLock { block() }
 
     /**
-     * [moveFeedsOutOfFolder]'s body, for a caller already holding the feed placement lock
-     * ([withFeedPlacementLock]).
+     * Moves all feeds in [folderId] into the ungrouped feed list, appended after its current feeds
+     * while preserving their relative order, stamping [now]. The caller must already hold the feed
+     * placement lock ([withFeedPlacementLock]) — `FolderRepository.deleteFolder`, the one caller.
      */
     internal fun moveFeedsOutOfFolderLocked(folderId: String, now: Long) {
         val feedsInFolder = feeds.getByFolder(folderId).executeAsList()

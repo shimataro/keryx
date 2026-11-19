@@ -1804,7 +1804,10 @@ class FeedRepositoryTest {
         }
     }
 
-    /** As [moveFeedWaitsForTheFeedPlacementLock], for the no-folder group a folder's feeds move into. */
+    /**
+     * As [moveFeedWaitsForTheFeedPlacementLock], for the no-folder group a deleted folder's feeds
+     * move into (FolderRepository.deleteFolder's path: withFeedPlacementLock + moveFeedsOutOfFolderLocked).
+     */
     @Test
     fun moveFeedsOutOfFolderWaitsForTheFeedPlacementLock(): Unit = runBlocking {
         val (driver, db) = inMemoryDb()
@@ -1816,7 +1819,9 @@ class FeedRepositoryTest {
             val repo = newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK) }, feedPlacementMutex = placement)
             placement.lock()
 
-            val move = launch(start = CoroutineStart.UNDISPATCHED) { repo.moveFeedsOutOfFolder("d1") }
+            val move = launch(start = CoroutineStart.UNDISPATCHED) {
+                repo.withFeedPlacementLock { repo.moveFeedsOutOfFolderLocked("d1", now = 100L) }
+            }
 
             assertEquals("d1", db.feedsQueries.getById("f1").executeAsOne().folder_id)
 

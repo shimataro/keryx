@@ -389,8 +389,8 @@ Confirmed by inspection (not by triggering each one) — a transaction reads bef
 
 - `FeedRepository.subscribeFeedWrite` (`FeedRepository.kt`, the `db.transaction {}` covering
   `getByUrl`/`nextSortOrderInGroup` then `upsert`) — the one this was observed against.
-- `FeedRepository.moveFeedsOutOfFolder` (reads `nextSortOrderInGroup` then writes per feed in the
-  same transaction), reachable directly and via `FolderRepository.deleteFolder`'s transaction.
+- `FeedRepository.moveFeedsOutOfFolderLocked` (reads `nextSortOrderInGroup` then writes per feed in
+  the same transaction), reached via `FolderRepository.deleteFolder`'s transaction.
 
 `FeedRepository.moveFeed` and `FolderRepository.reorderFolders` read their ordering *before*
 opening `db.transaction {}`, so they don't have this shape. (`moveFeed` holds `feedPlacementMutex`
