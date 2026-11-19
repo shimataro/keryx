@@ -134,21 +134,6 @@ actual object DatabaseMerger {
         }
 
     /**
-     * Walks the cause chain looking for the [SQLiteException] that explains [this], since
-     * SQLDelight's `JdbcSqliteDriver` (used by [migrateCloudIfOlder]) may wrap it before it
-     * reaches [merge]'s catch. Bounded so a (theoretical) cause cycle cannot loop forever.
-     */
-    private fun Throwable.findSqliteCause(): SQLiteException? {
-        var current: Throwable? = this
-        repeat(CAUSE_CHAIN_MAX_DEPTH) {
-            val c = current ?: return null
-            if (c is SQLiteException) return c
-            current = c.cause
-        }
-        return null
-    }
-
-    /**
      * Validates that the database at [dbPath] contains the required tables and columns for [schemaVersion].
      *
      * @param dbPath The path to the database to validate.
@@ -209,9 +194,6 @@ actual object DatabaseMerger {
     }
 
     private const val TAG = "DatabaseMerger"
-
-    /** Bounds [findSqliteCause]'s cause-chain walk against a theoretical cause cycle. */
-    private const val CAUSE_CHAIN_MAX_DEPTH = 8
 
     // SQLite *primary* result codes (an extended code's low byte, i.e. `code and 0xFF`), named
     // locally so the classification `when` above reads without a lookup table. See
