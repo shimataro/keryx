@@ -1,10 +1,13 @@
 package works.merc.keryx.app.domain
 
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
+import works.merc.keryx.app.HoldingDispatcher
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.data.local.LocalSettings
 import works.merc.keryx.app.data.local.LocalSettingsStore
@@ -218,6 +221,73 @@ class SettingsRepositoryTest {
 
             assertTrue(repo.isSetupComplete())
             assertEquals(store.isSetupComplete(), repo.isSetupComplete())
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
+     * A global setter is called from the UI thread (the settings screen), so its DB write must run
+     * on the write dispatcher rather than block the caller on the SQLite write lock.
+     */
+    @Test
+    fun globalSettersWriteOnTheWriteDispatcherNotTheCallersThread() {
+        val (driver, db) = inMemoryDb()
+        try {
+            val scheduler = SettingsCountingSyncScheduler()
+            val writes = HoldingDispatcher()
+            val repo = SettingsRepository(
+                db, LocalSettingsStore(dirOverride = dir), scheduler, Clock { 0L }, writeDispatcher = writes,
+            )
+            writes.hold()
+
+            repo.setReadTimeoutSeconds(60)
+            repo.setCacheRetentionDays(null)
+            repo.setArticleListDefaultUnreadOnly(true)
+
+            // Nothing written, nor a sync scheduled, until the write dispatcher runs.
+            assertEquals(30, repo.getReadTimeoutSeconds())
+            assertEquals(30, repo.getCacheRetentionDays())
+            assertFalse(repo.getArticleListDefaultUnreadOnly())
+            assertEquals(0, scheduler.callCount)
+
+            writes.release()
+
+            assertEquals(60, repo.getReadTimeoutSeconds())
+            assertNull(repo.getCacheRetentionDays())
+            assertTrue(repo.getArticleListDefaultUnreadOnly())
+            assertEquals(3, scheduler.callCount)
+        } finally {
+            driver.close()
+        }
+    }
+
+    /** [SettingsRepository.flush] returns only after a global write queued before it has landed. */
+    @Test
+    fun flushWaitsForAPendingGlobalWrite() {
+        val (driver, db) = inMemoryDb()
+        try {
+            val writes = HoldingDispatcher()
+            val repo = SettingsRepository(
+                db, LocalSettingsStore(dirOverride = dir), SyncScheduler {}, Clock { 0L }, writeDispatcher = writes,
+            )
+            writes.hold()
+            repo.setReadTimeoutSeconds(60)
+
+            runBlocking {
+                var flushed = false
+                val flush = launch(start = CoroutineStart.UNDISPATCHED) {
+                    repo.flush()
+                    flushed = true
+                }
+                assertFalse(flushed)
+
+                writes.release()
+                flush.join()
+
+                assertTrue(flushed)
+                assertEquals(60, repo.getReadTimeoutSeconds())
+            }
         } finally {
             driver.close()
         }

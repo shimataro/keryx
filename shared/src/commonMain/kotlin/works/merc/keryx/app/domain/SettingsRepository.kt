@@ -28,6 +28,12 @@ import works.merc.keryx.app.data.local.db.KeryxDatabase
  * Reads/writes both synced global settings (in `global_settings`) and
  * device-local settings (`local_settings.json`). Global changes trigger a sync.
  *
+ * Global settings are written **off the caller's thread** too: a setter returns at once and its
+ * `global_settings` upsert (and the sync it schedules) runs on [writeDispatcher], so a setter called
+ * from the UI thread never waits on the SQLite write lock — a sync merge or search-index write can
+ * hold it for up to `busy_timeout`. A getter called right after a setter may therefore still read
+ * the previous value; callers that show the value keep their own state (`PreferencesController`).
+ *
  * Device-local settings are written to disk **off the caller's thread**: [saveLocalSettings]
  * updates the in-memory [localSettings] synchronously (so the UI and [getLocalSettings] see the
  * new value instantly) and signals a background writer to persist it. Writes are coalesced (a
@@ -94,9 +100,12 @@ class SettingsRepository(
     private fun getGlobal(key: String): String? =
         db.global_settingsQueries.get(key).executeAsOneOrNull()
 
+    // Serialized with the local-settings writer and [flush] on [writeDispatcher], in call order.
     private fun setGlobal(key: String, value: String) {
-        db.global_settingsQueries.upsert(key, value, clock.nowMillis())
-        syncScheduler.scheduleSync()
+        writeScope.launch {
+            db.global_settingsQueries.upsert(key, value, clock.nowMillis())
+            syncScheduler.scheduleSync()
+        }
     }
 
     /**
@@ -131,7 +140,9 @@ class SettingsRepository(
 
     /**
      * Persists the current settings synchronously, serialized with the background writer (both run
-     * on [writeDispatcher]). Suspends until the write completes. Called from the JVM shutdown hook
+     * on [writeDispatcher]). Suspends until the write completes — and, since [writeDispatcher] runs
+     * its work in order, until every global-setting write queued before this call has landed too.
+     * Called from the JVM shutdown hook
      * (so no pending debounced/coalesced write is lost on quit) and right after setup completes (so
      * `isSetupComplete`'s file-existence check is durable even if the app is closed immediately).
      */
