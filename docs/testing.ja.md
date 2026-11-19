@@ -284,7 +284,7 @@ AGP の `build` ライフサイクルは `androidTest` ソースセットに対�
     二度とレガシーを読まないこと、移行中の壊れたレガシーファイルと不正な（gzip ではない）`.gz`
     ペイロードのどちらも `CloudDataIncompatibleException` に分類されること、リセットが `.gz` のみを
     リネーム・再作成しレガシーファイルには一切触れないこと。
-- 読書状態の遅延同期（`SyncRepositoryTest.kt`）：`scheduleDeferredSync` は長い窓を待ち、`scheduleSync` は短い窓を使い満了後に短い窓へ戻ること、構成の変更が保留中の遅延窓を縮めて 1 回の同期にまとめること、`flushPendingSync` は保留があるときだけ同期し実行中の同期を待つこと、キューに残るローカル書き込み（`PendingLocalWrites`。成功・失敗・破棄のいずれでも数え終わることを `SettingsRepositoryTest`・`SerialWriteQueueTest` で確認）を上限付きで待つこと、`flushOnLeavingForeground` がアプリ自身の起動の印をスキップすること（`ExternalAppLaunchTest`）、未同期フラグがエラー結果・例外・キャンセルを越えて残り同期中の変更で立て直されること。`SyncSchedulerTest` は既定の `scheduleDeferredSync` の委譲。`ArticleRepositoryTest` は状態が変わらない既読・スターの書き込みが打刻も同期予約もしないこと。`RefreshCycleRunnerTest` は起動時サイクルの更新後の `scheduleSync`
+- 読書状態の遅延同期（`SyncRepositoryTest.kt`）：`scheduleDeferredSync` は長い窓を待ち、`scheduleSync` は短い窓を使い満了後に短い窓へ戻ること、構成の変更が保留中の遅延窓を縮めて 1 回の同期にまとめること、`flushPendingSync` は保留があるときだけ同期し実行中の同期を待つこと、キューに残るローカル書き込み（`PendingLocalWrites`。成功・失敗・破棄のいずれでも数え終わることを `SettingsRepositoryTest`・`SerialWriteQueueTest` で確認。既読・スターの書き込みは `HomeViewModelTest`）を上限付きで待つこと、`flushOnLeavingForeground` がアプリ自身の起動の印をスキップすること（`ExternalAppLaunchTest`）、未同期フラグがエラー結果・例外・キャンセルを越えて残り同期中の変更で立て直されること。`SyncSchedulerTest` は既定の `scheduleDeferredSync` の委譲。`ArticleRepositoryTest` は状態が変わらない既読・スターの書き込みが打刻も同期予約もしないこと。`RefreshCycleRunnerTest` は起動時サイクルの更新後の `scheduleSync`
 - 自動同期の抑制ゲート（`SyncRepositoryTest.kt`：`AUTOMATIC` トリガーの同期が `autoSyncSuspended` 中はスキップされること、`MANUAL` は決してゲートされないこと、`scheduleSync()` も同様に抑制されること、成功した同期／リセット／`clearSyncFailureState()` でゲートがクリアされること——`SchemaVersionException` は意図的にゲートを一切起動しない）
 - アプリ内アップデートのパイプライン:
   - `UpdateCheckerTest.kt`：`assets[]`/`body` を `asset`/`releaseNotes` へパースすること、`sha256`

@@ -7,7 +7,8 @@ import kotlinx.coroutines.flow.update
 /**
  * Counts the local DB writes that have been requested but have not run yet — the ones a caller
  * queues off its own thread and returns from at once (a global-setting change in
- * `SettingsRepository`, the feed list's writes in `SerialWriteQueue`).
+ * `SettingsRepository`, the feed list's writes in `SerialWriteQueue`, `HomeViewModel`'s read/star
+ * writes).
  *
  * Such a write schedules its sync only once it runs, so until then nothing tells
  * [SyncRepository.flushPendingSync] that a change is on its way: a flush made as the app leaves the

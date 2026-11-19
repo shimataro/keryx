@@ -68,6 +68,7 @@ import works.merc.keryx.app.domain.RefreshCycleRunner
 import works.merc.keryx.app.domain.RefreshOutcome
 import works.merc.keryx.app.domain.FakeNotificationMessages
 import works.merc.keryx.app.domain.NotificationCenter
+import works.merc.keryx.app.domain.PendingLocalWrites
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.SyncScheduler
@@ -307,6 +308,8 @@ class HomeViewModelTest {
         // watchAllTags / watchAllFolders) included. A test can hold it (a HoldingDispatcher) to keep
         // the feed list showing an item whose delete has already been written.
         listDispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
+        // The counter of the ViewModel's requested-but-not-yet-run read/star writes.
+        pendingLocalWrites: PendingLocalWrites = PendingLocalWrites(),
     ): HomeViewModel {
         val articleRepository = ArticleRepository(db, FtsSearch(ftsDriver), syncScheduler, clock, Dispatchers.Unconfined)
         // Mirror startup: ensureIndexed() creates articles_fts so the subscribe/refresh path's indexMissing() works.
@@ -355,6 +358,7 @@ class HomeViewModelTest {
             // dbWriteDispatcher: Unconfined by default so read/star writes run inline for
             // deterministic assertions; overridable via the dbWriteDispatcher parameter above.
             dbWriteDispatcher,
+            pendingLocalWrites,
         ).also { createdViewModels += it }
     }
 
@@ -7874,6 +7878,164 @@ class HomeViewModelTest {
         testScheduler.advanceUntilIdle()
         assertEquals(0L, dbIsRead("s2"))
         assertEquals(0L, dbIsRead("u1"))
+    }
+
+    // --- Pending local writes (foreground-exit flush waits on PendingLocalWrites) ---
+
+    /** Starts a waiter on [pending]'s `awaitIdle()`; it is `isCompleted` once the counter is idle. */
+    private fun TestScope.awaitIdleWaiter(pending: PendingLocalWrites): Job =
+        backgroundScope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { pending.awaitIdle() }
+
+    /** Whether [waiter] has finished, after letting the scheduler deliver its resumption. */
+    private fun TestScope.isIdle(waiter: Job): Boolean {
+        testScheduler.runCurrent()
+        return waiter.isCompleted
+    }
+
+    /** Builds a ViewModel over one feed of unread articles whose read/star writes are held. */
+    private fun TestScope.newViewModelWithHeldWrites(
+        pending: PendingLocalWrites,
+        writes: HoldingDispatcher,
+    ): HomeViewModel {
+        db.insertFeed("f1")
+        listOf("a1", "a2").forEachIndexed { index, id ->
+            db.insertArticle(id, "f1", isRead = 0L, publishedAt = 2L - index, createdAt = 2L - index, content = "<p>$id</p>")
+        }
+        val vm = newViewModel(dbWriteDispatcher = writes, pendingLocalWrites = pending)
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+        return vm
+    }
+
+    @Test
+    fun selectArticleCountsItsReadWriteAsPendingUntilItRuns() = runTest {
+        val pending = PendingLocalWrites()
+        val writes = HoldingDispatcher()
+        val vm = newViewModelWithHeldWrites(pending, writes)
+        writes.hold()
+
+        vm.selectArticle(vm.row("a1"))
+        val waiter = awaitIdleWaiter(pending)
+
+        assertFalse(isIdle(waiter), "a queued mark-as-read must keep the counter busy")
+        assertEquals(0L, dbIsRead("a1"))
+
+        writes.release()
+        testScheduler.advanceUntilIdle()
+
+        assertTrue(isIdle(waiter))
+        assertEquals(1L, dbIsRead("a1"))
+    }
+
+    @Test
+    fun setReadCountsItsWriteAsPendingUntilItRuns() = runTest {
+        val pending = PendingLocalWrites()
+        val writes = HoldingDispatcher()
+        val vm = newViewModelWithHeldWrites(pending, writes)
+        writes.hold()
+
+        vm.setRead(vm.row("a1"), read = true)
+        val waiter = awaitIdleWaiter(pending)
+
+        assertFalse(isIdle(waiter))
+        assertEquals(0L, dbIsRead("a1"))
+
+        writes.release()
+        testScheduler.advanceUntilIdle()
+
+        assertTrue(isIdle(waiter))
+        assertEquals(1L, dbIsRead("a1"))
+    }
+
+    @Test
+    fun setStarredCountsItsWriteAsPendingUntilItRuns() = runTest {
+        val pending = PendingLocalWrites()
+        val writes = HoldingDispatcher()
+        val vm = newViewModelWithHeldWrites(pending, writes)
+        writes.hold()
+
+        vm.setStarred(vm.row("a1"), starred = true)
+        val waiter = awaitIdleWaiter(pending)
+
+        assertFalse(isIdle(waiter))
+        assertEquals(0L, dbIsStarred("a1"))
+
+        writes.release()
+        testScheduler.advanceUntilIdle()
+
+        assertTrue(isIdle(waiter))
+        assertEquals(1L, dbIsStarred("a1"))
+    }
+
+    @Test
+    fun markAllReadCountsItsWriteAsPendingUntilItRuns() = runTest {
+        val pending = PendingLocalWrites()
+        val writes = HoldingDispatcher()
+        val vm = newViewModelWithHeldWrites(pending, writes)
+        writes.hold()
+
+        vm.markAllRead()
+        val waiter = awaitIdleWaiter(pending)
+
+        assertFalse(isIdle(waiter))
+        assertEquals(0L, dbIsRead("a1"))
+        assertEquals(0L, dbIsRead("a2"))
+
+        writes.release()
+        testScheduler.advanceUntilIdle()
+
+        assertTrue(isIdle(waiter))
+        assertEquals(1L, dbIsRead("a1"))
+        assertEquals(1L, dbIsRead("a2"))
+    }
+
+    /**
+     * Right after a filter switch the rows on screen are still the previous list's, so markAllRead
+     * defers its write until the list catches up; the counter must stay busy through that wait too.
+     */
+    @Test
+    fun markAllReadStaysPendingWhileTheDisplayedScopeCatchesUp() = runTest {
+        val pending = PendingLocalWrites()
+        db.insertFeed("f1")
+        db.insertFeed("f2")
+        db.insertArticle("a1", "f1", isRead = 0L, publishedAt = 1L, createdAt = 1L)
+        db.insertArticle("b1", "f2", isRead = 0L, publishedAt = 1L, createdAt = 1L)
+        // Holding the ViewModel's background dispatcher keeps the list queries from re-running, so
+        // the displayed rows stay All's after the switch.
+        val background = HoldingDispatcher()
+        val vm = newViewModel(dispatcher = background, pendingLocalWrites = pending)
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+
+        background.hold()
+        vm.selectFilter(ArticleFilter.Feed("f2"))
+        vm.markAllRead()
+        val waiter = awaitIdleWaiter(pending)
+
+        assertFalse(isIdle(waiter), "the deferred markAllRead must keep the counter busy")
+        assertEquals(0L, dbIsRead("b1"))
+
+        background.release()
+        testScheduler.advanceUntilIdle()
+
+        assertTrue(isIdle(waiter))
+        assertEquals(1L, dbIsRead("b1"))
+        assertEquals(0L, dbIsRead("a1"), "only the requested scope is marked")
+    }
+
+    /** A read action on a ViewModel whose scope is already cancelled must not leave the counter busy. */
+    @Test
+    fun readActionAfterTheScopeIsCancelledLeavesTheCounterIdle() = runTest {
+        val pending = PendingLocalWrites()
+        val vm = newViewModelWithHeldWrites(pending, HoldingDispatcher())
+        val row = vm.row("a1")
+        vm.viewModelScope.cancel()
+
+        vm.setRead(row, read = true)
+        val waiter = awaitIdleWaiter(pending)
+
+        assertTrue(isIdle(waiter), "a launch into a cancelled scope must still be matched by end()")
+        assertEquals(0L, dbIsRead("a1"))
     }
 }
 

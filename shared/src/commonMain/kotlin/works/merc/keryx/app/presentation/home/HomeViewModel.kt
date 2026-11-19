@@ -95,11 +95,12 @@ class HomeViewModel(
     // fresh connection per statement, so concurrent writes would contend for the write lock and
     // only avoid SQLITE_BUSY by burning the busy_timeout DatabaseDriverFactory sets. UI state is
     // updated optimistically before the write is dispatched. Feed-list writes additionally go
-    // through [feedListWrites], which keeps them in order across their suspensions too.
+    // through [feedListWrites], which keeps them in order across their suspensions too. Every write
+    // is counted in [pendingLocalWrites] until it has run, so a foreground-exit sync flush waits for it.
     private val dbWriteDispatcher: CoroutineDispatcher = Dispatchers.Default.limitedParallelism(1),
     // Counts the feed-list writes queued but not yet run, so a foreground-exit sync flush waits for
     // them (see [PendingLocalWrites]). Shared with `SyncRepository` in production.
-    pendingLocalWrites: PendingLocalWrites = PendingLocalWrites(),
+    private val pendingLocalWrites: PendingLocalWrites = PendingLocalWrites(),
 ) : ViewModel() {
 
     // Eagerly (not WhileSubscribed) so these start populating as soon as the ViewModel is
@@ -1013,7 +1014,7 @@ class HomeViewModel(
         // sync merge tombstone the row concurrently, marking it read only stamps read_at/updated_at;
         // deletion's last-write-wins runs on deleted_updated_at, which this write never touches, so
         // it cannot revive or otherwise disturb the deletion.
-        viewModelScope.launch(dbWriteDispatcher) { articleRepository.markAsRead(article.id) }
+        launchArticleWrite { articleRepository.markAsRead(article.id) }
         // Set before the cursor, so selectedArticleRow never resolves the new cursor against the
         // previous selection's row.
         _pendingSelectedRow.value = article.copy(is_read = 1L)
@@ -1265,7 +1266,7 @@ class HomeViewModel(
         // own KDoc for why this order is load-bearing: it is what guarantees a concurrent reconcile
         // pass can never observe (and revert) this optimistic pin/selection using DB flags from
         // before this write has landed.
-        viewModelScope.launch(dbWriteDispatcher) {
+        launchArticleWrite {
             if (read) articleRepository.markAsRead(article.id) else articleRepository.markAsUnread(article.id)
         }
         readIntents.record(article.id, read)
@@ -1349,7 +1350,7 @@ class HomeViewModel(
         // own KDoc for why this order is load-bearing: it is what guarantees a concurrent reconcile
         // pass can never observe (and revert) this optimistic pin/selection using DB flags from
         // before this write has landed.
-        viewModelScope.launch(dbWriteDispatcher) { articleRepository.setStarred(article.id, starred = starred) }
+        launchArticleWrite { articleRepository.setStarred(article.id, starred = starred) }
         if (_filter.value == ArticleFilter.Starred || currentMode() == ArticleListMode.Starred) {
             _pinnedUnstarredArticles.update { it + (article.id to article.copy(is_starred = starred.toDbFlag())) }
         } else if (starred) {
@@ -1414,6 +1415,11 @@ class HomeViewModel(
     fun markAllRead() {
         val requested = currentScope()
         if (displayedScope() == requested) return markShownRead()
+        // Counted as a pending local write while it waits, too: the write it leads to is decided only
+        // once the list shows the requested scope, and a foreground-exit flush must not miss it. The
+        // wait ends without the UI — the displayed scope comes from the eagerly collected DB queries —
+        // and the write markShownRead dispatches counts itself before this one ends.
+        pendingLocalWrites.begin()
         viewModelScope.launch {
             // From the source flows, as currentScope() is: the derived mode/narrowing lag behind them.
             combine(
@@ -1422,7 +1428,18 @@ class HomeViewModel(
                 shown == scopeOf(filter, unread, unreadStarred, starred)
             }.first { it }
             if (currentScope() == requested) markShownRead()
-        }
+        }.invokeOnCompletion { pendingLocalWrites.end() }
+    }
+
+    /**
+     * Runs a read/star write on [dbWriteDispatcher], in call order, and returns at once. Counted in
+     * [pendingLocalWrites] from the call until it has finished — run, failed, or cancelled before it
+     * started — since the write schedules its deferred sync only once it runs, and a foreground-exit
+     * flush made in between must still send it.
+     */
+    private fun launchArticleWrite(write: suspend () -> Unit) {
+        pendingLocalWrites.begin()
+        viewModelScope.launch(dbWriteDispatcher) { write() }.invokeOnCompletion { pendingLocalWrites.end() }
     }
 
     /** [markAllRead] over the rows on screen, once they belong to the current [ListScope]. */
@@ -1459,7 +1476,7 @@ class HomeViewModel(
         // own KDoc for why this order is load-bearing: it is what guarantees a concurrent reconcile
         // pass can never observe (and revert) this optimistic pin/selection using DB flags from
         // before this write has landed.
-        viewModelScope.launch(dbWriteDispatcher) {
+        launchArticleWrite {
             if (scoped) {
                 articleRepository.markArticlesAsRead(idsToMark)
                 // Re-run search only after the write lands so the freshly-read state shows up.
