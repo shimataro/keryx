@@ -47,7 +47,10 @@ internal class SerialWriteQueue(
      *
      * @param afterWrite Run on [scope]'s own dispatcher (the ViewModel's main thread for a
      *   `viewModelScope`) rather than [dispatcher] — for UI state that must be checked again after the
-     *   write landed. Skipped when [write] fails; it does not hold back the next write. `null` = none.
+     *   write landed. The write having landed does not mean the DB-backed flows have delivered it yet:
+     *   UI state that must wait for the change to show (a delete's selection fallback) is handed on
+     *   from here to whatever watches those flows ([DeletedItemFallback]). Skipped when [write]
+     *   fails; it does not hold back the next write. `null` = none.
      */
     fun enqueue(write: suspend () -> Unit, afterWrite: (() -> Unit)?) {
         entries.trySend(Entry(write, afterWrite))

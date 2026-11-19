@@ -99,6 +99,8 @@ class FeedListActionsTest {
                 val run: suspend () -> Unit = { write(); afterWrite?.invoke() }
                 if (holdWrites) pendingWrites += run else runBlocking { run() }
             },
+            // No feed-list flow here to wait on: falls back as soon as the write has landed.
+            fallBackOnceHidden = { _, fallback -> fallback() },
         )
     }
 

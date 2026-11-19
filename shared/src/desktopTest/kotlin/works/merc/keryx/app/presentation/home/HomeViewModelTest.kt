@@ -92,6 +92,7 @@ import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotEquals
@@ -160,6 +161,19 @@ private class GetByIdFailingSqlDriver(private val delegate: SqlDriver) : SqlDriv
             throw IllegalStateException("database is locked")
         }
         return delegate.executeQuery(identifier, sql, mapper, parameters, binders)
+    }
+
+    /** Fails every statement it matches, as a locked database would — lets a test fail a write. */
+    @kotlin.concurrent.Volatile var failExecute: ((sql: String) -> Boolean)? = null
+
+    override fun execute(
+        identifier: Int?,
+        sql: String,
+        parameters: Int,
+        binders: (app.cash.sqldelight.db.SqlPreparedStatement.() -> Unit)?,
+    ): app.cash.sqldelight.db.QueryResult<Long> {
+        if (failExecute?.invoke(sql) == true) throw IllegalStateException("database is locked")
+        return delegate.execute(identifier, sql, parameters, binders)
     }
 }
 
@@ -289,17 +303,21 @@ class HomeViewModelTest {
         manualSync: ManualSync = FakeManualSync(),
         // The FeedRepository's placement lock — a test can hold it to keep a feed-list move waiting.
         feedPlacementMutex: Mutex = Mutex(),
+        // What the feed/tag/folder repositories run on — their list queries (watchAllFeeds /
+        // watchAllTags / watchAllFolders) included. A test can hold it (a HoldingDispatcher) to keep
+        // the feed list showing an item whose delete has already been written.
+        listDispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
     ): HomeViewModel {
         val articleRepository = ArticleRepository(db, FtsSearch(ftsDriver), syncScheduler, clock, Dispatchers.Unconfined)
         // Mirror startup: ensureIndexed() creates articles_fts so the subscribe/refresh path's indexMissing() works.
         val feedRepository = FeedRepository(
             db, feedFetcher, missingFaviconResolver(), articleRepository, ftsManagerIndexed(driver), syncScheduler,
-            NotificationCenter(), clock, Dispatchers.Unconfined,
+            NotificationCenter(), clock, listDispatcher,
             faviconMisses = InMemoryFaviconMissStore(),
             feedPlacementMutex = feedPlacementMutex,
         )
-        val tagRepository = TagRepository(db, syncScheduler, clock, Dispatchers.Unconfined)
-        val folderRepository = FolderRepository(db, feedRepository, syncScheduler, clock, Dispatchers.Unconfined)
+        val tagRepository = TagRepository(db, syncScheduler, clock, listDispatcher)
+        val folderRepository = FolderRepository(db, feedRepository, syncScheduler, clock, listDispatcher)
         // Unconfined write dispatcher so saveLocalSettings persists inline (store.load() assertions
         // in these tests are synchronous).
         val settingsRepository =
@@ -6061,6 +6079,185 @@ class HomeViewModelTest {
 
         assertNotNull(db.feedsQueries.getById("f1").executeAsOne().deleted_at)
         assertEquals(ArticleFilter.All, vm.filter.value)
+    }
+
+    // --- A selection moved back onto a deleted item after its write landed, before the list updated ---
+    //
+    // The feed list stops showing a deleted item only once its list flow delivers the DB change,
+    // which can be after the write has landed. A selection made on it in between must fall back once
+    // the list stops showing it — and only for a delete this ViewModel made.
+
+    @Test
+    fun deleteTagFallsBackOnceTheListStopsShowingATagReselectedAfterTheWriteLanded() = runTest {
+        db.insertTag("t1", "Kotlin")
+        val lists = HoldingDispatcher()
+        val vm = newViewModel(listDispatcher = lists)
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+        lists.hold()
+
+        vm.deleteTag("t1")
+        testScheduler.advanceUntilIdle()
+        assertNotNull(db.tagsQueries.getById("t1").executeAsOne().deleted_at)
+        assertTrue(vm.tags.value.any { it.id == "t1" }, "the list still shows the deleted tag")
+        vm.selectFilter(ArticleFilter.Tag("t1"))
+        lists.release()
+        testScheduler.advanceUntilIdle()
+
+        assertTrue(vm.tags.value.none { it.id == "t1" })
+        assertEquals(ArticleFilter.All, vm.filter.value)
+    }
+
+    @Test
+    fun deleteTagDemotesATagNestedRowReselectedAfterTheWriteLandedOnceTheListUpdates() = runTest {
+        db.insertFeed("f1")
+        db.insertTag("t1", "Kotlin")
+        db.insertFeedTag("f1", "t1")
+        val lists = HoldingDispatcher()
+        val vm = newViewModel(listDispatcher = lists)
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+        lists.hold()
+
+        vm.deleteTag("t1")
+        testScheduler.advanceUntilIdle()
+        vm.selectFilter(ArticleFilter.Feed("f1"), FeedListRowSelection.FeedInTag("f1", "t1"))
+        lists.release()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(FeedListRowSelection.FeedInFolderGroup("f1"), vm.selectedRowInstance.value)
+    }
+
+    @Test
+    fun deleteFolderFallsBackOnceTheListStopsShowingAFolderReselectedAfterTheWriteLanded() = runTest {
+        db.insertFolder("d1", "Kotlin")
+        val lists = HoldingDispatcher()
+        val vm = newViewModel(listDispatcher = lists)
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+        lists.hold()
+
+        vm.deleteFolder("d1")
+        testScheduler.advanceUntilIdle()
+        assertNotNull(db.foldersQueries.getById("d1").executeAsOne().deleted_at)
+        assertTrue(vm.folders.value.any { it.id == "d1" }, "the list still shows the deleted folder")
+        vm.selectFilter(ArticleFilter.Folder("d1"))
+        lists.release()
+        testScheduler.advanceUntilIdle()
+
+        assertTrue(vm.folders.value.none { it.id == "d1" })
+        assertEquals(ArticleFilter.All, vm.filter.value)
+    }
+
+    @Test
+    fun unsubscribeFeedFallsBackOnceTheListStopsShowingAFeedReselectedAfterTheWriteLanded() = runTest {
+        db.insertFeed("f1")
+        val lists = HoldingDispatcher()
+        val vm = newViewModel(listDispatcher = lists)
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+        lists.hold()
+
+        vm.unsubscribeFeed("f1")
+        testScheduler.advanceUntilIdle()
+        assertNotNull(db.feedsQueries.getById("f1").executeAsOne().deleted_at)
+        assertTrue(vm.structuralFeeds.value.any { it.id == "f1" }, "the list still shows the unsubscribed feed")
+        vm.selectFilter(ArticleFilter.Feed("f1"))
+        lists.release()
+        testScheduler.advanceUntilIdle()
+
+        assertTrue(vm.structuralFeeds.value.none { it.id == "f1" })
+        assertEquals(ArticleFilter.All, vm.filter.value)
+    }
+
+    @Test
+    fun aDeleteWhoseWriteFailedLeavesTheSelectionAloneWhenTheTagLaterDisappears() {
+        // The failed write is thrown on the ViewModel's scope as an uncaught exception, which runTest
+        // reports once its body has finished — after every assertion below has passed.
+        val failure = assertFailsWith<IllegalStateException> {
+            runTest {
+                db.insertTag("t1", "Kotlin")
+                val vm = newViewModel()
+                subscribeAll(vm)
+                testScheduler.advanceUntilIdle()
+                lookups.failExecute = { it.startsWith("UPDATE tags") }
+
+                vm.deleteTag("t1")
+                testScheduler.advanceUntilIdle()
+                lookups.failExecute = null
+                assertNull(db.tagsQueries.getById("t1").executeAsOne().deleted_at)
+                vm.selectFilter(ArticleFilter.Tag("t1"))
+                testScheduler.advanceUntilIdle()
+                // A deletion arriving later (as from a sync merge).
+                db.tagsQueries.softDelete(5L, 5L, "t1")
+                testScheduler.advanceUntilIdle()
+
+                assertTrue(vm.tags.value.none { it.id == "t1" })
+                assertEquals(ArticleFilter.Tag("t1"), vm.filter.value)
+            }
+        }
+        assertEquals("database is locked", failure.message)
+    }
+
+    @Test
+    fun aDeletionThisViewModelDidNotMakeLeavesTheSelectionAlone() = runTest {
+        db.insertTag("t1", "Kotlin")
+        db.insertFolder("d1", "News")
+        db.insertFeed("f1")
+        val vm = newViewModel()
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+
+        // Deletions arriving as from a sync merge, each while its item is selected.
+        vm.selectFilter(ArticleFilter.Tag("t1"))
+        testScheduler.advanceUntilIdle()
+        db.tagsQueries.softDelete(5L, 5L, "t1")
+        testScheduler.advanceUntilIdle()
+        assertTrue(vm.tags.value.none { it.id == "t1" })
+        assertEquals(ArticleFilter.Tag("t1"), vm.filter.value)
+
+        vm.selectFilter(ArticleFilter.Folder("d1"))
+        testScheduler.advanceUntilIdle()
+        db.foldersQueries.softDelete(5L, 5L, "d1")
+        testScheduler.advanceUntilIdle()
+        assertTrue(vm.folders.value.none { it.id == "d1" })
+        assertEquals(ArticleFilter.Folder("d1"), vm.filter.value)
+
+        vm.selectFilter(ArticleFilter.Feed("f1"))
+        testScheduler.advanceUntilIdle()
+        db.feedsQueries.softDelete(5L, 5L, 5L, "f1")
+        testScheduler.advanceUntilIdle()
+        assertTrue(vm.structuralFeeds.value.none { it.id == "f1" })
+        assertEquals(ArticleFilter.Feed("f1"), vm.filter.value)
+    }
+
+    @Test
+    fun aTagRecreatedBeforeTheListUpdatedIsNotFallenBackFromNowOrOnALaterDeletion() = runTest {
+        db.insertTag("t1", "Kotlin")
+        val lists = HoldingDispatcher()
+        val vm = newViewModel(listDispatcher = lists)
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+        lists.hold()
+
+        vm.deleteTag("t1")
+        testScheduler.advanceUntilIdle()
+        // Re-creating the same name reactivates the same tag id; the new color makes its row differ.
+        vm.createTag("Kotlin", "#ff0000")
+        testScheduler.advanceUntilIdle()
+        assertNull(db.tagsQueries.getById("t1").executeAsOne().deleted_at)
+        vm.selectFilter(ArticleFilter.Tag("t1"))
+        lists.release()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals("#ff0000", vm.tags.value.single { it.id == "t1" }.color)
+        assertEquals(ArticleFilter.Tag("t1"), vm.filter.value)
+
+        // A deletion arriving later (as from a sync merge) is not this ViewModel's delete.
+        db.tagsQueries.softDelete(5L, 5L, "t1")
+        testScheduler.advanceUntilIdle()
+        assertTrue(vm.tags.value.none { it.id == "t1" })
+        assertEquals(ArticleFilter.Tag("t1"), vm.filter.value)
     }
 
     // --- Restart persistence / restoration ---

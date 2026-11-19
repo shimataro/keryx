@@ -804,6 +804,20 @@ class HomeViewModel(
      */
     private val feedListWrites = SerialWriteQueue(viewModelScope, dbWriteDispatcher)
 
+    // A delete's second selection fallback, run once the list the feed list renders from stops
+    // showing the deleted item (see [DeletedItemFallback]) — the feed list renders feeds from
+    // [structuralFeeds], which can lag [feeds].
+    private val deletedFeedFallback = DeletedItemFallback(viewModelScope, structuralFeeds) { it.id }
+    private val deletedTagFallback = DeletedItemFallback(viewModelScope, tags) { it.id }
+    private val deletedFolderFallback = DeletedItemFallback(viewModelScope, folders) { it.id }
+
+    /** Runs [fallback] once the feed list stops showing [target] — see [DeletedItemFallback]. */
+    private fun fallBackOnceHidden(target: DeletedTarget, fallback: () -> Unit) = when (target) {
+        is DeletedTarget.Feed -> deletedFeedFallback.fallBackOnceHidden(target.id, fallback)
+        is DeletedTarget.Tag -> deletedTagFallback.fallBackOnceHidden(target.id, fallback)
+        is DeletedTarget.Folder -> deletedFolderFallback.fallBackOnceHidden(target.id, fallback)
+    }
+
     // Tag/folder structure actions live in their own class; this ViewModel only delegates to it.
     private val feedListActions = FeedListActions(
         feedRepository = feedRepository,
@@ -814,6 +828,7 @@ class HomeViewModel(
         currentFilter = { _filter.value },
         selectFilter = { selectFilter(it) },
         launchWrite = { write, afterWrite -> feedListWrites.enqueue(write, afterWrite) },
+        fallBackOnceHidden = ::fallBackOnceHidden,
     )
 
     /** The feed list's collapsed folders — see [FeedListExpansion.collapsedFolderIds]. */
@@ -1708,17 +1723,20 @@ class HomeViewModel(
     /**
      * Unsubscribes from a feed and switches to the all-articles filter if it is selected. The DB
      * write is queued behind the feed list's earlier writes ([feedListWrites]); the filter falls back
-     * at once, and again once the write has landed — until then the feed list still shows the feed,
-     * and selecting it again in between must not leave the selection on an unsubscribed feed.
+     * at once, and again once the write has landed and the feed list has stopped showing the feed
+     * ([DeletedItemFallback]) — until then the feed is still shown, and selecting it again in between
+     * must not leave the selection on an unsubscribed feed.
      *
-     * Only this action's own write re-checks the selection: a feed removed by a sync merge leaves the
-     * selection alone (external-spec §9, "Least surprise").
+     * Only this action's own successful write re-checks the selection: a feed removed by a sync
+     * merge leaves the selection alone (external-spec §9, "Least surprise").
      *
      * @param id The identifier of the feed to unsubscribe from.
      */
     fun unsubscribeFeed(id: String) {
         val fallBack = { if (_filter.value == ArticleFilter.Feed(id)) selectFilter(ArticleFilter.All) }
-        feedListWrites.enqueue({ feedRepository.unsubscribeFeed(id) }, fallBack)
+        feedListWrites.enqueue({ feedRepository.unsubscribeFeed(id) }) {
+            fallBackOnceHidden(DeletedTarget.Feed(id), fallBack)
+        }
         fallBack()
     }
 
@@ -1862,7 +1880,8 @@ class HomeViewModel(
 
     /**
      * Deletes a tag and resets the active filter if it references the deleted tag — at once, and
-     * again once the queued write has landed (see [unsubscribeFeed] for why, and why only here).
+     * again once the queued write has landed and the feed list has stopped showing the tag (see
+     * [unsubscribeFeed] for why, and why only here).
      *
      * @param id The identifier of the tag to delete.
      */
@@ -1896,8 +1915,8 @@ class HomeViewModel(
 
     /**
      * Deletes a folder, removes it from the collapsed-folder state and resets the active filter if
-     * it is the deleted folder — at once, and again once the queued write has landed (see
-     * [unsubscribeFeed] for why, and why only here).
+     * it is the deleted folder — at once, and again once the queued write has landed and the feed
+     * list has stopped showing the folder (see [unsubscribeFeed] for why, and why only here).
      *
      * @param id The identifier of the folder to delete.
      */

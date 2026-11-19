@@ -26,9 +26,14 @@ import works.merc.keryx.app.domain.TagRepository
  *   so they land in the order they were made (the ViewModel's unsubscribe and rename share the same
  *   queue). The UI-side state (selection fallback, expansion) is updated by the action itself,
  *   synchronously, before or regardless of the write. The second argument, when non-null, runs on
- *   the ViewModel's main thread once the write has landed: a delete re-applies its selection
- *   fallback there, since until the write lands the feed list still shows the deleted item and the
- *   user can select it again.
+ *   the ViewModel's main thread once the write has landed successfully; a delete hands its
+ *   selection fallback to [fallBackOnceHidden] there.
+ * @param fallBackOnceHidden Runs the fallback it is given once the feed list stops showing the
+ *   deleted target — in production the ViewModel's [DeletedItemFallback]s. A delete's write lands
+ *   before the list flow delivers it, so the feed list still shows the deleted item, and the user can
+ *   select it again, until then; the gap closes only when the list stops showing it, not when the
+ *   write lands. Called from a delete's `afterWrite`, so only for a delete this class made and whose
+ *   write succeeded.
  */
 internal class FeedListActions(
     private val feedRepository: FeedRepository,
@@ -39,6 +44,7 @@ internal class FeedListActions(
     private val currentFilter: () -> ArticleFilter,
     private val selectFilter: (ArticleFilter) -> Unit,
     private val launchWrite: (write: suspend () -> Unit, afterWrite: (() -> Unit)?) -> Unit,
+    private val fallBackOnceHidden: (target: DeletedTarget, fallback: () -> Unit) -> Unit,
 ) {
     /** See `HomeViewModel.toggleTagExpanded`. */
     fun toggleTagExpanded(tagId: String) {
@@ -69,10 +75,13 @@ internal class FeedListActions(
 
     /**
      * See `HomeViewModel.deleteTag`. The selection falls back at once, and again once the write has
-     * landed, in case the still-shown tag (or a feed row nested under it) was selected in between.
+     * landed and the feed list has stopped showing the tag, in case the still-shown tag (or a feed
+     * row nested under it) was selected in between.
      */
     fun deleteTag(id: String) {
-        launchWrite({ tagRepository.deleteTag(id) }, { fallBackFromDeletedTag(id) })
+        launchWrite({ tagRepository.deleteTag(id) }) {
+            fallBackOnceHidden(DeletedTarget.Tag(id)) { fallBackFromDeletedTag(id) }
+        }
         fallBackFromDeletedTag(id)
     }
 
@@ -117,10 +126,13 @@ internal class FeedListActions(
 
     /**
      * See `HomeViewModel.deleteFolder`. The selection falls back at once, and again once the write
-     * has landed, in case the still-shown folder was selected in between.
+     * has landed and the feed list has stopped showing the folder, in case the still-shown folder was
+     * selected in between.
      */
     fun deleteFolder(id: String) {
-        launchWrite({ folderRepository.deleteFolder(id) }, { fallBackFromDeletedFolder(id) })
+        launchWrite({ folderRepository.deleteFolder(id) }) {
+            fallBackOnceHidden(DeletedTarget.Folder(id)) { fallBackFromDeletedFolder(id) }
+        }
         fallBackFromDeletedFolder(id)
     }
 
