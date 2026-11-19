@@ -1,5 +1,10 @@
 package works.merc.keryx.app.domain
 
+import app.cash.sqldelight.db.QueryResult
+import app.cash.sqldelight.db.SqlDriver
+import app.cash.sqldelight.db.SqlPreparedStatement
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -11,6 +16,7 @@ import works.merc.keryx.app.HoldingDispatcher
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.data.local.LocalSettings
 import works.merc.keryx.app.data.local.LocalSettingsStore
+import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertGlobalSetting
 import works.merc.keryx.app.platform.AppDirs
@@ -30,6 +36,23 @@ private class SettingsCountingSyncScheduler : SyncScheduler {
 
     override fun scheduleSync() {
         callCount++
+    }
+}
+
+/** Fails the first `global_settings` write it sees, as a DB failure (e.g. a locked database) would. */
+private class FailFirstGlobalWriteDriver(private val delegate: SqlDriver) : SqlDriver by delegate {
+    private val failed = AtomicBoolean(false)
+
+    override fun execute(
+        identifier: Int?,
+        sql: String,
+        parameters: Int,
+        binders: (SqlPreparedStatement.() -> Unit)?,
+    ): QueryResult<Long> {
+        if (sql.contains("global_settings") && failed.compareAndSet(false, true)) {
+            throw IllegalStateException("database is locked")
+        }
+        return delegate.execute(identifier, sql, parameters, binders)
     }
 }
 
@@ -290,6 +313,31 @@ class SettingsRepositoryTest {
             }
         } finally {
             driver.close()
+        }
+    }
+
+    /**
+     * A failed global write is a DB failure: it surfaces as an uncaught exception on the writer, and
+     * the writer's SupervisorJob keeps the next setter's write working.
+     */
+    @Test
+    fun aFailedGlobalWriteDoesNotStopTheNextOne() {
+        val (inner, _) = inMemoryDb()
+        try {
+            val uncaught = mutableListOf<Throwable>()
+            val repo = SettingsRepository(
+                KeryxDatabase(FailFirstGlobalWriteDriver(inner)), LocalSettingsStore(dirOverride = dir),
+                SyncScheduler {}, Clock { 0L }, writeDispatcher = Dispatchers.Unconfined,
+                writeExceptionHandler = CoroutineExceptionHandler { _, e -> uncaught += e },
+            )
+
+            repo.setReadTimeoutSeconds(60)
+            repo.setReadTimeoutSeconds(90)
+
+            assertEquals("database is locked", uncaught.single().message)
+            assertEquals(90, repo.getReadTimeoutSeconds())
+        } finally {
+            inner.close()
         }
     }
 

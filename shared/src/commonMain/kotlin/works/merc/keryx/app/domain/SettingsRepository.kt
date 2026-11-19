@@ -7,6 +7,7 @@ import works.merc.keryx.app.core.SETTING_ARTICLE_LIST_DEFAULT_UNREAD_ONLY
 import works.merc.keryx.app.core.SETTING_CACHE_RETENTION_DAYS
 import works.merc.keryx.app.core.SETTING_READ_TIMEOUT_SECONDS
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -23,6 +24,7 @@ import kotlinx.coroutines.withContext
 import works.merc.keryx.app.data.local.LocalSettings
 import works.merc.keryx.app.data.local.LocalSettingsStore
 import works.merc.keryx.app.data.local.db.KeryxDatabase
+import kotlin.coroutines.EmptyCoroutineContext
 
 /**
  * Reads/writes both synced global settings (in `global_settings`) and
@@ -33,6 +35,10 @@ import works.merc.keryx.app.data.local.db.KeryxDatabase
  * from the UI thread never waits on the SQLite write lock — a sync merge or search-index write can
  * hold it for up to `busy_timeout`. A getter called right after a setter may therefore still read
  * the previous value; callers that show the value keep their own state (`PreferencesController`).
+ * A global write that fails is a DB failure, which `docs/error-design.md` makes an exception rather
+ * than a `Result`: with the write off the caller's thread, it surfaces as an uncaught exception on the
+ * writer rather than at the setter's call site, and the writer's `SupervisorJob` keeps later writes
+ * (global and local) working.
  *
  * Device-local settings are written to disk **off the caller's thread**: [saveLocalSettings]
  * updates the in-memory [localSettings] synchronously (so the UI and [getLocalSettings] see the
@@ -52,13 +58,17 @@ class SettingsRepository(
     private val syncScheduler: SyncScheduler,
     private val clock: Clock,
     private val writeDispatcher: CoroutineDispatcher = Dispatchers.Default.limitedParallelism(1),
+    // Where a failed write's exception goes; `null` (production) leaves it to the platform's
+    // uncaught-exception handling. A parameter only so a test can observe the failure.
+    writeExceptionHandler: CoroutineExceptionHandler? = null,
 ) {
     private val _localSettings = MutableStateFlow(store.load())
 
     /** Live device-local settings — the theme/font live off this. */
     val localSettings: StateFlow<LocalSettings> = _localSettings.asStateFlow()
 
-    private val writeScope = CoroutineScope(SupervisorJob() + writeDispatcher)
+    private val writeScope =
+        CoroutineScope(SupervisorJob() + writeDispatcher + (writeExceptionHandler ?: EmptyCoroutineContext))
 
     // A save signal; the writer always persists the *latest* _localSettings.value, so a burst of
     // saves that outpaces the disk collapses to one write (DROP_OLDEST keeps only the newest signal).
@@ -100,7 +110,12 @@ class SettingsRepository(
     private fun getGlobal(key: String): String? =
         db.global_settingsQueries.get(key).executeAsOneOrNull()
 
-    // Serialized with the local-settings writer and [flush] on [writeDispatcher], in call order.
+    /**
+     * Writes a global setting and schedules a sync, on [writeDispatcher] — serialized with the
+     * local-settings writer and [flush], in call order — and returns at once. A failed write is
+     * thrown on the writer as an uncaught exception (a DB failure, see the class KDoc), never
+     * reported to the caller; it cancels only its own write, not the writer scope.
+     */
     private fun setGlobal(key: String, value: String) {
         writeScope.launch {
             db.global_settingsQueries.upsert(key, value, clock.nowMillis())
