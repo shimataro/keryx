@@ -20,6 +20,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestCoroutineScheduler
 import kotlinx.coroutines.test.TestScope
@@ -286,6 +287,8 @@ class HomeViewModelTest {
         ftsDriver: SqlDriver = driver,
         // Home's "Sync now" delegate; a test that needs to drive or inspect it passes its own.
         manualSync: ManualSync = FakeManualSync(),
+        // The FeedRepository's placement lock — a test can hold it to keep a feed-list move waiting.
+        feedPlacementMutex: Mutex = Mutex(),
     ): HomeViewModel {
         val articleRepository = ArticleRepository(db, FtsSearch(ftsDriver), syncScheduler, clock, Dispatchers.Unconfined)
         // Mirror startup: ensureIndexed() creates articles_fts so the subscribe/refresh path's indexMissing() works.
@@ -293,6 +296,7 @@ class HomeViewModelTest {
             db, feedFetcher, missingFaviconResolver(), articleRepository, ftsManagerIndexed(driver), syncScheduler,
             NotificationCenter(), clock, Dispatchers.Unconfined,
             faviconMisses = InMemoryFaviconMissStore(),
+            feedPlacementMutex = feedPlacementMutex,
         )
         val tagRepository = TagRepository(db, syncScheduler, clock, Dispatchers.Unconfined)
         val folderRepository = FolderRepository(db, feedRepository, syncScheduler, clock, Dispatchers.Unconfined)
@@ -5633,7 +5637,9 @@ class HomeViewModelTest {
         assertEquals(listOf("d1", "d2", "d3"), db.foldersQueries.watchAll().executeAsList().map { it.id })
         assertNull(db.feedsQueries.getById("f2").executeAsOne().folder_id)
         assertNull(db.foldersQueries.getById("d3").executeAsOne().deleted_at)
-        assertEquals(7, writes.queuedCount)
+        // The writes wait in the ViewModel's serial feed-list queue, whose one consumer is held on
+        // the write dispatcher with the first of them; the other six wait behind it in the queue.
+        assertEquals(1, writes.queuedCount)
 
         writes.release()
 
@@ -5648,6 +5654,36 @@ class HomeViewModelTest {
         assertEquals(listOf("d2", "d1"), db.foldersQueries.watchAll().executeAsList().map { it.id })
         assertEquals("d1", db.feedsQueries.getById("f2").executeAsOne().folder_id)
         assertNotNull(db.foldersQueries.getById("d3").executeAsOne().deleted_at)
+    }
+
+    /**
+     * Feed-list writes land in the order they were made even when one of them has to wait: a move
+     * held up on the feed placement lock must not let an unsubscribe made after it land first (and
+     * the move then write its folder onto the unsubscribed row).
+     */
+    @Test
+    fun feedListWritesLandInOrderWhileAnEarlierOneWaitsForThePlacementLock() = runTest {
+        db.insertFolder("d1", "Kotlin")
+        db.insertFeed("x")
+        var now = 1000L
+        val placement = Mutex()
+        val vm = newViewModel(clock = Clock { ++now }, feedPlacementMutex = placement)
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+        placement.lock()
+
+        vm.moveFeed("x", "d1")
+        vm.unsubscribeFeed("x")
+
+        placement.unlock()
+        testScheduler.advanceUntilIdle()
+
+        val row = db.feedsQueries.getById("x").executeAsOne()
+        assertEquals("d1", row.folder_id)
+        assertNotNull(row.deleted_at)
+        val movedAt = assertNotNull(row.folder_updated_at)
+        val unsubscribedAt = assertNotNull(row.deleted_updated_at)
+        assertTrue(unsubscribedAt > movedAt, "unsubscribe ($unsubscribedAt) must land after the move ($movedAt)")
     }
 
     @Test

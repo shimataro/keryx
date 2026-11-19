@@ -93,7 +93,8 @@ class HomeViewModel(
     // stay serialized (one writer, as they were on the UI thread) — the JVM SQLite driver opens a
     // fresh connection per statement, so concurrent writes would contend for the write lock and
     // only avoid SQLITE_BUSY by burning the busy_timeout DatabaseDriverFactory sets. UI state is
-    // updated optimistically before the write is dispatched.
+    // updated optimistically before the write is dispatched. Feed-list writes additionally go
+    // through [feedListWrites], which keeps them in order across their suspensions too.
     private val dbWriteDispatcher: CoroutineDispatcher = Dispatchers.Default.limitedParallelism(1),
 ) : ViewModel() {
 
@@ -790,6 +791,19 @@ class HomeViewModel(
 
     private val expansion = FeedListExpansion(settingsRepository)
 
+    /**
+     * The feed list's writes — unsubscribe, rename, and [FeedListActions]' tag/folder/move actions —
+     * each run to completion, in the order they were made, before the next starts (see
+     * [SerialWriteQueue]); a move waiting on the feed placement lock holds back an unsubscribe made
+     * after it instead of letting it land first.
+     *
+     * Read/star writes ([selectArticle], [toggleRead], [toggleStar], …) are not queued here: they go
+     * straight to [dbWriteDispatcher], so one can run while a queued feed-list write is suspended on
+     * that lock. That is harmless — they write only `articles`' read/star columns, which no feed-list
+     * write touches, so the two never order against each other.
+     */
+    private val feedListWrites = SerialWriteQueue(viewModelScope, dbWriteDispatcher)
+
     // Tag/folder structure actions live in their own class; this ViewModel only delegates to it.
     private val feedListActions = FeedListActions(
         feedRepository = feedRepository,
@@ -799,7 +813,7 @@ class HomeViewModel(
         selectedRowInstance = _selectedRowInstance,
         currentFilter = { _filter.value },
         selectFilter = { selectFilter(it) },
-        launchWrite = { write -> viewModelScope.launch(dbWriteDispatcher) { write() } },
+        launchWrite = feedListWrites::enqueue,
     )
 
     /** The feed list's collapsed folders — see [FeedListExpansion.collapsedFolderIds]. */
@@ -1693,18 +1707,22 @@ class HomeViewModel(
 
     /**
      * Unsubscribes from a feed and switches to the all-articles filter if it is selected. The DB
-     * write runs on [dbWriteDispatcher]; the filter falls back at once.
+     * write is queued behind the feed list's earlier writes ([feedListWrites]); the filter falls back
+     * at once.
      *
      * @param id The identifier of the feed to unsubscribe from.
      */
     fun unsubscribeFeed(id: String) {
-        viewModelScope.launch(dbWriteDispatcher) { feedRepository.unsubscribeFeed(id) }
+        feedListWrites.enqueue { feedRepository.unsubscribeFeed(id) }
         if (_filter.value == ArticleFilter.Feed(id)) selectFilter(ArticleFilter.All)
     }
 
-    /** Sets (or, with `null`, clears) a feed's custom title. The DB write runs on [dbWriteDispatcher]. */
+    /**
+     * Sets (or, with `null`, clears) a feed's custom title. The DB write is queued behind the feed
+     * list's earlier writes ([feedListWrites]).
+     */
     fun renameFeed(id: String, title: String?) {
-        viewModelScope.launch(dbWriteDispatcher) { feedRepository.renameFeed(id, title) }
+        feedListWrites.enqueue { feedRepository.renameFeed(id, title) }
     }
 
     /**
@@ -1810,8 +1828,8 @@ class HomeViewModel(
 
     // --- Tag actions ---
     //
-    // These and the folder actions below write on [dbWriteDispatcher] and return at once (see
-    // [FeedListActions]); the state they show catches up through the DB-backed flows.
+    // These and the folder actions below queue their write on [feedListWrites] and return at once
+    // (see [FeedListActions]); the state they show catches up through the DB-backed flows.
 
     /**
      * Creates a tag and, when [attachToFeedId] is given, attaches it to that feed in the same write

@@ -18,11 +18,14 @@ import works.merc.keryx.app.domain.TagRepository
  * @param currentFilter The article list's current selection.
  * @param selectFilter Selects a filter on the ViewModel (with its canonical row), used to fall back
  *   to [ArticleFilter.All] when the selected tag/folder is deleted.
- * @param launchWrite Runs a DB write off the caller's thread and returns at once — in production the
- *   ViewModel's serial `dbWriteDispatcher`, so a write never blocks the UI thread on the SQLite write
- *   lock (a sync merge or search-index write can hold it for up to `busy_timeout`) and consecutive
- *   writes still land in the order they were made. The UI-side state (selection fallback, expansion)
- *   is updated by the action itself, synchronously, before or regardless of the write.
+ * @param launchWrite Queues a DB write to run off the caller's thread and returns at once — in
+ *   production the ViewModel's `feedListWrites` ([SerialWriteQueue] on its `dbWriteDispatcher`), so a
+ *   write never blocks the UI thread on the SQLite write lock (a sync merge or search-index write can
+ *   hold it for up to `busy_timeout`). Writes run one at a time, each to completion — including
+ *   while it is suspended, e.g. a move waiting on the feed placement lock — before the next starts,
+ *   so they land in the order they were made (the ViewModel's unsubscribe and rename share the same
+ *   queue). The UI-side state (selection fallback, expansion) is updated by the action itself,
+ *   synchronously, before or regardless of the write.
  */
 internal class FeedListActions(
     private val feedRepository: FeedRepository,
