@@ -82,8 +82,9 @@ again — unless the user has acted on the same item since, in which case that n
   behind the write queue), only on articles whose latest read (or star) write is still the failed one. Pins
   are refreshed rather than dropped, so a row does not vanish from the list; a tombstoned article loses its
   pins. See "Optimistic read/star pins" in [app-architecture.md](app-architecture.md).
-- **Feed list**: a failed folder or tag delete restores the collapsed/expanded state it forgot. The selection
-  fallback to All is kept — the item is still listed, just not selected. Creating a tag or folder for a feed
+- **Feed list**: a folder or tag delete changes the UI — the selection falling back to All, the open article
+  closing with it, the collapsed/expanded state being forgotten — only once its write has landed and the feed
+  list has stopped showing the item, so a failed delete leaves all of it as it was. Creating a tag or folder for a feed
   row is one transaction (`TagRepository.createTagAndAttach`, `FolderRepository.createFolderAndMoveFeed`), so
   a failure leaves neither half behind. The other actions show nothing ahead of their write.
 - **Global settings**: `PreferencesController` shows the stored value again, unless the same setting has been

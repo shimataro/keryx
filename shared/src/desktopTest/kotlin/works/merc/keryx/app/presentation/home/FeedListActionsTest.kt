@@ -55,7 +55,7 @@ class FeedListActionsTest {
     // [runPendingWrites], standing in for the ViewModel's serial dbWriteDispatcher.
     private var holdWrites = false
 
-    // Every write fails while set, running its onFailure instead (see launchWrite below).
+    // Every write fails while set: it writes nothing and skips its afterWrite (see launchWrite below).
     private var failWrites = false
     private val pendingWrites = mutableListOf<suspend () -> Unit>()
 
@@ -98,10 +98,10 @@ class FeedListActionsTest {
             selectedRow,
             currentFilter = { filter },
             selectFilter = { filter = it; selectCalls += it },
-            launchWrite = { write, afterWrite, onFailure ->
+            launchWrite = { write, afterWrite ->
                 val run: suspend () -> Unit = {
                     // A failing write stands in for SerialWriteQueue's runLocalWrite returning false.
-                    if (failWrites) onFailure?.invoke() else { write(); afterWrite?.invoke() }
+                    if (!failWrites) { write(); afterWrite?.invoke() }
                 }
                 if (holdWrites) pendingWrites += run else runBlocking { run() }
             },
@@ -221,28 +221,36 @@ class FeedListActionsTest {
     }
 
     @Test
-    fun aFolderDeleteThatFailsCollapsesTheFolderAgain() {
+    fun aFolderDeleteThatFailsChangesNothing() {
         db.insertFolder("d1", "D")
+        filter = ArticleFilter.Folder("d1")
         expansion.toggleFolder("d1")
         failWrites = true
-        holdWrites = true
 
         actions.deleteFolder("d1")
-        // The queue runs the write, and so its onFailure, after the action has returned.
-        assertEquals(1, pendingWrites.size)
-        runPendingWrites()
 
+        assertEquals(ArticleFilter.Folder("d1"), filter)
+        assertTrue(selectCalls.isEmpty())
         assertEquals(setOf("d1"), expansion.collapsedFolderIds.value)
         assertNull(db.foldersQueries.getById("d1").executeAsOne().deleted_at)
     }
 
     @Test
-    fun aFolderDeleteThatFailsLeavesAnExpandedFolderExpanded() {
+    fun aFolderDeleteFallsBackOnlyOnceItsWriteHasLanded() {
         db.insertFolder("d1", "D")
-        failWrites = true
+        filter = ArticleFilter.Folder("d1")
+        expansion.toggleFolder("d1")
+        holdWrites = true
 
         actions.deleteFolder("d1")
 
+        // Nothing changes while the write is still queued.
+        assertEquals(ArticleFilter.Folder("d1"), filter)
+        assertEquals(setOf("d1"), expansion.collapsedFolderIds.value)
+
+        runPendingWrites()
+
+        assertEquals(ArticleFilter.All, filter)
         assertEquals(emptySet(), expansion.collapsedFolderIds.value)
     }
 
@@ -269,28 +277,38 @@ class FeedListActionsTest {
     }
 
     @Test
-    fun aTagDeleteThatFailsExpandsTheTagAgain() {
+    fun aTagDeleteThatFailsChangesNothing() {
         db.insertTag("t1", "T")
+        filter = ArticleFilter.Tag("t1")
         actions.toggleTagExpanded("t1")
+        selectedRow.value = FeedListRowSelection.FeedInTag("f1", "t1")
         failWrites = true
-        holdWrites = true
 
         actions.deleteTag("t1")
-        // The queue runs the write, and so its onFailure, after the action has returned.
-        assertEquals(1, pendingWrites.size)
-        runPendingWrites()
 
+        assertEquals(ArticleFilter.Tag("t1"), filter)
+        assertTrue(selectCalls.isEmpty())
+        assertEquals(FeedListRowSelection.FeedInTag("f1", "t1"), selectedRow.value)
         assertEquals(setOf("t1"), expansion.expandedTagIds.value)
         assertNull(db.tagsQueries.getById("t1").executeAsOne().deleted_at)
     }
 
     @Test
-    fun aTagDeleteThatFailsLeavesACollapsedTagCollapsed() {
+    fun aTagDeleteFallsBackOnlyOnceItsWriteHasLanded() {
         db.insertTag("t1", "T")
-        failWrites = true
+        actions.toggleTagExpanded("t1")
+        selectedRow.value = FeedListRowSelection.FeedInTag("f1", "t1")
+        holdWrites = true
 
         actions.deleteTag("t1")
 
+        // Nothing changes while the write is still queued.
+        assertEquals(FeedListRowSelection.FeedInTag("f1", "t1"), selectedRow.value)
+        assertEquals(setOf("t1"), expansion.expandedTagIds.value)
+
+        runPendingWrites()
+
+        assertEquals(FeedListRowSelection.FeedInFolderGroup("f1"), selectedRow.value)
         assertEquals(emptySet(), expansion.expandedTagIds.value)
     }
 
@@ -405,7 +423,7 @@ class FeedListActionsTest {
     // --- Writes go through launchWrite ---
 
     @Test
-    fun everyActionReturnsBeforeItsWriteRunsAndUpdatesUiStateAtOnce() {
+    fun everyActionReturnsBeforeItsWriteRunsAndChangesUiStateOnlyOnceItLands() {
         db.insertFeed("f1", sortOrder = 0)
         db.insertFeed("f2", sortOrder = 1)
         db.insertTag("t1", "Old tag")
@@ -429,12 +447,11 @@ class FeedListActionsTest {
         actions.moveFeed("f2", "d1", null)
         actions.reorderFolders("d2", "d1")
 
-        // UI-side state changed at once…
-        assertEquals(FeedListRowSelection.FeedInFolderGroup("f1"), selectedRow.value)
-        assertEquals(emptySet(), expansion.expandedTagIds.value)
-        assertEquals(emptySet(), expansion.collapsedFolderIds.value)
-        assertEquals(listOf<ArticleFilter>(ArticleFilter.All), selectCalls)
-        // …while the DB is untouched until the queued writes run.
+        // Neither the UI-side state nor the DB changes until the queued writes run.
+        assertEquals(FeedListRowSelection.FeedInTag("f1", "t2"), selectedRow.value)
+        assertEquals(setOf("t2"), expansion.expandedTagIds.value)
+        assertEquals(setOf("d3"), expansion.collapsedFolderIds.value)
+        assertTrue(selectCalls.isEmpty())
         assertEquals(9, pendingWrites.size)
         assertEquals(listOf("Doomed tag", "Old tag"), db.tagsQueries.watchAll().executeAsList().map { it.name }.sorted())
         assertEquals(emptyMap(), feedTagMap())
@@ -445,6 +462,11 @@ class FeedListActionsTest {
 
         runPendingWrites()
 
+        // The deletes' fallbacks ran once their writes had landed.
+        assertEquals(FeedListRowSelection.FeedInFolderGroup("f1"), selectedRow.value)
+        assertEquals(emptySet(), expansion.expandedTagIds.value)
+        assertEquals(emptySet(), expansion.collapsedFolderIds.value)
+        assertEquals(listOf<ArticleFilter>(ArticleFilter.All), selectCalls)
         val newTagId = db.tagsQueries.watchAll().executeAsList().single { it.name == "New" }.id
         assertEquals("Renamed tag", db.tagsQueries.getById("t1").executeAsOne().name)
         assertNotNull(db.tagsQueries.getById("t2").executeAsOne().deleted_at)

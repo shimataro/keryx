@@ -5654,8 +5654,8 @@ class HomeViewModelTest {
         vm.moveFeed("f2", "d1")
         vm.deleteFolder("d3")
 
-        // Nothing has reached the DB yet, but the deleted tag's selection already fell back.
-        assertEquals(ArticleFilter.All, vm.filter.value)
+        // Nothing has reached the DB yet, so the deleted tag is still selected.
+        assertEquals(ArticleFilter.Tag("t2"), vm.filter.value)
         assertEquals("Old tag", db.tagsQueries.getById("t1").executeAsOne().name)
         assertNull(db.tagsQueries.getById("t2").executeAsOne().deleted_at)
         assertTrue(db.feed_tagsQueries.watchAllActive().executeAsList().isEmpty())
@@ -5668,7 +5668,10 @@ class HomeViewModelTest {
         assertEquals(1, writes.queuedCount)
 
         writes.release()
+        testScheduler.advanceUntilIdle()
 
+        // The tag's delete has landed and the list no longer shows it, so the selection fell back.
+        assertEquals(ArticleFilter.All, vm.filter.value)
         assertEquals("New tag", db.tagsQueries.getById("t1").executeAsOne().name)
         assertEquals("#123456", db.tagsQueries.getById("t1").executeAsOne().color)
         assertNotNull(db.tagsQueries.getById("t2").executeAsOne().deleted_at)
@@ -5757,8 +5760,10 @@ class HomeViewModelTest {
         vm.selectFilter(ArticleFilter.Tag("t1"))
 
         vm.deleteTag("t1")
+        // Falls back once the write has landed and the feed list has stopped showing it.
+        testScheduler.advanceUntilIdle()
 
-        assertEquals(ArticleFilter.All, vm.filter.value)
+                assertEquals(ArticleFilter.All, vm.filter.value)
         assertNotNull(db.tagsQueries.getById("t1").executeAsOne().deleted_at)
     }
 
@@ -5835,8 +5840,10 @@ class HomeViewModelTest {
         vm.selectFilter(ArticleFilter.Folder("d1"))
 
         vm.deleteFolder("d1")
+        // Falls back once the write has landed and the feed list has stopped showing it.
+        testScheduler.advanceUntilIdle()
 
-        assertEquals(ArticleFilter.All, vm.filter.value)
+                assertEquals(ArticleFilter.All, vm.filter.value)
         assertNotNull(db.foldersQueries.getById("d1").executeAsOne().deleted_at)
     }
 
@@ -5928,8 +5935,10 @@ class HomeViewModelTest {
         assertTrue("d1" in vm.collapsedFolderIds.value)
 
         vm.deleteFolder("d1")
+        // Falls back once the write has landed and the feed list has stopped showing it.
+        testScheduler.advanceUntilIdle()
 
-        assertFalse("d1" in vm.collapsedFolderIds.value)
+                assertFalse("d1" in vm.collapsedFolderIds.value)
         assertFalse("d1" in store.load().collapsedFolderIds)
     }
 
@@ -5965,8 +5974,10 @@ class HomeViewModelTest {
         assertTrue("t1" in vm.expandedTagIds.value)
 
         vm.deleteTag("t1")
+        // Falls back once the write has landed and the feed list has stopped showing it.
+        testScheduler.advanceUntilIdle()
 
-        assertFalse("t1" in vm.expandedTagIds.value)
+                assertFalse("t1" in vm.expandedTagIds.value)
         assertFalse("t1" in store.load().expandedTagIds)
     }
 
@@ -6007,8 +6018,10 @@ class HomeViewModelTest {
         assertEquals(FeedListRowSelection.FeedInTag("f1", "t1"), vm.selectedRowInstance.value)
 
         vm.deleteTag("t1")
+        // Falls back once the write has landed and the feed list has stopped showing it.
+        testScheduler.advanceUntilIdle()
 
-        assertEquals(FeedListRowSelection.FeedInFolderGroup("f1"), vm.selectedRowInstance.value)
+                assertEquals(FeedListRowSelection.FeedInFolderGroup("f1"), vm.selectedRowInstance.value)
     }
 
     // --- A selection moved back onto a deleted item before its delete landed ---
@@ -6187,14 +6200,16 @@ class HomeViewModelTest {
         testScheduler.advanceUntilIdle()
         lookups.failExecute = { it.startsWith("UPDATE tags") }
 
+        vm.selectFilter(ArticleFilter.Tag("t1"))
+        testScheduler.advanceUntilIdle()
+
         vm.deleteTag("t1")
         testScheduler.advanceUntilIdle()
         lookups.failExecute = null
         assertNull(db.tagsQueries.getById("t1").executeAsOne().deleted_at)
-        // Reported rather than thrown.
+        // Reported rather than thrown, and the selection never left the tag.
         assertEquals(1, notifications.items.value.size)
-        vm.selectFilter(ArticleFilter.Tag("t1"))
-        testScheduler.advanceUntilIdle()
+        assertEquals(ArticleFilter.Tag("t1"), vm.filter.value)
         // A deletion arriving later (as from a sync merge).
         db.tagsQueries.softDelete(5L, 5L, "t1")
         testScheduler.advanceUntilIdle()
@@ -6204,13 +6219,15 @@ class HomeViewModelTest {
     }
 
     @Test
-    fun aFolderDeleteWhoseWriteFailedIsReportedAndKeepsTheFolderCollapsed() = runTest {
+    fun aFolderDeleteWhoseWriteFailedIsReportedAndKeepsTheFolderSelectedAndCollapsed() = runTest {
         db.insertFolder("d1", "News")
         val notifications = NotificationCenter()
         val vm = newViewModel(localWriteFailureReporter = LocalWriteFailureReporter(notifications, Clock { 0L }))
         subscribeAll(vm)
         testScheduler.advanceUntilIdle()
         vm.toggleFolderCollapsed("d1")
+        vm.selectFilter(ArticleFilter.Folder("d1"))
+        testScheduler.advanceUntilIdle()
         lookups.failExecute = { it.contains("UPDATE folders") || it.contains("UPDATE feeds") }
 
         vm.deleteFolder("d1")
@@ -6220,6 +6237,7 @@ class HomeViewModelTest {
         assertNull(db.foldersQueries.getById("d1").executeAsOne().deleted_at)
         assertTrue(vm.folders.value.any { it.id == "d1" })
         assertEquals(setOf("d1"), vm.collapsedFolderIds.value)
+        assertEquals(ArticleFilter.Folder("d1"), vm.filter.value)
         assertEquals(1, notifications.items.value.size)
     }
 

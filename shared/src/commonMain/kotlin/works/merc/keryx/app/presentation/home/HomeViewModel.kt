@@ -858,7 +858,7 @@ class HomeViewModel(
         selectedRowInstance = _selectedRowInstance,
         currentFilter = { _filter.value },
         selectFilter = { selectFilter(it) },
-        launchWrite = { write, afterWrite, onFailure -> feedListWrites.enqueue(write, afterWrite, onFailure) },
+        launchWrite = { write, afterWrite -> feedListWrites.enqueue(write, afterWrite) },
         fallBackOnceHidden = ::fallBackOnceHidden,
     )
 
@@ -2077,9 +2077,9 @@ class HomeViewModel(
     fun updateTag(id: String, name: String, color: String?) = feedListActions.updateTag(id, name, color)
 
     /**
-     * Deletes a tag and resets the active filter if it references the deleted tag — at once, and
-     * again once the queued write has landed and the feed list has stopped showing the tag (see
-     * [unsubscribeFeed] for why, and why only here).
+     * Deletes a tag and resets the active filter if it references the deleted tag — once the queued
+     * write has landed and the feed list has stopped showing the tag, so a delete that fails changes
+     * nothing (see [FeedListActions.deleteTag]).
      *
      * @param id The identifier of the tag to delete.
      */
@@ -2113,8 +2113,8 @@ class HomeViewModel(
 
     /**
      * Deletes a folder, removes it from the collapsed-folder state and resets the active filter if
-     * it is the deleted folder — at once, and again once the queued write has landed and the feed
-     * list has stopped showing the folder (see [unsubscribeFeed] for why, and why only here).
+     * it is the deleted folder — once the queued write has landed and the feed list has stopped
+     * showing the folder, so a delete that fails changes nothing (see [FeedListActions.deleteFolder]).
      *
      * @param id The identifier of the folder to delete.
      */

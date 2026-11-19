@@ -65,12 +65,6 @@ internal class FeedListExpansion(private val settingsRepository: SettingsReposit
     /** Drops a deleted tag from the expanded-tag state. */
     fun forgetTag(tagId: String) = setExpandedTags(_expandedTagIds.value - tagId)
 
-    /** Collapses a folder again whose [forgetFolder] a failed delete has to take back. */
-    fun restoreFolderCollapsed(folderId: String) = setCollapsedFolders(_collapsedFolderIds.value + folderId)
-
-    /** Expands a tag again whose [forgetTag] a failed delete has to take back. */
-    fun restoreTagExpanded(tagId: String) = setExpandedTags(_expandedTagIds.value + tagId)
-
     private fun setCollapsedFolders(ids: Set<String>) {
         _collapsedFolderIds.value = ids
         settingsRepository.mutateLocalSettings { it.copy(collapsedFolderIds = ids) }

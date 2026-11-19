@@ -24,14 +24,13 @@ import works.merc.keryx.app.domain.TagRepository
  *   hold it for up to `busy_timeout`). Writes run one at a time, each to completion — including
  *   while it is suspended, e.g. a move waiting on the feed placement lock — before the next starts,
  *   so they land in the order they were made (the ViewModel's unsubscribe and rename share the same
- *   queue). The UI-side state (selection fallback, expansion) is updated by the action itself,
- *   synchronously, before or regardless of the write. The second argument, when non-null, runs on
- *   the ViewModel's main thread once the write has landed successfully; a delete hands its
- *   selection fallback to [fallBackOnceHidden] there. The third, when non-null, runs there instead
- *   once the write has failed (the failure itself is reported by the queue): a delete restores the
- *   expansion state it forgot. Creating an item and placing a feed in it is one write
+ *   queue). The second argument, when non-null, runs on the ViewModel's main thread once the write
+ *   has landed successfully — never after a failure, which the queue reports itself. A delete hands
+ *   its selection fallback (and the expansion state it forgets) to [fallBackOnceHidden] there and
+ *   changes nothing before, so a delete that fails leaves the filter, the open article and the
+ *   expansion exactly as they were. Creating an item and placing a feed in it is one write
  *   ([TagRepository.createTagAndAttach], [FolderRepository.createFolderAndMoveFeed]), so a failure
- *   leaves neither half behind; every other action shows nothing ahead of its write.
+ *   leaves neither half behind; no action shows anything ahead of its write.
  * @param fallBackOnceHidden Runs the fallback it is given once the feed list stops showing the
  *   deleted target — in production the ViewModel's [DeletedItemFallback]s. A delete's write lands
  *   before the list flow delivers it, so the feed list still shows the deleted item, and the user can
@@ -47,7 +46,7 @@ internal class FeedListActions(
     private val selectedRowInstance: MutableStateFlow<FeedListRowSelection>,
     private val currentFilter: () -> ArticleFilter,
     private val selectFilter: (ArticleFilter) -> Unit,
-    private val launchWrite: (write: suspend () -> Unit, afterWrite: (() -> Unit)?, onFailure: (() -> Unit)?) -> Unit,
+    private val launchWrite: (write: suspend () -> Unit, afterWrite: (() -> Unit)?) -> Unit,
     private val fallBackOnceHidden: (target: DeletedTarget, fallback: () -> Unit) -> Unit,
 ) {
     /** See `HomeViewModel.toggleTagExpanded`. */
@@ -70,30 +69,26 @@ internal class FeedListActions(
             } else {
                 tagRepository.createTag(trimmed, color)
             }
-        }, null, null)
+        }, null)
     }
 
     /** See `HomeViewModel.updateTag`. Blank names are ignored. */
     fun updateTag(id: String, name: String, color: String?) {
         if (name.isBlank()) return
         val trimmed = name.trim()
-        launchWrite({ tagRepository.updateTag(id, trimmed, color) }, null, null)
+        launchWrite({ tagRepository.updateTag(id, trimmed, color) }, null)
     }
 
     /**
-     * See `HomeViewModel.deleteTag`. The selection falls back at once, and again once the write has
-     * landed and the feed list has stopped showing the tag, in case the still-shown tag (or a feed
-     * row nested under it) was selected in between.
+     * See `HomeViewModel.deleteTag`. The selection falls back (and the tag's expansion state is
+     * forgotten) only once the write has landed and the feed list has stopped showing the tag — so a
+     * tag (or a feed row nested under it) selected again in between falls back too, and a delete that
+     * fails changes nothing.
      */
     fun deleteTag(id: String) {
-        // Taken before the fallback below forgets it, for a failed write to put back.
-        val wasExpanded = id in expansion.expandedTagIds.value
-        launchWrite(
-            { tagRepository.deleteTag(id) },
-            { fallBackOnceHidden(DeletedTarget.Tag(id)) { fallBackFromDeletedTag(id) } },
-            { if (wasExpanded) expansion.restoreTagExpanded(id) },
-        )
-        fallBackFromDeletedTag(id)
+        launchWrite({ tagRepository.deleteTag(id) }) {
+            fallBackOnceHidden(DeletedTarget.Tag(id)) { fallBackFromDeletedTag(id) }
+        }
     }
 
     private fun fallBackFromDeletedTag(id: String) {
@@ -113,7 +108,7 @@ internal class FeedListActions(
     }
 
     fun setFeedTag(feedId: String, tagId: String, attached: Boolean) {
-        launchWrite({ tagRepository.setFeedTag(feedId, tagId, attached) }, null, null)
+        launchWrite({ tagRepository.setFeedTag(feedId, tagId, attached) }, null)
     }
 
     // --- Folder actions ---
@@ -128,30 +123,25 @@ internal class FeedListActions(
             } else {
                 folderRepository.createFolder(trimmed)
             }
-        }, null, null)
+        }, null)
     }
 
     /** See `HomeViewModel.updateFolder`. Blank names are ignored. */
     fun updateFolder(id: String, name: String) {
         if (name.isBlank()) return
         val trimmed = name.trim()
-        launchWrite({ folderRepository.updateFolder(id, trimmed) }, null, null)
+        launchWrite({ folderRepository.updateFolder(id, trimmed) }, null)
     }
 
     /**
-     * See `HomeViewModel.deleteFolder`. The selection falls back at once, and again once the write
-     * has landed and the feed list has stopped showing the folder, in case the still-shown folder was
-     * selected in between.
+     * See `HomeViewModel.deleteFolder`. The selection falls back (and the folder's collapsed state is
+     * forgotten) only once the write has landed and the feed list has stopped showing the folder — so
+     * a folder selected again in between falls back too, and a delete that fails changes nothing.
      */
     fun deleteFolder(id: String) {
-        // Taken before the fallback below forgets it, for a failed write to put back.
-        val wasCollapsed = id in expansion.collapsedFolderIds.value
-        launchWrite(
-            { folderRepository.deleteFolder(id) },
-            { fallBackOnceHidden(DeletedTarget.Folder(id)) { fallBackFromDeletedFolder(id) } },
-            { if (wasCollapsed) expansion.restoreFolderCollapsed(id) },
-        )
-        fallBackFromDeletedFolder(id)
+        launchWrite({ folderRepository.deleteFolder(id) }) {
+            fallBackOnceHidden(DeletedTarget.Folder(id)) { fallBackFromDeletedFolder(id) }
+        }
     }
 
     private fun fallBackFromDeletedFolder(id: String) {
@@ -160,10 +150,10 @@ internal class FeedListActions(
     }
 
     fun moveFeed(feedId: String, folderId: String?, targetFeedId: String?) {
-        launchWrite({ feedRepository.moveFeed(feedId, folderId, targetFeedId) }, null, null)
+        launchWrite({ feedRepository.moveFeed(feedId, folderId, targetFeedId) }, null)
     }
 
     fun reorderFolders(draggedFolderId: String, targetFolderId: String?) {
-        launchWrite({ folderRepository.reorderFolders(draggedFolderId, targetFolderId) }, null, null)
+        launchWrite({ folderRepository.reorderFolders(draggedFolderId, targetFolderId) }, null)
     }
 }
