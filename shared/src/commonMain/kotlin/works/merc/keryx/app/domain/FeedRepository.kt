@@ -216,12 +216,15 @@ class FeedRepository(
      * [storedBeforeFetch] is the feed values of the row stored at the requested URL, read before the
      * fetch began (`null` when there was none). At write time it tells whether something else — a
      * refresh of the same feed — changed those values while this fetch was in flight.
+     * [observedBatchWrites] is how many of the batch's own writes had committed when that read was
+     * taken (0 outside a batch) — see [SubscribeBatch].
      */
     internal class PrefetchedSubscription(
         val fetched: FetchedFeed,
         val effectiveUrl: String,
         val favicon: String?,
         val storedBeforeFetch: StoredFeedValues?,
+        val observedBatchWrites: Int,
     )
 
     /**
@@ -250,13 +253,16 @@ class FeedRepository(
      * Fetches [url] and resolves its favicon, writing nothing to the DB. A fetch error is returned as
      * [Result.Err]; the favicon lookup is made only once the fetch succeeded.
      */
-    internal suspend fun prefetchSubscription(url: String): Result<PrefetchedSubscription> {
+    internal suspend fun prefetchSubscription(url: String, batch: SubscribeBatch? = null): Result<PrefetchedSubscription> {
+        // Counted before the row is read: a batch write that commits in between then shows in both the
+        // row and the baseline, rather than in the row alone, where it would pass for another writer's.
+        val observedBatchWrites = batch?.committedWrites() ?: 0
         // Read before the fetch starts, so a write that lands while it is in flight shows as a change.
         val storedBeforeFetch = feeds.getByUrl(url).executeAsOneOrNull()?.let { StoredFeedValues(it.id, it.feedValues) }
         val fetched = feedFetcher.fetch(url).valueOrElse { return it }
         val effectiveUrl = fetched.redirectUrl ?: url
         val favicon = faviconResolver.resolve(fetched.siteUrl, effectiveUrl)
-        return Result.Ok(PrefetchedSubscription(fetched, effectiveUrl, favicon, storedBeforeFetch))
+        return Result.Ok(PrefetchedSubscription(fetched, effectiveUrl, favicon, storedBeforeFetch, observedBatchWrites))
     }
 
     /**
@@ -301,7 +307,7 @@ class FeedRepository(
         val written = feedPlacementMutex.withLock {
             doSubscribeFeedWrite(
                 effectiveUrl, folderId, afterFeedId, beforeFeedId, subscription.favicon, fetched,
-                subscription.storedBeforeFetch, batch,
+                subscription.storedBeforeFetch, subscription.observedBatchWrites, batch,
             )
         }
         val feedId = written.feedId
@@ -310,8 +316,10 @@ class FeedRepository(
         // and only the groups this write replaced, not values it kept from another writer.
         batch?.record(
             feedId,
-            content = SubscribeBatch.Recorded(written.values.withoutFavicon()).takeIf { written.replacedContent },
-            favicon = SubscribeBatch.Recorded(written.values.faviconUrl).takeIf { written.replacedFavicon },
+            content = written.values.withoutFavicon(),
+            replacedContent = written.replacedContent,
+            favicon = written.values.faviconUrl,
+            replacedFavicon = written.replacedFavicon,
         )
         articleRepository.upsertParsed(feedId, fetched.articles)
         syncScheduler.scheduleSync()
@@ -436,6 +444,7 @@ class FeedRepository(
         favicon: String?,
         fetched: FetchedFeed,
         storedBeforeFetch: StoredFeedValues?,
+        observedBatchWrites: Int,
         batch: SubscribeBatch?,
     ): SubscribeWrite {
         // Taken under the lock, not before waiting for it: a write committed while this call waited
@@ -477,15 +486,19 @@ class FeedRepository(
                 etag = fetched.etag,
                 lastModified = fetched.lastModified,
             )
-            // Each group's baseline is this batch's own last write of that group to the row, when there
-            // is one (see writePrefetchedSubscription's batch), else the prefetch's read — only when it
-            // read this very row. No baseline means the fetched values are written.
+            // Each group's baseline is this batch's own last write of that group to the row, when that
+            // write came after the prefetch's read (see writePrefetchedSubscription's batch), else the
+            // prefetch's read — only when it read this very row. No baseline means the fetched values
+            // are written.
             val stored = current?.takeIf { it.deleted_at == null }?.feedValues
             val prefetchRead = storedBeforeFetch?.takeIf { current != null && it.feedId == current.id }?.values
-            val contentBaseline = current?.let { batch?.content(it.id) }?.value ?: prefetchRead?.withoutFavicon()
-            val faviconBaseline = current?.let { batch?.favicon(it.id) } ?: prefetchRead?.let { SubscribeBatch.Recorded(it.faviconUrl) }
+            val contentBaseline = current?.let { batch?.contentWrittenAfter(it.id, observedBatchWrites) } ?: prefetchRead?.withoutFavicon()
+            // The favicon can legitimately be null, so "a baseline exists" is tracked apart from its value.
+            val ownFavicon = current?.let { batch?.faviconWrittenAfter(it.id, observedBatchWrites) }
+            val hasFaviconBaseline = ownFavicon != null || prefetchRead != null
+            val faviconBaseline = if (ownFavicon != null) ownFavicon.value else prefetchRead?.faviconUrl
             val keepContent = stored != null && contentBaseline != null && stored.withoutFavicon() != contentBaseline
-            val keepFavicon = stored != null && faviconBaseline != null && stored.faviconUrl != faviconBaseline.value
+            val keepFavicon = stored != null && hasFaviconBaseline && stored.faviconUrl != faviconBaseline
             val values = (if (keepContent) stored!! else fetchedValues)
                 .copy(faviconUrl = if (keepFavicon) stored!!.faviconUrl else fetchedValues.faviconUrl)
 

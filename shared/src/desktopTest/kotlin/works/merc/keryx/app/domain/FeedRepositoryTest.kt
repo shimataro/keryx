@@ -1883,6 +1883,35 @@ class FeedRepositoryTest {
         }
     }
 
+    /**
+     * An entry whose prefetch read the row only after the batch's own write and a refresh that
+     * followed it — the canonical feed listed past the prefetch window of an alias before it — takes
+     * that read, not the older batch write, as its baseline: the refresh was already there when it
+     * fetched, so its newer fetch is written.
+     */
+    @Test
+    fun writePrefetchedSubscriptionIgnoresABatchWriteThePrefetchHadAlreadySeen(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val alias = "https://ex.com/old"
+            val target = "https://ex.com/feed"
+            val repo = newRepo(db, driver, aliasFetcher(alias, target), clock = Clock { 1000L })
+            db.insertFeed("f1", now = 500L, url = target)
+            db.feedsQueries.updateCacheHeaders("v0", null, 500L, "f1")
+            val batch = SubscribeBatch()
+            val viaAlias = repo.prefetchSubscription(alias, batch) // v1
+
+            repo.writePrefetchedSubscription(viaAlias, batch = batch)
+            db.feedsQueries.updateCacheHeaders("refreshed", null, 2000L, "f1")
+            val direct = repo.prefetchSubscription(target, batch) // v2, read after both writes
+            repo.writePrefetchedSubscription(direct, batch = batch)
+
+            assertEquals("v2", db.feedsQueries.getById("f1").executeAsOne().etag)
+        } finally {
+            driver.close()
+        }
+    }
+
     /** With no other writer in between, the last of several entries for the same row wins. */
     @Test
     fun writePrefetchedSubscriptionLetsTheLastOfSeveralEntriesWin(): Unit = runBlocking {

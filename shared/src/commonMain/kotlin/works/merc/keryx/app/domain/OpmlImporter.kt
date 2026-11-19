@@ -82,7 +82,7 @@ class OpmlImporter(
             for (entry in entries) {
                 while (prefetches.size < OPML_PREFETCH_AHEAD && nextToPrefetch < entries.size) {
                     val url = entries[nextToPrefetch++].xmlUrl
-                    prefetches.addLast(async { fetchSlots.withPermit { feedRepository.prefetchSubscription(url) } })
+                    prefetches.addLast(async { fetchSlots.withPermit { feedRepository.prefetchSubscription(url, batch) } })
                 }
                 val outcome = feedRepository.writePrefetchedSubscription(prefetches.removeFirst().await(), batch = batch)
                 when (val subscribed = outcome.result) {
