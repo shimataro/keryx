@@ -32,6 +32,7 @@ import works.merc.keryx.app.core.NotificationText
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.data.local.FtsManager
 import works.merc.keryx.app.data.local.FtsSearch
+import works.merc.keryx.app.data.remote.ParsedArticle
 import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.data.remote.FaviconResolver
 import works.merc.keryx.app.data.remote.FeedFetcher
@@ -1748,6 +1749,69 @@ class FeedRepositoryTest {
             assertEquals(1L, row.error_count)
             assertEquals("boom", row.last_error)
             assertEquals(listOf("f1"), db.articlesQueries.watchAll().executeAsList().map { it.feed_id })
+        } finally {
+            driver.close()
+        }
+    }
+
+    /** A feed whose fetch answers article g1 with [g1Body], plus a second article g2. */
+    private fun twoArticleFetcher(g1Body: String) = fetcherWith {
+        respond(
+            """<?xml version="1.0"?><rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/"><channel>
+<title>Feed</title><link>https://ex.com</link>
+<item><title>Post</title><link>https://ex.com/1</link><guid>g1</guid><content:encoded>$g1Body</content:encoded></item>
+<item><title>Other</title><link>https://ex.com/2</link><guid>g2</guid><content:encoded>g2 body</content:encoded></item>
+</channel></rss>""",
+            HttpStatusCode.OK,
+            headersOf(HttpHeaders.ETag, "fetched-etag"),
+        )
+    }
+
+    /**
+     * A refresh that lands after the prefetch, with newer validators and a newer body for an article,
+     * keeps both: the subscribe's own fetch is the older response, so it neither puts its validators
+     * nor its article bodies back over the refresh's. Articles only it fetched are still added.
+     */
+    @Test
+    fun writePrefetchedSubscriptionKeepsArticleBodiesARefreshWroteAfterItsFetchStarted(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val url = "https://ex.com/feed"
+            val repo = newRepo(db, driver, twoArticleFetcher("fetched body"), clock = Clock { 1000L })
+            val articles = ArticleRepository(db, FtsSearch(driver), SyncScheduler {}, Clock { 1000L }, Dispatchers.Unconfined)
+            db.insertFeed("f1", now = 500L, url = url)
+            articles.upsertParsed("f1", listOf(ParsedArticle(guid = "g1", title = "Post", content = "old body")))
+            val prefetched = repo.prefetchSubscription(url)
+            // A refresh of the same feed lands afterwards, with newer validators and a newer body.
+            db.feedsQueries.updateCacheHeaders("refreshed-etag", null, 2000L, "f1")
+            articles.upsertParsed("f1", listOf(ParsedArticle(guid = "g1", title = "Post", content = "refreshed body")))
+
+            repo.writePrefetchedSubscription(prefetched)
+
+            assertEquals("refreshed-etag", db.feedsQueries.getById("f1").executeAsOne().etag)
+            assertEquals("refreshed body", db.articlesQueries.getByFeedAndGuid("f1", "g1").executeAsOne().content)
+            assertEquals("g2 body", db.articlesQueries.getByFeedAndGuid("f1", "g2").executeAsOne().content)
+        } finally {
+            driver.close()
+        }
+    }
+
+    /** With nothing written since the prefetch, its fetched article bodies replace the stored ones. */
+    @Test
+    fun writePrefetchedSubscriptionOverwritesArticleBodiesWhenTheRowIsUnchangedSinceThePrefetch(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val url = "https://ex.com/feed"
+            val repo = newRepo(db, driver, twoArticleFetcher("fetched body"), clock = Clock { 1000L })
+            val articles = ArticleRepository(db, FtsSearch(driver), SyncScheduler {}, Clock { 1000L }, Dispatchers.Unconfined)
+            db.insertFeed("f1", now = 500L, url = url)
+            articles.upsertParsed("f1", listOf(ParsedArticle(guid = "g1", title = "Post", content = "old body")))
+            val prefetched = repo.prefetchSubscription(url)
+
+            repo.writePrefetchedSubscription(prefetched)
+
+            assertEquals("fetched-etag", db.feedsQueries.getById("f1").executeAsOne().etag)
+            assertEquals("fetched body", db.articlesQueries.getByFeedAndGuid("f1", "g1").executeAsOne().content)
         } finally {
             driver.close()
         }

@@ -45,6 +45,33 @@ class ArticleUpsertTest {
     }
 
     @Test
+    fun upsertWithoutOverwritingLeavesStoredArticlesAloneAndAddsOnlyNewOnes() {
+        val (driver, db) = inMemoryDb()
+        try {
+            val repo = ArticleRepository(db, FtsSearch(driver), SyncScheduler {}, Clock { 1000L })
+            db.insertFeed("f1")
+            repo.upsertParsed("f1", listOf(ParsedArticle(guid = "g1", title = "Stored", content = "stored body")))
+
+            val added = repo.upsertParsed(
+                "f1",
+                listOf(
+                    ParsedArticle(guid = "g1", title = "Older", content = "older body"),
+                    ParsedArticle(guid = "g2", title = "New", content = "new body"),
+                ),
+                overwriteExisting = false,
+            )
+
+            assertEquals(1, added)
+            val g1 = db.articlesQueries.getByFeedAndGuid("f1", "g1").executeAsOne()
+            assertEquals("Stored", g1.title)
+            assertEquals("stored body", g1.content)
+            assertEquals("new body", db.articlesQueries.getByFeedAndGuid("f1", "g2").executeAsOne().content)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
     fun sameArticleGetsSameIdAcrossIndependentDatabases() {
         // Reproduces the cross-device sync bug: two devices independently fetching the same article
         // (same feed_id + guid) must store it under the SAME id, otherwise the merge (matched by id)

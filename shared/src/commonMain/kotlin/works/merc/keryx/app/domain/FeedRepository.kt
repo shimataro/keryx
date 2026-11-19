@@ -321,7 +321,11 @@ class FeedRepository(
             favicon = written.values.faviconUrl,
             replacedFavicon = written.replacedFavicon,
         )
-        articleRepository.upsertParsed(feedId, fetched.articles)
+        // The articles follow the feed values: a write that kept another writer's newer content and
+        // validators (a refresh that landed after the prefetch) only adds the articles not stored
+        // yet. Its own fetch is the older response, so overwriting would put older bodies back under
+        // the kept validators — and a conditional request answered 304 would never repair them.
+        articleRepository.upsertParsed(feedId, fetched.articles, overwriteExisting = written.replacedContent)
         syncScheduler.scheduleSync()
         return FeedWriteOutcome(
             Result.Ok(feeds.getById(feedId).executeAsOne()),

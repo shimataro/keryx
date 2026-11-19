@@ -328,11 +328,14 @@ class ArticleRepository(
      *
      * @param feedId The identifier of the feed containing the articles.
      * @param parsed The fetched articles to store.
+     * @param overwriteExisting Whether an article already stored for the feed takes the fetched
+     *   values (the default), or is left as it is, so only articles not stored yet are added — see
+     *   [insertPrepared].
      * @return The number of articles that were not previously stored for the feed.
      */
-    fun upsertParsed(feedId: String, parsed: List<ParsedArticle>): Int {
+    fun upsertParsed(feedId: String, parsed: List<ParsedArticle>, overwriteExisting: Boolean = true): Int {
         val prepared = prepareParsed(feedId, parsed)
-        return db.transactionWithResult { insertPrepared(prepared) }
+        return db.transactionWithResult { insertPrepared(prepared, overwriteExisting) }
     }
 
     /**
@@ -394,30 +397,25 @@ class ArticleRepository(
      * Inserts prepared articles into the database while preserving existing article state.
      *
      * @param prepared The prepared articles and metadata to insert.
+     * @param overwriteExisting Whether an article already stored for the feed is updated with the
+     *   prepared values (the default, `articles.insert`), or left exactly as it is (`insertIfAbsent`)
+     *   — for a write whose fetch is older than what is stored, so it must not put older bodies back.
      * @return The number of newly stored articles.
      */
-    internal fun insertPrepared(prepared: PreparedArticles): Int {
+    internal fun insertPrepared(prepared: PreparedArticles, overwriteExisting: Boolean = true): Int {
+        // Both queries take the same columns in the same order (articles.sq); only ON CONFLICT differs.
+        // A function reference takes no named arguments, so the call below is positional, in the
+        // column order: id, feed_id, guid, url, title, summary, content, author, published_at,
+        // thumbnail_url, is_read, read_at, is_starred, starred_at, cached_at, search_text,
+        // updated_at, created_at.
+        val insert = if (overwriteExisting) articles::insert else articles::insertIfAbsent
         for (pi in prepared.rows) {
             val p = pi.parsed
-            articles.insert(
-                id = pi.id,
-                feed_id = prepared.feedId,
-                guid = p.guid,
-                url = p.url ?: "",
-                title = p.title ?: "",
-                summary = pi.summaryToStore,
-                content = p.content,
-                author = p.author,
-                published_at = p.publishedAtMillis,
-                thumbnail_url = p.thumbnailUrl,
-                is_read = 0L,
-                read_at = null,
-                is_starred = 0L,
-                starred_at = null,
-                cached_at = prepared.now,
-                search_text = pi.searchText,
-                updated_at = prepared.now,
-                created_at = prepared.now,
+            insert(
+                pi.id, prepared.feedId, p.guid, p.url ?: "", p.title ?: "", pi.summaryToStore, p.content,
+                p.author, p.publishedAtMillis, p.thumbnailUrl,
+                0L, null, 0L, null,
+                prepared.now, pi.searchText, prepared.now, prepared.now,
             )
         }
         return prepared.newCount
