@@ -806,10 +806,26 @@ class HomeViewModel(
 
     // A delete's second selection fallback, run once the list the feed list renders from stops
     // showing the deleted item (see [DeletedItemFallback]) — the feed list renders feeds from
-    // [structuralFeeds], which can lag [feeds].
-    private val deletedFeedFallback = DeletedItemFallback(viewModelScope, structuralFeeds) { it.id }
-    private val deletedTagFallback = DeletedItemFallback(viewModelScope, tags) { it.id }
-    private val deletedFolderFallback = DeletedItemFallback(viewModelScope, folders) { it.id }
+    // [structuralFeeds], which can lag [feeds]. Whether a still-shown item is live is read on
+    // [dispatcher], off the main thread.
+    private val deletedFeedFallback = DeletedItemFallback(
+        viewModelScope,
+        structuralFeeds,
+        dispatcher,
+        isLive = { id -> feedRepository.getFeedById(id).let { it != null && it.deleted_at == null } },
+    ) { it.id }
+    private val deletedTagFallback = DeletedItemFallback(
+        viewModelScope,
+        tags,
+        dispatcher,
+        isLive = { id -> tagRepository.getTagById(id).let { it != null && it.deleted_at == null } },
+    ) { it.id }
+    private val deletedFolderFallback = DeletedItemFallback(
+        viewModelScope,
+        folders,
+        dispatcher,
+        isLive = { id -> folderRepository.getFolderById(id).let { it != null && it.deleted_at == null } },
+    ) { it.id }
 
     /** Runs [fallback] once the feed list stops showing [target] — see [DeletedItemFallback]. */
     private fun fallBackOnceHidden(target: DeletedTarget, fallback: () -> Unit) = when (target) {
