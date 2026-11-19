@@ -1708,6 +1708,75 @@ class FeedRepositoryTest {
     }
 
     /**
+     * A re-import writes what it fetched earlier; a refresh of the same feed that wrote the row after
+     * that fetch started holds newer values, which the import must not overwrite with its older ones.
+     * Its articles are still added.
+     */
+    @Test
+    fun writePrefetchedSubscriptionKeepsFeedValuesWrittenAfterItsFetchStarted(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val url = "https://ex.com/feed"
+            var now = 1000L
+            val repo = newRepo(
+                db, driver,
+                fetcherWith { respond(RSS, HttpStatusCode.OK, headersOf(HttpHeaders.ETag, "fetched-etag")) },
+                clock = Clock { now },
+            )
+            db.insertFeed("f1", now = 500L, url = url)
+            val prefetched = repo.prefetchSubscription(url) // fetch starts at 1000
+            // A refresh of the same feed lands afterwards, with newer values and a failure on record.
+            now = 2000L
+            db.feedsQueries.updateCacheHeaders("refreshed-etag", "refreshed-lm", 2000L, "f1")
+            db.feedsQueries.updateContent("https://refreshed.site", "Refreshed title", "Refreshed desc", 2000L, "f1")
+            db.feedsQueries.incrementErrorCount("boom", 2000L, "f1")
+            now = 3000L
+            // (error_count / last_error survive either way: feeds.upsert never updates them on an
+            // existing row.)
+
+            repo.writePrefetchedSubscription(prefetched)
+
+            val row = db.feedsQueries.getById("f1").executeAsOne()
+            assertEquals("refreshed-etag", row.etag)
+            assertEquals("refreshed-lm", row.last_modified)
+            assertEquals("https://refreshed.site", row.site_url)
+            assertEquals("Refreshed title", row.title)
+            assertEquals("Refreshed desc", row.description)
+            assertEquals(1L, row.error_count)
+            assertEquals("boom", row.last_error)
+            assertEquals(listOf("f1"), db.articlesQueries.watchAll().executeAsList().map { it.feed_id })
+        } finally {
+            driver.close()
+        }
+    }
+
+    /** With the row last written no later than the fetch started, the fetched values are written. */
+    @Test
+    fun writePrefetchedSubscriptionWritesFetchedValuesWhenTheRowIsNotNewerThanTheFetch(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val url = "https://ex.com/feed"
+            val repo = newRepo(
+                db, driver,
+                fetcherWith { respond(RSS, HttpStatusCode.OK, headersOf(HttpHeaders.ETag, "fetched-etag")) },
+                clock = Clock { 1000L },
+            )
+            db.insertFeed("f1", now = 500L, url = url)
+            db.feedsQueries.updateCacheHeaders("stored-etag", null, 1000L, "f1")
+            val prefetched = repo.prefetchSubscription(url)
+
+            repo.writePrefetchedSubscription(prefetched)
+
+            val row = db.feedsQueries.getById("f1").executeAsOne()
+            assertEquals("fetched-etag", row.etag)
+            assertEquals("Feed", row.title)
+            assertEquals(listOf("f1"), db.articlesQueries.watchAll().executeAsList().map { it.feed_id })
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
      * moveFeed reads its target group's order and then writes it, so it must hold the same placement
      * lock a subscribe holds while it allocates a sort_order in that group — otherwise the two can
      * interleave and leave duplicate sort_orders.
