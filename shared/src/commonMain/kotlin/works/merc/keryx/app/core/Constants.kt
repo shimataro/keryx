@@ -85,6 +85,13 @@ const val READ_TIMEOUT_SECONDS_DEFAULT = 30
 const val MAX_REDIRECTS = 5 // redirect loop guard
 
 /**
+ * Max feeds fetched concurrently when many are fetched at once — a refresh's network phase
+ * (`FeedRepository.refreshFeeds`) and an OPML import's prefetch (`OpmlImporter`). Bounded so a large
+ * subscription list doesn't open an unbounded number of sockets at once; DB writes stay serial.
+ */
+const val FEED_FETCH_CONCURRENCY = 6
+
+/**
  * How long a refresh leaves a feed's favicon alone after a lookup found none, before looking again.
  * The miss is recorded per feed by `FaviconMissStore` in the device-local settings, so it outlives the
  * process: a site without any favicon isn't re-probed on every refresh or launch, while one that adds

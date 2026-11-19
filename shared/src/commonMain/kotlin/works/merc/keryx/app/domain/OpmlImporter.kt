@@ -1,9 +1,23 @@
 package works.merc.keryx.app.domain
 
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
+import works.merc.keryx.app.core.FEED_FETCH_CONCURRENCY
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.data.opml.OpmlCodec
+
+/**
+ * How many entries an OPML import fetches ahead of the one being written, counting that one. Every
+ * fetched entry keeps its parsed articles resident until it is written, so this bounds memory however
+ * long the document is; twice [FEED_FETCH_CONCURRENCY], so a writer that keeps up never stalls a fetch
+ * slot (the same shape as a refresh's `REFRESH_PENDING_APPLY_LIMIT`).
+ */
+private const val OPML_PREFETCH_AHEAD = 2 * FEED_FETCH_CONCURRENCY
 
 /** Result of [OpmlImporter.import]: how many listed feeds subscribed successfully vs. failed. */
 data class OpmlImportOutcome(val added: Int, val failed: Int)
@@ -47,27 +61,45 @@ class OpmlImporter(
         // FeedRepository.subscribeFeedWrite) — indexMissing()'s NOT IN scan is O(articles table
         // size), so a large OPML import must not repeat it once per feed.
         var anyHadArticles = false
-        for (entry in OpmlCodec.import(xml)) {
-            val outcome = feedRepository.subscribeFeedWrite(entry.xmlUrl)
-            when (val subscribed = outcome.result) {
-                is Result.Ok -> {
-                    added++
-                    if (outcome.hadArticles) anyHadArticles = true
-                    val feed = subscribed.value
-                    val folderId = entry.folderName?.let { name ->
-                        folderIdByName.getOrPut(name) { folderRepository.createFolder(name) }
-                    }
-                    // Guarded so a re-import that changes nothing writes nothing.
-                    if (feed.folder_id != folderId) feedRepository.moveFeed(feed.id, folderId)
-
-                    val newTagIds = entry.tags
-                        .map { name -> tagIdByName.getOrPut(name) { tagRepository.createTag(name) } }
-                        .toSet()
-                    val currentTagIds = previousFeedTagMap[feed.id].orEmpty()
-                    (currentTagIds - newTagIds).forEach { tagRepository.setFeedTag(feed.id, it, false) }
-                    (newTagIds - currentTagIds).forEach { tagRepository.setFeedTag(feed.id, it, true) }
+        val entries = OpmlCodec.import(xml)
+        // Fetches run concurrently (FEED_FETCH_CONCURRENCY at a time, at most OPML_PREFETCH_AHEAD
+        // entries ahead), but every DB write below runs from this one loop, entry by entry in document
+        // order — placement, folder and tags of one entry complete before the next entry's — so the
+        // result is the same as fetching one at a time. A prefetch writes nothing to the DB; the reads
+        // that decide the write (the existing row, the feed id, the clock) happen at write time.
+        // supervisorScope rather than coroutineScope: a failing prefetch must surface at its own
+        // await, after every earlier entry has been written, not cancel this loop the moment it fails.
+        // Leaving the block by an exception (or cancellation) cancels the prefetches still running.
+        supervisorScope {
+            val fetchSlots = Semaphore(FEED_FETCH_CONCURRENCY)
+            val prefetches = ArrayDeque<Deferred<Result<FeedRepository.PrefetchedSubscription>>>()
+            var nextToPrefetch = 0
+            for (entry in entries) {
+                while (prefetches.size < OPML_PREFETCH_AHEAD && nextToPrefetch < entries.size) {
+                    val url = entries[nextToPrefetch++].xmlUrl
+                    prefetches.addLast(async { fetchSlots.withPermit { feedRepository.prefetchSubscription(url) } })
                 }
-                is Result.Err -> failed++
+                val outcome = feedRepository.writePrefetchedSubscription(prefetches.removeFirst().await())
+                when (val subscribed = outcome.result) {
+                    is Result.Ok -> {
+                        added++
+                        if (outcome.hadArticles) anyHadArticles = true
+                        val feed = subscribed.value
+                        val folderId = entry.folderName?.let { name ->
+                            folderIdByName.getOrPut(name) { folderRepository.createFolder(name) }
+                        }
+                        // Guarded so a re-import that changes nothing writes nothing.
+                        if (feed.folder_id != folderId) feedRepository.moveFeed(feed.id, folderId)
+
+                        val newTagIds = entry.tags
+                            .map { name -> tagIdByName.getOrPut(name) { tagRepository.createTag(name) } }
+                            .toSet()
+                        val currentTagIds = previousFeedTagMap[feed.id].orEmpty()
+                        (currentTagIds - newTagIds).forEach { tagRepository.setFeedTag(feed.id, it, false) }
+                        (newTagIds - currentTagIds).forEach { tagRepository.setFeedTag(feed.id, it, true) }
+                    }
+                    is Result.Err -> failed++
+                }
             }
         }
         if (anyHadArticles) feedRepository.indexImportedArticles()

@@ -27,6 +27,7 @@ import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.FAVICON_RETRY_INTERVAL_MS
+import works.merc.keryx.app.core.FEED_FETCH_CONCURRENCY
 import works.merc.keryx.app.core.FEED_ERROR_REASON_GONE
 import works.merc.keryx.app.core.FeedNotFoundException
 import works.merc.keryx.app.core.Log
@@ -44,20 +45,13 @@ import works.merc.keryx.app.data.remote.FeedFetcher
 import works.merc.keryx.app.data.remote.FetchedFeed
 
 /**
- * Max feeds fetched concurrently in [FeedRepository.refreshAll] / [FeedRepository.refreshFeeds]'s
- * network phase. Bounded so a large subscription list doesn't open an unbounded number of sockets
- * at once; DB writes stay serial.
- */
-private const val REFRESH_FETCH_CONCURRENCY = 6
-
-/**
  * Max feeds a refresh holds between starting their fetch and the writer committing them — the
  * fetched results queued for the single writer included. Every queued result keeps its feed's parsed
  * articles resident, so without this a writer held back (a sync merge's write lock) would let a large
  * subscription list fetch its whole contents into memory at once. Twice the fetch concurrency, so a
  * writer that keeps up never stalls a fetch slot.
  */
-internal const val REFRESH_PENDING_APPLY_LIMIT = 2 * REFRESH_FETCH_CONCURRENCY
+internal const val REFRESH_PENDING_APPLY_LIMIT = 2 * FEED_FETCH_CONCURRENCY
 
 private const val TAG = "FeedRepository"
 
@@ -209,18 +203,50 @@ class FeedRepository(
         folderId: String? = null,
         afterFeedId: String? = null,
         beforeFeedId: String? = null,
+    ): FeedWriteOutcome = writePrefetchedSubscription(prefetchSubscription(url), folderId, afterFeedId, beforeFeedId)
+
+    /**
+     * The network phase of [subscribeFeedWrite]: the fetched feed, its redirect-resolved URL and its
+     * favicon. Writes nothing to the DB, so a batch (see [OpmlImporter]) can run several of these
+     * concurrently while [writePrefetchedSubscription] keeps the writes serial and in order.
+     */
+    internal class PrefetchedSubscription(val fetched: FetchedFeed, val effectiveUrl: String, val favicon: String?)
+
+    /**
+     * Fetches [url] and resolves its favicon, writing nothing to the DB. A fetch error is returned as
+     * [Result.Err]; the favicon lookup is made only once the fetch succeeded.
+     */
+    internal suspend fun prefetchSubscription(url: String): Result<PrefetchedSubscription> {
+        val fetched = feedFetcher.fetch(url).valueOrElse { return it }
+        val effectiveUrl = fetched.redirectUrl ?: url
+        val favicon = faviconResolver.resolve(fetched.siteUrl, effectiveUrl)
+        return Result.Ok(PrefetchedSubscription(fetched, effectiveUrl, favicon))
+    }
+
+    /**
+     * The write phase of [subscribeFeedWrite]: persists a [prefetchSubscription] result. Everything
+     * that reads the DB or the clock happens here, at write time rather than at fetch time, so a
+     * batch that fetched ahead still sees each earlier entry's write (a duplicate URL, or two URLs
+     * redirecting to the same feed, resolve to the existing row) and stamps the time of the write.
+     * Parameters as for [subscribeFeedWrite].
+     */
+    internal suspend fun writePrefetchedSubscription(
+        prefetched: Result<PrefetchedSubscription>,
+        folderId: String? = null,
+        afterFeedId: String? = null,
+        beforeFeedId: String? = null,
     ): FeedWriteOutcome {
-        val fetched = feedFetcher.fetch(url).valueOrElse {
+        val subscription = prefetched.valueOrElse {
             return FeedWriteOutcome(it, hadArticles = false, wasNewlyCreated = false)
         }
-        val effectiveUrl = fetched.redirectUrl ?: url
+        val fetched = subscription.fetched
+        val effectiveUrl = subscription.effectiveUrl
         val existing = feeds.getByUrl(effectiveUrl).executeAsOneOrNull()
         // Deterministic id from the (redirect-resolved) url so two devices that subscribe the same
         // feed independently get the SAME id and the sync merge can converge them (existing feeds
         // keep their id). See IdGenerator.feedId.
         val feedId = existing?.id ?: IdGenerator.feedId(effectiveUrl)
         val now = clock.nowMillis()
-        val favicon = faviconResolver.resolve(fetched.siteUrl, effectiveUrl)
 
         // sort_order: a brand-new feed is inserted right after afterFeedId (or, failing that, right
         // before beforeFeedId) within its target folder's group (the "no folder" group, unless the
@@ -231,7 +257,7 @@ class FeedRepository(
         // old relative position may no longer be meaningful after other feeds in that group moved
         // around while it was unsubscribed).
         val wasNewlyCreated = subscribePlacementMutex.withLock {
-            doSubscribeFeedWrite(effectiveUrl, feedId, folderId, afterFeedId, beforeFeedId, now, favicon, fetched)
+            doSubscribeFeedWrite(effectiveUrl, feedId, folderId, afterFeedId, beforeFeedId, now, subscription.favicon, fetched)
         }
         articleRepository.upsertParsed(feedId, fetched.articles)
         syncScheduler.scheduleSync()
@@ -348,8 +374,8 @@ class FeedRepository(
         fetched: FetchedFeed,
     ): Boolean {
         return db.transactionWithResult {
-            // Re-read under the lock: the snapshot taken before the fetch/favicon calls can be
-            // stale, so a concurrent subscribe of the same url may already have created the row.
+            // Re-read under the lock: the snapshot taken before acquiring it can be stale, so a
+            // concurrent subscribe of the same url may already have created the row.
             val current = feeds.getByUrl(effectiveUrl).executeAsOneOrNull()
             val sortOrder = when {
                 current == null -> insertionSortOrderForNewFeed(feedId, folderId, afterFeedId, beforeFeedId, now)
@@ -681,7 +707,7 @@ class FeedRepository(
      * is closed once every fetch has finished.
      */
     private fun CoroutineScope.launchFetches(feedList: List<Feeds>, steps: SendChannel<RefreshStep>) {
-        val semaphore = Semaphore(REFRESH_FETCH_CONCURRENCY)
+        val semaphore = Semaphore(FEED_FETCH_CONCURRENCY)
         val pendingApply = Semaphore(REFRESH_PENDING_APPLY_LIMIT)
         val fetches = feedList.map { feed ->
             launch(dispatcher) {

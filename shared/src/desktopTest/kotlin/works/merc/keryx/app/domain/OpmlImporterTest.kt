@@ -11,10 +11,13 @@ import io.ktor.http.headersOf
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import works.merc.keryx.app.InMemoryFaviconMissStore
+import works.merc.keryx.app.awaitCondition
+import works.merc.keryx.app.core.FEED_FETCH_CONCURRENCY
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.data.local.FtsManager
@@ -29,6 +32,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import java.util.concurrent.atomic.AtomicInteger
 
 /** A minimal valid RSS document with a single article. */
 private const val RSS = """<?xml version="1.0"?><rss version="2.0"><channel>
@@ -364,6 +368,137 @@ class OpmlImporterTest {
             assertEquals(setOf("Tech"), db.foldersQueries.watchAll().executeAsList().map { it.name }.toSet())
             assertNotNull(feed.folder_id)
             assertEquals(setOf("kotlin"), tagNamesOf(db, feed.id))
+        } finally {
+            driver.close()
+        }
+    }
+
+    /** An OPML document listing [count] feeds `https://ex.com/feed-<i>`, every odd one inside folder "Odd". */
+    private fun opmlWithFeeds(count: Int): String = buildString {
+        append("<opml version=\"2.0\"><body>")
+        for (i in 0 until count) {
+            val feed = """<outline type="rss" text="F$i" xmlUrl="https://ex.com/feed-$i" category="t${i % 3}"/>"""
+            if (i % 2 == 1) append("<outline text=\"Odd\">").append(feed).append("</outline>") else append(feed)
+        }
+        append("</body></opml>")
+    }
+
+    /** Each imported feed's url, folder name, sort_order and tags, in url order. */
+    private fun importedState(db: KeryxDatabase): List<String> {
+        val folderNames = db.foldersQueries.watchAll().executeAsList().associate { it.id to it.name }
+        return db.feedsQueries.watchAll().executeAsList()
+            .map { "${it.url} folder=${folderNames[it.folder_id]} order=${it.sort_order} tags=${tagNamesOf(db, it.id).sorted()}" }
+            .sorted()
+    }
+
+    @Test
+    fun importWritesInDocumentOrderEvenWhenLaterFetchesFinishFirst(): Unit = runBlocking {
+        val count = 10
+        val (inOrderDriver, inOrderDb) = inMemoryDb()
+        val (reversedDriver, reversedDb) = inMemoryDb()
+        try {
+            newImporter(inOrderDb, inOrderDriver, rssFetcher()).import(opmlWithFeeds(count))
+            // Every later entry answers sooner, so the fetches complete in reverse document order.
+            val reversed = fetcherWith { request ->
+                val index = request.url.toString().substringAfterLast("feed-").toInt()
+                delay((count - index) * 20L)
+                respond(RSS, HttpStatusCode.OK)
+            }
+
+            val result = newImporter(reversedDb, reversedDriver, reversed).import(opmlWithFeeds(count))
+
+            assertEquals(count, result.added)
+            assertEquals(importedState(inOrderDb), importedState(reversedDb), "the fetch completion order must not change the result")
+            val unfiled = reversedDb.feedsQueries.watchAll().executeAsList().filter { it.folder_id == null }
+            assertEquals((0 until count step 2).map { "https://ex.com/feed-$it" }, unfiled.map { it.url })
+        } finally {
+            inOrderDriver.close()
+            reversedDriver.close()
+        }
+    }
+
+    @Test
+    fun importFetchesConcurrentlyButNoMoreThanTheFetchConcurrencyAtOnce(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val inFlight = AtomicInteger()
+            val maxInFlight = AtomicInteger()
+            val release = CompletableDeferred<Unit>()
+            val fetcher = fetcherWith {
+                maxInFlight.accumulateAndGet(inFlight.incrementAndGet(), ::maxOf)
+                release.await()
+                inFlight.decrementAndGet()
+                respond(RSS, HttpStatusCode.OK)
+            }
+            val importer = newImporter(db, driver, fetcher)
+
+            val import = async { importer.import(opmlWithFeeds(20)) }
+            awaitCondition { inFlight.get() == FEED_FETCH_CONCURRENCY }
+            delay(100)
+            assertEquals(FEED_FETCH_CONCURRENCY, inFlight.get(), "no fetch beyond the concurrency bound may start")
+            release.complete(Unit)
+
+            assertEquals(20, import.await().added)
+            assertEquals(FEED_FETCH_CONCURRENCY, maxInFlight.get())
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun importFetchesAtMostTwiceTheConcurrencyAheadOfTheEntryBeingWritten(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val started = AtomicInteger()
+            val releaseFirst = CompletableDeferred<Unit>()
+            val fetcher = fetcherWith { request ->
+                started.incrementAndGet()
+                if (request.url.toString().endsWith("feed-0")) releaseFirst.await()
+                respond(RSS, HttpStatusCode.OK)
+            }
+            val importer = newImporter(db, driver, fetcher)
+
+            // The first entry's fetch is held, so nothing can be written and the prefetch window stays full.
+            val import = async { importer.import(opmlWithFeeds(30)) }
+            val window = 2 * FEED_FETCH_CONCURRENCY
+            awaitCondition { started.get() >= window }
+            delay(100)
+            assertEquals(window, started.get(), "fetches must not run further ahead of the writer than the window")
+            releaseFirst.complete(Unit)
+
+            assertEquals(30, import.await().added)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun twoEntriesRedirectingToTheSameFeedResolveToTheRowTheFirstOneWrote(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            // Both are fetched before either is written, so only a write-time lookup sees the first one's row.
+            val fetcher = fetcherWith { request ->
+                if (request.url.host == "old.com") {
+                    respond("", HttpStatusCode.MovedPermanently, headersOf(HttpHeaders.Location, "https://new.com/feed"))
+                } else {
+                    respond(RSS, HttpStatusCode.OK)
+                }
+            }
+            val importer = newImporter(db, driver, fetcher)
+            val xml = """
+                <opml version="2.0"><body>
+                  <outline type="rss" text="A" xmlUrl="https://old.com/a"/>
+                  <outline text="Tech"><outline type="rss" text="B" xmlUrl="https://old.com/b"/></outline>
+                </body></opml>
+            """.trimIndent()
+
+            val result = importer.import(xml)
+
+            assertEquals(2, result.added)
+            val feeds = db.feedsQueries.watchAll().executeAsList()
+            assertEquals(listOf("https://new.com/feed"), feeds.map { it.url })
+            val tech = db.foldersQueries.watchAll().executeAsList().single { it.name == "Tech" }
+            assertEquals(tech.id, feeds.single().folder_id, "the second entry moved the row the first one created")
         } finally {
             driver.close()
         }
