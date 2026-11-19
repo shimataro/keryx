@@ -23,6 +23,15 @@ const val SETTINGS_TAB_UPDATES = "updates"
  */
 const val SQLITE_BUSY_TIMEOUT_MS = 5_000L
 
+/**
+ * The longest `SyncRepository.flushPendingSync` waits for local writes still queued
+ * (`PendingLocalWrites`) before going ahead without them. Each queued write can wait out the whole
+ * [SQLITE_BUSY_TIMEOUT_MS] behind another connection's write lock, so this allows two; the bound
+ * keeps a write that never finishes from holding the foreground-exit flush — and the OS's background
+ * grace period on iOS — indefinitely.
+ */
+const val LOCAL_WRITES_FLUSH_WAIT_MS = 2 * SQLITE_BUSY_TIMEOUT_MS
+
 // --- Time ---
 const val MILLIS_PER_HOUR = 60 * 60 * 1000L
 const val MILLIS_PER_DAY = 24 * MILLIS_PER_HOUR

@@ -22,6 +22,7 @@ import works.merc.keryx.app.core.CloudAuthException
 import works.merc.keryx.app.core.CloudDataIncompatibleException
 import works.merc.keryx.app.core.CloudStorageException
 import works.merc.keryx.app.core.DEFERRED_SYNC_DEBOUNCE_MS
+import works.merc.keryx.app.core.LOCAL_WRITES_FLUSH_WAIT_MS
 import works.merc.keryx.app.core.ErrorKind
 import works.merc.keryx.app.core.MAX_SYNC_DB_SIZE_BYTES
 import works.merc.keryx.app.core.NetworkCondition
@@ -229,6 +230,7 @@ class SyncRepositoryTest {
         clockMillis: Long = 1_000L,
         activityCenter: ActivityCenter = ActivityCenter(),
         automaticSyncAllowedFlow: () -> Flow<Boolean> = { flowOf(true) },
+        pendingLocalWrites: PendingLocalWrites = PendingLocalWrites(),
     ): SyncRepository =
         SyncRepository(
             driver = localDriver,
@@ -242,6 +244,7 @@ class SyncRepositoryTest {
             localDbPath = localFile.absolutePath,
             tempDir = tempDir.absolutePath,
             automaticSyncAllowedFlow = automaticSyncAllowedFlow,
+            pendingLocalWrites = pendingLocalWrites,
         )
 
     /** [SyncRepository]'s network gate as SharedModule wires it, over fakes. */
@@ -1738,8 +1741,11 @@ class SyncRepositoryTest {
     // Each test first syncs once so the .gz exists, then resets existsCount: from there on, one
     // sync costs exactly one metadata request, so existsCount counts syncs.
 
-    private suspend fun TestScope.syncedRepo(cloud: FakeCloudStorage): SyncRepository =
-        newRepo(cloud).also {
+    private suspend fun TestScope.syncedRepo(
+        cloud: FakeCloudStorage,
+        pendingLocalWrites: PendingLocalWrites = PendingLocalWrites(),
+    ): SyncRepository =
+        newRepo(cloud, pendingLocalWrites = pendingLocalWrites).also {
             assertIs<Result.Ok<Unit>>(it.sync())
             cloud.existsCount = 0
         }
@@ -1793,6 +1799,48 @@ class SyncRepositoryTest {
         advanceTimeBy(DEFERRED_SYNC_DEBOUNCE_MS * 2)
         runCurrent()
         assertEquals(1, cloud.existsCount)
+    }
+
+    /**
+     * A local write queued just before leaving the foreground (a global setting, a feed-list action)
+     * schedules its sync only once it runs; the flush waits for it rather than finding nothing
+     * pending and returning without it.
+     */
+    @Test
+    fun flushPendingSyncWaitsForALocalWriteStillQueued() = runTest {
+        val cloud = FakeCloudStorage()
+        val pending = PendingLocalWrites()
+        val repo = syncedRepo(cloud, pending)
+        pending.begin()
+
+        val flush = launch { repo.flushPendingSync() }
+        runCurrent()
+        assertFalse(flush.isCompleted, "the flush must wait for the queued write")
+
+        // The write runs: it schedules its sync, then counts itself finished.
+        repo.scheduleSync()
+        pending.end()
+        flush.join()
+        assertEquals(1, cloud.existsCount)
+    }
+
+    /** A queued write that never finishes holds the flush for [LOCAL_WRITES_FLUSH_WAIT_MS] at most. */
+    @Test
+    fun flushPendingSyncStopsWaitingForLocalWritesAfterItsBound() = runTest {
+        val cloud = FakeCloudStorage()
+        val pending = PendingLocalWrites()
+        val repo = syncedRepo(cloud, pending)
+        pending.begin()
+        repo.scheduleDeferredSync()
+
+        val flush = launch { repo.flushPendingSync() }
+        advanceTimeBy(LOCAL_WRITES_FLUSH_WAIT_MS - 1)
+        runCurrent()
+        assertFalse(flush.isCompleted)
+
+        advanceTimeBy(2)
+        flush.join()
+        assertEquals(1, cloud.existsCount, "what was already pending is still flushed")
     }
 
     @Test

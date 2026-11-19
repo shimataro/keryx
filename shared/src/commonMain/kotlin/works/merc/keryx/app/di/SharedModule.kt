@@ -33,6 +33,7 @@ import works.merc.keryx.app.domain.NetworkUsagePolicy
 import works.merc.keryx.app.domain.NewArticleNotifier
 import works.merc.keryx.app.domain.NotificationCenter
 import works.merc.keryx.app.domain.OpmlImporter
+import works.merc.keryx.app.domain.PendingLocalWrites
 import works.merc.keryx.app.domain.RefreshCycleRunner
 import works.merc.keryx.app.domain.SettingsFaviconMissStore
 import works.merc.keryx.app.domain.SettingsRepository
@@ -95,6 +96,10 @@ fun sharedModule(): Module = module {
         CoroutineScope(SupervisorJob() + Dispatchers.Default + exceptionHandler)
     }
 
+    // Local writes queued off the caller's thread (global settings, feed-list actions) that a
+    // foreground-exit sync flush must wait for — one counter shared by those writers and SyncRepository.
+    single { PendingLocalWrites() }
+
     single {
         SyncRepository(
             driver = get(),
@@ -116,6 +121,7 @@ fun sharedModule(): Module = module {
                     syncOnMetered = get<SettingsRepository>().localSettings.map { it.syncOnMeteredNetwork },
                 )
             },
+            pendingLocalWrites = get(),
         )
     }
     single<SyncScheduler> { get<SyncRepository>() }
@@ -124,7 +130,7 @@ fun sharedModule(): Module = module {
     single { FeedFetcher(get()) { get<SettingsRepository>().getReadTimeoutSeconds() } }
     single { FaviconResolver(get()) }
 
-    single { SettingsRepository(get(), get(), get(), get()) }
+    single { SettingsRepository(get(), get(), get(), get(), pendingLocalWrites = get()) }
     single { ArticleRepository(get(), get(), get(), get()) }
     single { TagRepository(get(), get(), get()) }
     single {
@@ -166,7 +172,7 @@ fun updateModule(): Module = module {
  * Compose app's `appModule` and the Apple app's `KeryxSdk` both include it.
  */
 fun presentationModule(): Module = module {
-    single { HomeViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
+    single { HomeViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), pendingLocalWrites = get()) }
     single { SetupController(get(), get(), get(), get()) }
     single { NotificationAlerts(get()) }
     // Also Home's "Sync now" (HomeViewModel takes it as ManualSync), so every route shares one sync.

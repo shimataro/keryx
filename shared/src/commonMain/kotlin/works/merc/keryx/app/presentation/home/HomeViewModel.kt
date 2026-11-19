@@ -50,6 +50,7 @@ import works.merc.keryx.app.domain.AddFeedPreviewResolver
 import works.merc.keryx.app.domain.ArticleListRow
 import works.merc.keryx.app.domain.ArticleReaderRow
 import works.merc.keryx.app.domain.ArticleRepository
+import works.merc.keryx.app.domain.PendingLocalWrites
 import works.merc.keryx.app.domain.ArticleSearchResult
 import works.merc.keryx.app.domain.displayTitle
 import works.merc.keryx.app.domain.toListRow
@@ -96,6 +97,9 @@ class HomeViewModel(
     // updated optimistically before the write is dispatched. Feed-list writes additionally go
     // through [feedListWrites], which keeps them in order across their suspensions too.
     private val dbWriteDispatcher: CoroutineDispatcher = Dispatchers.Default.limitedParallelism(1),
+    // Counts the feed-list writes queued but not yet run, so a foreground-exit sync flush waits for
+    // them (see [PendingLocalWrites]). Shared with `SyncRepository` in production.
+    pendingLocalWrites: PendingLocalWrites = PendingLocalWrites(),
 ) : ViewModel() {
 
     // Eagerly (not WhileSubscribed) so these start populating as soon as the ViewModel is
@@ -802,7 +806,7 @@ class HomeViewModel(
      * that lock. That is harmless — they write only `articles`' read/star columns, which no feed-list
      * write touches, so the two never order against each other.
      */
-    private val feedListWrites = SerialWriteQueue(viewModelScope, dbWriteDispatcher)
+    private val feedListWrites = SerialWriteQueue(viewModelScope, dbWriteDispatcher, pendingLocalWrites)
 
     // A delete's second selection fallback, run once the list the feed list renders from stops
     // showing the deleted item (see [DeletedItemFallback]) — the feed list renders feeds from

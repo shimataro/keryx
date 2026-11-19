@@ -4,6 +4,7 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
+import works.merc.keryx.app.domain.PendingLocalWrites
 
 /**
  * Runs DB writes one at a time, each **to completion** — suspensions included — before the next
@@ -18,24 +19,39 @@ import kotlinx.coroutines.launch
  * scope's uncaught-exception handling exactly as a plain `scope.launch(dispatcher)` would — and,
  * with [scope]'s `SupervisorJob` (a `viewModelScope`), neither the consumer nor the writes after it
  * are cancelled by it.
+ *
+ * Every write is counted in [pendingLocalWrites] from [enqueue] until it has finished — run, failed,
+ * or dropped unrun because [scope] ended — so a foreground-exit sync flush waits for the sync it
+ * schedules (see [PendingLocalWrites]). `null` counts nothing.
  */
 internal class SerialWriteQueue(
     private val scope: CoroutineScope,
     private val dispatcher: CoroutineDispatcher,
+    private val pendingLocalWrites: PendingLocalWrites? = null,
 ) {
     private class Entry(val write: suspend () -> Unit, val afterWrite: (() -> Unit)?)
 
-    private val entries = Channel<Entry>(Channel.UNLIMITED)
+    // An entry the consumer never gets to — still buffered when the queue is cancelled below, or
+    // taken by an iteration that was cancelled before handing it over — is uncounted here.
+    private val entries = Channel<Entry>(Channel.UNLIMITED, onUndeliveredElement = { pendingLocalWrites?.end() })
 
     init {
         scope.launch(dispatcher) {
             for (entry in entries) {
-                val job = scope.launch(dispatcher) { entry.write() }
-                // join() does not rethrow the write's failure; the failure is the child's own.
-                job.join()
-                // A failed (or cancelled) job reports isCancelled; its afterWrite is skipped.
-                if (entry.afterWrite != null && !job.isCancelled) scope.launch { entry.afterWrite.invoke() }
+                try {
+                    val job = scope.launch(dispatcher) { entry.write() }
+                    // join() does not rethrow the write's failure; the failure is the child's own.
+                    job.join()
+                    // A failed (or cancelled) job reports isCancelled; its afterWrite is skipped.
+                    if (entry.afterWrite != null && !job.isCancelled) scope.launch { entry.afterWrite.invoke() }
+                } finally {
+                    pendingLocalWrites?.end()
+                }
             }
+        }.invokeOnCompletion {
+            // The consumer has ended (the scope was cancelled, even before it started): drop what is
+            // still queued, and refuse later enqueues, so none of it stays counted.
+            entries.cancel()
         }
     }
 
@@ -53,6 +69,8 @@ internal class SerialWriteQueue(
      *   fails; it does not hold back the next write. `null` = none.
      */
     fun enqueue(write: suspend () -> Unit, afterWrite: (() -> Unit)?) {
-        entries.trySend(Entry(write, afterWrite))
+        pendingLocalWrites?.begin()
+        // A refused entry (the queue was cancelled with its scope) never reaches onUndeliveredElement.
+        if (entries.trySend(Entry(write, afterWrite)).isFailure) pendingLocalWrites?.end()
     }
 }

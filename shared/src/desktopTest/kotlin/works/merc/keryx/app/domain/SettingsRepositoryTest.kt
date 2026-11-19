@@ -9,6 +9,7 @@ import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
@@ -338,6 +339,77 @@ class SettingsRepositoryTest {
             assertEquals(90, repo.getReadTimeoutSeconds())
         } finally {
             inner.close()
+        }
+    }
+
+    /**
+     * A global write is counted as pending from the setter until it has run, so a foreground-exit
+     * sync flush made in between waits for the sync it schedules.
+     */
+    @Test
+    fun aGlobalWriteStaysPendingUntilItHasRun() {
+        val (driver, db) = inMemoryDb()
+        try {
+            val writes = HoldingDispatcher()
+            val pending = PendingLocalWrites()
+            val repo = SettingsRepository(
+                db, LocalSettingsStore(dirOverride = dir), SyncScheduler {}, Clock { 0L },
+                writeDispatcher = writes, pendingLocalWrites = pending,
+            )
+            writes.hold()
+            repo.setReadTimeoutSeconds(60)
+
+            runBlocking {
+                val idle = launch(start = CoroutineStart.UNDISPATCHED) { pending.awaitIdle() }
+                assertFalse(idle.isCompleted)
+
+                writes.release()
+                idle.join()
+            }
+        } finally {
+            driver.close()
+        }
+    }
+
+    /** A failed global write still counts itself finished, or every later flush would wait it out. */
+    @Test
+    fun aFailedGlobalWriteIsNoLongerPending() {
+        val (inner, _) = inMemoryDb()
+        try {
+            val pending = PendingLocalWrites()
+            val repo = SettingsRepository(
+                KeryxDatabase(FailFirstGlobalWriteDriver(inner)), LocalSettingsStore(dirOverride = dir),
+                SyncScheduler {}, Clock { 0L }, writeDispatcher = Dispatchers.Unconfined,
+                writeExceptionHandler = CoroutineExceptionHandler { _, _ -> }, pendingLocalWrites = pending,
+            )
+
+            repo.setReadTimeoutSeconds(60)
+
+            runBlocking { withTimeout(1_000L) { pending.awaitIdle() } }
+        } finally {
+            inner.close()
+        }
+    }
+
+    /** A global write queued behind close() never runs, and is not left counted either. */
+    @Test
+    fun aGlobalWriteDroppedByCloseIsNoLongerPending() {
+        val (driver, db) = inMemoryDb()
+        try {
+            val pending = PendingLocalWrites()
+            val repo = SettingsRepository(
+                db, LocalSettingsStore(dirOverride = dir), SyncScheduler {}, Clock { 0L },
+                pendingLocalWrites = pending,
+            )
+            runBlocking {
+                repo.close()
+                repo.setReadTimeoutSeconds(60)
+
+                withTimeout(1_000L) { pending.awaitIdle() }
+            }
+            assertEquals(30, repo.getReadTimeoutSeconds())
+        } finally {
+            driver.close()
         }
     }
 

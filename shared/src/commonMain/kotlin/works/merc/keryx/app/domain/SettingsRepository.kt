@@ -61,6 +61,9 @@ class SettingsRepository(
     // Where a failed write's exception goes; `null` (production) leaves it to the platform's
     // uncaught-exception handling. A parameter only so a test can observe the failure.
     writeExceptionHandler: CoroutineExceptionHandler? = null,
+    // Counts the global-setting writes queued but not yet run, so a foreground-exit sync flush waits
+    // for them (see [PendingLocalWrites]). Shared with `SyncRepository` in production.
+    private val pendingLocalWrites: PendingLocalWrites = PendingLocalWrites(),
 ) {
     private val _localSettings = MutableStateFlow(store.load())
 
@@ -115,12 +118,17 @@ class SettingsRepository(
      * local-settings writer and [flush], in call order — and returns at once. A failed write is
      * thrown on the writer as an uncaught exception (a DB failure, see the class KDoc), never
      * reported to the caller; it cancels only its own write, not the writer scope.
+     *
+     * The write is counted in [pendingLocalWrites] from the call until it has finished — run, failed,
+     * or cancelled before it started (after [close]) — so a foreground-exit flush made in between
+     * waits for the sync it schedules instead of finding nothing pending.
      */
     private fun setGlobal(key: String, value: String) {
+        pendingLocalWrites.begin()
         writeScope.launch {
             db.global_settingsQueries.upsert(key, value, clock.nowMillis())
             syncScheduler.scheduleSync()
-        }
+        }.invokeOnCompletion { pendingLocalWrites.end() }
     }
 
     /**

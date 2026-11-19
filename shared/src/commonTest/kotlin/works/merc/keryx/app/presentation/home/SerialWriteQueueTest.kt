@@ -10,6 +10,11 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.runTest
+import works.merc.keryx.app.domain.PendingLocalWrites
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.awaitCancellation
+import kotlin.test.assertTrue
+import kotlin.test.assertFalse
 
 class SerialWriteQueueTest {
 
@@ -70,5 +75,47 @@ class SerialWriteQueueTest {
 
         assertEquals(listOf("write", "after"), steps)
         scope.cancel()
+    }
+
+    @Test
+    fun aWriteIsPendingFromEnqueueUntilItHasRunWhetherItSucceedsOrFails() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val scope = CoroutineScope(SupervisorJob() + dispatcher + CoroutineExceptionHandler { _, _ -> })
+        val pending = PendingLocalWrites()
+        val queue = SerialWriteQueue(scope, dispatcher, pending)
+        val gate = CompletableDeferred<Unit>()
+
+        queue.enqueue { gate.await() }
+        queue.enqueue { throw IllegalStateException("write failed") }
+        val idle = launch { pending.awaitIdle() }
+        testScheduler.advanceUntilIdle()
+        assertFalse(idle.isCompleted)
+
+        gate.complete(Unit)
+        testScheduler.advanceUntilIdle()
+        assertTrue(idle.isCompleted)
+        scope.cancel()
+    }
+
+    @Test
+    fun writesDroppedWithTheScopeAreNoLongerPending() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val scope = CoroutineScope(SupervisorJob() + dispatcher)
+        val pending = PendingLocalWrites()
+        val queue = SerialWriteQueue(scope, dispatcher, pending)
+        val ran = mutableListOf<String>()
+
+        queue.enqueue { awaitCancellation() }
+        queue.enqueue { ran += "queued" }
+        testScheduler.advanceUntilIdle()
+        scope.cancel()
+        // Refused by the cancelled queue.
+        queue.enqueue { ran += "late" }
+        testScheduler.advanceUntilIdle()
+
+        val idle = launch { pending.awaitIdle() }
+        testScheduler.advanceUntilIdle()
+        assertTrue(idle.isCompleted)
+        assertEquals(emptyList(), ran)
     }
 }
