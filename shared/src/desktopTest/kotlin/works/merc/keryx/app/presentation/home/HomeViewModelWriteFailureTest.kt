@@ -213,6 +213,33 @@ class HomeViewModelWriteFailureTest {
         assertOneLocalWriteFailure()
     }
 
+    /**
+     * A failed "mark as read" leaves its row shown read until its revert lands. A mark-all-read of the
+     * whole filter made after the revert re-read the row — and that has already landed, its reconcile
+     * included — writes that row read too, so the revert must not then put its older unread state
+     * back over it.
+     */
+    @Test
+    fun aMarkAllReadMadeWhileARevertIsPendingIsNotOverwrittenByThatRevert() = runVmTest {
+        val vm = newViewModel("a1", "a2")
+        failReadWrites()
+        driver.afterQuery = { sql ->
+            sql.startsWith("SELECT id, is_read, is_starred FROM articles WHERE id IN").also { reread ->
+                if (reread) {
+                    // The revert has its (unread) snapshot; mark-all now runs and lands before it applies.
+                    driver.failExecute = null
+                    vm.markAllRead()
+                }
+            }
+        }
+
+        vm.setRead(vm.row("a1"), read = true)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(listOf(1L, 1L), listOf(dbIsRead("a1"), dbIsRead("a2")))
+        assertEquals(listOf("a1" to 1L, "a2" to 1L), vm.articles.value.map { it.id to it.is_read })
+    }
+
     @Test
     fun aNewerActionOnTheSameArticleIsNotOverwrittenByTheRevert() = runVmTest {
         val writes = ParkingWriteDispatcher()
@@ -254,6 +281,26 @@ class HomeViewModelWriteFailureTest {
 /** Fails every statement [failExecute] matches, as a locked database would — lets a test fail a write. */
 private class WriteFailingSqlDriver(private val delegate: SqlDriver) : SqlDriver by delegate {
     @kotlin.concurrent.Volatile var failExecute: ((sql: String) -> Boolean)? = null
+
+    /**
+     * Run once, right after the next query whose SQL it accepts has returned its rows (it returns
+     * whether it handled that query), then cleared — for a test that has to act between a read and
+     * what its caller does with the result.
+     */
+    @kotlin.concurrent.Volatile var afterQuery: ((sql: String) -> Boolean)? = null
+
+    override fun <R> executeQuery(
+        identifier: Int?,
+        sql: String,
+        mapper: (app.cash.sqldelight.db.SqlCursor) -> QueryResult<R>,
+        parameters: Int,
+        binders: (SqlPreparedStatement.() -> Unit)?,
+    ): QueryResult<R> {
+        val result = delegate.executeQuery(identifier, sql, mapper, parameters, binders)
+        val hook = afterQuery
+        if (hook != null && hook(sql.trimStart())) afterQuery = null
+        return result
+    }
 
     override fun execute(
         identifier: Int?,

@@ -1633,10 +1633,17 @@ class HomeViewModel(
         // before this write has landed.
         // An explicit "read" for everything this writes, so a selection still loading its body cannot
         // apply an earlier "mark as unread" over it (see SelectionReadIntents). When scoped that is
-        // exactly idsToMark; otherwise markAllAsRead marks the whole filter, which holds every
-        // visible row as well as the selection (including one still loading). Also what a failure
-        // of the write below is undone on.
-        val marked = if (scoped) idsToMark else (visibleUnread.map { it.id } + listOfNotNull(selected?.id, selectionCursorId)).distinct()
+        // exactly idsToMark; otherwise markAllAsRead marks the whole filter, which holds every row
+        // listed — the ones shown read included — as well as the selection (including one still
+        // loading). Also the write's generation (see ArticleWriteGenerations): a row shown read only
+        // because of an earlier write that failed is written read here too, so that failure's revert
+        // must not put its older unread state back over this one. And what a failure of the write
+        // below is undone on.
+        val marked = if (scoped) {
+            idsToMark
+        } else {
+            (currentArticles().map { it.id } + listOfNotNull(selected?.id, selectionCursorId)).distinct()
+        }
         val write = launchArticleWrite(ArticleWriteField.READ, marked) {
             if (scoped) {
                 articleRepository.markArticlesAsRead(idsToMark)
