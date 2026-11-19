@@ -360,6 +360,12 @@ call does after releasing the mutex — `articleRepository.upsertParsed(feedId, 
 separate per-feed `db.transaction {}` — can still be mid-flight, still holding a lock, when the
 second call's own transaction tries to upgrade its SHARED read lock to RESERVED for its write.
 
+(That is the code as it was observed. A subscribe has since written its articles inside the same
+transaction as its feed row, under the mutex, so a refresh cannot commit between the two; the search
+index's catch-up still writes after the mutex. The transaction still reads before it writes
+(`getByUrl` → `upsert`), so another writer — a refresh, say — can still make its upgrade fail the same
+way, and the conclusion below stands: the real fix is `BEGIN IMMEDIATE`.)
+
 ### Ruled out
 
 - **`busy_timeout` does not help.** It is set (`SQLITE_BUSY_TIMEOUT_MS = 5_000`), yet the failing
@@ -401,7 +407,7 @@ transaction (`FeedRepository.kt`, around `applyFetch`), which only writes.
 ### How the test was worked around
 
 `FeedRepositoryTest.subscribeFeedSerializesSortOrderAllocationAcrossConcurrentCalls` now subscribes
-a feed with no `<item>`s. With nothing for `articleRepository.upsertParsed` to insert, the first
+a feed with no `<item>`s. With no articles to write and no search-index catch-up, the first
 call's post-mutex work is read-only, so there is no longer a second writer left to race the upgrade.
 See `testing.md`'s note on concurrent-write tests for the general pattern.
 

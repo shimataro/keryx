@@ -135,6 +135,30 @@ private class GatedSortOrderDriver(private val delegate: SqlDriver) : SqlDriver 
 }
 
 /**
+ * Runs [beforeFirstArticleInsert] once, right before the first `INSERT INTO articles` it is asked to
+ * run, and passes everything through — for a test that has to put another writer's commit at that
+ * exact point.
+ */
+private class BeforeFirstArticleInsertDriver(private val delegate: app.cash.sqldelight.db.SqlDriver) :
+    app.cash.sqldelight.db.SqlDriver by delegate {
+    @Volatile var beforeFirstArticleInsert: (() -> Unit)? = null
+
+    override fun execute(
+        identifier: Int?,
+        sql: String,
+        parameters: Int,
+        binders: (app.cash.sqldelight.db.SqlPreparedStatement.() -> Unit)?,
+    ): app.cash.sqldelight.db.QueryResult<Long> {
+        if (sql.startsWith("INSERT INTO articles")) {
+            val hook = beforeFirstArticleInsert
+            beforeFirstArticleInsert = null
+            hook?.invoke()
+        }
+        return delegate.execute(identifier, sql, parameters, binders)
+    }
+}
+
+/**
  * Fails the first `UPDATE feeds SET favicon_url` it is asked to run — the write a refresh makes
  * once its favicon lookup succeeds — and passes everything else through.
  */
@@ -386,12 +410,13 @@ class FeedRepositoryTest {
         // RSS_NO_ITEMS (not RSS) matters too: subscribeFeedWrite's db.transaction {} does a read
         // (getByUrl / nextSortOrderInGroup) before its write (upsert), so SQLite's deferred BEGIN
         // means that transaction only takes a SHARED lock up front and has to upgrade to RESERVED at
-        // the write. If the first call's articleRepository.upsertParsed (a separate, per-feed
-        // transaction, run after feedPlacementMutex is released) is still holding RESERVED when
-        // the second call tries to upgrade, SQLite treats the upgrade as a potential deadlock and
-        // fails it with SQLITE_BUSY *without* invoking the busy handler at all — busy_timeout does
-        // not apply to a failed lock upgrade, only to acquiring a lock that has no other waiter ahead
-        // of it. A feed with no items means upsertParsed's insert loop runs zero times and
+        // the write. If a write of the first call is still holding RESERVED when the second call
+        // tries to upgrade, SQLite treats the upgrade as a potential deadlock and fails it with
+        // SQLITE_BUSY *without* invoking the busy handler at all — busy_timeout does not apply to a
+        // failed lock upgrade, only to acquiring a lock that has no other waiter ahead of it. (The
+        // articles are now written inside the feed's own transaction, under the mutex, rather than
+        // in a separate one after it — the overlap first observed — but the search index's catch-up
+        // still writes after it.) A feed with no items means no articles are written and
         // indexMissing() is skipped (hadArticles == false), so nothing outside the mutex writes to
         // the DB — the only thing left to overlap the second call's read is the first call's own
         // read-only feeds.getById, which cannot block a SHARED-lock acquisition.
@@ -1791,6 +1816,50 @@ class FeedRepositoryTest {
             HttpStatusCode.OK,
             headersOf(HttpHeaders.ETag, "fetched-etag"),
         )
+    }
+
+    /**
+     * A refresh that commits right where the subscribe's feed write ends and its article write
+     * begins must not end up with its validators beside the subscribe's older bodies. The two are one
+     * transaction, so the refresh (another connection, as in production) can only commit after it:
+     * then its own write puts its validators and bodies together.
+     */
+    @Test
+    fun writePrefetchedSubscriptionKeepsARefreshCommittedBetweenItsFeedAndArticleWrites(): Unit = runBlocking {
+        val (_, rawDriver, rawDb) = fileDb()
+        val driver = BeforeFirstArticleInsertDriver(rawDriver)
+        val db = works.merc.keryx.app.data.local.db.KeryxDatabase(driver)
+        try {
+            val url = "https://ex.com/feed"
+            val repo = newRepo(db, driver, twoArticleFetcher("fetched body"), clock = Clock { 1000L })
+            val refreshArticles = ArticleRepository(rawDb, FtsSearch(rawDriver), SyncScheduler {}, Clock { 2000L }, Dispatchers.Unconfined)
+            rawDb.insertFeed("f1", now = 500L, url = url)
+            refreshArticles.upsertParsed("f1", listOf(ParsedArticle(guid = "g1", title = "Post", content = "old body")))
+            val prefetched = repo.prefetchSubscription(url)
+            var refresh: Thread? = null
+            driver.beforeFirstArticleInsert = {
+                val refreshDone = CountDownLatch(1)
+                // A refresh on another thread — so another connection — writing its validators and
+                // body in one transaction, as the refresh's apply does. Waited for only briefly: it
+                // must not be able to commit while the subscribe's transaction holds the write lock.
+                refresh = Thread {
+                    rawDb.transaction {
+                        rawDb.feedsQueries.updateCacheHeaders("E2", null, 2000L, "f1")
+                        refreshArticles.upsertParsed("f1", listOf(ParsedArticle(guid = "g1", title = "Post", content = "refreshed body")))
+                    }
+                    refreshDone.countDown()
+                }.apply { start() }
+                refreshDone.await(500, TimeUnit.MILLISECONDS)
+            }
+
+            repo.writePrefetchedSubscription(prefetched)
+            assertNotNull(refresh).join(10_000)
+
+            assertEquals("E2", rawDb.feedsQueries.getById("f1").executeAsOne().etag)
+            assertEquals("refreshed body", rawDb.articlesQueries.getByFeedAndGuid("f1", "g1").executeAsOne().content)
+        } finally {
+            rawDriver.close()
+        }
     }
 
     /**

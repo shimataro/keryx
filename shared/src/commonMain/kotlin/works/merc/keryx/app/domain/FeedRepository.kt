@@ -304,10 +304,16 @@ class FeedRepository(
         // feed being re-subscribed is re-numbered to the end of the group it used to belong to (its
         // old relative position may no longer be meaningful after other feeds in that group moved
         // around while it was unsubscribed).
+        // The CPU-heavy part of storing the articles (each one's HTML stripped into its search text)
+        // is done here, before the lock and the transaction, for the id a new row gets; the write
+        // itself goes into the feed's own transaction (see doSubscribeFeedWrite).
+        val articleRowsFeedId = IdGenerator.feedId(effectiveUrl)
+        val articleRows = articleRepository.prepareRows(articleRowsFeedId, fetched.articles)
         val written = feedPlacementMutex.withLock {
             doSubscribeFeedWrite(
                 effectiveUrl, folderId, afterFeedId, beforeFeedId, subscription.favicon, fetched,
                 subscription.storedBeforeFetch, subscription.observedBatchWrites, batch,
+                articleRowsFeedId, articleRows,
             )
         }
         val feedId = written.feedId
@@ -321,11 +327,6 @@ class FeedRepository(
             favicon = written.values.faviconUrl,
             replacedFavicon = written.replacedFavicon,
         )
-        // The articles follow the feed values: a write that kept another writer's newer content and
-        // validators (a refresh that landed after the prefetch) only adds the articles not stored
-        // yet. Its own fetch is the older response, so overwriting would put older bodies back under
-        // the kept validators — and a conditional request answered 304 would never repair them.
-        articleRepository.upsertParsed(feedId, fetched.articles, overwriteExisting = written.replacedContent)
         syncScheduler.scheduleSync()
         return FeedWriteOutcome(
             Result.Ok(feeds.getById(feedId).executeAsOne()),
@@ -438,7 +439,11 @@ class FeedRepository(
 
     /**
      * The locked internals of [subscribeFeedWrite]. Reads the current feed row under the mutex,
-     * decides the feed id and sort order from it, upserts the feed, and returns what it wrote.
+     * decides the feed id and sort order from it, upserts the feed and its articles in one
+     * transaction, and returns what it wrote.
+     *
+     * @param articleRowsFeedId The feed id [articleRows] were prepared for (the id a new row gets).
+     * @param articleRows The fetched articles, prepared outside the lock.
      */
     private fun doSubscribeFeedWrite(
         effectiveUrl: String,
@@ -450,6 +455,8 @@ class FeedRepository(
         storedBeforeFetch: StoredFeedValues?,
         observedBatchWrites: Int,
         batch: SubscribeBatch?,
+        articleRowsFeedId: String,
+        articleRows: List<ArticleRepository.PreparedInsert>,
     ): SubscribeWrite {
         // Taken under the lock, not before waiting for it: a write committed while this call waited
         // (a refresh, a move) must not end up newer than the time stamped here.
@@ -480,8 +487,7 @@ class FeedRepository(
             // rename, a reorder — leaves both alone, so the fetched values are written. So are they
             // for a new row, a resubscribed one, and a row the prefetch never saw (no row yet, or a
             // redirect to another feed's URL). (error_count / last_error need no such guard: upsert
-            // never updates them on an existing row.) The articles are still upserted by the
-            // caller — they only add.
+            // never updates them on an existing row.) The articles follow this decision, below.
             val fetchedValues = FeedValues(
                 siteUrl = fetched.siteUrl,
                 title = fetched.title ?: effectiveUrl,
@@ -530,6 +536,18 @@ class FeedRepository(
             // Re-subscribing (feed was soft-deleted) is a subscription-state change: stamp its
             // last-wins timestamp so it propagates over another device's refresh on the next sync.
             if (current?.deleted_at != null) feeds.stampResubscribed(now, feedId)
+
+            // The articles follow the feed values, in this same transaction: one that kept another
+            // writer's newer content and validators (a refresh that landed after the prefetch) only
+            // adds the articles not stored yet. Its own fetch is the older response, so overwriting
+            // would put older bodies back under the kept validators — and a conditional request
+            // answered 304 would never repair them. Written here rather than after the transaction,
+            // so a refresh (which writes its validators and articles in one transaction too) can only
+            // commit wholly before this write — and then shows in `current` above — or wholly after.
+            // Rows prepared for another id (an existing row whose id predates deterministic ids) are
+            // prepared again here: rare, and the only case doing that CPU work inside the transaction.
+            val rows = if (feedId == articleRowsFeedId) articleRows else articleRepository.prepareRows(feedId, fetched.articles)
+            articleRepository.insertPrepared(articleRepository.countPrepared(feedId, rows), overwriteExisting = !keepContent)
 
             SubscribeWrite(feedId, wasNewlyCreated = current == null, values, replacedContent = !keepContent, replacedFavicon = !keepFavicon)
         }
