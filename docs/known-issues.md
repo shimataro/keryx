@@ -355,7 +355,7 @@ upgrade could deadlock against another connection that is itself waiting to upgr
 *acquire* a lock that has no conflicting upgrade in progress — it does not apply here.
 
 The two overlapping writers in the failing test: the first `subscribeFeedWrite` call holds RESERVED
-inside `subscribePlacementMutex.withLock { db.transaction { ... } }`, but the *next* thing that
+inside `feedPlacementMutex.withLock { db.transaction { ... } }`, but the *next* thing that
 call does after releasing the mutex — `articleRepository.upsertParsed(feedId, fetched.articles)`, a
 separate per-feed `db.transaction {}` — can still be mid-flight, still holding a lock, when the
 second call's own transaction tries to upgrade its SHARED read lock to RESERVED for its write.
@@ -393,7 +393,9 @@ Confirmed by inspection (not by triggering each one) — a transaction reads bef
   same transaction), reachable directly and via `FolderRepository.deleteFolder`'s transaction.
 
 `FeedRepository.moveFeed` and `FolderRepository.reorderFolders` read their ordering *before*
-opening `db.transaction {}`, so they don't have this shape. Neither does the feed-refresh apply
+opening `db.transaction {}`, so they don't have this shape. (`moveFeed` holds `feedPlacementMutex`
+across that read and its transaction, so it cannot interleave with a subscribe placing a feed in the
+same group, while keeping the read outside the transaction.) Neither does the feed-refresh apply
 transaction (`FeedRepository.kt`, around `applyFetch`), which only writes.
 
 ### How the test was worked around

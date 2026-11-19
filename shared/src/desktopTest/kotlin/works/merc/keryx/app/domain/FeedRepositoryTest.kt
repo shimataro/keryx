@@ -8,6 +8,7 @@ import io.ktor.client.plugins.HttpTimeout
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
@@ -58,7 +59,7 @@ private const val RSS = """<?xml version="1.0"?><rss version="2.0"><channel>
 
 /**
  * A feed with no items, so a subscribe performs no article or FTS writes after releasing
- * subscribePlacementMutex. Used by the concurrent-subscribe test — see its own comment.
+ * feedPlacementMutex. Used by the concurrent-subscribe test — see its own comment.
  */
 private const val RSS_NO_ITEMS = """<?xml version="1.0"?><rss version="2.0"><channel>
 <title>Feed</title><link>https://ex.com</link>
@@ -80,7 +81,7 @@ private const val RSS_WITH_NEW_SEARCHABLE_ARTICLE = """<?xml version="1.0"?><rss
 /**
  * Pauses the first `nextSortOrderInGroup` SELECT on a latch and records whether a second,
  * overlapping call reaches the same statement while the first is still gated, so
- * [FeedRepository]'s `subscribePlacementMutex` can be checked without depending on timing.
+ * [FeedRepository]'s `feedPlacementMutex` can be checked without depending on timing.
  */
 private class GatedSortOrderDriver(private val delegate: SqlDriver) : SqlDriver {
     val firstReadEntered = CountDownLatch(1)
@@ -233,7 +234,7 @@ class FeedRepositoryTest {
         notificationCenter: NotificationCenter = NotificationCenter(),
         messages: NotificationMessages = FakeNotificationMessages(),
         clock: Clock = Clock { 1000L },
-        subscribePlacementMutex: Mutex = Mutex(),
+        feedPlacementMutex: Mutex = Mutex(),
     ): FeedRepository {
         val articleRepository = ArticleRepository(db, FtsSearch(driver), syncScheduler, clock, Dispatchers.Unconfined)
         // Mirror startup: ensureIndexed() creates articles_fts so the refresh path's indexMissing() works.
@@ -242,7 +243,7 @@ class FeedRepositoryTest {
             db, feedFetcher, faviconResolver, articleRepository, ftsManager, syncScheduler,
             notificationCenter, clock, Dispatchers.Unconfined,
             faviconMisses = InMemoryFaviconMissStore(),
-            subscribePlacementMutex = subscribePlacementMutex,
+            feedPlacementMutex = feedPlacementMutex,
         )
     }
 
@@ -382,7 +383,7 @@ class FeedRepositoryTest {
         // (getByUrl / nextSortOrderInGroup) before its write (upsert), so SQLite's deferred BEGIN
         // means that transaction only takes a SHARED lock up front and has to upgrade to RESERVED at
         // the write. If the first call's articleRepository.upsertParsed (a separate, per-feed
-        // transaction, run after subscribePlacementMutex is released) is still holding RESERVED when
+        // transaction, run after feedPlacementMutex is released) is still holding RESERVED when
         // the second call tries to upgrade, SQLite treats the upgrade as a potential deadlock and
         // fails it with SQLITE_BUSY *without* invoking the busy handler at all — busy_timeout does
         // not apply to a failed lock upgrade, only to acquiring a lock that has no other waiter ahead
@@ -401,7 +402,7 @@ class FeedRepositoryTest {
                 respond(RSS_NO_ITEMS, HttpStatusCode.OK)
             }
             val placementMutex = CountingMutex()
-            val repo = newRepo(db, driver, fetcher, subscribePlacementMutex = placementMutex)
+            val repo = newRepo(db, driver, fetcher, feedPlacementMutex = placementMutex)
 
             val firstResult = java.util.concurrent.atomic.AtomicReference<Result<Feeds>>()
             val secondResult = java.util.concurrent.atomic.AtomicReference<Result<Feeds>>()
@@ -1668,6 +1669,59 @@ class FeedRepositoryTest {
 
             // The refresh must not revert the concurrent reorder.
             assertEquals(99L, db.feedsQueries.getById(id).executeAsOne().sort_order)
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
+     * moveFeed reads its target group's order and then writes it, so it must hold the same placement
+     * lock a subscribe holds while it allocates a sort_order in that group — otherwise the two can
+     * interleave and leave duplicate sort_orders.
+     */
+    @Test
+    fun moveFeedWaitsForTheFeedPlacementLock(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f1", sortOrder = 0L)
+            db.insertFeed("f2", sortOrder = 1L)
+            val placement = Mutex()
+            val repo = newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK) }, feedPlacementMutex = placement)
+            placement.lock()
+
+            val move = launch(start = CoroutineStart.UNDISPATCHED) { repo.moveFeed("f2", null, "f1") }
+
+            assertEquals(listOf("f1", "f2"), db.feedsQueries.getByFolder(null).executeAsList().map { it.id })
+
+            placement.unlock()
+            move.join()
+
+            assertEquals(listOf("f2", "f1"), db.feedsQueries.getByFolder(null).executeAsList().map { it.id })
+        } finally {
+            driver.close()
+        }
+    }
+
+    /** As [moveFeedWaitsForTheFeedPlacementLock], for the no-folder group a folder's feeds move into. */
+    @Test
+    fun moveFeedsOutOfFolderWaitsForTheFeedPlacementLock(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFolder("d1", "Kotlin")
+            db.insertFeed("existing", sortOrder = 0L)
+            db.insertFeed("f1", folderId = "d1", sortOrder = 0L)
+            val placement = Mutex()
+            val repo = newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK) }, feedPlacementMutex = placement)
+            placement.lock()
+
+            val move = launch(start = CoroutineStart.UNDISPATCHED) { repo.moveFeedsOutOfFolder("d1") }
+
+            assertEquals("d1", db.feedsQueries.getById("f1").executeAsOne().folder_id)
+
+            placement.unlock()
+            move.join()
+
+            assertEquals(listOf("existing", "f1"), db.feedsQueries.getByFolder(null).executeAsList().map { it.id })
         } finally {
             driver.close()
         }

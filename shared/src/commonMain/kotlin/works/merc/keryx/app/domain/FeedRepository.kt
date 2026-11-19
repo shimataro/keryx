@@ -71,21 +71,24 @@ class FeedRepository(
     private val clock: Clock,
     private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
     private val faviconMisses: FaviconMissStore,
-    // Guards subscribe placement — see the "[subscribePlacementMutex] guards" comment below. A constructor parameter only so
-    // FeedRepositoryTest can wrap it and observe a second subscribe waiting on it.
-    private val subscribePlacementMutex: Mutex = Mutex(),
+    // Guards feed placement — see the "[feedPlacementMutex] guards" comment below. A constructor parameter only so
+    // tests can wrap or hold it and observe a placement waiting on it.
+    private val feedPlacementMutex: Mutex = Mutex(),
 ) {
     private val feeds get() = db.feedsQueries
 
-    // [subscribePlacementMutex] guards subscribeFeedWrite's sort-order allocation + upsert + folder assignment. A
-    // db.transaction alone isn't enough: SQLite's deferred BEGIN means the nextSortOrderInGroup
-    // SELECT below doesn't take a write lock, so two overlapping transactions could still both
-    // read the same stale MAX before either writes. This mutex is the piece that actually
-    // serializes that read-then-write, the same way OpmlImporter's own mutex serializes concurrent
-    // import() runs against each other — but that lock doesn't cover a concurrent call through
-    // this class's other entry point (AddFeedPreviewResolver's "Add Feed" dialog path), so the
-    // two need their own shared guard here where they converge. (Injected — see the constructor's
-    // subscribePlacementMutex parameter.)
+    // [feedPlacementMutex] guards every read-then-write of `feeds.sort_order` within a group:
+    // subscribeFeedWrite's sort-order allocation + upsert + folder assignment, moveFeed's renumbering
+    // of its target group, and moveFeedsOutOfFolder's append to the no-folder group (also reached
+    // through FolderRepository.deleteFolder, via withFeedPlacementLock). A db.transaction alone isn't
+    // enough: SQLite's deferred BEGIN means the nextSortOrderInGroup / getByFolder SELECT doesn't take
+    // a write lock, so two overlapping writers could still both read the same stale order before
+    // either writes, leaving duplicate sort_orders. This mutex is the piece that actually serializes
+    // that read-then-write within this process — OpmlImporter's own mutex only serializes import()
+    // runs against each other, not against the "Add Feed" dialog (AddFeedPreviewResolver) or a feed-
+    // list move, so they need this shared guard here where they converge. The sync merge runs on its
+    // own connection outside it; its sort_order changes resolve by last-write-wins. (Injected — see
+    // the constructor's feedPlacementMutex parameter.)
 
     // Per-feed reference count of in-flight refreshes. A count rather than a set membership because a
     // single-feed refresh can overlap a refresh of every feed, and the feed must stay marked until both end.
@@ -256,7 +259,7 @@ class FeedRepository(
         // feed being re-subscribed is re-numbered to the end of the group it used to belong to (its
         // old relative position may no longer be meaningful after other feeds in that group moved
         // around while it was unsubscribed).
-        val wasNewlyCreated = subscribePlacementMutex.withLock {
+        val wasNewlyCreated = feedPlacementMutex.withLock {
             doSubscribeFeedWrite(effectiveUrl, feedId, folderId, afterFeedId, beforeFeedId, now, subscription.favicon, fetched)
         }
         articleRepository.upsertParsed(feedId, fetched.articles)
@@ -329,14 +332,20 @@ class FeedRepository(
      * @param folderId The destination folder ID, or `null` for no folder.
      * @param targetFeedId The ID of the feed to place the moved feed before, or `null` to place it last.
      */
-    fun moveFeed(feedId: String, folderId: String?, targetFeedId: String? = null) {
-        val current = feeds.getByFolder(folderId).executeAsList()
-        val sortOrderOf = current.associate { it.id to it.sort_order }
-        val newOrder = reorderIds(current.map { it.id }, feedId, targetFeedId)
-        val now = clock.nowMillis()
-        db.transaction {
-            applyReorderUpdates(newOrder, sortOrderOf, feedId, now, feeds) { index ->
-                feeds.updateFolderAndSortOrder(folderId, index.toLong(), now, now, now, feedId)
+    suspend fun moveFeed(feedId: String, folderId: String?, targetFeedId: String? = null) {
+        feedPlacementMutex.withLock {
+            // The group is read *outside* the transaction on purpose: a deferred transaction that
+            // reads and then writes has to upgrade its lock, which SQLite can refuse with an
+            // immediate SQLITE_BUSY (see docs/known-issues.md). The mutex serializes the read and
+            // the write against every other placement in this process instead.
+            val current = feeds.getByFolder(folderId).executeAsList()
+            val sortOrderOf = current.associate { it.id to it.sort_order }
+            val newOrder = reorderIds(current.map { it.id }, feedId, targetFeedId)
+            val now = clock.nowMillis()
+            db.transaction {
+                applyReorderUpdates(newOrder, sortOrderOf, feedId, now, feeds) { index ->
+                    feeds.updateFolderAndSortOrder(folderId, index.toLong(), now, now, now, feedId)
+                }
             }
         }
         syncScheduler.scheduleSync()
@@ -348,7 +357,22 @@ class FeedRepository(
      * @param folderId The ID of the folder whose feeds should be moved.
      * @param now The timestamp to apply to the moved feeds.
      */
-    fun moveFeedsOutOfFolder(folderId: String, now: Long = clock.nowMillis()) {
+    suspend fun moveFeedsOutOfFolder(folderId: String, now: Long = clock.nowMillis()) {
+        feedPlacementMutex.withLock { moveFeedsOutOfFolderLocked(folderId, now) }
+    }
+
+    /**
+     * Runs [block] holding the feed placement lock (see [feedPlacementMutex]), for a caller that
+     * places feeds as part of its own transaction — `FolderRepository.deleteFolder`, which calls
+     * [moveFeedsOutOfFolderLocked] inside it.
+     */
+    internal suspend fun <T> withFeedPlacementLock(block: () -> T): T = feedPlacementMutex.withLock { block() }
+
+    /**
+     * [moveFeedsOutOfFolder]'s body, for a caller already holding the feed placement lock
+     * ([withFeedPlacementLock]).
+     */
+    internal fun moveFeedsOutOfFolderLocked(folderId: String, now: Long) {
         val feedsInFolder = feeds.getByFolder(folderId).executeAsList()
         val startOrder = feeds.nextSortOrderInGroup(null).executeAsOne()
         db.transaction {

@@ -6,7 +6,11 @@ import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.http.HttpStatusCode
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import works.merc.keryx.app.InMemoryFaviconMissStore
@@ -48,6 +52,7 @@ class FolderRepositoryTest {
         driver: SqlDriver,
         syncScheduler: SyncScheduler = SyncScheduler {},
         clock: Clock = Clock { 0L },
+        placementMutex: Mutex = Mutex(),
     ): FolderRepository {
         val articleRepository = ArticleRepository(db, FtsSearch(driver), syncScheduler, clock, Dispatchers.Unconfined)
         // Mirror startup: ensureIndexed() creates articles_fts so indexMissing() (unused here) works.
@@ -57,6 +62,7 @@ class FolderRepositoryTest {
             articleRepository, ftsManager, syncScheduler, NotificationCenter(),
             clock, Dispatchers.Unconfined,
             faviconMisses = InMemoryFaviconMissStore(),
+            feedPlacementMutex = placementMutex,
         )
         return FolderRepository(db, feedRepository, syncScheduler, clock, Dispatchers.Unconfined)
     }
@@ -249,7 +255,7 @@ class FolderRepositoryTest {
             val scheduler = FolderCountingSyncScheduler()
             val repo = newRepo(db, driver, syncScheduler = scheduler, clock = Clock { 300L })
 
-            repo.deleteFolder("d1")
+            runBlocking { repo.deleteFolder("d1") }
 
             val row = db.foldersQueries.getById("d1").executeAsOne()
             assertNotNull(row.deleted_at)
@@ -271,7 +277,7 @@ class FolderRepositoryTest {
             val scheduler = FolderCountingSyncScheduler()
             val repo = newRepo(db, driver, syncScheduler = scheduler, clock = Clock { 400L })
 
-            repo.deleteFolder("d1")
+            runBlocking { repo.deleteFolder("d1") }
 
             assertNull(db.feedsQueries.getById("f1").executeAsOne().folder_id)
             assertNull(db.feedsQueries.getById("f2").executeAsOne().folder_id)
@@ -280,6 +286,36 @@ class FolderRepositoryTest {
             assertNotNull(folder.deleted_at)
             assertEquals(400L, folder.deleted_at)
             assertEquals(1, scheduler.callCount)
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
+     * Deleting a folder appends its feeds to the no-folder group, reading that group's next
+     * sort_order first — so it must hold the feed placement lock a concurrent subscribe into that
+     * group holds, or the two can allocate the same sort_order.
+     */
+    @Test
+    fun deleteFolderWaitsForTheFeedPlacementLock(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFolder("d1", "Kotlin", now = 10L)
+            db.insertFeed("f1", now = 10L, folderId = "d1")
+            val placement = Mutex()
+            val repo = newRepo(db, driver, clock = Clock { 400L }, placementMutex = placement)
+            placement.lock()
+
+            val delete = launch(start = CoroutineStart.UNDISPATCHED) { repo.deleteFolder("d1") }
+
+            assertEquals("d1", db.feedsQueries.getById("f1").executeAsOne().folder_id)
+            assertNull(db.foldersQueries.getById("d1").executeAsOne().deleted_at)
+
+            placement.unlock()
+            delete.join()
+
+            assertNull(db.feedsQueries.getById("f1").executeAsOne().folder_id)
+            assertEquals(400L, db.foldersQueries.getById("d1").executeAsOne().deleted_at)
         } finally {
             driver.close()
         }
@@ -297,7 +333,7 @@ class FolderRepositoryTest {
             db.insertFeed("f1", now = 10L, folderId = "d1", sortOrder = 1L)
             val repo = newRepo(db, driver, clock = Clock { 400L })
 
-            repo.deleteFolder("d1")
+            runBlocking { repo.deleteFolder("d1") }
 
             val noFolderOrdered = db.feedsQueries.getByFolder(null).executeAsList()
             assertEquals(listOf("existing", "f2", "f1"), noFolderOrdered.map { it.id })
