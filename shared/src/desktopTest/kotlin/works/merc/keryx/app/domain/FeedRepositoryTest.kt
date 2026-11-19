@@ -135,6 +135,31 @@ private class GatedSortOrderDriver(private val delegate: SqlDriver) : SqlDriver 
 }
 
 /**
+ * Runs [beforeFeedByUrlRead] once, right before the next read of a feed by URL (`feeds.getByUrl`) it is
+ * asked to run, and passes everything through — for a test that has to put other writers' commits
+ * between a prefetch's read of the batch count and its read of the row.
+ */
+private class BeforeFeedByUrlReadDriver(private val delegate: app.cash.sqldelight.db.SqlDriver) :
+    app.cash.sqldelight.db.SqlDriver by delegate {
+    @Volatile var beforeFeedByUrlRead: (() -> Unit)? = null
+
+    override fun <R> executeQuery(
+        identifier: Int?,
+        sql: String,
+        mapper: (app.cash.sqldelight.db.SqlCursor) -> app.cash.sqldelight.db.QueryResult<R>,
+        parameters: Int,
+        binders: (app.cash.sqldelight.db.SqlPreparedStatement.() -> Unit)?,
+    ): app.cash.sqldelight.db.QueryResult<R> {
+        if (sql.endsWith("FROM feeds WHERE url = ?")) {
+            val hook = beforeFeedByUrlRead
+            beforeFeedByUrlRead = null
+            hook?.invoke()
+        }
+        return delegate.executeQuery(identifier, sql, mapper, parameters, binders)
+    }
+}
+
+/**
  * Runs [beforeFirstArticleInsert] once, right before the first `INSERT INTO articles` it is asked to
  * run, and passes everything through — for a test that has to put another writer's commit at that
  * exact point.
@@ -2068,6 +2093,49 @@ class FeedRepositoryTest {
             assertEquals("v2", db.feedsQueries.getById("f1").executeAsOne().etag)
         } finally {
             driver.close()
+        }
+    }
+
+    /**
+     * A batch write and a refresh after it can no longer commit between a prefetch's read of the batch
+     * count and its read of the row: the batch write waits on the prefetch's read. Otherwise the
+     * prefetch would read the refresh's values with a count from before the batch write, take that
+     * older write as its baseline, and drop its own newer fetch.
+     */
+    @Test
+    fun writePrefetchedSubscriptionReadsTheBatchCountAndTheRowAsOfOneMoment(): Unit = runBlocking {
+        val (_, rawDriver, rawDb) = fileDb()
+        val driver = BeforeFeedByUrlReadDriver(rawDriver)
+        val db = works.merc.keryx.app.data.local.db.KeryxDatabase(driver)
+        try {
+            val alias = "https://ex.com/old"
+            val target = "https://ex.com/feed"
+            val repo = newRepo(db, driver, aliasFetcher(alias, target), clock = Clock { 1000L })
+            rawDb.insertFeed("f1", now = 500L, url = target)
+            rawDb.feedsQueries.updateCacheHeaders("v0", null, 500L, "f1")
+            val batch = SubscribeBatch()
+            val viaAlias = repo.prefetchSubscription(alias, batch) // v1
+            var aliasWrite: Thread? = null
+            driver.beforeFeedByUrlRead = {
+                val aliasWritten = CountDownLatch(1)
+                // The alias entry's write, on another thread (so another connection), then a refresh —
+                // both trying to land in the middle of the canonical entry's prefetch read.
+                aliasWrite = Thread {
+                    runBlocking { repo.writePrefetchedSubscription(viaAlias, batch = batch) }
+                    aliasWritten.countDown()
+                }.apply { start() }
+                aliasWritten.await(500, TimeUnit.MILLISECONDS)
+                rawDb.feedsQueries.updateCacheHeaders("refreshed", null, 2000L, "f1")
+            }
+
+            val direct = repo.prefetchSubscription(target, batch) // v2
+            assertNotNull(aliasWrite).join(10_000)
+            repo.writePrefetchedSubscription(direct, batch = batch)
+
+            // The refresh was there when the canonical entry fetched, so its newer fetch is written.
+            assertEquals("v2", rawDb.feedsQueries.getById("f1").executeAsOne().etag)
+        } finally {
+            rawDriver.close()
         }
     }
 

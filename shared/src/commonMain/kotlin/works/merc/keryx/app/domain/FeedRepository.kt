@@ -254,11 +254,12 @@ class FeedRepository(
      * [Result.Err]; the favicon lookup is made only once the fetch succeeded.
      */
     internal suspend fun prefetchSubscription(url: String, batch: SubscribeBatch? = null): Result<PrefetchedSubscription> {
-        // Counted before the row is read: a batch write that commits in between then shows in both the
-        // row and the baseline, rather than in the row alone, where it would pass for another writer's.
-        val observedBatchWrites = batch?.committedWrites() ?: 0
         // Read before the fetch starts, so a write that lands while it is in flight shows as a change.
-        val storedBeforeFetch = feeds.getByUrl(url).executeAsOneOrNull()?.let { StoredFeedValues(it.id, it.feedValues) }
+        val readRow = { feeds.getByUrl(url).executeAsOneOrNull()?.let { StoredFeedValues(it.id, it.feedValues) } }
+        // In a batch, read together with the count of the batch's committed writes, with no batch write
+        // between the two (see SubscribeBatch); only this one read is held under the batch lock.
+        val (observedBatchWrites, storedBeforeFetch) =
+            if (batch != null) batch.observe(readRow).let { it.writes to it.value } else 0 to readRow()
         val fetched = feedFetcher.fetch(url).valueOrElse { return it }
         val effectiveUrl = fetched.redirectUrl ?: url
         val favicon = faviconResolver.resolve(fetched.siteUrl, effectiveUrl)
@@ -309,24 +310,31 @@ class FeedRepository(
         // itself goes into the feed's own transaction (see doSubscribeFeedWrite).
         val articleRowsFeedId = IdGenerator.feedId(effectiveUrl)
         val articleRows = articleRepository.prepareRows(articleRowsFeedId, fetched.articles)
-        val written = feedPlacementMutex.withLock {
-            doSubscribeFeedWrite(
-                effectiveUrl, folderId, afterFeedId, beforeFeedId, subscription.favicon, fetched,
-                subscription.storedBeforeFetch, subscription.observedBatchWrites, batch,
-                articleRowsFeedId, articleRows,
+        val writeAndRecord: suspend () -> SubscribeWrite = {
+            val written = feedPlacementMutex.withLock {
+                doSubscribeFeedWrite(
+                    effectiveUrl, folderId, afterFeedId, beforeFeedId, subscription.favicon, fetched,
+                    subscription.storedBeforeFetch, subscription.observedBatchWrites, batch,
+                    articleRowsFeedId, articleRows,
+                )
+            }
+            // Recorded only once the transaction has committed, so a rolled-back write leaves no
+            // record — and only the groups this write replaced, not values it kept from another writer.
+            batch?.record(
+                written.feedId,
+                content = written.values.withoutFavicon(),
+                replacedContent = written.replacedContent,
+                favicon = written.values.faviconUrl,
+                replacedFavicon = written.replacedFavicon,
             )
+            written
         }
+        // In a batch, the write and its record exclude the batch's prefetch reads (see SubscribeBatch),
+        // so a prefetch never reads the row and the count from either side of this write. The batch
+        // lock is always taken before the placement lock, and a prefetch takes only the batch lock.
+        val written = if (batch != null) batch.write(writeAndRecord) else writeAndRecord()
         val feedId = written.feedId
         val wasNewlyCreated = written.wasNewlyCreated
-        // Recorded only once the transaction has committed, so a rolled-back write leaves no record —
-        // and only the groups this write replaced, not values it kept from another writer.
-        batch?.record(
-            feedId,
-            content = written.values.withoutFavicon(),
-            replacedContent = written.replacedContent,
-            favicon = written.values.faviconUrl,
-            replacedFavicon = written.replacedFavicon,
-        )
         syncScheduler.scheduleSync()
         return FeedWriteOutcome(
             Result.Ok(feeds.getById(feedId).executeAsOne()),
