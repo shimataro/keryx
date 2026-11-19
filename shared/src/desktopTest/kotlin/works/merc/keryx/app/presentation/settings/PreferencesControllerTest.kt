@@ -1,7 +1,14 @@
 package works.merc.keryx.app.presentation.settings
 
 import app.cash.sqldelight.db.SqlDriver
+import app.cash.sqldelight.db.QueryResult
+import app.cash.sqldelight.db.SqlPreparedStatement
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import works.merc.keryx.app.HoldingDispatcher
+import works.merc.keryx.app.core.SETTING_CACHE_RETENTION_DAYS
+import works.merc.keryx.app.core.SETTING_READ_TIMEOUT_SECONDS
+import works.merc.keryx.app.insertGlobalSetting
 import works.merc.keryx.app.core.ARTICLE_LIST_PANE_MAX_WIDTH
 import works.merc.keryx.app.core.ARTICLE_LIST_PANE_MIN_WIDTH
 import works.merc.keryx.app.core.Clock
@@ -43,14 +50,72 @@ class PreferencesControllerTest {
         File(dir).deleteRecursively()
     }
 
-    private fun newController(): PreferencesController {
+    private fun newController(
+        database: KeryxDatabase = db,
+        writeDispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
+    ): PreferencesController {
         // Unconfined write dispatcher so every write persists inline, keeping store.load() assertions
         // deterministic without a test coroutine scheduler.
         val settingsRepository = SettingsRepository(
-            db, LocalSettingsStore(dirOverride = dir), SyncScheduler {}, Clock { 0L },
-            writeDispatcher = Dispatchers.Unconfined,
+            database, LocalSettingsStore(dirOverride = dir), SyncScheduler {}, Clock { 0L },
+            writeDispatcher = writeDispatcher,
         )
         return PreferencesController(settingsRepository)
+    }
+
+    /** How many of the next `global_settings` writes through [failingDb] fail. */
+    private var globalWritesToFail = 0
+    private fun failingDb() = KeryxDatabase(object : SqlDriver by driver {
+        override fun execute(
+            identifier: Int?,
+            sql: String,
+            parameters: Int,
+            binders: (SqlPreparedStatement.() -> Unit)?,
+        ): QueryResult<Long> {
+            if (globalWritesToFail > 0 && sql.contains("global_settings")) {
+                globalWritesToFail--
+                throw IllegalStateException("database is locked")
+            }
+            return driver.execute(identifier, sql, parameters, binders)
+        }
+    })
+
+    @Test
+    fun aFailedReadTimeoutWriteShowsTheStoredValueAgain() {
+        db.insertGlobalSetting(SETTING_READ_TIMEOUT_SECONDS, "45")
+        val controller = newController(failingDb())
+        globalWritesToFail = 1
+
+        controller.updateReadTimeout(90)
+
+        assertEquals(45, controller.readTimeoutSeconds.value)
+    }
+
+    @Test
+    fun aFailedCacheRetentionWriteShowsTheStoredValueAgain() {
+        db.insertGlobalSetting(SETTING_CACHE_RETENTION_DAYS, "7")
+        val controller = newController(failingDb())
+        globalWritesToFail = 1
+
+        controller.updateCacheRetention(null)
+
+        assertEquals(7, controller.cacheRetentionDays.value)
+    }
+
+    @Test
+    fun aFailedWriteDoesNotOverwriteANewerChangeOfTheSameSetting() {
+        val writes = HoldingDispatcher()
+        val controller = newController(failingDb(), writes)
+        writes.hold()
+
+        controller.updateReadTimeout(60)
+        controller.updateReadTimeout(90)
+        // The first write fails, the second one lands.
+        globalWritesToFail = 1
+        writes.release()
+
+        assertEquals(90, controller.readTimeoutSeconds.value)
+        assertEquals(90, newController().readTimeoutSeconds.value)
     }
 
     @Test

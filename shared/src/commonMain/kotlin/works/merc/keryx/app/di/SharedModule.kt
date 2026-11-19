@@ -133,7 +133,7 @@ fun sharedModule(): Module = module {
     single { FeedFetcher(get()) { get<SettingsRepository>().getReadTimeoutSeconds() } }
     single { FaviconResolver(get()) }
 
-    single { SettingsRepository(get(), get(), get(), get(), pendingLocalWrites = get()) }
+    single { SettingsRepository(get(), get(), get(), get(), localWriteFailureReporter = get(), pendingLocalWrites = get()) }
     single { ArticleRepository(get(), get(), get(), get()) }
     single { TagRepository(get(), get(), get()) }
     single {

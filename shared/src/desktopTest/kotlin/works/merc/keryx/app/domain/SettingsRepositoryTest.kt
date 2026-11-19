@@ -4,7 +4,6 @@ import app.cash.sqldelight.db.QueryResult
 import app.cash.sqldelight.db.SqlDriver
 import app.cash.sqldelight.db.SqlPreparedStatement
 import java.util.concurrent.atomic.AtomicBoolean
-import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -15,6 +14,8 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import works.merc.keryx.app.HoldingDispatcher
 import works.merc.keryx.app.core.Clock
+import works.merc.keryx.app.core.LocalWriteFailureKind
+import works.merc.keryx.app.core.NotificationText
 import works.merc.keryx.app.data.local.LocalSettings
 import works.merc.keryx.app.data.local.LocalSettingsStore
 import works.merc.keryx.app.data.local.db.KeryxDatabase
@@ -318,25 +319,30 @@ class SettingsRepositoryTest {
     }
 
     /**
-     * A failed global write is a DB failure: it surfaces as an uncaught exception on the writer, and
-     * the writer's SupervisorJob keeps the next setter's write working.
+     * A failed global write is reported (not thrown), runs only its own onFailed, and leaves the next
+     * setter's write working.
      */
     @Test
-    fun aFailedGlobalWriteDoesNotStopTheNextOne() {
+    fun aFailedGlobalWriteIsReportedRunsItsOnFailedAndDoesNotStopTheNextOne() {
         val (inner, _) = inMemoryDb()
         try {
-            val uncaught = mutableListOf<Throwable>()
+            val notifications = NotificationCenter()
             val repo = SettingsRepository(
                 KeryxDatabase(FailFirstGlobalWriteDriver(inner)), LocalSettingsStore(dirOverride = dir),
                 SyncScheduler {}, Clock { 0L }, writeDispatcher = Dispatchers.Unconfined,
-                writeExceptionHandler = CoroutineExceptionHandler { _, e -> uncaught += e },
+                localWriteFailureReporter = LocalWriteFailureReporter(notifications, Clock { 0L }),
             )
+            val failed = mutableListOf<Int>()
 
-            repo.setReadTimeoutSeconds(60)
-            repo.setReadTimeoutSeconds(90)
+            repo.setReadTimeoutSeconds(60) { failed += 60 }
+            repo.setReadTimeoutSeconds(90) { failed += 90 }
 
-            assertEquals("database is locked", uncaught.single().message)
+            assertEquals(listOf(60), failed)
             assertEquals(90, repo.getReadTimeoutSeconds())
+            assertEquals(
+                NotificationText.LocalWriteFailed(LocalWriteFailureKind.OTHER),
+                notifications.items.value.single().text,
+            )
         } finally {
             inner.close()
         }
@@ -380,7 +386,7 @@ class SettingsRepositoryTest {
             val repo = SettingsRepository(
                 KeryxDatabase(FailFirstGlobalWriteDriver(inner)), LocalSettingsStore(dirOverride = dir),
                 SyncScheduler {}, Clock { 0L }, writeDispatcher = Dispatchers.Unconfined,
-                writeExceptionHandler = CoroutineExceptionHandler { _, _ -> }, pendingLocalWrites = pending,
+                pendingLocalWrites = pending,
             )
 
             repo.setReadTimeoutSeconds(60)

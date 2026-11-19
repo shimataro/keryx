@@ -7,7 +7,6 @@ import works.merc.keryx.app.core.SETTING_ARTICLE_LIST_DEFAULT_UNREAD_ONLY
 import works.merc.keryx.app.core.SETTING_CACHE_RETENTION_DAYS
 import works.merc.keryx.app.core.SETTING_READ_TIMEOUT_SECONDS
 import kotlinx.coroutines.CoroutineDispatcher
-import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -24,7 +23,6 @@ import kotlinx.coroutines.withContext
 import works.merc.keryx.app.data.local.LocalSettings
 import works.merc.keryx.app.data.local.LocalSettingsStore
 import works.merc.keryx.app.data.local.db.KeryxDatabase
-import kotlin.coroutines.EmptyCoroutineContext
 
 /**
  * Reads/writes both synced global settings (in `global_settings`) and
@@ -35,10 +33,11 @@ import kotlin.coroutines.EmptyCoroutineContext
  * from the UI thread never waits on the SQLite write lock — a sync merge or search-index write can
  * hold it for up to `busy_timeout`. A getter called right after a setter may therefore still read
  * the previous value; callers that show the value keep their own state (`PreferencesController`).
- * A global write that fails is a DB failure, which `docs/error-design.md` makes an exception rather
- * than a `Result`: with the write off the caller's thread, it surfaces as an uncaught exception on the
- * writer rather than at the setter's call site, and the writer's `SupervisorJob` keeps later writes
- * (global and local) working.
+ * A global write that fails has no caller left to throw to, so it is reported
+ * ([LocalWriteFailureReporter]: logged, and posted to the notification center) — the documented
+ * exception to "a DB failure is an exception" in `docs/error-design.md` — and the setter's
+ * `onFailed` lets a caller that shows the value put it back. Later writes (global and local) keep
+ * working.
  *
  * Device-local settings are written to disk **off the caller's thread**: [saveLocalSettings]
  * updates the in-memory [localSettings] synchronously (so the UI and [getLocalSettings] see the
@@ -58,9 +57,9 @@ class SettingsRepository(
     private val syncScheduler: SyncScheduler,
     private val clock: Clock,
     private val writeDispatcher: CoroutineDispatcher = Dispatchers.Default.limitedParallelism(1),
-    // Where a failed write's exception goes; `null` (production) leaves it to the platform's
-    // uncaught-exception handling. A parameter only so a test can observe the failure.
-    writeExceptionHandler: CoroutineExceptionHandler? = null,
+    // Reports a global write that failed. Production passes the app's one (Koin); the default, over a
+    // notification center nobody shows, is for tests that never fail a write.
+    private val localWriteFailureReporter: LocalWriteFailureReporter = LocalWriteFailureReporter(NotificationCenter(), clock),
     // Counts the global-setting writes queued but not yet run, so a foreground-exit sync flush waits
     // for them (see [PendingLocalWrites]). Shared with `SyncRepository` in production.
     private val pendingLocalWrites: PendingLocalWrites = PendingLocalWrites(),
@@ -70,8 +69,7 @@ class SettingsRepository(
     /** Live device-local settings — the theme/font live off this. */
     val localSettings: StateFlow<LocalSettings> = _localSettings.asStateFlow()
 
-    private val writeScope =
-        CoroutineScope(SupervisorJob() + writeDispatcher + (writeExceptionHandler ?: EmptyCoroutineContext))
+    private val writeScope = CoroutineScope(SupervisorJob() + writeDispatcher)
 
     // A save signal; the writer always persists the *latest* _localSettings.value, so a burst of
     // saves that outpaces the disk collapses to one write (DROP_OLDEST keeps only the newest signal).
@@ -89,8 +87,9 @@ class SettingsRepository(
     fun getReadTimeoutSeconds(): Int =
         getGlobal(SETTING_READ_TIMEOUT_SECONDS)?.toIntOrNull() ?: READ_TIMEOUT_SECONDS_DEFAULT
 
-    fun setReadTimeoutSeconds(seconds: Int) {
-        setGlobal(SETTING_READ_TIMEOUT_SECONDS, seconds.toString())
+    /** Writes the feed read timeout; [onFailed] runs (on the writer) if the write fails — see [setGlobal]. */
+    fun setReadTimeoutSeconds(seconds: Int, onFailed: (() -> Unit)? = null) {
+        setGlobal(SETTING_READ_TIMEOUT_SECONDS, seconds.toString(), onFailed)
     }
 
     /** null == unlimited retention. */
@@ -99,15 +98,17 @@ class SettingsRepository(
         return if (raw == "null") null else raw.toIntOrNull() ?: CACHE_RETENTION_DAYS_DEFAULT
     }
 
-    fun setCacheRetentionDays(days: Int?) {
-        setGlobal(SETTING_CACHE_RETENTION_DAYS, days?.toString() ?: "null")
+    /** Writes the cache retention (`null` = unlimited); [onFailed] as for [setReadTimeoutSeconds]. */
+    fun setCacheRetentionDays(days: Int?, onFailed: (() -> Unit)? = null) {
+        setGlobal(SETTING_CACHE_RETENTION_DAYS, days?.toString() ?: "null", onFailed)
     }
 
     fun getArticleListDefaultUnreadOnly(): Boolean =
         getGlobal(SETTING_ARTICLE_LIST_DEFAULT_UNREAD_ONLY)?.toBooleanStrictOrNull() ?: false
 
-    fun setArticleListDefaultUnreadOnly(value: Boolean) {
-        setGlobal(SETTING_ARTICLE_LIST_DEFAULT_UNREAD_ONLY, value.toString())
+    /** Writes the article list's default mode; [onFailed] as for [setReadTimeoutSeconds]. */
+    fun setArticleListDefaultUnreadOnly(value: Boolean, onFailed: (() -> Unit)? = null) {
+        setGlobal(SETTING_ARTICLE_LIST_DEFAULT_UNREAD_ONLY, value.toString(), onFailed)
     }
 
     private fun getGlobal(key: String): String? =
@@ -116,18 +117,22 @@ class SettingsRepository(
     /**
      * Writes a global setting and schedules a sync, on [writeDispatcher] — serialized with the
      * local-settings writer and [flush], in call order — and returns at once. A failed write is
-     * thrown on the writer as an uncaught exception (a DB failure, see the class KDoc), never
-     * reported to the caller; it cancels only its own write, not the writer scope.
+     * reported through [localWriteFailureReporter] (see the class KDoc) and then runs [onFailed], on
+     * the writer, for a caller that showed the value ahead of the write to put it back; the writes
+     * after it are unaffected.
      *
      * The write is counted in [pendingLocalWrites] from the call until it has finished — run, failed,
      * or cancelled before it started (after [close]) — so a foreground-exit flush made in between
      * waits for the sync it schedules instead of finding nothing pending.
      */
-    private fun setGlobal(key: String, value: String) {
+    private fun setGlobal(key: String, value: String, onFailed: (() -> Unit)?) {
         pendingLocalWrites.begin()
         writeScope.launch {
-            db.global_settingsQueries.upsert(key, value, clock.nowMillis())
-            syncScheduler.scheduleSync()
+            val landed = localWriteFailureReporter.runLocalWrite {
+                db.global_settingsQueries.upsert(key, value, clock.nowMillis())
+                syncScheduler.scheduleSync()
+            }
+            if (!landed) onFailed?.invoke()
         }.invokeOnCompletion { pendingLocalWrites.end() }
     }
 
