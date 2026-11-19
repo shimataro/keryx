@@ -240,6 +240,9 @@ class FeedRepository(
         val lastModified: String?,
     )
 
+    /** These values with the favicon blanked out: the content and the validators that describe it. */
+    private fun FeedValues.withoutFavicon(): FeedValues = copy(faviconUrl = null)
+
     private val Feeds.feedValues: FeedValues
         get() = FeedValues(site_url, title, description, favicon_url, etag, last_modified)
 
@@ -436,12 +439,17 @@ class FeedRepository(
             }
             // A live row whose feed values changed since the prefetch read them (a refresh of the
             // same feed, typically during an OPML re-import that fetched ahead) holds newer values
-            // than [fetched]; keep them rather than roll them back. A change to anything else — a
-            // move, a rename, a reorder — leaves them alone, so the fetched values are written. So
-            // are they for a new row, a resubscribed one, and a row the prefetch never saw (no row
-            // yet, or a redirect to another feed's URL). (error_count / last_error need no such
-            // guard: upsert never updates them on an existing row.) The articles are still upserted
-            // by the caller — they only add.
+            // than [fetched]; keep them rather than roll them back. Two groups are judged on their
+            // own: the content with the validators describing it (site URL, title, description,
+            // ETag, Last-Modified — kept or replaced together, so a validator never ends up beside
+            // content it does not describe), and the favicon, which a refresh's favicon lookup
+            // writes alone (applyFavicon) — so a favicon stored meanwhile does not discard the
+            // fetched content, nor the other way round. A change to anything else — a move, a
+            // rename, a reorder — leaves both alone, so the fetched values are written. So are they
+            // for a new row, a resubscribed one, and a row the prefetch never saw (no row yet, or a
+            // redirect to another feed's URL). (error_count / last_error need no such guard: upsert
+            // never updates them on an existing row.) The articles are still upserted by the
+            // caller — they only add.
             val fetchedValues = FeedValues(
                 siteUrl = fetched.siteUrl,
                 title = fetched.title ?: effectiveUrl,
@@ -451,7 +459,14 @@ class FeedRepository(
                 lastModified = fetched.lastModified,
             )
             val storedValues = current?.takeIf { it.deleted_at == null && it.id == storedBeforeFetch?.feedId }?.feedValues
-            val values = if (storedValues != null && storedValues != storedBeforeFetch?.values) storedValues else fetchedValues
+            val baseline = storedBeforeFetch?.values
+            val values = if (storedValues == null || baseline == null) {
+                fetchedValues
+            } else {
+                val content = if (storedValues.withoutFavicon() != baseline.withoutFavicon()) storedValues else fetchedValues
+                val favicon = if (storedValues.faviconUrl != baseline.faviconUrl) storedValues.faviconUrl else fetchedValues.faviconUrl
+                content.copy(faviconUrl = favicon)
+            }
 
             feeds.upsert(
                 id = feedId,

@@ -1754,6 +1754,37 @@ class FeedRepositoryTest {
     }
 
     /**
+     * A refresh's favicon lookup that stores a favicon after the prefetch read the row changes the
+     * favicon alone: that favicon is kept, and the fetched content and validators are still written
+     * rather than discarded with it.
+     */
+    @Test
+    fun writePrefetchedSubscriptionKeepsAFaviconStoredMeanwhileAndStillWritesTheFetchedContent(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val url = "https://ex.com/feed"
+            val repo = newRepo(
+                db, driver,
+                fetcherWith { respond(RSS, HttpStatusCode.OK, headersOf(HttpHeaders.ETag, "fetched-etag")) },
+                clock = Clock { 1000L },
+            )
+            db.insertFeed("f1", now = 500L, url = url)
+            db.feedsQueries.updateCacheHeaders("stored-etag", null, 500L, "f1")
+            val prefetched = repo.prefetchSubscription(url)
+            db.feedsQueries.updateFaviconUrlIfMissing("https://ex.com/stored.ico", 2000L, "f1")
+
+            repo.writePrefetchedSubscription(prefetched)
+
+            val row = db.feedsQueries.getById("f1").executeAsOne()
+            assertEquals("https://ex.com/stored.ico", row.favicon_url)
+            assertEquals("fetched-etag", row.etag)
+            assertEquals("Feed", row.title)
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
      * With the row's feed values unchanged since the prefetch read them — here last written at the
      * very time the fetch started — the fetched values are written.
      */
