@@ -2,6 +2,8 @@ package works.merc.keryx.app.domain
 
 import works.merc.keryx.app.core.CACHE_RETENTION_DAYS_DEFAULT
 import works.merc.keryx.app.core.Clock
+import works.merc.keryx.app.core.LOCAL_WRITE_REREAD_RETRY_INITIAL_MS
+import works.merc.keryx.app.core.LOCAL_WRITE_REREAD_RETRY_MAX_MS
 import works.merc.keryx.app.core.READ_TIMEOUT_SECONDS_DEFAULT
 import works.merc.keryx.app.core.SETTING_ARTICLE_LIST_DEFAULT_UNREAD_ONLY
 import works.merc.keryx.app.core.SETTING_CACHE_RETENTION_DAYS
@@ -11,6 +13,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.job
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
@@ -164,6 +167,27 @@ class SettingsRepository(
     fun mutateLocalSettings(transform: (LocalSettings) -> LocalSettings) {
         _localSettings.update(transform)
         saveSignals.trySend(Unit)
+    }
+
+    /**
+     * Runs [attempt] again and again on the writer until it returns `true`, waiting
+     * [LOCAL_WRITE_REREAD_RETRY_INITIAL_MS] before the first try and doubling the wait after each
+     * failed one, up to [LOCAL_WRITE_REREAD_RETRY_MAX_MS]. For `PreferencesController`, whose read of a
+     * failed setting write's stored value can fail too (the same write lock holding both), so the
+     * shown value still catches up once the database can be read.
+     *
+     * The waits suspend rather than hold [writeDispatcher], so every other write keeps running in
+     * between. The retries stop with the writer itself ([close]).
+     */
+    internal fun retryOnWriter(attempt: () -> Boolean) {
+        writeScope.launch {
+            var wait = LOCAL_WRITE_REREAD_RETRY_INITIAL_MS
+            while (true) {
+                delay(wait)
+                if (attempt()) return@launch
+                wait = (wait * 2).coerceAtMost(LOCAL_WRITE_REREAD_RETRY_MAX_MS)
+            }
+        }
     }
 
     /**

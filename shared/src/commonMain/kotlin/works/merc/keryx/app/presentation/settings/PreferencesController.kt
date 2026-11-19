@@ -30,7 +30,10 @@ import works.merc.keryx.app.presentation.derived
  * value goes back to what the DB holds — unless the user has changed the same setting again since,
  * in which case that newer change decides it. Each setting's shown value carries the sequence number
  * of the change that set it ([ShownSetting]), and the revert, which runs on the writer's thread,
- * replaces it only while that number is still the failed change's own.
+ * replaces it only while that number is still the failed change's own. Should reading the stored
+ * value fail as well, the read is tried again on the writer ([SettingsRepository.retryOnWriter])
+ * until it succeeds or a newer change of the same setting makes it moot, so the shown value never
+ * stays on one that was not saved.
  */
 class PreferencesController(
     private val settingsRepository: SettingsRepository,
@@ -61,14 +64,14 @@ class PreferencesController(
         // its own change to take back.
         val seq = _readTimeoutSeconds.show(seconds)
         settingsRepository.setReadTimeoutSeconds(seconds) {
-            _readTimeoutSeconds.revertIfLatest(seq) { settingsRepository.getReadTimeoutSeconds() }
+            revert(_readTimeoutSeconds, seq) { settingsRepository.getReadTimeoutSeconds() }
         }
     }
 
     fun updateCacheRetention(days: Int?) {
         val seq = _cacheRetentionDays.show(days)
         settingsRepository.setCacheRetentionDays(days) {
-            _cacheRetentionDays.revertIfLatest(seq) { settingsRepository.getCacheRetentionDays() }
+            revert(_cacheRetentionDays, seq) { settingsRepository.getCacheRetentionDays() }
         }
     }
 
@@ -88,6 +91,14 @@ class PreferencesController(
     /** [pane] is the raw name of whichever pane enum the calling UI defines (Compose's `HomePane`,
      * the Apple app's `HomeFocusedPane`) — stored as plain text so neither UI needs the other's type. */
     fun setLastFocusedPane(pane: String) = update { it.copy(lastFocusedPane = pane) }
+
+    /**
+     * Puts the stored value back after the change [seq] of [shown] failed to save: at once if it can
+     * be read, else again on the writer until it can (see the class KDoc).
+     */
+    private fun <T> revert(shown: MutableStateFlow<ShownSetting<T>>, seq: Long, read: () -> T) {
+        if (!shown.tryRevert(seq, read)) settingsRepository.retryOnWriter { shown.tryRevert(seq, read) }
+    }
 }
 
 /**
@@ -101,13 +112,17 @@ private fun <T> MutableStateFlow<ShownSetting<T>>.show(value: T): Long =
     updateAndGet { ShownSetting(it.seq + 1, value) }.seq
 
 /**
- * Puts the DB's value ([read]) back while the change [seq] is still the one shown. A failing read
- * leaves the shown value as it is (logged): it has nothing better to show.
+ * Puts the DB's value ([read]) back while the change [seq] is still the one shown.
+ *
+ * @return `true` when nothing is left to do — the value was put back, or a newer change of the same
+ *   setting is shown and decides it; `false` when the read failed (logged), so it should be tried again.
  */
-private inline fun <T> MutableStateFlow<ShownSetting<T>>.revertIfLatest(seq: Long, read: () -> T) {
+private fun <T> MutableStateFlow<ShownSetting<T>>.tryRevert(seq: Long, read: () -> T): Boolean {
+    if (value.seq != seq) return true
     val stored = runCatchingUnlessCancelled(read).getOrElse { e ->
         Log.warn("PreferencesController", "Re-reading a setting after its write failed failed", e)
-        return
+        return false
     }
     update { if (it.seq == seq) it.copy(value = stored) else it }
+    return true
 }

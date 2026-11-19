@@ -89,7 +89,9 @@ again — unless the user has acted on the same item since, in which case that n
   row is one transaction (`TagRepository.createTagAndAttach`, `FolderRepository.createFolderAndMoveFeed`), so
   a failure leaves neither half behind. The other actions show nothing ahead of their write.
 - **Global settings**: `PreferencesController` shows the stored value again, unless the same setting has been
-  changed since.
+  changed since. Should reading the stored value fail too, the read is tried again on the settings writer
+  (`SettingsRepository.retryOnWriter`, waiting 1 s at first and doubling up to 30 s) until it succeeds or a newer
+  change of the same setting makes it moot, so the shown value does not stay on one that was never saved.
 
 ## Error Types (`core/KeryxException.kt`, `core/Result.kt`)
 

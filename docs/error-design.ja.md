@@ -83,7 +83,9 @@
   トランザクション（`TagRepository.createTagAndAttach`、`FolderRepository.createFolderAndMoveFeed`）なので、失敗しても
   片方だけが残ることはない。ほかの操作は、書き込みより先に画面を変えていない。
 - **グローバル設定**: `PreferencesController` は保存されている値を表示し直す。ただし、その後同じ設定が変更されていれば
-  戻さない。
+  戻さない。保存されている値の読み直しも失敗したときは、設定の書き込み側で読み直しを繰り返す
+  （`SettingsRepository.retryOnWriter`。最初は 1 秒待ち、倍にしながら最大 30 秒）。読めた時点か、同じ設定がより新しく
+  変更された時点でやめるので、保存されなかった値が表示されたまま残ることはない。
 
 ## エラー型（`core/KeryxException.kt`, `core/Result.kt`）
 

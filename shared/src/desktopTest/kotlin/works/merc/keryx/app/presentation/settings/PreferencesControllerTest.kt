@@ -5,6 +5,9 @@ import app.cash.sqldelight.db.QueryResult
 import app.cash.sqldelight.db.SqlPreparedStatement
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.TestCoroutineScheduler
+import works.merc.keryx.app.core.LOCAL_WRITE_REREAD_RETRY_INITIAL_MS
 import works.merc.keryx.app.HoldingDispatcher
 import works.merc.keryx.app.core.SETTING_CACHE_RETENTION_DAYS
 import works.merc.keryx.app.core.SETTING_READ_TIMEOUT_SECONDS
@@ -65,7 +68,24 @@ class PreferencesControllerTest {
 
     /** How many of the next `global_settings` writes through [failingDb] fail. */
     private var globalWritesToFail = 0
+
+    /** How many of the next `global_settings` reads through [failingDb] fail. */
+    private var globalReadsToFail = 0
     private fun failingDb() = KeryxDatabase(object : SqlDriver by driver {
+        override fun <R> executeQuery(
+            identifier: Int?,
+            sql: String,
+            mapper: (app.cash.sqldelight.db.SqlCursor) -> QueryResult<R>,
+            parameters: Int,
+            binders: (SqlPreparedStatement.() -> Unit)?,
+        ): QueryResult<R> {
+            if (globalReadsToFail > 0 && sql.contains("global_settings")) {
+                globalReadsToFail--
+                throw IllegalStateException("database is locked")
+            }
+            return driver.executeQuery(identifier, sql, mapper, parameters, binders)
+        }
+
         override fun execute(
             identifier: Int?,
             sql: String,
@@ -100,6 +120,47 @@ class PreferencesControllerTest {
         controller.updateCacheRetention(null)
 
         assertEquals(7, controller.cacheRetentionDays.value)
+    }
+
+    @Test
+    fun aFailedWriteWhoseReReadFailsShowsTheStoredValueOnceItCanBeRead() {
+        db.insertGlobalSetting(SETTING_READ_TIMEOUT_SECONDS, "45")
+        val scheduler = TestCoroutineScheduler()
+        val controller = newController(failingDb(), StandardTestDispatcher(scheduler))
+        globalWritesToFail = 1
+        // The read right after the failed write, and the first retry, fail too.
+        globalReadsToFail = 2
+
+        controller.updateReadTimeout(90)
+        scheduler.runCurrent()
+        assertEquals(90, controller.readTimeoutSeconds.value)
+
+        scheduler.advanceTimeBy(LOCAL_WRITE_REREAD_RETRY_INITIAL_MS)
+        scheduler.runCurrent()
+        assertEquals(90, controller.readTimeoutSeconds.value)
+
+        // The wait doubles; the next attempt reads the stored value.
+        scheduler.advanceTimeBy(2 * LOCAL_WRITE_REREAD_RETRY_INITIAL_MS)
+        scheduler.runCurrent()
+        assertEquals(45, controller.readTimeoutSeconds.value)
+        assertEquals(0, globalReadsToFail)
+    }
+
+    @Test
+    fun aPendingReReadStopsOnceTheSameSettingIsChangedAgain() {
+        db.insertGlobalSetting(SETTING_READ_TIMEOUT_SECONDS, "45")
+        val scheduler = TestCoroutineScheduler()
+        val controller = newController(failingDb(), StandardTestDispatcher(scheduler))
+        globalWritesToFail = 1
+        globalReadsToFail = 1
+
+        controller.updateReadTimeout(90)
+        scheduler.runCurrent()
+        controller.updateReadTimeout(60)
+        scheduler.advanceUntilIdle()
+
+        assertEquals(60, controller.readTimeoutSeconds.value)
+        assertEquals(60, newController().readTimeoutSeconds.value)
     }
 
     @Test

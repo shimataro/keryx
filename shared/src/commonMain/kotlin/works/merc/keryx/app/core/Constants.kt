@@ -32,6 +32,17 @@ const val SQLITE_BUSY_TIMEOUT_MS = 5_000L
  */
 const val LOCAL_WRITES_FLUSH_WAIT_MS = 2 * SQLITE_BUSY_TIMEOUT_MS
 
+/**
+ * How long `SettingsRepository.retryOnWriter` first waits before reading a setting again, when the
+ * read that should show a failed setting write's stored value has failed too; it doubles after each
+ * failed attempt up to [LOCAL_WRITE_REREAD_RETRY_MAX_MS], so the shown value catches up with the
+ * database once it can be read again without polling a database that stays unreadable.
+ */
+const val LOCAL_WRITE_REREAD_RETRY_INITIAL_MS = 1_000L
+
+/** The longest wait between attempts in `SettingsRepository.retryOnWriter`. */
+const val LOCAL_WRITE_REREAD_RETRY_MAX_MS = 30_000L
+
 // --- Time ---
 const val MILLIS_PER_HOUR = 60 * 60 * 1000L
 const val MILLIS_PER_DAY = 24 * MILLIS_PER_HOUR
