@@ -27,7 +27,11 @@ import works.merc.keryx.app.domain.TagRepository
  *   queue). The UI-side state (selection fallback, expansion) is updated by the action itself,
  *   synchronously, before or regardless of the write. The second argument, when non-null, runs on
  *   the ViewModel's main thread once the write has landed successfully; a delete hands its
- *   selection fallback to [fallBackOnceHidden] there.
+ *   selection fallback to [fallBackOnceHidden] there. The third, when non-null, runs there instead
+ *   once the write has failed (the failure itself is reported by the queue): a delete restores the
+ *   expansion state it forgot. Creating an item and placing a feed in it is one write
+ *   ([TagRepository.createTagAndAttach], [FolderRepository.createFolderAndMoveFeed]), so a failure
+ *   leaves neither half behind; every other action shows nothing ahead of its write.
  * @param fallBackOnceHidden Runs the fallback it is given once the feed list stops showing the
  *   deleted target — in production the ViewModel's [DeletedItemFallback]s. A delete's write lands
  *   before the list flow delivers it, so the feed list still shows the deleted item, and the user can
@@ -43,7 +47,7 @@ internal class FeedListActions(
     private val selectedRowInstance: MutableStateFlow<FeedListRowSelection>,
     private val currentFilter: () -> ArticleFilter,
     private val selectFilter: (ArticleFilter) -> Unit,
-    private val launchWrite: (write: suspend () -> Unit, afterWrite: (() -> Unit)?) -> Unit,
+    private val launchWrite: (write: suspend () -> Unit, afterWrite: (() -> Unit)?, onFailure: (() -> Unit)?) -> Unit,
     private val fallBackOnceHidden: (target: DeletedTarget, fallback: () -> Unit) -> Unit,
 ) {
     /** See `HomeViewModel.toggleTagExpanded`. */
@@ -61,16 +65,19 @@ internal class FeedListActions(
         if (name.isBlank()) return
         val trimmed = name.trim()
         launchWrite({
-            val tagId = tagRepository.createTag(trimmed, color)
-            if (attachToFeedId != null) tagRepository.setFeedTag(attachToFeedId, tagId, attached = true)
-        }, null)
+            if (attachToFeedId != null) {
+                tagRepository.createTagAndAttach(trimmed, color, attachToFeedId)
+            } else {
+                tagRepository.createTag(trimmed, color)
+            }
+        }, null, null)
     }
 
     /** See `HomeViewModel.updateTag`. Blank names are ignored. */
     fun updateTag(id: String, name: String, color: String?) {
         if (name.isBlank()) return
         val trimmed = name.trim()
-        launchWrite({ tagRepository.updateTag(id, trimmed, color) }, null)
+        launchWrite({ tagRepository.updateTag(id, trimmed, color) }, null, null)
     }
 
     /**
@@ -79,9 +86,13 @@ internal class FeedListActions(
      * row nested under it) was selected in between.
      */
     fun deleteTag(id: String) {
-        launchWrite({ tagRepository.deleteTag(id) }) {
-            fallBackOnceHidden(DeletedTarget.Tag(id)) { fallBackFromDeletedTag(id) }
-        }
+        // Taken before the fallback below forgets it, for a failed write to put back.
+        val wasExpanded = id in expansion.expandedTagIds.value
+        launchWrite(
+            { tagRepository.deleteTag(id) },
+            { fallBackOnceHidden(DeletedTarget.Tag(id)) { fallBackFromDeletedTag(id) } },
+            { if (wasExpanded) expansion.restoreTagExpanded(id) },
+        )
         fallBackFromDeletedTag(id)
     }
 
@@ -102,7 +113,7 @@ internal class FeedListActions(
     }
 
     fun setFeedTag(feedId: String, tagId: String, attached: Boolean) {
-        launchWrite({ tagRepository.setFeedTag(feedId, tagId, attached) }, null)
+        launchWrite({ tagRepository.setFeedTag(feedId, tagId, attached) }, null, null)
     }
 
     // --- Folder actions ---
@@ -112,16 +123,19 @@ internal class FeedListActions(
         if (name.isBlank()) return
         val trimmed = name.trim()
         launchWrite({
-            val folderId = folderRepository.createFolder(trimmed)
-            if (moveFeedId != null) feedRepository.moveFeed(moveFeedId, folderId)
-        }, null)
+            if (moveFeedId != null) {
+                folderRepository.createFolderAndMoveFeed(trimmed, moveFeedId)
+            } else {
+                folderRepository.createFolder(trimmed)
+            }
+        }, null, null)
     }
 
     /** See `HomeViewModel.updateFolder`. Blank names are ignored. */
     fun updateFolder(id: String, name: String) {
         if (name.isBlank()) return
         val trimmed = name.trim()
-        launchWrite({ folderRepository.updateFolder(id, trimmed) }, null)
+        launchWrite({ folderRepository.updateFolder(id, trimmed) }, null, null)
     }
 
     /**
@@ -130,9 +144,13 @@ internal class FeedListActions(
      * selected in between.
      */
     fun deleteFolder(id: String) {
-        launchWrite({ folderRepository.deleteFolder(id) }) {
-            fallBackOnceHidden(DeletedTarget.Folder(id)) { fallBackFromDeletedFolder(id) }
-        }
+        // Taken before the fallback below forgets it, for a failed write to put back.
+        val wasCollapsed = id in expansion.collapsedFolderIds.value
+        launchWrite(
+            { folderRepository.deleteFolder(id) },
+            { fallBackOnceHidden(DeletedTarget.Folder(id)) { fallBackFromDeletedFolder(id) } },
+            { if (wasCollapsed) expansion.restoreFolderCollapsed(id) },
+        )
         fallBackFromDeletedFolder(id)
     }
 
@@ -142,10 +160,10 @@ internal class FeedListActions(
     }
 
     fun moveFeed(feedId: String, folderId: String?, targetFeedId: String?) {
-        launchWrite({ feedRepository.moveFeed(feedId, folderId, targetFeedId) }, null)
+        launchWrite({ feedRepository.moveFeed(feedId, folderId, targetFeedId) }, null, null)
     }
 
     fun reorderFolders(draggedFolderId: String, targetFolderId: String?) {
-        launchWrite({ folderRepository.reorderFolders(draggedFolderId, targetFolderId) }, null)
+        launchWrite({ folderRepository.reorderFolders(draggedFolderId, targetFolderId) }, null, null)
     }
 }

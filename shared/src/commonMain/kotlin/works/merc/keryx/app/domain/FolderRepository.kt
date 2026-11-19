@@ -56,6 +56,39 @@ class FolderRepository(
         return id
     }
 
+    /**
+     * Creates or reactivates a folder ([createFolder]) and moves [feedId] into it in one transaction,
+     * so a failure leaves neither behind — a feed row's "New folder…".
+     *
+     * Under the feed placement lock, like every other feed placement. Everything it reads is read
+     * before the transaction, not inside it: a deferred transaction that reads and then writes has to
+     * upgrade its lock, which SQLite can refuse with an immediate `SQLITE_BUSY` (see
+     * `docs/known-issues.md`). A new folder is empty, so the feed takes sort order 0 there without
+     * reading the group; only a reactivated folder — which a sync may have left feeds pointing at —
+     * has its group read, so the feed is appended after them.
+     *
+     * @param name The folder name.
+     * @param feedId The feed to move into the folder.
+     * @return The folder ID.
+     */
+    suspend fun createFolderAndMoveFeed(name: String, feedId: String): String {
+        val id = feedRepository.withFeedPlacementLock {
+            // Taken under the lock, as in deleteFolder: a placement committed while this call waited
+            // must not end up newer than the one stamped here.
+            val now = clock.nowMillis()
+            val existing = folders.getByName(name).executeAsOneOrNull()
+            val nextSortOrder = folders.nextSortOrder().executeAsOne()
+            val feedSortOrder = existing?.let { db.feedsQueries.nextSortOrderInGroup(it.id).executeAsOne() } ?: 0L
+            db.transactionWithResult {
+                createOrReactivateId(existing?.id) { id ->
+                    folders.upsert(id, name, nextSortOrder, null, now, existing?.created_at ?: now)
+                }.also { id -> db.feedsQueries.updateFolderAndSortOrder(id, feedSortOrder, now, now, now, feedId) }
+            }
+        }
+        syncScheduler.scheduleSync()
+        return id
+    }
+
     fun updateFolder(id: String, name: String) {
         val existing = folders.getById(id).executeAsOneOrNull() ?: return
         folders.upsert(id, name, existing.sort_order, existing.deleted_at, clock.nowMillis(), existing.created_at)

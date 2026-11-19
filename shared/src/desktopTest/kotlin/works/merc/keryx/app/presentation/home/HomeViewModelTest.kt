@@ -6179,32 +6179,48 @@ class HomeViewModelTest {
     }
 
     @Test
-    fun aDeleteWhoseWriteFailedLeavesTheSelectionAloneWhenTheTagLaterDisappears() {
-        // The failed write is thrown on the ViewModel's scope as an uncaught exception, which runTest
-        // reports once its body has finished — after every assertion below has passed.
-        val failure = assertFailsWith<IllegalStateException> {
-            runTest {
-                db.insertTag("t1", "Kotlin")
-                val vm = newViewModel()
-                subscribeAll(vm)
-                testScheduler.advanceUntilIdle()
-                lookups.failExecute = { it.startsWith("UPDATE tags") }
+    fun aDeleteWhoseWriteFailedLeavesTheSelectionAloneWhenTheTagLaterDisappears() = runTest {
+        db.insertTag("t1", "Kotlin")
+        val notifications = NotificationCenter()
+        val vm = newViewModel(localWriteFailureReporter = LocalWriteFailureReporter(notifications, Clock { 0L }))
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+        lookups.failExecute = { it.startsWith("UPDATE tags") }
 
-                vm.deleteTag("t1")
-                testScheduler.advanceUntilIdle()
-                lookups.failExecute = null
-                assertNull(db.tagsQueries.getById("t1").executeAsOne().deleted_at)
-                vm.selectFilter(ArticleFilter.Tag("t1"))
-                testScheduler.advanceUntilIdle()
-                // A deletion arriving later (as from a sync merge).
-                db.tagsQueries.softDelete(5L, 5L, "t1")
-                testScheduler.advanceUntilIdle()
+        vm.deleteTag("t1")
+        testScheduler.advanceUntilIdle()
+        lookups.failExecute = null
+        assertNull(db.tagsQueries.getById("t1").executeAsOne().deleted_at)
+        // Reported rather than thrown.
+        assertEquals(1, notifications.items.value.size)
+        vm.selectFilter(ArticleFilter.Tag("t1"))
+        testScheduler.advanceUntilIdle()
+        // A deletion arriving later (as from a sync merge).
+        db.tagsQueries.softDelete(5L, 5L, "t1")
+        testScheduler.advanceUntilIdle()
 
-                assertTrue(vm.tags.value.none { it.id == "t1" })
-                assertEquals(ArticleFilter.Tag("t1"), vm.filter.value)
-            }
-        }
-        assertEquals("database is locked", failure.message)
+        assertTrue(vm.tags.value.none { it.id == "t1" })
+        assertEquals(ArticleFilter.Tag("t1"), vm.filter.value)
+    }
+
+    @Test
+    fun aFolderDeleteWhoseWriteFailedIsReportedAndKeepsTheFolderCollapsed() = runTest {
+        db.insertFolder("d1", "News")
+        val notifications = NotificationCenter()
+        val vm = newViewModel(localWriteFailureReporter = LocalWriteFailureReporter(notifications, Clock { 0L }))
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+        vm.toggleFolderCollapsed("d1")
+        lookups.failExecute = { it.contains("UPDATE folders") || it.contains("UPDATE feeds") }
+
+        vm.deleteFolder("d1")
+        testScheduler.advanceUntilIdle()
+        lookups.failExecute = null
+
+        assertNull(db.foldersQueries.getById("d1").executeAsOne().deleted_at)
+        assertTrue(vm.folders.value.any { it.id == "d1" })
+        assertEquals(setOf("d1"), vm.collapsedFolderIds.value)
+        assertEquals(1, notifications.items.value.size)
     }
 
     @Test

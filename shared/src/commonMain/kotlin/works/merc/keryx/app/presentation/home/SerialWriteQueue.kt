@@ -4,6 +4,7 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
+import works.merc.keryx.app.domain.LocalWriteFailureReporter
 import works.merc.keryx.app.domain.PendingLocalWrites
 
 /**
@@ -15,10 +16,10 @@ import works.merc.keryx.app.domain.PendingLocalWrites
  * placement lock) lets a write enqueued after it run, and land, first. Here one consumer coroutine
  * takes the next write only once the previous one has finished.
  *
- * Each write runs as its own child of [scope], on [dispatcher], so a write that throws reaches the
- * scope's uncaught-exception handling exactly as a plain `scope.launch(dispatcher)` would — and,
- * with [scope]'s `SupervisorJob` (a `viewModelScope`), neither the consumer nor the writes after it
- * are cancelled by it.
+ * Each write runs as its own child of [scope], on [dispatcher], through
+ * [LocalWriteFailureReporter.runLocalWrite]: a write that fails is reported (logged, and posted to the
+ * notification center) rather than thrown, so it neither ends the app nor holds up the writes after
+ * it, and the caller's `onFailure` undoes what the UI showed ahead of it.
  *
  * Every write is counted in [pendingLocalWrites] from [enqueue] until it has finished — run, failed,
  * or dropped unrun because [scope] ended — so a foreground-exit sync flush waits for the sync it
@@ -27,9 +28,10 @@ import works.merc.keryx.app.domain.PendingLocalWrites
 internal class SerialWriteQueue(
     private val scope: CoroutineScope,
     private val dispatcher: CoroutineDispatcher,
+    private val localWriteFailureReporter: LocalWriteFailureReporter,
     private val pendingLocalWrites: PendingLocalWrites? = null,
 ) {
-    private class Entry(val write: suspend () -> Unit, val afterWrite: (() -> Unit)?)
+    private class Entry(val write: suspend () -> Unit, val afterWrite: (() -> Unit)?, val onFailure: (() -> Unit)?)
 
     // An entry the consumer never gets to — still buffered when the queue is cancelled below, or
     // taken by an iteration that was cancelled before handing it over — is uncounted here.
@@ -39,11 +41,15 @@ internal class SerialWriteQueue(
         scope.launch(dispatcher) {
             for (entry in entries) {
                 try {
-                    val job = scope.launch(dispatcher) { entry.write() }
-                    // join() does not rethrow the write's failure; the failure is the child's own.
+                    var landed = false
+                    val job = scope.launch(dispatcher) { landed = localWriteFailureReporter.runLocalWrite(entry.write) }
                     job.join()
-                    // A failed (or cancelled) job reports isCancelled; its afterWrite is skipped.
-                    if (entry.afterWrite != null && !job.isCancelled) scope.launch { entry.afterWrite.invoke() }
+                    // A cancelled write (its scope ended) runs neither follow-up; join() orders the
+                    // write's own assignment of `landed` before this read.
+                    if (!job.isCancelled) {
+                        val followUp = if (landed) entry.afterWrite else entry.onFailure
+                        if (followUp != null) scope.launch { followUp() }
+                    }
                 } finally {
                     pendingLocalWrites?.end()
                 }
@@ -56,7 +62,10 @@ internal class SerialWriteQueue(
     }
 
     /** Queues [write] behind every write enqueued before it and returns at once. */
-    fun enqueue(write: suspend () -> Unit) = enqueue(write, afterWrite = null)
+    fun enqueue(write: suspend () -> Unit) = enqueue(write, afterWrite = null, onFailure = null)
+
+    /** As the three-argument `enqueue`, with no `onFailure` — trailing-lambda friendly for [afterWrite]. */
+    fun enqueue(write: suspend () -> Unit, afterWrite: (() -> Unit)?) = enqueue(write, afterWrite, onFailure = null)
 
     /**
      * As `enqueue(write)`, then runs [afterWrite] once [write] has completed successfully.
@@ -67,10 +76,12 @@ internal class SerialWriteQueue(
      *   UI state that must wait for the change to show (a delete's selection fallback) is handed on
      *   from here to whatever watches those flows ([DeletedItemFallback]). Skipped when [write]
      *   fails; it does not hold back the next write. `null` = none.
+     * @param onFailure Run, like [afterWrite], on [scope]'s own dispatcher once [write] has failed (and
+     *   been reported) — to undo UI state the caller changed ahead of the write. `null` = none.
      */
-    fun enqueue(write: suspend () -> Unit, afterWrite: (() -> Unit)?) {
+    fun enqueue(write: suspend () -> Unit, afterWrite: (() -> Unit)?, onFailure: (() -> Unit)?) {
         pendingLocalWrites?.begin()
         // A refused entry (the queue was cancelled with its scope) never reaches onUndeliveredElement.
-        if (entries.trySend(Entry(write, afterWrite)).isFailure) pendingLocalWrites?.end()
+        if (entries.trySend(Entry(write, afterWrite, onFailure)).isFailure) pendingLocalWrites?.end()
     }
 }

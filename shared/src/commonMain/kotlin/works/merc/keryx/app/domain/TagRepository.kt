@@ -76,6 +76,30 @@ class TagRepository(
         return id
     }
 
+    /**
+     * Creates or reactivates a tag ([createTag]) and attaches it to [feedId] ([setFeedTag]) in one
+     * transaction, so a failure leaves neither behind — a feed row's "New tag…". The existing tag of
+     * that name is looked up before the transaction, not inside it: a deferred transaction that reads
+     * and then writes has to upgrade its lock, which SQLite can refuse with an immediate
+     * `SQLITE_BUSY` (see `docs/known-issues.md`).
+     *
+     * @param name The tag name.
+     * @param color The tag color, or `null` to preserve an existing color or leave a new tag uncolored.
+     * @param feedId The feed to attach the tag to.
+     * @return The tag ID.
+     */
+    fun createTagAndAttach(name: String, color: String?, feedId: String): String {
+        val now = clock.nowMillis()
+        val existing = tags.getByName(name).executeAsOneOrNull()
+        val id = db.transactionWithResult {
+            createOrReactivateId(existing?.id) { id ->
+                tags.upsert(id, name, color ?: existing?.color, existing?.sort_order ?: 0, null, now, existing?.created_at ?: now)
+            }.also { id -> feedTags.upsert(feedId, id, null, now) }
+        }
+        syncScheduler.scheduleSync()
+        return id
+    }
+
     fun updateTag(id: String, name: String, color: String?) {
         val existing = tags.getById(id).executeAsOneOrNull() ?: return
         tags.upsert(id, name, color, existing.sort_order, existing.deleted_at, clock.nowMillis(), existing.created_at)

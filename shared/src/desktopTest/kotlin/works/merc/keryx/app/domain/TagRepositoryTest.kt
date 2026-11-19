@@ -351,4 +351,47 @@ class TagRepositoryTest {
             driver.close()
         }
     }
+
+    // --- createTagAndAttach ---
+
+    @Test
+    fun createTagAndAttachCreatesTheTagAttachedToTheFeedAndSchedulesOneSync() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f1")
+            val scheduler = TagCountingSyncScheduler()
+            val repo = newRepo(db, syncScheduler = scheduler, clock = Clock { 100L })
+
+            val id = repo.createTagAndAttach("Kotlin", "#ff0000", "f1")
+
+            assertEquals("Kotlin", db.tagsQueries.getById(id).executeAsOne().name)
+            assertEquals(mapOf("f1" to setOf(id)), repo.getFeedTagMap())
+            assertEquals(1, scheduler.callCount)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun createTagAndAttachLeavesNoTagBehindWhenTheAttachFails() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f1")
+            driver.execute(
+                null,
+                "CREATE TRIGGER fail_attach BEFORE INSERT ON feed_tags BEGIN SELECT RAISE(ABORT, 'attach failed'); END",
+                0,
+            )
+            val scheduler = TagCountingSyncScheduler()
+            val repo = newRepo(db, syncScheduler = scheduler, clock = Clock { 100L })
+
+            kotlin.test.assertFails { repo.createTagAndAttach("Kotlin", null, "f1") }
+
+            assertNull(db.tagsQueries.getByName("Kotlin").executeAsOneOrNull())
+            assertTrue(repo.getFeedTagMap().isEmpty())
+            assertEquals(0, scheduler.callCount)
+        } finally {
+            driver.close()
+        }
+    }
 }

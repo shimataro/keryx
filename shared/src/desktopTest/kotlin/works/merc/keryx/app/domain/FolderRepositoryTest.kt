@@ -469,4 +469,70 @@ class FolderRepositoryTest {
             driver.close()
         }
     }
+
+    // --- createFolderAndMoveFeed ---
+
+    @Test
+    fun createFolderAndMoveFeedPlacesTheFeedFirstInTheNewFolderAndSchedulesOneSync() = runTest {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f1", sortOrder = 4L)
+            val scheduler = FolderCountingSyncScheduler()
+            val repo = newRepo(db, driver, syncScheduler = scheduler, clock = Clock { 100L })
+
+            val id = repo.createFolderAndMoveFeed("Kotlin", "f1")
+
+            assertEquals("Kotlin", db.foldersQueries.getById(id).executeAsOne().name)
+            val feed = db.feedsQueries.getById("f1").executeAsOne()
+            assertEquals(id, feed.folder_id)
+            assertEquals(0L, feed.sort_order)
+            assertEquals(100L, feed.folder_updated_at)
+            assertEquals(1, scheduler.callCount)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun createFolderAndMoveFeedAppendsAfterFeedsAReactivatedFolderStillHolds() = runTest {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFolder("d1", "Kotlin", now = 10L, deletedAt = 20L)
+            // Left pointing at the deleted folder, as a sync from another device can.
+            db.insertFeed("f0", folderId = "d1", sortOrder = 0L)
+            db.insertFeed("f1")
+            val repo = newRepo(db, driver, clock = Clock { 100L })
+
+            val id = repo.createFolderAndMoveFeed("Kotlin", "f1")
+
+            assertEquals("d1", id)
+            assertEquals(1L, db.feedsQueries.getById("f1").executeAsOne().sort_order)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun createFolderAndMoveFeedLeavesNoFolderBehindWhenTheMoveFails() = runTest {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f1")
+            driver.execute(
+                null,
+                "CREATE TRIGGER fail_move BEFORE UPDATE OF folder_id ON feeds BEGIN SELECT RAISE(ABORT, 'move failed'); END",
+                0,
+            )
+            val scheduler = FolderCountingSyncScheduler()
+            val repo = newRepo(db, driver, syncScheduler = scheduler, clock = Clock { 100L })
+
+            kotlin.test.assertFails { repo.createFolderAndMoveFeed("Kotlin", "f1") }
+
+            assertTrue(db.foldersQueries.watchAll().executeAsList().isEmpty())
+            assertNull(db.foldersQueries.getByName("Kotlin").executeAsOneOrNull())
+            assertNull(db.feedsQueries.getById("f1").executeAsOne().folder_id)
+            assertEquals(0, scheduler.callCount)
+        } finally {
+            driver.close()
+        }
+    }
 }

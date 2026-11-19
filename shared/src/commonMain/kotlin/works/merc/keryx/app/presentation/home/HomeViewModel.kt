@@ -817,7 +817,7 @@ class HomeViewModel(
      * deliberately left unordered: the queued write has not reached the list yet either, so what is
      * marked read is what the article list showed when the user asked.
      */
-    private val feedListWrites = SerialWriteQueue(viewModelScope, dbWriteDispatcher, pendingLocalWrites)
+    private val feedListWrites = SerialWriteQueue(viewModelScope, dbWriteDispatcher, localWriteFailureReporter, pendingLocalWrites)
 
     // A delete's second selection fallback, run once the list the feed list renders from stops
     // showing the deleted item (see [DeletedItemFallback]) — the feed list renders feeds from
@@ -858,7 +858,7 @@ class HomeViewModel(
         selectedRowInstance = _selectedRowInstance,
         currentFilter = { _filter.value },
         selectFilter = { selectFilter(it) },
-        launchWrite = { write, afterWrite -> feedListWrites.enqueue(write, afterWrite) },
+        launchWrite = { write, afterWrite, onFailure -> feedListWrites.enqueue(write, afterWrite, onFailure) },
         fallBackOnceHidden = ::fallBackOnceHidden,
     )
 

@@ -54,6 +54,9 @@ class FeedListActionsTest {
     // Writes run inline unless [holdWrites] is set — then they queue in [pendingWrites] until
     // [runPendingWrites], standing in for the ViewModel's serial dbWriteDispatcher.
     private var holdWrites = false
+
+    // Every write fails while set, running its onFailure instead (see launchWrite below).
+    private var failWrites = false
     private val pendingWrites = mutableListOf<suspend () -> Unit>()
 
     private fun runPendingWrites() = runBlocking {
@@ -95,8 +98,11 @@ class FeedListActionsTest {
             selectedRow,
             currentFilter = { filter },
             selectFilter = { filter = it; selectCalls += it },
-            launchWrite = { write, afterWrite ->
-                val run: suspend () -> Unit = { write(); afterWrite?.invoke() }
+            launchWrite = { write, afterWrite, onFailure ->
+                val run: suspend () -> Unit = {
+                    // A failing write stands in for SerialWriteQueue's runLocalWrite returning false.
+                    if (failWrites) onFailure?.invoke() else { write(); afterWrite?.invoke() }
+                }
                 if (holdWrites) pendingWrites += run else runBlocking { run() }
             },
             // No feed-list flow here to wait on: falls back as soon as the write has landed.
@@ -214,6 +220,32 @@ class FeedListActionsTest {
         assertEquals(emptySet(), expansion.collapsedFolderIds.value)
     }
 
+    @Test
+    fun aFolderDeleteThatFailsCollapsesTheFolderAgain() {
+        db.insertFolder("d1", "D")
+        expansion.toggleFolder("d1")
+        failWrites = true
+        holdWrites = true
+
+        actions.deleteFolder("d1")
+        // The queue runs the write, and so its onFailure, after the action has returned.
+        assertEquals(1, pendingWrites.size)
+        runPendingWrites()
+
+        assertEquals(setOf("d1"), expansion.collapsedFolderIds.value)
+        assertNull(db.foldersQueries.getById("d1").executeAsOne().deleted_at)
+    }
+
+    @Test
+    fun aFolderDeleteThatFailsLeavesAnExpandedFolderExpanded() {
+        db.insertFolder("d1", "D")
+        failWrites = true
+
+        actions.deleteFolder("d1")
+
+        assertEquals(emptySet(), expansion.collapsedFolderIds.value)
+    }
+
     // --- Tag-nested row selection ---
 
     @Test
@@ -234,6 +266,32 @@ class FeedListActionsTest {
         actions.deleteTag("t1")
 
         assertEquals(FeedListRowSelection.FeedInTag("f1", "t2"), selectedRow.value)
+    }
+
+    @Test
+    fun aTagDeleteThatFailsExpandsTheTagAgain() {
+        db.insertTag("t1", "T")
+        actions.toggleTagExpanded("t1")
+        failWrites = true
+        holdWrites = true
+
+        actions.deleteTag("t1")
+        // The queue runs the write, and so its onFailure, after the action has returned.
+        assertEquals(1, pendingWrites.size)
+        runPendingWrites()
+
+        assertEquals(setOf("t1"), expansion.expandedTagIds.value)
+        assertNull(db.tagsQueries.getById("t1").executeAsOne().deleted_at)
+    }
+
+    @Test
+    fun aTagDeleteThatFailsLeavesACollapsedTagCollapsed() {
+        db.insertTag("t1", "T")
+        failWrites = true
+
+        actions.deleteTag("t1")
+
+        assertEquals(emptySet(), expansion.expandedTagIds.value)
     }
 
     @Test
