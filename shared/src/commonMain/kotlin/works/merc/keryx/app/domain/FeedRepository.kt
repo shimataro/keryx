@@ -213,34 +213,56 @@ class FeedRepository(
      * favicon. Writes nothing to the DB, so a batch (see [OpmlImporter]) can run several of these
      * concurrently while [writePrefetchedSubscription] keeps the writes serial and in order.
      *
-     * [fetchStartedAt] is when the fetch began. It is only compared against the stored row's
-     * `updated_at` at write time (a row written after it holds newer values than [fetched]); the
-     * times written to the row are still taken at write time.
+     * [storedBeforeFetch] is the feed values of the row stored at the requested URL, read before the
+     * fetch began (`null` when there was none). At write time it tells whether something else — a
+     * refresh of the same feed — changed those values while this fetch was in flight.
      */
     internal class PrefetchedSubscription(
         val fetched: FetchedFeed,
         val effectiveUrl: String,
         val favicon: String?,
-        val fetchStartedAt: Long,
+        val storedBeforeFetch: StoredFeedValues?,
     )
+
+    /**
+     * The feed values a subscribe writes over an existing row (everything `feeds.upsert` takes from
+     * the fetch), with the id of the row they were read from.
+     */
+    internal data class StoredFeedValues(val feedId: String, val values: FeedValues)
+
+    /** The feed-level values a subscribe or a refresh writes from a fetch. */
+    internal data class FeedValues(
+        val siteUrl: String?,
+        val title: String,
+        val description: String?,
+        val faviconUrl: String?,
+        val etag: String?,
+        val lastModified: String?,
+    )
+
+    private val Feeds.feedValues: FeedValues
+        get() = FeedValues(site_url, title, description, favicon_url, etag, last_modified)
 
     /**
      * Fetches [url] and resolves its favicon, writing nothing to the DB. A fetch error is returned as
      * [Result.Err]; the favicon lookup is made only once the fetch succeeded.
      */
     internal suspend fun prefetchSubscription(url: String): Result<PrefetchedSubscription> {
-        val fetchStartedAt = clock.nowMillis()
+        // Read before the fetch starts, so a write that lands while it is in flight shows as a change.
+        val storedBeforeFetch = feeds.getByUrl(url).executeAsOneOrNull()?.let { StoredFeedValues(it.id, it.feedValues) }
         val fetched = feedFetcher.fetch(url).valueOrElse { return it }
         val effectiveUrl = fetched.redirectUrl ?: url
         val favicon = faviconResolver.resolve(fetched.siteUrl, effectiveUrl)
-        return Result.Ok(PrefetchedSubscription(fetched, effectiveUrl, favicon, fetchStartedAt))
+        return Result.Ok(PrefetchedSubscription(fetched, effectiveUrl, favicon, storedBeforeFetch))
     }
 
     /**
      * The write phase of [subscribeFeedWrite]: persists a [prefetchSubscription] result. Everything
-     * that reads the DB or the clock happens here, at write time rather than at fetch time, so a
-     * batch that fetched ahead still sees each earlier entry's write (a duplicate URL, or two URLs
-     * redirecting to the same feed, resolve to the existing row) and stamps the time of the write.
+     * that decides the write from the DB or the clock happens here, at write time rather than at
+     * fetch time, so a batch that fetched ahead still sees each earlier entry's write (a duplicate
+     * URL, or two URLs redirecting to the same feed, resolve to the existing row) and stamps the time
+     * of the write. (The prefetch's own read, [PrefetchedSubscription.storedBeforeFetch], is only the
+     * baseline that tells whether the row's feed values changed in between.)
      * Parameters as for [subscribeFeedWrite].
      */
     internal suspend fun writePrefetchedSubscription(
@@ -267,7 +289,7 @@ class FeedRepository(
         val (feedId, wasNewlyCreated) = feedPlacementMutex.withLock {
             doSubscribeFeedWrite(
                 effectiveUrl, folderId, afterFeedId, beforeFeedId, now, subscription.favicon, fetched,
-                subscription.fetchStartedAt,
+                subscription.storedBeforeFetch,
             )
         }
         articleRepository.upsertParsed(feedId, fetched.articles)
@@ -394,7 +416,7 @@ class FeedRepository(
         now: Long,
         favicon: String?,
         fetched: FetchedFeed,
-        fetchStartedAt: Long,
+        storedBeforeFetch: StoredFeedValues?,
     ): Pair<String, Boolean> {
         return db.transactionWithResult {
             // Read under the lock, and decide the id from this read only: a concurrent subscribe of
@@ -411,22 +433,34 @@ class FeedRepository(
                 current.deleted_at == null -> current.sort_order
                 else -> feeds.nextSortOrderInGroup(current.folder_id).executeAsOne()
             }
-            // A live row written after this fetch began (a refresh of the same feed, typically
-            // during an OPML re-import that fetched ahead) holds newer feed values than [fetched];
-            // keep them rather than roll them back. Equal times still write the fetched values.
-            // (error_count / last_error need no such guard: upsert never updates them on an
-            // existing row.) The articles are still upserted by the caller — they only add.
-            val keep = current?.takeIf { it.deleted_at == null && it.updated_at > fetchStartedAt }
+            // A live row whose feed values changed since the prefetch read them (a refresh of the
+            // same feed, typically during an OPML re-import that fetched ahead) holds newer values
+            // than [fetched]; keep them rather than roll them back. A change to anything else — a
+            // move, a rename, a reorder — leaves them alone, so the fetched values are written. So
+            // are they for a new row, a resubscribed one, and a row the prefetch never saw (no row
+            // yet, or a redirect to another feed's URL). (error_count / last_error need no such
+            // guard: upsert never updates them on an existing row.) The articles are still upserted
+            // by the caller — they only add.
+            val fetchedValues = FeedValues(
+                siteUrl = fetched.siteUrl,
+                title = fetched.title ?: effectiveUrl,
+                description = fetched.description,
+                faviconUrl = favicon,
+                etag = fetched.etag,
+                lastModified = fetched.lastModified,
+            )
+            val storedValues = current?.takeIf { it.deleted_at == null && it.id == storedBeforeFetch?.feedId }?.feedValues
+            val values = if (storedValues != null && storedValues != storedBeforeFetch?.values) storedValues else fetchedValues
 
             feeds.upsert(
                 id = feedId,
                 url = effectiveUrl,
-                site_url = if (keep != null) keep.site_url else fetched.siteUrl,
-                title = keep?.title ?: fetched.title ?: effectiveUrl,
-                description = if (keep != null) keep.description else fetched.description,
-                favicon_url = if (keep != null) keep.favicon_url else favicon,
-                etag = if (keep != null) keep.etag else fetched.etag,
-                last_modified = if (keep != null) keep.last_modified else fetched.lastModified,
+                site_url = values.siteUrl,
+                title = values.title,
+                description = values.description,
+                favicon_url = values.faviconUrl,
+                etag = values.etag,
+                last_modified = values.lastModified,
                 error_count = 0,
                 last_error = null,
                 custom_title = current?.custom_title,

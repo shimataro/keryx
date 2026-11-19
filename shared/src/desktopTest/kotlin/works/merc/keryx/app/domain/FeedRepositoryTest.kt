@@ -1708,9 +1708,9 @@ class FeedRepositoryTest {
     }
 
     /**
-     * A re-import writes what it fetched earlier; a refresh of the same feed that wrote the row after
-     * that fetch started holds newer values, which the import must not overwrite with its older ones.
-     * Its articles are still added.
+     * A re-import writes what it fetched earlier; a refresh of the same feed that changed the row's
+     * feed values after the prefetch read them holds newer values, which the import must not
+     * overwrite with its older ones. Its articles are still added.
      */
     @Test
     fun writePrefetchedSubscriptionKeepsFeedValuesWrittenAfterItsFetchStarted(): Unit = runBlocking {
@@ -1750,9 +1750,12 @@ class FeedRepositoryTest {
         }
     }
 
-    /** With the row last written no later than the fetch started, the fetched values are written. */
+    /**
+     * With the row's feed values unchanged since the prefetch read them — here last written at the
+     * very time the fetch started — the fetched values are written.
+     */
     @Test
-    fun writePrefetchedSubscriptionWritesFetchedValuesWhenTheRowIsNotNewerThanTheFetch(): Unit = runBlocking {
+    fun writePrefetchedSubscriptionWritesFetchedValuesWhenTheRowIsUnchangedSinceThePrefetch(): Unit = runBlocking {
         val (driver, db) = inMemoryDb()
         try {
             val url = "https://ex.com/feed"
@@ -1771,6 +1774,69 @@ class FeedRepositoryTest {
             assertEquals("fetched-etag", row.etag)
             assertEquals("Feed", row.title)
             assertEquals(listOf("f1"), db.articlesQueries.watchAll().executeAsList().map { it.feed_id })
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
+     * A move between the prefetch and its write changes none of the feed values the subscribe
+     * writes, so the fetched values are written — the move only bumped the row's `updated_at`. The
+     * move itself survives.
+     */
+    @Test
+    fun writePrefetchedSubscriptionWritesFetchedValuesOverAMoveMadeAfterThePrefetch(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val url = "https://ex.com/feed"
+            var now = 1000L
+            val repo = newRepo(
+                db, driver,
+                fetcherWith { respond(RSS, HttpStatusCode.OK, headersOf(HttpHeaders.ETag, "fetched-etag")) },
+                clock = Clock { now },
+            )
+            db.insertFolder("d1", "Kotlin")
+            db.insertFeed("f1", now = 500L, url = url)
+            val prefetched = repo.prefetchSubscription(url)
+            now = 2000L
+            repo.moveFeed("f1", "d1")
+            now = 3000L
+
+            repo.writePrefetchedSubscription(prefetched)
+
+            val row = db.feedsQueries.getById("f1").executeAsOne()
+            assertEquals("fetched-etag", row.etag)
+            assertEquals("Feed", row.title)
+            assertEquals("d1", row.folder_id)
+        } finally {
+            driver.close()
+        }
+    }
+
+    /** As [writePrefetchedSubscriptionWritesFetchedValuesOverAMoveMadeAfterThePrefetch], for a rename. */
+    @Test
+    fun writePrefetchedSubscriptionWritesFetchedValuesOverARenameMadeAfterThePrefetch(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val url = "https://ex.com/feed"
+            var now = 1000L
+            val repo = newRepo(
+                db, driver,
+                fetcherWith { respond(RSS, HttpStatusCode.OK, headersOf(HttpHeaders.ETag, "fetched-etag")) },
+                clock = Clock { now },
+            )
+            db.insertFeed("f1", now = 500L, url = url)
+            val prefetched = repo.prefetchSubscription(url)
+            now = 2000L
+            repo.renameFeed("f1", "My name")
+            now = 3000L
+
+            repo.writePrefetchedSubscription(prefetched)
+
+            val row = db.feedsQueries.getById("f1").executeAsOne()
+            assertEquals("fetched-etag", row.etag)
+            assertEquals("Feed", row.title)
+            assertEquals("My name", row.custom_title)
         } finally {
             driver.close()
         }
