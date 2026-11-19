@@ -5572,6 +5572,8 @@ class HomeViewModelTest {
         vm.selectFilter(ArticleFilter.Feed("f1"))
 
         vm.unsubscribeFeed(feed.id)
+        // Falls back once the write has landed and the feed list has stopped showing it.
+        testScheduler.advanceUntilIdle()
 
         assertEquals(ArticleFilter.All, vm.filter.value)
         assertNotNull(db.feedsQueries.getById("f1").executeAsOne().deleted_at)
@@ -5593,7 +5595,7 @@ class HomeViewModelTest {
     // --- Feed-list writes run on dbWriteDispatcher, never on the caller's (UI) thread ---
 
     @Test
-    fun unsubscribeFeedWritesOnTheDbWriteDispatcherButResetsTheFilterAtOnce() = runTest {
+    fun unsubscribeFeedWritesOnTheDbWriteDispatcherAndResetsTheFilterOnlyOnceItLands() = runTest {
         db.insertFeed("f1")
         val writes = HoldingDispatcher()
         val vm = newViewModel(dbWriteDispatcher = writes)
@@ -5604,13 +5606,39 @@ class HomeViewModelTest {
 
         vm.unsubscribeFeed("f1")
 
-        // The selection falls back at once; the DB write waits for the write dispatcher.
-        assertEquals(ArticleFilter.All, vm.filter.value)
+        // While the DB write waits for the write dispatcher, the feed stays selected.
+        assertEquals(ArticleFilter.Feed("f1"), vm.filter.value)
         assertNull(db.feedsQueries.getById("f1").executeAsOne().deleted_at)
 
         writes.release()
+        testScheduler.advanceUntilIdle()
 
         assertNotNull(db.feedsQueries.getById("f1").executeAsOne().deleted_at)
+        assertEquals(ArticleFilter.All, vm.filter.value)
+    }
+
+    @Test
+    fun anUnsubscribeWhoseWriteFailedIsReportedAndKeepsTheFeedAndItsArticleOpen() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1")
+        val notifications = NotificationCenter()
+        val vm = newViewModel(localWriteFailureReporter = LocalWriteFailureReporter(notifications, Clock { 0L }))
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+        vm.selectFilter(ArticleFilter.Feed("f1"))
+        testScheduler.advanceUntilIdle()
+        vm.selectArticle(vm.articles.value.single())
+        testScheduler.advanceUntilIdle()
+        lookups.failExecute = { it.startsWith("UPDATE feeds SET deleted_at") }
+
+        vm.unsubscribeFeed("f1")
+        testScheduler.advanceUntilIdle()
+        lookups.failExecute = null
+
+        assertNull(db.feedsQueries.getById("f1").executeAsOne().deleted_at)
+        assertEquals(ArticleFilter.Feed("f1"), vm.filter.value)
+        assertEquals("a1", vm.selectedArticle.value?.id)
+        assertEquals(1, notifications.items.value.size)
     }
 
     @Test

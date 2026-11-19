@@ -1921,12 +1921,13 @@ class HomeViewModel(
     /**
      * Unsubscribes from a feed and switches to the all-articles filter if it is selected. The DB
      * write is queued behind the feed list's earlier writes ([feedListWrites]); the filter falls back
-     * at once, and again once the write has landed and the feed list has stopped showing the feed
-     * ([DeletedItemFallback]) — until then the feed is still shown, and selecting it again in between
-     * must not leave the selection on an unsubscribed feed.
+     * only once the write has landed and the feed list has stopped showing the feed
+     * ([DeletedItemFallback]) — until then the feed is still shown, so the selection stays on it, and
+     * selecting it again in between still falls back. A write that fails leaves the filter and the
+     * open article as they were, since the feed is still subscribed.
      *
-     * Only this action's own successful write re-checks the selection: a feed removed by a sync
-     * merge leaves the selection alone (external-spec §9, "Least surprise").
+     * Only this action's own successful write moves the selection: a feed removed by a sync merge
+     * leaves the selection alone (external-spec §9, "Least surprise").
      *
      * @param id The identifier of the feed to unsubscribe from.
      */
@@ -1935,7 +1936,6 @@ class HomeViewModel(
         feedListWrites.enqueue({ feedRepository.unsubscribeFeed(id) }) {
             fallBackOnceHidden(DeletedTarget.Feed(id), fallBack)
         }
-        fallBack()
     }
 
     /**
