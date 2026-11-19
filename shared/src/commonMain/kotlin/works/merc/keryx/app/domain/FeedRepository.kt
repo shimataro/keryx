@@ -244,11 +244,6 @@ class FeedRepository(
         }
         val fetched = subscription.fetched
         val effectiveUrl = subscription.effectiveUrl
-        val existing = feeds.getByUrl(effectiveUrl).executeAsOneOrNull()
-        // Deterministic id from the (redirect-resolved) url so two devices that subscribe the same
-        // feed independently get the SAME id and the sync merge can converge them (existing feeds
-        // keep their id). See IdGenerator.feedId.
-        val feedId = existing?.id ?: IdGenerator.feedId(effectiveUrl)
         val now = clock.nowMillis()
 
         // sort_order: a brand-new feed is inserted right after afterFeedId (or, failing that, right
@@ -259,8 +254,8 @@ class FeedRepository(
         // feed being re-subscribed is re-numbered to the end of the group it used to belong to (its
         // old relative position may no longer be meaningful after other feeds in that group moved
         // around while it was unsubscribed).
-        val wasNewlyCreated = feedPlacementMutex.withLock {
-            doSubscribeFeedWrite(effectiveUrl, feedId, folderId, afterFeedId, beforeFeedId, now, subscription.favicon, fetched)
+        val (feedId, wasNewlyCreated) = feedPlacementMutex.withLock {
+            doSubscribeFeedWrite(effectiveUrl, folderId, afterFeedId, beforeFeedId, now, subscription.favicon, fetched)
         }
         articleRepository.upsertParsed(feedId, fetched.articles)
         syncScheduler.scheduleSync()
@@ -383,24 +378,29 @@ class FeedRepository(
     }
 
     /**
-     * The locked internals of [subscribeFeedWrite]. Re-reads the current feed row under the mutex
-     * (the pre-lock snapshot may be stale), computes its sort order, upserts the feed, and returns
+     * The locked internals of [subscribeFeedWrite]. Reads the current feed row under the mutex,
+     * decides the feed id and sort order from it, upserts the feed, and returns the feed id and
      * whether the row was newly created.
      */
     private fun doSubscribeFeedWrite(
         effectiveUrl: String,
-        feedId: String,
         folderId: String?,
         afterFeedId: String?,
         beforeFeedId: String?,
         now: Long,
         favicon: String?,
         fetched: FetchedFeed,
-    ): Boolean {
+    ): Pair<String, Boolean> {
         return db.transactionWithResult {
-            // Re-read under the lock: the snapshot taken before acquiring it can be stale, so a
-            // concurrent subscribe of the same url may already have created the row.
+            // Read under the lock, and decide the id from this read only: a concurrent subscribe of
+            // the same url, or a sync merge bringing it in under another device's id, may have
+            // created the row while this call waited, and upserting a different id for the same url
+            // would violate UNIQUE(url).
             val current = feeds.getByUrl(effectiveUrl).executeAsOneOrNull()
+            // Deterministic id from the (redirect-resolved) url so two devices that subscribe the
+            // same feed independently get the SAME id and the sync merge can converge them (existing
+            // feeds keep their id). See IdGenerator.feedId.
+            val feedId = current?.id ?: IdGenerator.feedId(effectiveUrl)
             val sortOrder = when {
                 current == null -> insertionSortOrderForNewFeed(feedId, folderId, afterFeedId, beforeFeedId, now)
                 current.deleted_at == null -> current.sort_order
@@ -432,7 +432,7 @@ class FeedRepository(
             // last-wins timestamp so it propagates over another device's refresh on the next sync.
             if (current?.deleted_at != null) feeds.stampResubscribed(now, feedId)
 
-            current == null
+            feedId to (current == null)
         }
     }
 

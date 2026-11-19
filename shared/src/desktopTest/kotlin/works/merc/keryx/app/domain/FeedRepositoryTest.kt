@@ -1675,6 +1675,39 @@ class FeedRepositoryTest {
     }
 
     /**
+     * The feed id is decided from the row re-read under the placement lock, not from a read made
+     * before waiting for it: a sync merge can bring in the same URL under another id meanwhile, and
+     * upserting the URL's deterministic id then would violate `UNIQUE(url)`.
+     */
+    @Test
+    fun writePrefetchedSubscriptionUsesTheIdOfARowThatAppearedWhileWaitingForTheLock(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val url = "https://ex.com/feed"
+            val placement = Mutex()
+            val repo = newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK) }, feedPlacementMutex = placement)
+            val prefetched = repo.prefetchSubscription(url)
+            placement.lock()
+
+            val write = async(start = CoroutineStart.UNDISPATCHED) { repo.writePrefetchedSubscription(prefetched) }
+            // Another device's subscription of the same URL, under its own id, lands via a merge.
+            db.insertFeed("merged-id", url = url)
+            placement.unlock()
+            val outcome = write.await()
+
+            val stored = assertIs<Result.Ok<Feeds>>(outcome.result).value
+            assertEquals("merged-id", stored.id)
+            assertEquals(listOf("merged-id"), db.feedsQueries.watchAll().executeAsList().map { it.id })
+            assertEquals(
+                listOf("merged-id"),
+                db.articlesQueries.watchAll().executeAsList().map { it.feed_id }.distinct(),
+            )
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
      * moveFeed reads its target group's order and then writes it, so it must hold the same placement
      * lock a subscribe holds while it allocates a sort_order in that group — otherwise the two can
      * interleave and leave duplicate sort_orders.
