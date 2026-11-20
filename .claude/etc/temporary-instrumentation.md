@@ -44,8 +44,10 @@ outcomes.
 
 A race is **not** unconfirmed merely because its interleaving could not be forced at runtime. If the
 interleaving is traced through the code end to end — every step reachable, nothing in between that
-serializes it — record that trace as the evidence; the claim is confirmed and the fix proceeds, and its outcome is
-reported as fixed wherever the caller reports outcomes. Only a trace with a gap — a step whose
+serializes it — record that trace as the evidence; the claim is confirmed and the fix proceeds. The trace confirms
+the claim only: its outcome is reported as fixed once the fix is made, not before. A confirmed race
+whose fix needs a redesign outside the change's scope follows `.claude/CLAUDE.md`'s procedure for a
+hole that cannot be closed — recorded in `docs/known-issues.md` — and is reported as unfixed. Only a trace with a gap — a step whose
 reachability could not be established — leaves the race unconfirmed. A
 narrow window is never grounds for treating it as unconfirmed (`.claude/CLAUDE.md` "Error handling
 and race conditions").
