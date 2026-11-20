@@ -78,6 +78,50 @@ class TagRepositoryTest {
         }
     }
 
+    /**
+     * An edit made right after a same-millisecond delete and recreation, whose stamps ran ahead of the
+     * clock, is still stamped newest — otherwise a device that already has the recreated row would drop
+     * the edit in the sync merge's strict last-write-wins.
+     */
+    @Test
+    fun anEditRightAfterASameMillisecondRecreationIsStampedNewest() {
+        val (driver, db) = inMemoryDb()
+        try {
+            var now = 100L
+            val repo = newRepo(db, clock = Clock { now })
+            val id = repo.createTag("Kotlin", "#ff0000")
+            repo.deleteTag(id)
+            repo.createTag("Kotlin")
+            val recreated = db.tagsQueries.getById(id).executeAsOne().updated_at
+
+            now = 101L
+            repo.updateTag(id, "Kotlin", "#00ff00")
+
+            val row = db.tagsQueries.getById(id).executeAsOne()
+            assertTrue(row.updated_at > recreated)
+            assertEquals("#00ff00", row.color)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun anEditWithTheClockAheadOfTheRowIsStampedWithTheCurrentTime() {
+        val (driver, db) = inMemoryDb()
+        try {
+            var now = 100L
+            val repo = newRepo(db, clock = Clock { now })
+            val id = repo.createTag("Kotlin")
+
+            now = 5_000L
+            repo.updateTag(id, "Renamed", null)
+
+            assertEquals(5_000L, db.tagsQueries.getById(id).executeAsOne().updated_at)
+        } finally {
+            driver.close()
+        }
+    }
+
     @Test
     fun createTagReactivatesSoftDeletedTagWithSameNameInsteadOfDuplicating() {
         val (driver, db) = inMemoryDb()
