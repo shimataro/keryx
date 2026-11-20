@@ -173,14 +173,45 @@ class AppleDatabaseTest {
         // Garble page 1's b-tree (everything after the 100-byte file header, which keeps
         // user_version readable): the version check still sees 1, so the failure surfaces only once
         // NativeSqliteDriver opens the file to migrate it.
+        assertPageSize(path("corrupt-v1.db"))
         val bytes = FileIO.readBytes(path("corrupt-v1.db"))!!
-        for (i in 100 until minOf(bytes.size, 4096)) bytes[i] = 0xFF.toByte()
+        for (i in 100 until minOf(bytes.size, PAGE_SIZE)) bytes[i] = 0xFF.toByte()
         FileIO.writeBytes(path("corrupt-v1.db"), bytes)
         assertEquals(1, RawSqliteConnection.userVersionOf(path("corrupt-v1.db")))
 
         assertFailsWith<works.merc.keryx.app.core.CloudDataIncompatibleException> {
             DatabaseMerger.merge(path("main.db"), path("corrupt-v1.db"), KeryxDatabase.Schema.version, MergeSql.all)
         }
+    }
+
+    /** Asserts the file's page size is [PAGE_SIZE], the offset the corruption helpers assume. */
+    private fun assertPageSize(file: String) {
+        assertEquals(PAGE_SIZE.toLong(), RawSqliteConnection.open(file).use { it.queryLong("PRAGMA page_size") }, "the corruption helpers assume this page size")
+    }
+
+    /**
+     * A corrupt *local* database raises SQLITE_CORRUPT during the merge, but the downloaded cloud file
+     * passes its quick_check, so the corruption is local: the original failure is rethrown, never a
+     * cloud-data reset.
+     */
+    @Test
+    fun aCorruptLocalDatabaseIsNotBlamedOnAnIntactCloudFile() {
+        for (name in listOf("main.db", "cloud.db")) {
+            val driver = open(name)
+            driver.insertFeed("f1")
+            driver.close()
+            drivers -= driver
+        }
+        assertPageSize(path("main.db"))
+        val bytes = FileIO.readBytes(path("main.db"))!!
+        assertTrue(bytes.size > PAGE_SIZE, "the file must have a page past the first to corrupt")
+        for (i in PAGE_SIZE until bytes.size) bytes[i] = bytes[i].inc()
+        FileIO.writeBytes(path("main.db"), bytes)
+
+        val thrown = assertFailsWith<SqliteException> {
+            DatabaseMerger.merge(path("main.db"), path("cloud.db"), KeryxDatabase.Schema.version, MergeSql.all)
+        }
+        assertEquals(SQLITE_CORRUPT, thrown.resultCode and 0xFF, "got ${thrown.resultCode}: ${thrown.message}")
     }
 
     /**
@@ -292,6 +323,10 @@ class AppleDatabaseTest {
         const val UNGUARDED_ARTICLE_INSERT =
             "INSERT INTO main.articles (id, feed_id, guid, url, title, cached_at, updated_at, created_at) " +
                 "SELECT id, feed_id, guid, url, title, cached_at, updated_at, created_at FROM cloud.articles"
+
+        /** The page size the corruption helpers start at; asserted against the real file. */
+        const val PAGE_SIZE = 4096
+        const val SQLITE_CORRUPT = 11
 
         /** Extended result codes (`SQLITE_CONSTRAINT | n << 8`). */
         const val SQLITE_CONSTRAINT_FOREIGNKEY = 787

@@ -13,7 +13,6 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
-import kotlin.test.assertIs
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -236,7 +235,7 @@ class DatabaseMergerTest {
     @Test
     fun corruptCloudFileIsCloudDataIncompatible() {
         val cloudFile = soundDbFile { driver -> insertFeedRow(driver) }
-        corruptPastFirstPage(cloudFile, untilByte = 8192)
+        corruptPastFirstPage(cloudFile, untilByte = 2 * ASSUMED_PAGE_SIZE)
         val localFile = soundDbFile()
 
         assertFailsWith<CloudDataIncompatibleException> {
@@ -254,12 +253,12 @@ class DatabaseMergerTest {
         val localFile = soundDbFile { driver -> insertFeedRow(driver) }
         corruptPastFirstPage(localFile, untilByte = Int.MAX_VALUE)
 
-        val thrown = assertFailsWith<Exception> {
+        val thrown = assertFailsWith<SQLiteException> {
             DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, SCHEMA_VERSION, MergeSql.all)
         }
-        assertFalse(thrown is CloudDataIncompatibleException, "got $thrown")
-        val sqliteCause = generateSequence<Throwable>(thrown) { it.cause }.firstNotNullOfOrNull { it as? SQLiteException }
-        assertIs<SQLiteException>(sqliteCause, "the original SQLite failure must be rethrown unchanged")
+        // The original SQLite failure is rethrown unchanged, and it really is corruption (not some
+        // other failure that merely was not blamed on the cloud).
+        assertEquals(SQLiteErrorCode.SQLITE_CORRUPT.code, thrown.resultCode.code and 0xFF, "got ${thrown.resultCode}")
     }
 
     /**
@@ -307,16 +306,28 @@ class DatabaseMergerTest {
         KeryxDatabase(driver).insertFeed("f1", now = 0)
     }
 
-    /** Flips every byte from the second page up to [untilByte], leaving the header page intact. */
+    /**
+     * Flips every byte from the second page up to [untilByte], leaving the header page intact. First
+     * asserts the file's real page size is the offset the corruption starts at, so a changed page size
+     * cannot silently turn this into a header corruption (or a no-op).
+     */
     private fun corruptPastFirstPage(file: File, untilByte: Int) {
+        val pageSize = java.sql.DriverManager.getConnection("jdbc:sqlite:${file.absolutePath}").use { conn ->
+            conn.createStatement().use { st -> st.executeQuery("PRAGMA page_size").use { it.next(); it.getInt(1) } }
+        }
+        assertEquals(ASSUMED_PAGE_SIZE, pageSize, "the corruption helper assumes this page size")
         val bytes = file.readBytes()
-        for (i in 4096 until minOf(bytes.size, untilByte)) {
+        assertTrue(bytes.size > ASSUMED_PAGE_SIZE, "the file must have a page past the first to corrupt")
+        for (i in ASSUMED_PAGE_SIZE until minOf(bytes.size, untilByte)) {
             bytes[i] = bytes[i].inc()
         }
         file.writeBytes(bytes)
     }
 
     private companion object {
+        /** The page size [corruptPastFirstPage] starts corrupting at; asserted against the file. */
+        const val ASSUMED_PAGE_SIZE = 4096
+
         /**
          * The schema `validateSchema` is actually called with in production (always the running
          * build's own version — see `DatabaseMerger.desktop.kt`'s `validateCloudSchema`), so these

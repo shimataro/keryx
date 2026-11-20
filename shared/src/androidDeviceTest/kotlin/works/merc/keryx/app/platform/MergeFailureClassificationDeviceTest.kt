@@ -12,6 +12,7 @@ import io.requery.android.database.sqlite.SQLiteDatabase
 import works.merc.keryx.app.core.CloudDataIncompatibleException
 import works.merc.keryx.app.createSchemaDbFile
 import works.merc.keryx.app.deleteDbFiles
+import works.merc.keryx.app.domain.MergeSql
 import works.merc.keryx.app.domain.SqliteFailureCategory
 import java.io.File
 import java.io.RandomAccessFile
@@ -157,6 +158,92 @@ class MergeFailureClassificationDeviceTest {
         }
     }
 
+    /**
+     * SQLite itself can end the merge transaction on a failure (here a statement's own `OR ROLLBACK`).
+     * A `foreign_key_check` run then would read a `main` other writers may already have changed, so
+     * the verdict must be undetermined and the failure stays unclassified though the local DB is sound.
+     */
+    @Test
+    fun constraintFailureAfterSqliteEndedTheTransactionIsLeftUnclassified() {
+        val localFile = createSchemaDbFile().also { cleanup += it }
+        val cloudFile = createSchemaDbFile().also { cleanup += it }
+        seedFolder(localFile.absolutePath, "dup", "Local")
+        seedFolder(cloudFile.absolutePath, "dup", "CloudDup")
+
+        assertFailsWith<SQLiteConstraintException> {
+            DatabaseMerger.merge(
+                localDbPath = localFile.absolutePath,
+                cloudDbPath = cloudFile.absolutePath,
+                localSchemaVersion = SCHEMA_VERSION,
+                mergeStatements = listOf(unguardedFolderInsert.replace("INSERT INTO", "INSERT OR ROLLBACK INTO")),
+            )
+        }
+    }
+
+    private fun seedFeed(dbPath: String) {
+        SQLiteDatabase.openOrCreateDatabase(dbPath, null, NoOpDatabaseErrorHandler).use { db ->
+            db.execSQL("INSERT INTO feeds (id, url, title, updated_at, created_at) VALUES ('f1', 'https://example.com/f1', 'Feed', 0, 0)")
+        }
+    }
+
+    /**
+     * Flips every byte from the second page up to [untilByte], leaving the header page intact. First
+     * asserts the file's real page size is the offset the corruption starts at, so a changed page size
+     * cannot silently turn this into a header corruption (or a no-op).
+     */
+    private fun corruptPastFirstPage(file: File, untilByte: Int) {
+        val pageSize = SQLiteDatabase.openDatabase(file.absolutePath, null, SQLiteDatabase.OPEN_READONLY, NoOpDatabaseErrorHandler).use { db ->
+            db.rawQuery("PRAGMA page_size", null).use { it.moveToFirst(); it.getInt(0) }
+        }
+        assertEquals(ASSUMED_PAGE_SIZE, pageSize, "the corruption helper assumes this page size")
+        val bytes = file.readBytes()
+        assertTrue(bytes.size > ASSUMED_PAGE_SIZE, "the file must have a page past the first to corrupt")
+        for (i in ASSUMED_PAGE_SIZE until minOf(bytes.size, untilByte)) {
+            bytes[i] = bytes[i].inc()
+        }
+        file.writeBytes(bytes)
+    }
+
+    /** A cloud file corrupt past its header is still classified: its own quick_check fails. */
+    @Test
+    fun corruptCloudFileIsClassifiedAsCloudDataIncompatible() {
+        val localFile = createSchemaDbFile().also { cleanup += it }
+        val cloudFile = createSchemaDbFile().also { cleanup += it }
+        seedFeed(cloudFile.absolutePath)
+        corruptPastFirstPage(cloudFile, untilByte = Int.MAX_VALUE)
+
+        assertFailsWith<CloudDataIncompatibleException> {
+            DatabaseMerger.merge(
+                localDbPath = localFile.absolutePath,
+                cloudDbPath = cloudFile.absolutePath,
+                localSchemaVersion = SCHEMA_VERSION,
+                mergeStatements = MergeSql.all,
+            )
+        }
+    }
+
+    /**
+     * A corrupt *local* DB raises the same corruption during the merge, but the downloaded cloud file
+     * passes its quick_check, so the corruption is local and the original failure is rethrown.
+     */
+    @Test
+    fun corruptLocalDbIsNotBlamedOnAnIntactCloudFile() {
+        val localFile = createSchemaDbFile().also { cleanup += it }
+        val cloudFile = createSchemaDbFile().also { cleanup += it }
+        seedFeed(localFile.absolutePath)
+        seedFeed(cloudFile.absolutePath)
+        corruptPastFirstPage(localFile, untilByte = Int.MAX_VALUE)
+
+        assertFailsWith<SQLiteDatabaseCorruptException> {
+            DatabaseMerger.merge(
+                localDbPath = localFile.absolutePath,
+                cloudDbPath = cloudFile.absolutePath,
+                localSchemaVersion = SCHEMA_VERSION,
+                mergeStatements = MergeSql.all,
+            )
+        }
+    }
+
     @Test
     fun statementErrorAgainstAStructurallyValidCloudDbIsLeftUnclassified() {
         val localFile = createSchemaDbFile().also { cleanup += it }
@@ -275,5 +362,8 @@ class MergeFailureClassificationDeviceTest {
 
     private companion object {
         const val SCHEMA_VERSION = 2L
+
+        /** The page size [corruptPastFirstPage] starts corrupting at; asserted against the file. */
+        const val ASSUMED_PAGE_SIZE = 1024
     }
 }
