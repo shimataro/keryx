@@ -212,6 +212,12 @@ Downloaded DB is attached as `cloud` and merged table-by-table via timestamp com
 Merge SQL (`MergeSql`) key points:
 
 - **Explicitly specify columns** (avoid `SELECT *` which can cause column count mismatch on schema differences).
+- **A tie goes to the cloud, in every statement.** When both sides carry the same timestamp, the cloud side's
+  value is adopted (`>=` on the cloud side). The cloud holds a single file at any moment, so every device adopting
+  its value on a tie converges — whichever provider is used, and even with an older app version on another device.
+  Letting the local side win would leave two devices that stamped different values in the same millisecond each
+  keeping, and re-uploading, their own value forever. A tie with identical values rewrites the same values, which
+  is harmless.
 - feeds / tags / folders / global_settings: last-write-wins (including logical deletion). However, the `ON CONFLICT` in the feeds statement **does not handle user-edited fields (`folder_id` / `sort_order` / `custom_title` / `deleted_at`) at all** (delegated to dedicated statements below). This prevents these fields from being overwritten just because the content is newer.
   The `ON CONFLICT` only handles content fields (url/title/description/etag etc. + `updated_at`).
   feeds are matched **`id`** so feed ids must be deterministically generated from `url` as **UUIDv5** at subscription time (`IdGenerator.feedId`), ensuring the same feed has the same id on all devices — otherwise the URL collision guard below would skip independently-subscribed duplicates and they'd never converge (and article ids derived from `feed_id` would also diverge). See `feeds` section in [db-schema.md](db-schema.md) for details.
@@ -236,7 +242,7 @@ Merge SQL (`MergeSql`) key points:
   join through `cloud.tags` (so two devices that created the same tag name independently, with different ids, still
   converge on one tag) — a row whose tag resolves to neither is skipped.
 - **feeds user-edited fields are merged independently via dedicated statements using field-specific timestamps** (same design as `read_at` / `starred_at` for articles, separated from row-level `updated_at` = content refresh update):
-  `mergeFeedFolderId` (`folder_id` / `folder_updated_at`), `mergeFeedSortOrder` (`sort_order` / `sort_order_updated_at`), `mergeFeedCustomTitle` (`custom_title` / `custom_title_updated_at`), `mergeFeedDeletedAt` (`deleted_at` / `deleted_updated_at`). All use NULL-aware comparison (`c.<ts> IS NOT NULL AND (main is NULL or cloud is strictly newer)`), satisfying: propagation not blocked by refresh, no useless writes after convergence, local preserved if newer. `folder_id` is resolved by the dedicated statement, in four branches: NULL outright if the cloud's own referenced
+  `mergeFeedFolderId` (`folder_id` / `folder_updated_at`), `mergeFeedSortOrder` (`sort_order` / `sort_order_updated_at`), `mergeFeedCustomTitle` (`custom_title` / `custom_title_updated_at`), `mergeFeedDeletedAt` (`deleted_at` / `deleted_updated_at`). All use NULL-aware comparison (`c.<ts> IS NOT NULL AND (main is NULL or cloud is the same age or newer)`), satisfying: propagation not blocked by refresh, local preserved if newer, a tie going to the cloud (see above). `folder_id` is resolved by the dedicated statement, in four branches: NULL outright if the cloud's own referenced
 folder isn't alive in `cloud.folders` (`deleted_at IS NULL`); else the cloud's `folder_id` as-is if that folder is
 alive in `main`; else a same-name lookup joining `main.folders`/`cloud.folders` (both sides' `deleted_at IS NULL`);
 else NULL. It is not included in feeds INSERT. `sort_order` / `custom_title` / `deleted_at` remain in feeds INSERT for initial value propagation (only excluded from `ON CONFLICT`).

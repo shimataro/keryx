@@ -1255,6 +1255,237 @@ class SyncMergerTest {
         verifyDriver.close()
     }
 
+    // ---- Ties: equal timestamps, different values. The cloud side wins every tie in every
+    // last-write-wins statement, so two devices that stamped different values in the same
+    // millisecond converge instead of each keeping (and re-uploading) its own. ----
+
+    /** Builds a local and a cloud file via the given setups, merges cloud into local, then runs [verify]. */
+    private fun mergeThenVerify(
+        local: (KeryxDatabase) -> Unit,
+        cloud: (KeryxDatabase) -> Unit,
+        verify: (KeryxDatabase) -> Unit,
+    ) {
+        val (cloudFile, cloudDriver, cloudDb) = fileDb()
+        cloud(cloudDb)
+        cloudDriver.close()
+
+        val (localFile, localDriver, localDb) = fileDb()
+        local(localDb)
+        localDriver.close()
+
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+
+        val (_, verifyDriver, verifyDb) = reopen(localFile)
+        try {
+            verify(verifyDb)
+        } finally {
+            verifyDriver.close()
+        }
+    }
+
+    @Test
+    fun tieOnFolderByIdGoesToCloud() = mergeThenVerify(
+        local = { it.insertFolder("d1", "Local name", now = 100, sortOrder = 1L) },
+        cloud = { it.insertFolder("d1", "Cloud name", now = 100, sortOrder = 5L) },
+        verify = {
+            val folder = it.foldersQueries.getById("d1").executeAsOne()
+            assertEquals("Cloud name", folder.name)
+            assertEquals(5L, folder.sort_order)
+        },
+    )
+
+    @Test
+    fun tieOnFolderByNameGoesToCloud() = mergeThenVerify(
+        local = { it.insertFolder("d-local", "IT", now = 100, sortOrder = 1L) },
+        cloud = { it.insertFolder("d-cloud", "IT", now = 100, sortOrder = 5L) },
+        verify = {
+            assertEquals(5L, it.foldersQueries.getById("d-local").executeAsOne().sort_order)
+        },
+    )
+
+    @Test
+    fun tieOnFeedContentRowGoesToCloud() = mergeThenVerify(
+        local = { it.insertFeed("f1", now = 100, url = "https://local/feed") },
+        cloud = { it.insertFeed("f1", now = 100, url = "https://cloud/feed") },
+        verify = {
+            assertEquals("https://cloud/feed", it.feedsQueries.getById("f1").executeAsOne().url)
+        },
+    )
+
+    @Test
+    fun tieOnTagByIdGoesToCloud() = mergeThenVerify(
+        local = { it.insertTag("t1", "Local name", now = 100, sortOrder = 1L) },
+        cloud = { it.insertTag("t1", "Cloud name", now = 100, sortOrder = 5L) },
+        verify = {
+            val tag = it.tagsQueries.getById("t1").executeAsOne()
+            assertEquals("Cloud name", tag.name)
+            assertEquals(5L, tag.sort_order)
+        },
+    )
+
+    @Test
+    fun tieOnTagByNameGoesToCloud() = mergeThenVerify(
+        local = { it.insertTag("t-local", "News", now = 100, sortOrder = 1L) },
+        cloud = { it.insertTag("t-cloud", "News", now = 100, sortOrder = 5L) },
+        verify = {
+            assertEquals(5L, it.tagsQueries.getById("t-local").executeAsOne().sort_order)
+        },
+    )
+
+    @Test
+    fun tieOnFeedTagGoesToCloud() = mergeThenVerify(
+        local = {
+            it.insertFeed("f1", now = 100)
+            it.insertTag("t1", "tag", now = 100)
+            it.insertFeedTag("f1", "t1", now = 100, deletedAt = null)
+        },
+        cloud = {
+            it.insertFeed("f1", now = 100)
+            it.insertTag("t1", "tag", now = 100)
+            it.insertFeedTag("f1", "t1", now = 100, deletedAt = 100) // detached at the same stamp
+        },
+        verify = {
+            // The detached link is soft-deleted, so it is no longer listed for the feed.
+            assertEquals(emptyList(), it.feed_tagsQueries.watchTagIdsForFeed("f1").executeAsList())
+        },
+    )
+
+    @Test
+    fun tieOnGlobalSettingGoesToCloud() = mergeThenVerify(
+        local = { it.insertGlobalSetting("k1", "local-value", now = 100) },
+        cloud = { it.insertGlobalSetting("k1", "cloud-value", now = 100) },
+        verify = { assertEquals("cloud-value", it.global_settingsQueries.get("k1").executeAsOne()) },
+    )
+
+    // Per-field ties. The local row's content stamp is newer (500) than the cloud's (400) so only
+    // the per-field statement can bring the cloud value in.
+
+    @Test
+    fun tieOnFeedFolderIdGoesToCloud() = mergeThenVerify(
+        local = {
+            it.insertFolder("d1", "One", now = 100)
+            it.insertFolder("d2", "Two", now = 100)
+            it.insertFeed("f1", now = 500)
+            it.feedsQueries.updateFolder("d1", 500L, 100L, "f1")
+        },
+        cloud = {
+            it.insertFolder("d1", "One", now = 100)
+            it.insertFolder("d2", "Two", now = 100)
+            it.insertFeed("f1", now = 400)
+            it.feedsQueries.updateFolder("d2", 400L, 100L, "f1")
+        },
+        verify = { assertEquals("d2", it.feedsQueries.getById("f1").executeAsOne().folder_id) },
+    )
+
+    @Test
+    fun tieOnFeedSortOrderGoesToCloud() = mergeThenVerify(
+        local = {
+            it.insertFeed("f1", now = 500)
+            it.feedsQueries.updateSortOrder(1L, 500L, 100L, "f1")
+        },
+        cloud = {
+            it.insertFeed("f1", now = 400)
+            it.feedsQueries.updateSortOrder(9L, 400L, 100L, "f1")
+        },
+        verify = { assertEquals(9L, it.feedsQueries.getById("f1").executeAsOne().sort_order) },
+    )
+
+    @Test
+    fun tieOnFeedCustomTitleGoesToCloud() = mergeThenVerify(
+        local = {
+            it.insertFeed("f1", now = 500)
+            it.feedsQueries.updateCustomTitle("Local name", 500L, 100L, "f1")
+        },
+        cloud = {
+            it.insertFeed("f1", now = 400)
+            it.feedsQueries.updateCustomTitle("Cloud name", 400L, 100L, "f1")
+        },
+        verify = { assertEquals("Cloud name", it.feedsQueries.getById("f1").executeAsOne().custom_title) },
+    )
+
+    @Test
+    fun tieOnFeedDeletedAtGoesToCloud() = mergeThenVerify(
+        local = {
+            it.insertFeed("f1", now = 500)
+            it.feedsQueries.stampResubscribed(100L, "f1") // alive, subscription state stamped at 100
+        },
+        cloud = {
+            it.insertFeed("f1", now = 400)
+            it.feedsQueries.softDelete(77L, 400L, 100L, "f1") // unsubscribed at the same stamp
+        },
+        verify = { assertEquals(77L, it.feedsQueries.getById("f1").executeAsOne().deleted_at) },
+    )
+
+    @Test
+    fun strictlyNewerLocalValuesAreStillKeptOverCloud() = mergeThenVerify(
+        local = {
+            it.insertFolder("d1", "Local name", now = 200)
+            it.insertTag("t1", "Local tag", now = 200)
+            it.insertGlobalSetting("k1", "local-value", now = 200)
+            it.insertFeed("f1", now = 500, url = "https://local/feed")
+            it.feedsQueries.updateCustomTitle("Local title", 500L, 200L, "f1")
+            it.feedsQueries.updateSortOrder(1L, 500L, 200L, "f1")
+        },
+        cloud = {
+            it.insertFolder("d1", "Cloud name", now = 100)
+            it.insertTag("t1", "Cloud tag", now = 100)
+            it.insertGlobalSetting("k1", "cloud-value", now = 100)
+            it.insertFeed("f1", now = 400, url = "https://cloud/feed")
+            it.feedsQueries.updateCustomTitle("Cloud title", 400L, 100L, "f1")
+            it.feedsQueries.updateSortOrder(9L, 400L, 100L, "f1")
+        },
+        verify = {
+            assertEquals("Local name", it.foldersQueries.getById("d1").executeAsOne().name)
+            assertEquals("Local tag", it.tagsQueries.getById("t1").executeAsOne().name)
+            assertEquals("local-value", it.global_settingsQueries.get("k1").executeAsOne())
+            val feed = it.feedsQueries.getById("f1").executeAsOne()
+            assertEquals("https://local/feed", feed.url)
+            assertEquals("Local title", feed.custom_title)
+            assertEquals(1L, feed.sort_order)
+        },
+    )
+
+    @Test
+    fun twoDevicesHoldingTiedDifferentValuesConverge() {
+        fun deviceA(db: KeryxDatabase) {
+            db.insertGlobalSetting("k1", "value-A", now = 100)
+            db.insertFeed("f1", now = 500)
+            db.feedsQueries.updateCustomTitle("Title A", 500L, 100L, "f1")
+        }
+        fun deviceB(db: KeryxDatabase) {
+            db.insertGlobalSetting("k1", "value-B", now = 100)
+            db.insertFeed("f1", now = 500)
+            db.feedsQueries.updateCustomTitle("Title B", 500L, 100L, "f1")
+        }
+
+        // Step 1: the cloud holds B's database; A merges it and must adopt B's values.
+        val (cloudFile, cloudDriver, cloudDb) = fileDb()
+        deviceB(cloudDb)
+        cloudDriver.close()
+        val (aFile, aDriver, aDb) = fileDb()
+        deviceA(aDb)
+        aDriver.close()
+        DatabaseMerger.merge(aFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+
+        val (_, aVerifyDriver, aVerifyDb) = reopen(aFile)
+        assertEquals("value-B", aVerifyDb.global_settingsQueries.get("k1").executeAsOne())
+        assertEquals("Title B", aVerifyDb.feedsQueries.getById("f1").executeAsOne().custom_title)
+        aVerifyDriver.close()
+
+        // Step 2: A uploads its merged database (a copy of it becomes the cloud); B merges it.
+        val uploaded = java.io.File.createTempFile("cloud-after-A", ".db").also { it.deleteOnExit() }
+        aFile.copyTo(uploaded, overwrite = true)
+        val (bFile, bDriver, bDb) = fileDb()
+        deviceB(bDb)
+        bDriver.close()
+        DatabaseMerger.merge(bFile.absolutePath, uploaded.absolutePath, 1L, MergeSql.all)
+
+        val (_, bVerifyDriver, bVerifyDb) = reopen(bFile)
+        assertEquals("value-B", bVerifyDb.global_settingsQueries.get("k1").executeAsOne())
+        assertEquals("Title B", bVerifyDb.feedsQueries.getById("f1").executeAsOne().custom_title)
+        bVerifyDriver.close()
+    }
+
     private fun reopen(file: java.io.File): Triple<java.io.File, app.cash.sqldelight.db.SqlDriver, KeryxDatabase> {
         val driver = app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver("jdbc:sqlite:${file.absolutePath}")
         return Triple(file, driver, KeryxDatabase(driver))

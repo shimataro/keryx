@@ -321,6 +321,11 @@
 マージ SQL（`MergeSql`）の要点:
 
 - **列を明示指定**する（`SELECT *` はスキーマ差異で列数不一致を起こしうるため避ける）。
+- **同着はすべての文でクラウドが勝つ。** 両側のタイムスタンプが等しいときは、クラウド側の値を採用する（クラウド側で
+  `>=`）。クラウドに置かれるファイルはどの時点でも 1 つなので、同着のときに各端末がその値を採用すれば収束する。これは
+  どのプロバイダーでも、他の端末が古いバージョンのアプリでも成り立つ。ローカル側を勝たせると、同じミリ秒に違う値を
+  記録した 2 台の端末が、それぞれ自分の値を残してアップロードし続け、永久に収束しない。値も同じ同着では同じ値を
+  書き直すだけで、害はない。
 - feeds / tags / folders / global_settings: タイムスタンプ後勝ち（論理削除含む）。ただし feeds 文の
   `ON CONFLICT` は **ユーザー編集フィールド（`folder_id` / `sort_order` / `custom_title` / `deleted_at`）を
   一切扱わない**（下記の専用文に委譲）。内容が新しいという理由でこれらが上書きされないようにするため。
@@ -356,8 +361,8 @@
   `mergeFeedFolderId`（`folder_id` / `folder_updated_at`）、`mergeFeedSortOrder`（`sort_order` /
   `sort_order_updated_at`）、`mergeFeedCustomTitle`（`custom_title` / `custom_title_updated_at`）、
   `mergeFeedDeletedAt`（`deleted_at` / `deleted_updated_at`）。いずれも NULL 認識の比較
-  （`c.<ts> IS NOT NULL AND (main が NULL または cloud が厳密に新しい)`）で、リフレッシュに妨げられない伝播・
-  収束後の無駄書き込み無し・ローカルが新しければ維持、を満たす。`folder_id` は列に値を持たず専用文が
+  （`c.<ts> IS NOT NULL AND (main が NULL または cloud が同じか新しい)`）で、リフレッシュに妨げられない伝播・
+  ローカルが新しければ維持・同着はクラウドが勝つ（前述）、を満たす。`folder_id` は列に値を持たず専用文が
   次の4分岐で解決する: クラウド側が参照する folder 自体が `cloud.folders` で生存していなければ
   （`deleted_at IS NULL`）無条件で NULL、そうでなければその folder が main にも生存していればクラウド側
   の `folder_id` をそのまま採用、それも無ければ `main.folders`/`cloud.folders` を名前で join した
