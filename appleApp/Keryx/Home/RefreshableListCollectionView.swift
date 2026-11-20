@@ -33,6 +33,30 @@ final class ListPullToRefresh {
             return
         }
         guard scrollView.refreshControl == nil else { return }
+        installControl(on: scrollView)
+    }
+
+    /// Call as the user starts dragging the list. Replaces the refresh control with a fresh one when
+    /// UIKit has left it out of the window, so this pull shows its spinner.
+    ///
+    /// From iOS 26 the navigation bar hosts the refresh control of the scroll view it tracks in a
+    /// container of its own, and a navigation transition can drop that container from the hierarchy
+    /// without putting it back: the control stays the list's `refreshControl` and still starts
+    /// refreshes, but spins out of sight. Re-assigning the same control keeps the zero width it was
+    /// given while detached (the spinner shows half off the leading edge), so a new one goes in its
+    /// place. Checked at drag start rather than on appearance, since when the container is dropped
+    /// is not known. See "iOS: the pull-to-refresh spinner disappears after navigating" in
+    /// `docs/known-issues.md`.
+    func listWillBeginDragging() {
+        guard action != nil, let scrollView, scrollView.window != nil,
+              let control = scrollView.refreshControl, control.window == nil else { return }
+        // The detached control's refresh, if any, has no visible spinner left to end.
+        cancel()
+        scrollView.refreshControl = nil
+        installControl(on: scrollView)
+    }
+
+    private func installControl(on scrollView: UIScrollView) {
         let control = UIRefreshControl()
         control.addAction(
             UIAction { [weak self] action in self?.refresh(from: action.sender as? UIRefreshControl) },

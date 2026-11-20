@@ -492,6 +492,12 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
         actions.select(item)
     }
 
+    // MARK: - Pull to refresh
+
+    func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+        pullToRefresh.listWillBeginDragging()
+    }
+
     // MARK: - Swipe actions
 
     /// The trailing swipe actions of the row at `indexPath` (`SidebarSwipeActions`), none mid-drag.
