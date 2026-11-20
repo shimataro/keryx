@@ -149,6 +149,8 @@ Compose 自身のレイジーリスト項目再利用における内部不変条
 同じ表明違反の上流報告:
 [compose-multiplatform#3977](https://github.com/JetBrains/compose-multiplatform/issues/3977)、
 [issuetracker 303256075](https://issuetracker.google.com/issues/303256075)。
+compose-multiplatform#3977 は 2024 年 4 月に close されたが、このアプリが使うバージョンでも今なお再現する
+— 最後に確認した結果は下記「ライブラリ更新後の再検証」を参照。
 
 ### 緩和策: 行あたりのノード数を減らす
 
@@ -221,12 +223,21 @@ Compose 自身のレイジーリスト項目再利用における内部不変条
 実行しても何も分からない。まず `ArticleRow`（`ArticleRowComponents.kt`）を緩和策適用前の構成に戻す
 — 現在の `Modifier.padding` に畳み込んだ隙間と `AsyncImage`/`Spacer` の分岐ではなく、`Spacer` で
 隙間を作り favicon を `Box` で包む元の形に戻す（favicon 分岐直前のインラインコメント、および
-"cut ArticleRow's LazyColumn item node count" コミットに、戻すべき差分の詳細がある）。そのうえで
+"cut ArticleRow's LazyColumn item node count" コミット a0d35cbd（#66）に、戻すべき差分がある。その後
+行は変わっているので、差分を逆適用するのではなく手で組み直し、行の常設ノード数が 12（現在は 8）に
+なっていることを数えて確かめる）。そのうえで
 `@Ignore` を外して数回実行する。
 
 ```bash
 ./gradlew :composeApp:desktopTest --tests '*ArticleReuseCrashRepro*' --rerun-tasks
 ```
+
+ハーネスは選択のたびに `revealRequest` を進める。scroll-into-view の effect を再始動させるのはそれだから
+である（上記「発生条件」を参照）。選択中の id を変えるだけのハーネスでは effect が一度も走らず、
+不具合の有無にかかわらず成功する — effect のキーが変わった後、しばらく実際にそうなっていた。
+
+最後に再確認したのは 2026-11-20（Compose Multiplatform 1.11.1、`compose-material3` 1.9.0）。緩和策適用前の
+構成では 5 / 5 で再現し、現在の構成では 0 / 5 だった。
 
 この緩和策適用前の構成で繰り返し成功するようになっていれば上流で修正済み。この項目を削除する
 （あるいはテストは通常のリグレッションテストとして残す）とともに、`ArticleRow` は緩和策適用前の
@@ -326,10 +337,11 @@ Compose 版デスクトップビルド**（内部の確認用。出荷してい�
 
 ### 症状
 
-並行する書き込みの下で、`FeedRepository.subscribeFeedWrite` の `feeds.upsert` が
+並行する書き込みの下で、購読の `feeds.upsert`（`subscribeFeedWrite` の書き込み段階である
+`FeedRepository.doSubscribeFeedWrite`）が
 `org.sqlite.SQLiteException: [SQLITE_BUSY] The database file is locked` を投げることがある。
 これは `Result.Err` ではなく呼び出し元スレッドの**捕捉されない例外**である —
-`subscribeFeedWrite` の `db.transaction {}` は `try`/`catch` で囲まれておらず、例外は
+その `db.transactionWithResult {}` は `try`/`catch` で囲まれておらず、例外は
 `FeedRepository` の外まで伝播する。
 
 CI でのみ発生する `FeedRepositoryTest.subscribeFeedSerializesSortOrderAllocationAcrossConcurrentCalls`
@@ -338,8 +350,9 @@ CI でのみ発生する `FeedRepositoryTest.subscribeFeedSerializesSortOrderAll
 
 ### 診断
 
-`subscribeFeedWrite` の `db.transaction {}` は write の前に read を行う
-（`feeds.getByUrl` / `feeds.nextSortOrderInGroup` の後に `feeds.upsert`）。SQLDelight の
+購読の書き込みトランザクション（`doSubscribeFeedWrite` の `db.transactionWithResult {}`）は write の前に
+read を行う（`feeds.getByUrl`、新規または再購読の行なら `insertionSortOrderForNewFeed` /
+`feeds.nextSortOrderInGroup`、その後に `feeds.upsert`）。SQLDelight の
 `JdbcSqliteDriver` は常に素の `BEGIN TRANSACTION`（SQLite のデフォルトである deferred モード）を
 発行するため、トランザクションは read の時点では SHARED ロックしか取らず、write の際に
 RESERVED へ**昇格**する必要がある。
@@ -350,18 +363,18 @@ SQLite 自身のロック昇格ルール（`sqlite3_busy_handler` の公式ド�
 `SQLITE_BUSY_TIMEOUT_MS`。`sqliteConnectionProperties()` 経由で適用）は、他の昇格と衝突していない
 ロックの**取得**を待つ場合にのみ効き、この経路には効かない。
 
-失敗したテストにおける並行書き込み元は次の 2 つ: 1 本目の `subscribeFeedWrite` は
-`feedPlacementMutex.withLock { db.transaction { ... } }` の中で RESERVED を保持するが、
+観測した当時のコードで、失敗したテストにおける並行書き込み元は次の 2 つだった: 1 本目の
+`subscribeFeedWrite` は `feedPlacementMutex.withLock { db.transaction { ... } }` の中で RESERVED を保持していたが、
 mutex を解放した**直後**にその呼び出しが行う次の処理 —
 `articleRepository.upsertParsed(feedId, fetched.articles)`（フィードごとの別トランザクション）—
 がまだ進行中でロックを保持している間に、2 本目の呼び出しが自分の SHARED read ロックを RESERVED へ
 昇格させようとする、という重なりである。
 
-（これは観測した当時のコードの説明である。その後、購読は記事をフィード行と同じトランザクションの中で、mutex を
-保持したまま書くようになったので、更新（refresh）がその 2 つの間に確定することはない。検索インデックスの追いつき
-処理は、今も mutex の解放後に書く。また、このトランザクションは今も書く前に読む（`getByUrl` → `upsert`）ので、
-別の書き込み元（更新など）によって同じように昇格が失敗することはありうる。そのため、本当の直し方は
-`BEGIN IMMEDIATE` だという下の結論は変わらない。）
+この重なり自体はもう無い。購読は今、記事をフィード行と同じトランザクションの中で、mutex を保持したまま書く
+（`writePrefetchedSubscription` → `doSubscribeFeedWrite`）。検索インデックスの追いつき処理（`indexMissing()`）は、
+今も mutex の解放後に書く。また、このトランザクションは今も書く前に読むので、別の書き込み元（更新や、先に
+行われた購読の追いつき処理）によって同じように昇格が失敗することはありうる。そのため、本当の直し方は
+`BEGIN IMMEDIATE` だという下の結論は変わらない。
 
 ### 除外した仮説
 
@@ -393,17 +406,21 @@ mutex を解放した**直後**にその呼び出しが行う次の処理 —
 コード上の確認による（実際に発生させて確認したものではない）— トランザクションが write の前に
 read を行っている箇所:
 
-- `FeedRepository.subscribeFeedWrite`（`FeedRepository.kt`。`getByUrl`/`nextSortOrderInGroup` の後に
-  `upsert` を行う `db.transaction {}`）— 今回観測された箇所。
-- `FeedRepository.moveFeedsOutOfFolderLocked`（同一トランザクション内で `nextSortOrderInGroup` を読んでから
-  フィードごとに書き込む）。`FolderRepository.deleteFolder` のトランザクション経由で到達する。
+- `FeedRepository.doSubscribeFeedWrite`（`FeedRepository.kt`。`getByUrl` と
+  `insertionSortOrderForNewFeed`/`nextSortOrderInGroup` の後に、`upsert` と記事の挿入を行う
+  `db.transactionWithResult {}`）— 今回観測された箇所（当時は `subscribeFeedWrite` 自身の `db.transaction {}`）。
+- `FolderRepository.deleteFolder` のトランザクション。`FeedRepository.moveFeedsOutOfFolderLocked` は
+  `getByFolder`/`nextSortOrderInGroup` を自分の `db.transaction {}` を開く前に読むが、`deleteFolder` が
+  自分のトランザクションの中で呼ぶので、その外側のトランザクションでは、フィードごとの書き込みと
+  フォルダーの論理削除より先にこの read が来る。
 
 `FeedRepository.moveFeed` と `FolderRepository.reorderFolders` は並び順の read を
 `db.transaction {}` を開く**前**に済ませているため、この形状には当てはまらない。（`moveFeed` は
 その read からトランザクションまでの間 `feedPlacementMutex` を保持するので、同じグループへフィードを
 配置する購読と交互に実行されることはない。read はトランザクションの外に置いたままである。）
 フィード更新の反映トランザクション（`FeedRepository.kt` の `applyFetch` 周辺）も write のみで
-該当しない。
+該当しない。`TagRepository.createTagAndAttach` と `FolderRepository.createFolderAndMoveFeed` は先に書き
+（名前の `upsertByName`）、その後で読むので、最初の文から書き込みロックを持つ。
 
 ### テスト側でどう回避したか
 
@@ -639,8 +656,8 @@ Android で `https://alfalfalfa.com/articles/11110022.html` を開くと、1〜2
 ### 意図的に残している範囲
 
 `script-src` は宣言していないので、本文のスクリプトは引き続き実行される。広告・計測コードが動いて
-独自に外部リクエストを発行するため、[external-spec.ja.md](external-spec.ja.md) §10 の「外部サーバへ
-データを送信しない」とは厳密には折り合っていない。また、スクリプトがインラインの `<style>` 要素を
+使っている機能とは関係のないサーバーへ独自にリクエストを発行するため、[external-spec.ja.md](external-spec.ja.md)
+§10 の「使っている機能に直接関係するサーバーにしか接続しない」とは厳密には折り合っていない。また、スクリプトがインラインの `<style>` 要素を
 注入する経路も残る（`'unsafe-inline'` の範囲内。通常のケースはクロームの `!important` で受け止めて
 いるが、受け止められるのは列挙済みの宣言だけで、どのルールも `!important` を付けていない
 プロパティや、本文側の同詳細度の `!important` ルールは、本文が `<style>` ブロックより後ろに来る

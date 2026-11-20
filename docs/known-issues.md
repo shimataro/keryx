@@ -156,6 +156,8 @@ introduce the defect — it only pushed the row past the threshold that exposes 
 Upstream reports of the same assertion:
 [compose-multiplatform#3977](https://github.com/JetBrains/compose-multiplatform/issues/3977),
 [issuetracker 303256075](https://issuetracker.google.com/issues/303256075).
+compose-multiplatform#3977 was closed in April 2024, yet the crash still reproduces on the versions
+this app uses — see "Re-checking after a library update" below for the last check.
 
 ### Mitigation: fewer nodes per row
 
@@ -230,12 +232,22 @@ upstream bug is fixed, so running it as-is proves nothing. First revert `Article
 (`ArticleRowComponents.kt`) to its pre-mitigation structure: `Spacer`-separated gaps and a
 `Box`-wrapped favicon, rather than the `Modifier.padding`-folded gaps and `AsyncImage`/`Spacer`
 branch currently there (see the inline comment at the favicon branch, and the "cut ArticleRow's
-LazyColumn item node count" commit for the exact diff to reverse). Then remove `@Ignore` and run it
+LazyColumn item node count" commit, a0d35cbd (#66), for the diff to reverse — the row has changed
+since, so rebuild that structure by hand rather than reverse-applying it, and count the row's
+always-present nodes: 12, against the current 8). Then remove `@Ignore` and run it
 a few times:
 
 ```bash
 ./gradlew :composeApp:desktopTest --tests '*ArticleReuseCrashRepro*' --rerun-tasks
 ```
+
+The harness bumps `revealRequest` with each selection, since that is what re-keys the scroll-into-view
+effect (see "What triggers it" above). A harness that only changes the selected id never runs the
+effect and passes whether or not the bug is there — which it did for a while, after the effect's key
+changed.
+
+Last re-checked on 2026-11-20, with Compose Multiplatform 1.11.1 and `compose-material3` 1.9.0: the
+pre-mitigation structure reproduced the crash 5 / 5, and the current structure 0 / 5.
 
 If it passes repeatedly at this pre-mitigation structure, the upstream fix has landed: delete this
 entry (or keep the test as a normal regression test), keep `ArticleRow` reverted to the
@@ -338,10 +350,11 @@ the change that found it. Worked around in the one test it made flaky.
 
 ### Symptom
 
-Under concurrent writers, `FeedRepository.subscribeFeedWrite`'s `feeds.upsert` can throw
+Under concurrent writers, a subscribe's `feeds.upsert` (`FeedRepository.doSubscribeFeedWrite`, the
+write phase of `subscribeFeedWrite`) can throw
 `org.sqlite.SQLiteException: [SQLITE_BUSY] The database file is locked`. This is an *uncaught*
-exception on the calling thread, not a `Result.Err` — `subscribeFeedWrite` has no `try`/`catch`
-around its `db.transaction {}` block, so the exception propagates past `FeedRepository` entirely.
+exception on the calling thread, not a `Result.Err` — there is no `try`/`catch` around that
+`db.transactionWithResult {}` block, so the exception propagates past `FeedRepository` entirely.
 
 First observed via a CI-only flake in
 `FeedRepositoryTest.subscribeFeedSerializesSortOrderAllocationAcrossConcurrentCalls` (two real
@@ -350,7 +363,8 @@ First observed via a CI-only flake in
 
 ### Diagnosis
 
-`subscribeFeedWrite`'s `db.transaction {}` reads before it writes (`feeds.getByUrl` /
+A subscribe's write transaction (`doSubscribeFeedWrite`'s `db.transactionWithResult {}`) reads before
+it writes (`feeds.getByUrl`, and for a new or resubscribed row `insertionSortOrderForNewFeed` /
 `feeds.nextSortOrderInGroup`, then `feeds.upsert`). SQLDelight's `JdbcSqliteDriver` always issues a
 plain `BEGIN TRANSACTION` (SQLite's default *deferred* mode), so the transaction starts by taking
 only a SHARED lock at the read and has to **upgrade** to RESERVED at the write.
@@ -361,17 +375,17 @@ upgrade could deadlock against another connection that is itself waiting to upgr
 `SQLITE_BUSY_TIMEOUT_MS`, applied via `sqliteConnectionProperties()`) only governs waiting to
 *acquire* a lock that has no conflicting upgrade in progress — it does not apply here.
 
-The two overlapping writers in the failing test: the first `subscribeFeedWrite` call holds RESERVED
-inside `feedPlacementMutex.withLock { db.transaction { ... } }`, but the *next* thing that
-call does after releasing the mutex — `articleRepository.upsertParsed(feedId, fetched.articles)`, a
-separate per-feed `db.transaction {}` — can still be mid-flight, still holding a lock, when the
-second call's own transaction tries to upgrade its SHARED read lock to RESERVED for its write.
+The two overlapping writers in the failing test, as the code stood when it was observed: the first
+`subscribeFeedWrite` call held RESERVED inside `feedPlacementMutex.withLock { db.transaction { ... } }`,
+but the *next* thing that call did after releasing the mutex — `articleRepository.upsertParsed(feedId, fetched.articles)`, a
+separate per-feed `db.transaction {}` — could still be mid-flight, still holding a lock, when the
+second call's own transaction tried to upgrade its SHARED read lock to RESERVED for its write.
 
-(That is the code as it was observed. A subscribe has since written its articles inside the same
-transaction as its feed row, under the mutex, so a refresh cannot commit between the two; the search
-index's catch-up still writes after the mutex. The transaction still reads before it writes
-(`getByUrl` → `upsert`), so another writer — a refresh, say — can still make its upgrade fail the same
-way, and the conclusion below stands: the real fix is `BEGIN IMMEDIATE`.)
+That particular overlap is gone: a subscribe now writes its articles inside the same transaction as its
+feed row, under the mutex (`writePrefetchedSubscription` → `doSubscribeFeedWrite`). The search index's
+catch-up (`indexMissing()`) still writes after the mutex is released. The transaction still reads before
+it writes, so another writer — a refresh, or an earlier subscribe's catch-up — can still make its upgrade
+fail the same way, and the conclusion below stands: the real fix is `BEGIN IMMEDIATE`.
 
 ### Ruled out
 
@@ -400,16 +414,23 @@ could be applied — out of scope for a CI-flake fix.
 
 Confirmed by inspection (not by triggering each one) — a transaction reads before it writes:
 
-- `FeedRepository.subscribeFeedWrite` (`FeedRepository.kt`, the `db.transaction {}` covering
-  `getByUrl`/`nextSortOrderInGroup` then `upsert`) — the one this was observed against.
-- `FeedRepository.moveFeedsOutOfFolderLocked` (reads `nextSortOrderInGroup` then writes per feed in
-  the same transaction), reached via `FolderRepository.deleteFolder`'s transaction.
+- `FeedRepository.doSubscribeFeedWrite` (`FeedRepository.kt`, the `db.transactionWithResult {}`
+  covering `getByUrl` and `insertionSortOrderForNewFeed`/`nextSortOrderInGroup`, then `upsert` and the
+  articles' insert) — the one this was observed against, back when it was `subscribeFeedWrite`'s own
+  `db.transaction {}`.
+- `FolderRepository.deleteFolder`'s transaction. `FeedRepository.moveFeedsOutOfFolderLocked` reads
+  `getByFolder`/`nextSortOrderInGroup` before opening its own `db.transaction {}`, but `deleteFolder`
+  calls it inside its transaction, so those reads still come first in that outer transaction, ahead of
+  the per-feed writes and the folder's soft delete.
 
 `FeedRepository.moveFeed` and `FolderRepository.reorderFolders` read their ordering *before*
 opening `db.transaction {}`, so they don't have this shape. (`moveFeed` holds `feedPlacementMutex`
 across that read and its transaction, so it cannot interleave with a subscribe placing a feed in the
 same group, while keeping the read outside the transaction.) Neither does the feed-refresh apply
 transaction (`FeedRepository.kt`, around `applyFetch`), which only writes.
+`TagRepository.createTagAndAttach` and `FolderRepository.createFolderAndMoveFeed` write first (the
+name's `upsertByName`) and read only after it, so their transactions hold the write lock from their
+first statement.
 
 ### How the test was worked around
 
@@ -656,8 +677,9 @@ lower-specificity override — hardening, not isolation (see "Article Reader" in
 ### What is deliberately left
 
 No `script-src` is declared, so the body's scripts still run: ad and analytics code executes and
-makes its own network requests, which does not sit comfortably with "no data sent to external
-servers" in [external-spec.md](external-spec.md) §10, and a script can still inject an inline
+makes its own network requests to servers that have nothing to do with the feature in use, which
+does not sit comfortably with [external-spec.md](external-spec.md) §10's "Keryx contacts only servers
+directly relevant to the feature in use", and a script can still inject an inline
 `<style>` element (which `'unsafe-inline'` admits — the `!important` chrome rules absorb the
 ordinary case, but only for the declarations they list: a property none of them marks
 `!important`, or an equally-specific `!important` rule of the body's own, still restyles the
