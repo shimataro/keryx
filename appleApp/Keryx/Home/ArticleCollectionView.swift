@@ -322,6 +322,10 @@ final class ArticleCollectionViewController: UIViewController, UICollectionViewD
         scheduleReport()
     }
 
+    func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+        pullToRefresh.listWillBeginDragging()
+    }
+
     /// Coalesces a scroll's worth of changes into one report.
     private func scheduleReport() {
         reportTask?.cancel()

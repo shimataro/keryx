@@ -1190,3 +1190,62 @@ On each new iOS release, check on a simulator whether the workaround is still ne
    defect is fixed for that version.
 
 Once it is fixed on every supported iOS version, remove the workaround and delete this entry.
+
+## iOS: the pull-to-refresh spinner disappears after navigating
+
+**Status**: worked around, not fixed — external (UIKit) defect. Keryx replaces a refresh control UIKit
+has dropped from the window when the user starts dragging the list (see "Workaround" below); the
+defect itself is still there.
+
+### Symptom
+
+At a phone width, pulling the article list showed the spinner right after launch, but after going back
+and forth between the sidebar, the article list and the reader a few times, a pull showed no spinner at
+all. The refresh still ran (the bottom bar's "Checking for new articles…" and the feed rows' spinners
+showed it); only the pull's own indicator was missing, and it stayed missing for every later pull.
+Seen on the iOS 27.0 simulator; not reproduced on iOS 17.0.
+
+### Cause
+
+From iOS 26, the navigation bar hosts the `UIRefreshControl` of the scroll view it tracks
+(`setContentScrollView`) in a plain `UIView` container of its own, placed just below the bar. In the
+broken state, inspected with lldb on the live process:
+
+- the collection view's `refreshControl` was still the same control, and pulling still sent its
+  `valueChanged`;
+- the control's superview was that container, with `alpha = 0`, and the container had no superview and
+  no window — a navigation transition had removed it from the hierarchy and nothing put it back.
+
+So the spinner animated off screen. When it is dropped is not known: the list had come back into the
+window a second before the first broken pull.
+
+### What was ruled out
+
+| Attempt | Result |
+| --- | --- |
+| Ending the spinner before the list leaves the window (the first hypothesis) | Not the cause: in the logs every `endRefreshing()` ran on screen before the transition |
+| Re-assigning the same control (`refreshControl = nil`, then the same instance) | It goes into the collection view, but keeps the zero width it was given while detached: the spinner shows half off the leading edge |
+| Assigning a new `UIRefreshControl` | Shown in the middle of the pulled-down area, as it should be |
+
+### Workaround
+
+`ListPullToRefresh.listWillBeginDragging()` (`appleApp/Keryx/Home/RefreshableListCollectionView.swift`),
+called from `scrollViewWillBeginDragging` of both the article list and the sidebar, checks whether the
+list is in a window while its refresh control is not; if so it drops that control (and the wait of any
+refresh it started, which has no visible spinner left to end) and installs a new one with the same
+action. It runs at drag start rather than when the list appears, since when the container is dropped is
+not known; the check costs two `window` reads per drag, and the replacement happens only when the
+control was detached.
+
+### What a real fix would need
+
+A fix in UIKit, so that the navigation bar puts its refresh-control container back when the tracked
+scroll view returns. The workaround could then go.
+
+### Re-checking after an iOS or Xcode update
+
+On each new iOS release, take the `listWillBeginDragging()` call out of both collection views, go back
+and forth between the sidebar, the article list and the reader on a phone-width simulator, and pull the
+article list each time. If the spinner keeps showing, inspect
+`collectionView.refreshControl?.window` with lldb as well; once it never turns `nil` on any supported
+iOS version, remove the workaround and delete this entry.
