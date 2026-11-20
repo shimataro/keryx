@@ -52,6 +52,7 @@ import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.test.fail
 
 private const val RSS = """<?xml version="1.0"?><rss version="2.0"><channel>
 <title>Feed</title><link>https://ex.com</link>
@@ -254,6 +255,20 @@ private class CountingMutex(private val inner: Mutex = Mutex()) : Mutex by inner
     override fun tryLock(owner: Any?): Boolean {
         attempts.incrementAndGet()
         return inner.tryLock(owner)
+    }
+}
+
+/**
+ * Delegates to [inner], and counts down [contendedLockRequested] when [lock] is asked for while
+ * someone else already holds it — so a test can tell a lock request that had to wait from one that
+ * never came.
+ */
+private class ContentionSignallingMutex(private val inner: Mutex = Mutex()) : Mutex by inner {
+    val contendedLockRequested = CountDownLatch(1)
+
+    override suspend fun lock(owner: Any?) {
+        if (inner.isLocked) contendedLockRequested.countDown()
+        inner.lock(owner)
     }
 }
 
@@ -2113,18 +2128,26 @@ class FeedRepositoryTest {
             val repo = newRepo(db, driver, aliasFetcher(alias, target), clock = Clock { 1000L })
             rawDb.insertFeed("f1", now = 500L, url = target)
             rawDb.feedsQueries.updateCacheHeaders("v0", null, 500L, "f1")
-            val batch = SubscribeBatch()
+            val batchLock = ContentionSignallingMutex()
+            val batch = SubscribeBatch(batchLock)
             val viaAlias = repo.prefetchSubscription(alias, batch) // v1
             var aliasWrite: Thread? = null
+            // Runs inside the canonical entry's prefetch read, which holds the batch lock.
             driver.beforeFeedByUrlRead = {
-                val aliasWritten = CountDownLatch(1)
                 // The alias entry's write, on another thread (so another connection), then a refresh —
                 // both trying to land in the middle of the canonical entry's prefetch read.
-                aliasWrite = Thread {
+                val writer = Thread {
                     runBlocking { repo.writePrefetchedSubscription(viaAlias, batch = batch) }
-                    aliasWritten.countDown()
                 }.apply { start() }
-                aliasWritten.await(500, TimeUnit.MILLISECONDS)
+                aliasWrite = writer
+                // The write must have asked for the batch lock while this read holds it...
+                if (!batchLock.contendedLockRequested.await(10, TimeUnit.SECONDS)) {
+                    fail("the alias write never asked for the batch lock while the prefetch held it")
+                }
+                // ...and must not be able to commit until the read is over.
+                writer.join(200)
+                assertTrue(writer.isAlive, "the alias write finished while the prefetch held the batch lock")
+                assertEquals("v0", rawDb.feedsQueries.getById("f1").executeAsOne().etag)
                 rawDb.feedsQueries.updateCacheHeaders("refreshed", null, 2000L, "f1")
             }
 

@@ -28,15 +28,17 @@ import kotlinx.coroutines.sync.withLock
  *
  * The count is only read or written under [lock], which orders it across the prefetches' coroutines;
  * the records are written under it too, and read by the batch's one writing coroutine.
+ *
+ * @param lock The lock described above. A constructor parameter only so a test can wrap it and observe
+ *   a batch write waiting on it (as [FeedRepository]'s `feedPlacementMutex`).
  */
-internal class SubscribeBatch {
+internal class SubscribeBatch(private val lock: Mutex = Mutex()) {
     /** A value the batch wrote, with the number of the write that wrote it. */
     class Recorded<T>(val value: T, val writeNumber: Int)
 
     /** What a prefetch read with [observe]: [value], and how many batch writes had committed then. */
     class Observed<T>(val writes: Int, val value: T)
 
-    private val lock = Mutex()
     private var committed = 0
     private val contents = HashMap<String, Recorded<FeedRepository.FeedValues>>()
     private val favicons = HashMap<String, Recorded<String?>>()
