@@ -1486,6 +1486,124 @@ class SyncMergerTest {
         bVerifyDriver.close()
     }
 
+    /** `PRAGMA main.foreign_key_check` rows as "table|rowid|parent|fkid" keys (a raw connection, FKs not enforced). */
+    private fun foreignKeyViolations(file: java.io.File): Set<String> =
+        java.sql.DriverManager.getConnection("jdbc:sqlite:${file.absolutePath}").use { conn ->
+            conn.createStatement().use { st ->
+                st.executeQuery("PRAGMA main.foreign_key_check").use { rs ->
+                    buildSet {
+                        while (rs.next()) {
+                            add("${rs.getString(1)}|${rs.getObject(2)}|${rs.getString(3)}|${rs.getObject(4)}")
+                        }
+                    }
+                }
+            }
+        }
+
+    // MergeSql's invariant (MergeFailureClassifier.mainRuledOut): no statement brings in an FK violation.
+    // SQLite counts immediate FK violations per statement net, so the merge would not fail on one; only
+    // foreign_key_check afterwards can show it.
+    @Test
+    fun mergeSqlBringsInNoForeignKeyViolation() {
+        val (cloudFile, cloudDriver, cloudDb) = fileDb()
+        // feeds.folder_id -> folders: the folder is absent from the cloud file.
+        cloudDb.insertFeed("f-cloud", now = 100, folderId = "gone-folder")
+        // articles.feed_id -> feeds: the feed is absent.
+        insertArticle(cloudDb, "a-orphan", "gone-feed", "g1", isRead = 0, readAt = null, updatedAt = 100)
+        // feed_tags.feed_id -> feeds and feed_tags.tag_id -> tags: each parent absent.
+        cloudDb.insertTag("t-cloud", "tag", now = 100)
+        cloudDb.insertFeedTag("gone-feed", "t-cloud", now = 100)
+        cloudDb.insertFeedTag("f-cloud", "gone-tag", now = 100)
+        cloudDriver.close()
+
+        val (localFile, localDriver, localDb) = fileDb()
+        localDb.insertFeed("f-local", now = 50)
+        localDriver.close()
+        assertEquals(emptySet(), foreignKeyViolations(localFile))
+
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+
+        assertEquals(emptySet(), foreignKeyViolations(localFile))
+        val (_, verifyDriver, verifyDb) = reopen(localFile)
+        assertNotNull(verifyDb.feedsQueries.getById("f-cloud").executeAsOneOrNull())
+        assertNull(verifyDb.articlesQueries.getById("a-orphan").executeAsOneOrNull())
+        verifyDriver.close()
+    }
+
+    // The other half of the invariant: no statement modifies an existing local orphan's FK column to
+    // add a violation, whichever merge path a cloud row takes to it.
+    @Test
+    fun mergeSqlNeverAddsToALocalForeignKeyOrphan() {
+        val (cloudFile, cloudDriver, cloudDb) = fileDb()
+        cloudDb.insertFolder("folder-ok", "ok", now = 100)
+        cloudDb.insertTag("t-ok", "tag-ok", now = 100)
+        // Same feeds as local, every user-edited field newer; the folder assignment points at a folder the
+        // cloud file lacks.
+        cloudDb.insertFeed("f-orphan-new", now = 500, folderId = "gone-folder")
+        cloudDb.insertFeed("f-orphan-old", now = 500)
+        cloudDb.insertFeed("f-valid", now = 500, folderId = "gone-folder")
+        for (id in listOf("f-orphan-new", "f-orphan-old", "f-valid")) {
+            cloudDriver.execute(
+                null,
+                "UPDATE feeds SET sort_order = 9, sort_order_updated_at = 500, custom_title = 'cloud', " +
+                    "custom_title_updated_at = 500, deleted_at = 500, deleted_updated_at = 500 WHERE id = '$id'",
+                0,
+            )
+        }
+        // An older folder stamp for the second one: its assignment must not be adopted.
+        cloudDriver.execute(null, "UPDATE feeds SET folder_updated_at = 50 WHERE id = 'f-orphan-old'", 0)
+        cloudDb.insertFeed("f-ok", now = 100)
+        // The local orphan articles' ids, newer read / star / deleted stamps; one with a valid feed in cloud.
+        insertArticle(cloudDb, "a-orphan", "f-ok", "g1", isRead = 1, readAt = 500, updatedAt = 500, isStarred = 1, starredAt = 500)
+        insertArticle(cloudDb, "a-orphan-gone", "gone-feed", "g2", isRead = 1, readAt = 500, updatedAt = 500, isStarred = 1, starredAt = 500)
+        cloudDriver.stampArticleDeleted("a-orphan", 500)
+        cloudDriver.stampArticleDeleted("a-orphan-gone", 500)
+        cloudDb.insertFeedTag("f-orphan-new", "gone-tag", now = 500, deletedAt = 500)
+        cloudDb.insertFeedTag("gone-feed", "t-ok", now = 500, deletedAt = 500)
+        cloudDb.insertFeedTag("f-ok", "gone-tag", now = 500)
+        cloudDriver.close()
+
+        val (localFile, localDriver, localDb) = fileDb()
+        localDb.insertFolder("folder-ok", "ok", now = 100)
+        localDb.insertTag("t-ok", "tag-ok", now = 100)
+        localDb.insertFeed("f-ok", now = 100)
+        localDb.insertFeed("f-orphan-new", now = 100, folderId = "gone-folder")
+        localDb.insertFeed("f-orphan-old", now = 100, folderId = "gone-folder")
+        localDriver.execute(null, "UPDATE feeds SET folder_updated_at = 400 WHERE id = 'f-orphan-old'", 0)
+        // A valid assignment: copying the cloud's dangling folder_id here would add a violation.
+        localDb.insertFeed("f-valid", now = 100, folderId = "folder-ok")
+        insertArticle(localDb, "a-orphan", "gone-feed", "g1", isRead = 0, readAt = 100, updatedAt = 100)
+        insertArticle(localDb, "a-orphan-gone", "gone-feed", "g2", isRead = 0, readAt = 100, updatedAt = 100)
+        localDb.insertFeedTag("f-orphan-new", "gone-tag", now = 100)
+        localDb.insertFeedTag("gone-feed", "t-ok", now = 100)
+        localDb.insertFeedTag("f-ok", "gone-tag", now = 100)
+        localDriver.close()
+
+        val before = foreignKeyViolations(localFile)
+        // One orphan per FK relation the schema declares.
+        assertEquals(
+            setOf("feeds", "articles", "feed_tags"),
+            before.map { it.substringBefore('|') }.toSet(),
+        )
+        assertEquals(
+            setOf("folders", "feeds", "tags"),
+            before.map { it.split('|')[2] }.toSet(),
+        )
+
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+
+        val after = foreignKeyViolations(localFile)
+        assertEquals(emptySet(), after - before, "the merge added FK violations")
+        val (_, verifyDriver, verifyDb) = reopen(localFile)
+        // The merge really did reach the rows: their user-edited fields took the cloud's values.
+        assertEquals("cloud", verifyDb.feedsQueries.getById("f-orphan-old").executeAsOne().custom_title)
+        assertEquals(500L, verifyDb.feedsQueries.getById("f-orphan-old").executeAsOne().deleted_at)
+        assertEquals(1L, verifyDb.articlesQueries.getById("a-orphan").executeAsOne().is_read)
+        // The older assignment was not adopted, so that orphan is still there.
+        assertEquals("gone-folder", verifyDb.feedsQueries.getById("f-orphan-old").executeAsOne().folder_id)
+        verifyDriver.close()
+    }
+
     private fun reopen(file: java.io.File): Triple<java.io.File, app.cash.sqldelight.db.SqlDriver, KeryxDatabase> {
         val driver = app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver("jdbc:sqlite:${file.absolutePath}")
         return Triple(file, driver, KeryxDatabase(driver))
