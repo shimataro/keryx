@@ -9,6 +9,8 @@ import works.merc.keryx.app.domain.MergeSql
 import works.merc.keryx.app.fileDb
 import works.merc.keryx.app.insertFeed
 import java.io.File
+import java.sql.DriverManager
+import java.sql.SQLException
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -226,6 +228,49 @@ class DatabaseMergerTest {
     }
 
     /**
+     * A failed merge whose rollback itself fails must still leave main unchanged. sqlite-jdbc's
+     * `setAutoCommit(true)` runs `commit;`, so restoring autoCommit after the failure would commit the
+     * transaction the failed rollback left open, keeping statement 0's write. The connection is closed
+     * instead, which makes SQLite roll the open transaction back.
+     */
+    @Test
+    fun failedRollbackNeverCommitsTheFailedMerge() {
+        val cloudFile = soundDbFile { driver ->
+            insertTag(driver, "cloud-tag", "Cloud")
+            insertFolder(driver, "dup", "Cloud")
+        }
+        val localFile = soundDbFile { driver -> insertFolder(driver, "dup", "Local") }
+
+        val thrown = assertFailsWith<CloudDataIncompatibleException> {
+            DatabaseMerger.merge(
+                localFile.absolutePath,
+                cloudFile.absolutePath,
+                SCHEMA_VERSION,
+                // Statement 0 writes a new tag into main; statement 1 then hits the PRIMARY KEY of
+                // the folder both sides hold. Unlike a FOREIGN KEY failure, nothing is left pending
+                // at commit time, so a commit would succeed and keep statement 0's write.
+                listOf(UNGUARDED_TAG_INSERT, UNGUARDED_FOLDER_INSERT),
+                migrateCloud = { _, _ -> },
+                rollbackMerge = { throw SQLException("forced rollback failure") },
+            )
+        }
+        // The merge failure itself (the cloud's duplicate key) reaches the caller, classified; the
+        // forced rollback failure neither replaces it nor escapes.
+        assertTrue("SQLITE_CONSTRAINT_PRIMARYKEY" in thrown.messageText, "got ${thrown.messageText}")
+
+        // Open main fresh: the failed merge's tag insert must not have been committed.
+        val tags = DriverManager.getConnection("jdbc:sqlite:${localFile.absolutePath}").use { conn ->
+            conn.createStatement().use { st ->
+                st.executeQuery("SELECT COUNT(*) FROM tags").use { rs ->
+                    rs.next()
+                    rs.getInt(1)
+                }
+            }
+        }
+        assertEquals(0, tags, "a failed merge must leave main unchanged")
+    }
+
+    /**
      * A non-constraint failure during the deferred re-run (here a missing table) says nothing about the
      * cloud rows: the verdict is undetermined, the original FOREIGN KEY failure is rethrown, and the
      * re-run's own error is attached to it as suppressed.
@@ -356,7 +401,7 @@ class DatabaseMergerTest {
         val localFile = soundDbFile { driver -> insertOrphanArticle(driver) }
 
         val thrown = assertFailsWith<CloudDataIncompatibleException> {
-            DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, SCHEMA_VERSION, MergeSql.all) { cloudPath, _ ->
+            DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, SCHEMA_VERSION, MergeSql.all, migrateCloud = { cloudPath, _ ->
                 java.sql.DriverManager.getConnection("jdbc:sqlite:$cloudPath").use { conn ->
                     conn.createStatement().use { st ->
                         st.execute(
@@ -365,7 +410,7 @@ class DatabaseMergerTest {
                         )
                     }
                 }
-            }
+            })
         }
         assertTrue("SQLITE_CONSTRAINT" in thrown.messageText, "expected a constraint failure, got ${thrown.messageText}")
     }

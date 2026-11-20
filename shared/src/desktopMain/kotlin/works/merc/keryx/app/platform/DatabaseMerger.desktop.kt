@@ -50,6 +50,9 @@ actual object DatabaseMerger {
      *
      * @param migrateCloud brings the cloud file at the given path up to the given schema version;
      * it must touch only that file, never the local DB.
+     * @param rollbackMerge rolls the failed merge transaction back — [Connection.rollback] in
+     * production; a test makes it fail to check that a failed rollback never lets the failed merge
+     * be committed.
      */
     internal fun merge(
         localDbPath: String,
@@ -57,10 +60,11 @@ actual object DatabaseMerger {
         localSchemaVersion: Long,
         mergeStatements: List<String>,
         migrateCloud: (cloudDbPath: String, localSchemaVersion: Long) -> Unit,
+        rollbackMerge: (Connection) -> Unit = Connection::rollback,
     ) {
         val verdict = MainRuledOutVerdict()
         try {
-            mergeUnclassified(localDbPath, cloudDbPath, localSchemaVersion, mergeStatements, migrateCloud, verdict)
+            mergeUnclassified(localDbPath, cloudDbPath, localSchemaVersion, mergeStatements, migrateCloud, rollbackMerge, verdict)
         } catch (e: SchemaVersionException) {
             // Already classified — must not fall into the Throwable catch-all below, which would
             // reclassify it as CloudDataIncompatibleException (the wrong recovery action: this
@@ -73,6 +77,7 @@ actual object DatabaseMerger {
 
     /**
      * @param migrateCloud the cloud-only phase (see the internal [merge]).
+     * @param rollbackMerge rolls the failed merge transaction back (see the internal [merge]).
      * @param verdict receives the "main is not the cause" verdict: `true` for any failure of the
      * cloud-only phase ([migrateCloud], which never touches main), and for a constraint failure of
      * the merge statements the verdict computed inside the failed transaction before its rollback
@@ -84,6 +89,7 @@ actual object DatabaseMerger {
         localSchemaVersion: Long,
         mergeStatements: List<String>,
         migrateCloud: (cloudDbPath: String, localSchemaVersion: Long) -> Unit,
+        rollbackMerge: (Connection) -> Unit,
         verdict: MainRuledOutVerdict,
     ) {
         // Bring an older cloud DB up to the local schema first, so the merge statements can
@@ -151,16 +157,19 @@ actual object DatabaseMerger {
                     )
                 }
                 // A rollback failure must not replace (and hide) the failure being classified.
-                runCatching { connection.rollback() }.exceptionOrNull()?.let(e::addSuppressed)
+                runCatching { rollbackMerge(connection) }.exceptionOrNull()?.let(e::addSuppressed)
                 failure = e
                 throw e
             } finally {
                 sqliteConnection.removeCommitListener(transactionEnded)
-                // Restoring autoCommit commits/ends whatever transaction the driver thinks is open,
-                // which fails once SQLite has already ended it; that failure must not replace (and
-                // hide) the merge failure being classified either.
-                runCatching { connection.autoCommit = true }.exceptionOrNull()?.let { restoreFailure ->
-                    failure?.addSuppressed(restoreFailure) ?: throw restoreFailure
+                // Restoring autoCommit runs `commit;` (sqlite-jdbc's setAutoCommit(true)), so it is
+                // done only once the merge has committed. After a failure it is skipped: a rollback
+                // that failed may have left the merge transaction open, and committing it would keep
+                // the failed merge's writes (and the deferred re-run's). The connection is closed
+                // below instead, and SQLite rolls back a transaction still open when its connection
+                // closes.
+                if (failure == null) {
+                    connection.autoCommit = true
                 }
             }
         } finally {
