@@ -435,13 +435,16 @@ fails for that cycle.
 
 `DatabaseMerger.merge` runs every `MergeSql` statement inside one transaction on its dedicated connection,
 so the write lock is held from the first statement to the commit or rollback, and the time grows with the
-number of rows merged. Measured on desktop with 20,000 articles of about 2 KB each: a successful merge took
-about 350 ms on one machine, so at that rate the lock reaches 5 s somewhere around a few hundred thousand
-articles — a size an unlimited cache retention can reach. A constraint failure whose verdict needs the
-deferred re-run (a FOREIGN KEY failure with violations already in main, and on Android any constraint
-failure with violations already in main) holds it longer still, about 1.7x on the same data; other
-constraint failures no longer re-run (see "Merge Failure Classification" in
-[sync-architecture.md](sync-architecture.md)).
+number of rows merged, so with enough articles — which an unlimited cache retention allows — it exceeds
+`busy_timeout`. A constraint failure whose verdict needs the deferred re-run (a FOREIGN KEY failure with
+violations already in main, and on Android any constraint failure with violations already in main) holds
+it longer still, since the remaining statements run a second time; other constraint failures do not re-run
+(see "Merge Failure Classification" in [sync-architecture.md](sync-architecture.md)).
+
+For scale only: a one-off measurement on one desktop machine, with 20,000 articles of about 2 KB each,
+took about 350 ms for a successful merge and about 1.7x that for a failure that needed the re-run. No test
+in the repository reproduces these figures, so they go stale as the merge changes; the claims above do not
+depend on them.
 
 ### Ruled out
 
