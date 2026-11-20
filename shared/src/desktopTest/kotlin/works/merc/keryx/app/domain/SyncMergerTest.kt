@@ -1604,6 +1604,275 @@ class SyncMergerTest {
         verifyDriver.close()
     }
 
+    // ---- A local write stamped at the value the row already holds must still beat the cloud's tie
+    // rule. Every user-edit stamp is written as MAX(now, previous + 1), so a write made in the same
+    // millisecond as the stamp a merge (or an earlier write) brought in stays strictly newer. ----
+
+    private fun scalarLong(driver: app.cash.sqldelight.db.SqlDriver, sql: String): Long? =
+        driver.executeQuery(
+            null, sql,
+            { cursor ->
+                app.cash.sqldelight.db.QueryResult.Value(if (cursor.next().value) cursor.getLong(0) else null)
+            },
+            0,
+        ).value
+
+    /**
+     * Builds the same state on a cloud file and a local file via [setup], performs [write] on the local DB
+     * only, runs [afterWrite] on the local DB, merges the cloud into it, then runs [verify].
+     */
+    private fun localWriteThenMerge(
+        setup: (KeryxDatabase) -> Unit,
+        write: (KeryxDatabase) -> Unit,
+        afterWrite: (KeryxDatabase, app.cash.sqldelight.db.SqlDriver) -> Unit,
+        verify: (KeryxDatabase, app.cash.sqldelight.db.SqlDriver) -> Unit,
+        setupRaw: (app.cash.sqldelight.db.SqlDriver) -> Unit = {},
+    ) {
+        val (cloudFile, cloudDriver, cloudDb) = fileDb()
+        setup(cloudDb)
+        setupRaw(cloudDriver)
+        cloudDriver.close()
+
+        val (localFile, localDriver, localDb) = fileDb()
+        setup(localDb)
+        setupRaw(localDriver)
+        write(localDb)
+        afterWrite(localDb, localDriver)
+        localDriver.close()
+
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+
+        val (_, verifyDriver, verifyDb) = reopen(localFile)
+        try {
+            verify(verifyDb, verifyDriver)
+        } finally {
+            verifyDriver.close()
+        }
+    }
+
+    @Test
+    fun sameMillisecondRenameBeatsTheCloudsOlderCustomTitle() = localWriteThenMerge(
+        setup = {
+            it.insertFeed("f1", now = 100)
+            it.feedsQueries.updateCustomTitle("Old", 500L, 500L, "f1")
+        },
+        write = { it.feedsQueries.updateCustomTitle("New", 500L, 500L, "f1") },
+        afterWrite = { db, _ -> assertEquals(501L, db.feedsQueries.getById("f1").executeAsOne().custom_title_updated_at) },
+        verify = { db, _ ->
+            val feed = db.feedsQueries.getById("f1").executeAsOne()
+            assertEquals("New", feed.custom_title)
+            assertEquals(501L, feed.custom_title_updated_at)
+        },
+    )
+
+    @Test
+    fun twoRenamesWithinOneTickKeepTheSecondTitleAfterMerge() = localWriteThenMerge(
+        // The cloud already holds the first rename (uploaded between the two renames).
+        setup = {
+            it.insertFeed("f1", now = 100)
+            it.feedsQueries.updateCustomTitle("First", 500L, 500L, "f1")
+        },
+        write = { it.feedsQueries.updateCustomTitle("Second", 500L, 500L, "f1") },
+        afterWrite = { db, _ -> assertEquals(501L, db.feedsQueries.getById("f1").executeAsOne().custom_title_updated_at) },
+        verify = { db, _ -> assertEquals("Second", db.feedsQueries.getById("f1").executeAsOne().custom_title) },
+    )
+
+    @Test
+    fun twoRenamesWithinOneTickOnTheSameDbStampStrictlyIncreasing() {
+        val (_, driver, db) = fileDb()
+        db.insertFeed("f1", now = 100)
+        db.feedsQueries.updateCustomTitle("A", 500L, 500L, "f1")
+        db.feedsQueries.updateCustomTitle("B", 500L, 500L, "f1")
+        assertEquals(501L, db.feedsQueries.getById("f1").executeAsOne().custom_title_updated_at)
+        db.feedsQueries.updateCustomTitle("C", 500L, 500L, "f1")
+        assertEquals(502L, db.feedsQueries.getById("f1").executeAsOne().custom_title_updated_at)
+        driver.close()
+    }
+
+    @Test
+    fun renameStampNeverMovesBackwardsWhenTheClockIsBehindTheStoredStamp() {
+        val (_, driver, db) = fileDb()
+        db.insertFeed("f1", now = 100)
+        db.feedsQueries.updateCustomTitle("A", 900L, 900L, "f1")
+        db.feedsQueries.updateCustomTitle("B", 400L, 400L, "f1")
+        assertEquals(901L, db.feedsQueries.getById("f1").executeAsOne().custom_title_updated_at)
+        driver.close()
+    }
+
+    @Test
+    fun sameMillisecondFolderMoveBeatsTheCloudsOlderFolder() = localWriteThenMerge(
+        setup = {
+            it.insertFolder("d1", "One", now = 100)
+            it.insertFolder("d2", "Two", now = 100)
+            it.insertFeed("f1", now = 100)
+            it.feedsQueries.updateFolder("d1", 500L, 500L, "f1")
+        },
+        write = { it.feedsQueries.updateFolder("d2", 500L, 500L, "f1") },
+        afterWrite = { db, _ -> assertEquals(501L, db.feedsQueries.getById("f1").executeAsOne().folder_updated_at) },
+        verify = { db, _ ->
+            val feed = db.feedsQueries.getById("f1").executeAsOne()
+            assertEquals("d2", feed.folder_id)
+            assertEquals(501L, feed.folder_updated_at)
+        },
+    )
+
+    @Test
+    fun sameMillisecondSortOrderBeatsTheCloudsOlderSortOrder() = localWriteThenMerge(
+        setup = {
+            it.insertFeed("f1", now = 100)
+            it.feedsQueries.updateSortOrder(5L, 500L, 500L, "f1")
+        },
+        write = { it.feedsQueries.updateSortOrder(9L, 500L, 500L, "f1") },
+        afterWrite = { db, _ -> assertEquals(501L, db.feedsQueries.getById("f1").executeAsOne().sort_order_updated_at) },
+        verify = { db, _ ->
+            val feed = db.feedsQueries.getById("f1").executeAsOne()
+            assertEquals(9L, feed.sort_order)
+            assertEquals(501L, feed.sort_order_updated_at)
+        },
+    )
+
+    @Test
+    fun sameMillisecondFolderAndSortOrderMoveBeatsTheCloudsOlderValues() = localWriteThenMerge(
+        setup = {
+            it.insertFolder("d1", "One", now = 100)
+            it.insertFolder("d2", "Two", now = 100)
+            it.insertFeed("f1", now = 100)
+            it.feedsQueries.updateFolderAndSortOrder("d1", 5L, 500L, 500L, 500L, "f1")
+        },
+        write = { it.feedsQueries.updateFolderAndSortOrder("d2", 9L, 500L, 500L, 500L, "f1") },
+        afterWrite = { db, _ ->
+            val feed = db.feedsQueries.getById("f1").executeAsOne()
+            assertEquals(501L, feed.folder_updated_at)
+            assertEquals(501L, feed.sort_order_updated_at)
+        },
+        verify = { db, _ ->
+            val feed = db.feedsQueries.getById("f1").executeAsOne()
+            assertEquals("d2", feed.folder_id)
+            assertEquals(9L, feed.sort_order)
+        },
+    )
+
+    /** One unread article (marked unread at 500 on both sides), in a folder and under a tag, for the read-stamp tests. */
+    private fun setupUnreadArticleAt500(db: KeryxDatabase) {
+        db.insertFolder("d1", "One", now = 100)
+        db.insertTag("t1", "tag", now = 100)
+        db.insertFeed("f1", now = 100, folderId = "d1")
+        db.insertFeedTag("f1", "t1", now = 100)
+        insertArticle(db, "a1", "f1", "g1", isRead = 0, readAt = 500, updatedAt = 100)
+    }
+
+    /** Runs [write] (a local mark-read at now = 500) and checks the stamp is 501 and the read survives a merge. */
+    private fun readWriteSurvivesMerge(write: (KeryxDatabase) -> Unit) = localWriteThenMerge(
+        setup = ::setupUnreadArticleAt500,
+        write = write,
+        afterWrite = { db, _ ->
+            val article = db.articlesQueries.getById("a1").executeAsOne()
+            assertEquals(1L, article.is_read)
+            assertEquals(501L, article.read_at)
+        },
+        verify = { db, _ ->
+            val article = db.articlesQueries.getById("a1").executeAsOne()
+            assertEquals(1L, article.is_read)
+            assertEquals(501L, article.read_at)
+        },
+    )
+
+    @Test
+    fun sameMillisecondMarkReadBeatsTheCloudsOlderUnread() =
+        readWriteSurvivesMerge { it.articlesQueries.updateReadStatus(1L, 500L, 500L, "a1") }
+
+    @Test
+    fun sameMillisecondMarkReadByIdsBeatsTheCloudsOlderUnread() =
+        readWriteSurvivesMerge { it.articlesQueries.updateReadStatusByIds(500L, 500L, listOf("a1")) }
+
+    @Test
+    fun sameMillisecondMarkAllReadAllBeatsTheCloudsOlderUnread() =
+        readWriteSurvivesMerge { it.articlesQueries.markAllReadAll(500L, 500L) }
+
+    @Test
+    fun sameMillisecondMarkAllReadByFeedBeatsTheCloudsOlderUnread() =
+        readWriteSurvivesMerge { it.articlesQueries.markAllReadByFeed(500L, 500L, "f1") }
+
+    @Test
+    fun sameMillisecondMarkAllReadByTagBeatsTheCloudsOlderUnread() =
+        readWriteSurvivesMerge { it.articlesQueries.markAllReadByTag(500L, 500L, "t1") }
+
+    @Test
+    fun sameMillisecondMarkAllReadByFolderBeatsTheCloudsOlderUnread() =
+        readWriteSurvivesMerge { it.articlesQueries.markAllReadByFolder(500L, 500L, "d1") }
+
+    @Test
+    fun sameMillisecondStarBeatsTheCloudsOlderUnstar() = localWriteThenMerge(
+        setup = {
+            it.insertFeed("f1", now = 100)
+            insertArticle(it, "a1", "f1", "g1", isRead = 0, readAt = null, updatedAt = 100, isStarred = 0, starredAt = 500)
+        },
+        write = { it.articlesQueries.updateStarStatus(1L, 500L, 500L, "a1") },
+        afterWrite = { db, _ -> assertEquals(501L, db.articlesQueries.getById("a1").executeAsOne().starred_at) },
+        verify = { db, _ ->
+            val article = db.articlesQueries.getById("a1").executeAsOne()
+            assertEquals(1L, article.is_starred)
+            assertEquals(501L, article.starred_at)
+        },
+    )
+
+    @Test
+    fun sameMillisecondCacheCleanupBeatsTheCloudsLiveRowStampedAtTheSameValue() = localWriteThenMerge(
+        // 11 articles in one feed: cleanup protects the newest 10 and expires a00. Both sides hold a00 live
+        // with deleted_updated_at = 500 (an earlier undelete event), the cleanup runs at now = 500.
+        setup = { db ->
+            db.insertFeed("f1", now = 100)
+            for (i in 0..10) {
+                insertArticle(db, "a%02d".format(i), "f1", "g$i", isRead = 0, readAt = null, updatedAt = 100)
+            }
+        },
+        setupRaw = { it.stampArticleDeleted("a00", deletedAt = null, deletedUpdatedAt = 500) },
+        write = { db ->
+            db.articlesQueries.softDeleteExpired(500L, 500L, 500L, 1000L)
+        },
+        afterWrite = { _, driver ->
+            assertEquals(
+                501L,
+                scalarLong(driver, "SELECT deleted_updated_at FROM articles WHERE id = 'a00'"),
+            )
+        },
+        verify = { db, _ ->
+            val article = db.articlesQueries.getById("a00").executeAsOne()
+            assertEquals(500L, article.deleted_at)
+            assertEquals(501L, article.deleted_updated_at)
+        },
+    )
+
+    @Test
+    fun sameMillisecondFeedTagReattachBeatsTheCloudsDetach() = localWriteThenMerge(
+        setup = {
+            it.insertFeed("f1", now = 100)
+            it.insertTag("t1", "tag", now = 100)
+            it.insertFeedTag("f1", "t1", now = 500, deletedAt = 500)
+        },
+        write = { it.insertFeedTag("f1", "t1", now = 500, deletedAt = null) },
+        afterWrite = { _, driver ->
+            assertEquals(501L, scalarLong(driver, "SELECT updated_at FROM feed_tags WHERE feed_id = 'f1' AND tag_id = 't1'"))
+        },
+        verify = { db, driver ->
+            assertEquals(listOf("t1"), db.feed_tagsQueries.watchTagIdsForFeed("f1").executeAsList())
+            assertEquals(501L, scalarLong(driver, "SELECT updated_at FROM feed_tags WHERE feed_id = 'f1' AND tag_id = 't1'"))
+        },
+    )
+
+    @Test
+    fun sameMillisecondGlobalSettingBeatsTheCloudsOlderValue() = localWriteThenMerge(
+        setup = { it.insertGlobalSetting("read_timeout_seconds", "10", now = 500) },
+        write = { it.insertGlobalSetting("read_timeout_seconds", "20", now = 500) },
+        afterWrite = { _, driver ->
+            assertEquals(501L, scalarLong(driver, "SELECT updated_at FROM global_settings WHERE key = 'read_timeout_seconds'"))
+        },
+        verify = { db, driver ->
+            assertEquals("20", db.global_settingsQueries.get("read_timeout_seconds").executeAsOne())
+            assertEquals(501L, scalarLong(driver, "SELECT updated_at FROM global_settings WHERE key = 'read_timeout_seconds'"))
+        },
+    )
+
     private fun reopen(file: java.io.File): Triple<java.io.File, app.cash.sqldelight.db.SqlDriver, KeryxDatabase> {
         val driver = app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver("jdbc:sqlite:${file.absolutePath}")
         return Triple(file, driver, KeryxDatabase(driver))

@@ -27,6 +27,14 @@ through it rather than composing `AppDirs.appDataDir()` with the filename themse
   Because those stamps can run a few milliseconds ahead of the clock, every other local write to such a row moves
   its stamp forward the same way, so an edit made right after them is still the newest: for `folders`, a rename
   (`upsert`) and a reorder (`updateSortOrder`); for `tags`, a rename or color change (`upsert`).
+- **Every other last-write-wins stamp moves only forward on its row the same way**, `MAX(now, previous + 1)`:
+  `feeds.custom_title_updated_at` / `folder_updated_at` / `sort_order_updated_at` (`updateCustomTitle`,
+  `updateFolder`, `updateSortOrder`, `updateFolderAndSortOrder`), `articles.read_at` / `starred_at`
+  (`updateReadStatus`, `updateReadStatusByIds`, `updateStarStatus`, the `markAllRead*` queries) and
+  `deleted_updated_at` (`softDeleteExpired`), and `feed_tags.updated_at` / `global_settings.updated_at` (`upsert`).
+  Without it, a write stamped at the value the row already holds — two writes within one millisecond, or one made
+  right after a merge brought that very stamp in — would lose to the older value on the next merge, since the tie
+  goes to the cloud side. A tie is thereby left only to two devices' independent writes.
 - Booleans and timestamps are **INTEGER (`Long`)**. Booleans are 0/1; times are Unix milliseconds.
 - Schema version is managed by `PRAGMA user_version` (currently 2). On desktop, `DatabaseDriverFactory`
   drives create/migrate manually off this pragma; on Android, `AndroidSqliteDriver` drives it internally via its own

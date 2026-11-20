@@ -217,7 +217,9 @@ Merge SQL (`MergeSql`) key points:
   its value on a tie converges — whichever provider is used, and even with an older app version on another device.
   Letting the local side win would leave two devices that stamped different values in the same millisecond each
   keeping, and re-uploading, their own value forever. A tie with identical values rewrites the same values, which
-  is harmless.
+  is harmless. A device's own write always stamps above what its row already holds (see "Design Philosophy" in
+  [db-schema.md](db-schema.md)), including a stamp a merge just brought in, so a tie only ever arises between
+  writes made independently on two devices — never between a merged value and a later local edit.
 - feeds / tags / folders / global_settings: last-write-wins (including logical deletion). However, the `ON CONFLICT` in the feeds statement **does not handle user-edited fields (`folder_id` / `sort_order` / `custom_title` / `deleted_at`) at all** (delegated to dedicated statements below). This prevents these fields from being overwritten just because the content is newer.
   The `ON CONFLICT` only handles content fields (url/title/description/etag etc. + `updated_at`).
   feeds are matched **`id`** so feed ids must be deterministically generated from `url` as **UUIDv5** at subscription time (`IdGenerator.feedId`), ensuring the same feed has the same id on all devices — otherwise the URL collision guard below would skip independently-subscribed duplicates and they'd never converge (and article ids derived from `feed_id` would also diverge). See `feeds` section in [db-schema.md](db-schema.md) for details.

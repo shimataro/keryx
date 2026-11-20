@@ -199,8 +199,14 @@ ON CONFLICT(feed_id, guid) DO NOTHING;
 -- re-stamps read_at (which would win last-write-wins over another device's later "mark unread" and
 -- change the sync snapshot for nothing) nor needs a sync. The affected-row count tells the caller
 -- whether anything changed.
+--
+-- read_at, starred_at and deleted_updated_at move only forward on their row: MAX(now, previous + 1),
+-- in every statement below that stamps them. The sync merge settles an equal stamp by its tie rule
+-- (the cloud side wins), which knows nothing of which write came later, so a change stamped at the
+-- value the row already holds — two changes within one millisecond, or one made right after a merge
+-- brought that stamp in — would lose to the older value on the next merge. See docs/db-schema.md.
 updateReadStatus:
-UPDATE articles SET is_read = :is_read, read_at = ?, updated_at = ? WHERE id = ? AND is_read <> :is_read;
+UPDATE articles SET is_read = :is_read, read_at = MAX(:read_at, COALESCE(read_at, 0) + 1), updated_at = ? WHERE id = ? AND is_read <> :is_read;
 
 -- Marks a batch of articles read in one statement (callers chunk the id list to stay under
 -- SQLite's bound-parameter limit). Used by markArticlesAsRead instead of a per-id UPDATE loop.
@@ -208,11 +214,11 @@ UPDATE articles SET is_read = :is_read, read_at = ?, updated_at = ? WHERE id = ?
 -- the DB, so a tombstoned or already-read row is left alone rather than stamped with a read event
 -- (read_at/updated_at) the user never made, which would otherwise ride the next sync.
 updateReadStatusByIds:
-UPDATE articles SET is_read = 1, read_at = ?, updated_at = ? WHERE id IN ? AND is_read = 0 AND deleted_at IS NULL;
+UPDATE articles SET is_read = 1, read_at = MAX(:read_at, COALESCE(read_at, 0) + 1), updated_at = ? WHERE id IN ? AND is_read = 0 AND deleted_at IS NULL;
 
 -- Same no-op guard as updateReadStatus, for starred_at.
 updateStarStatus:
-UPDATE articles SET is_starred = :is_starred, starred_at = ?, updated_at = ? WHERE id = ? AND is_starred <> :is_starred;
+UPDATE articles SET is_starred = :is_starred, starred_at = MAX(:starred_at, COALESCE(starred_at, 0) + 1), updated_at = ? WHERE id = ? AND is_starred <> :is_starred;
 
 -- The feed_id EXISTS guard on markAllReadAll/markAllReadByTag keeps this in the same row set as
 -- the corresponding plain list query (watchAll/watchByTag, both INNER JOIN feeds ... f.deleted_at
@@ -221,15 +227,15 @@ UPDATE articles SET is_starred = :is_starred, starred_at = ?, updated_at = ? WHE
 -- watchAll/watchByTag, markAllReadByFeed/markAllReadByFolder don't need this — a soft-deleted
 -- feed can't be the one directly selected, nor carry a folder assignment worth acting on.
 markAllReadAll:
-UPDATE articles SET is_read = 1, read_at = ?, updated_at = ?
+UPDATE articles SET is_read = 1, read_at = MAX(:read_at, COALESCE(read_at, 0) + 1), updated_at = ?
 WHERE is_read = 0 AND deleted_at IS NULL
   AND EXISTS (SELECT 1 FROM feeds f WHERE f.id = articles.feed_id AND f.deleted_at IS NULL);
 
 markAllReadByFeed:
-UPDATE articles SET is_read = 1, read_at = ?, updated_at = ? WHERE feed_id = ? AND is_read = 0 AND deleted_at IS NULL;
+UPDATE articles SET is_read = 1, read_at = MAX(:read_at, COALESCE(read_at, 0) + 1), updated_at = ? WHERE feed_id = ? AND is_read = 0 AND deleted_at IS NULL;
 
 markAllReadByTag:
-UPDATE articles SET is_read = 1, read_at = ?, updated_at = ?
+UPDATE articles SET is_read = 1, read_at = MAX(:read_at, COALESCE(read_at, 0) + 1), updated_at = ?
 WHERE is_read = 0 AND deleted_at IS NULL AND feed_id IN (
     SELECT ft.feed_id FROM feed_tags ft
     INNER JOIN feeds f ON f.id = ft.feed_id
@@ -237,7 +243,7 @@ WHERE is_read = 0 AND deleted_at IS NULL AND feed_id IN (
 );
 
 markAllReadByFolder:
-UPDATE articles SET is_read = 1, read_at = ?, updated_at = ?
+UPDATE articles SET is_read = 1, read_at = MAX(:read_at, COALESCE(read_at, 0) + 1), updated_at = ?
 WHERE is_read = 0 AND deleted_at IS NULL AND feed_id IN (
     SELECT id FROM feeds WHERE folder_id = ? AND deleted_at IS NULL
 );
@@ -256,7 +262,7 @@ WHERE is_read = 0 AND deleted_at IS NULL AND feed_id IN (
 -- set cannot shift while the statement runs — which makes per-row re-evaluation redundant.
 softDeleteExpired:
 UPDATE articles
-SET deleted_at = ?, deleted_updated_at = ?, updated_at = ?
+SET deleted_at = ?, deleted_updated_at = MAX(:deleted_updated_at, COALESCE(deleted_updated_at, 0) + 1), updated_at = ?
 WHERE is_starred = 0
   AND deleted_at IS NULL
   AND cached_at < ?

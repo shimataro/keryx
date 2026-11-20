@@ -20,9 +20,13 @@ SELECT feed_id FROM feed_tags WHERE tag_id = ? AND deleted_at IS NULL;
 watchAllActive:
 SELECT feed_id, tag_id FROM feed_tags WHERE deleted_at IS NULL;
 
+-- updated_at is this row's last-write-wins stamp in the sync merge and moves only forward:
+-- MAX(now, previous + 1). The merge settles an equal stamp by its tie rule (the cloud side wins),
+-- which knows nothing of which write came later, so a write stamped at the value the row already
+-- holds would lose to the older value on the next merge. See docs/db-schema.md.
 upsert:
 INSERT INTO feed_tags (feed_id, tag_id, deleted_at, updated_at)
 VALUES (?, ?, ?, ?)
 ON CONFLICT(feed_id, tag_id) DO UPDATE SET
     deleted_at = excluded.deleted_at,
-    updated_at = excluded.updated_at;
+    updated_at = MAX(excluded.updated_at, updated_at + 1);
