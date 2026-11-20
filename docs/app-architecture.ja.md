@@ -2074,8 +2074,11 @@ iOS の記事一覧は、SwiftUI の `List` ではなく、サイドバーと同
 iOS では行の部分だけを差し替える。`List` にしない理由は次のとおり。
 
 - **スクロールを、一覧が持っている行に対して行う。** `List` は `ScrollViewProxy.scrollTo` でスクロールし、
-  SwiftUI はそれを後のレイアウトで、その時点で変わっているかもしれない行に対して行う
-  （[known-issues.ja.md](known-issues.ja.md) の「iOS: 記事一覧に戻ると `UICollectionView` でクラッシュした」）。
+  SwiftUI はそれを後のレイアウトで、その時点で変わっているかもしれない行に対して行う。v0.27.0 は、
+  リーダーから pop する際にそうしたスクロールを UIKit が検証するところでクラッシュした
+  （`-[UICollectionView _validateScrollingTargetIndexPath:…]` からの `NSInternalInconsistencyException`）。
+  このクラッシュは再現できておらず、この変更で止まったとは確認できていない。以降のビルドで同じスタックが
+  報告されたら、原因は別にある。
 - **スピナー（refresh control）が一覧自身のもの。** SwiftUI は `.refreshable` の一覧のスピナーを
   ナビゲーションバーの下にぶら下げ、列が pop されると外していた。そのため、iPhone の幅でサイドバーから
   戻るたびに一覧を作り直す必要があり、スクロール位置が失われていた。

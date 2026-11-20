@@ -502,60 +502,6 @@ Drive の内容更新に対するサーバー側の前提条件（`files.update`
 不可分な「なければ作成」（または強い整合性を持つ一覧）。それがあれば、`upload` は OneDrive や Nextcloud のストレージと
 同じように `expectedRev` を書き込みそのものに渡せ、`create` は後から調整するのではなく、その場で失敗できる。
 
-## CI でのみ `UpdateDownloaderTest.progressArrivesWhileTheBodyIsStillStreaming` がタイムアウトする
-
-**状態**: 根本原因は未特定。素のタイムアウトではなくダウンロードが実際に何をしたのかを報告するよう
-テストを組み替えたので、次に再現したときは失敗自体が原因を示す。これは**診断性の改善であって、
-引き金そのものの修正ではない**。
-
-### 症状
-
-desktop のテストタスクが、次の情報だけを残して失敗する:
-
-```text
-UpdateDownloaderTest[desktop] > progressArrivesWhileTheBodyIsStillStreaming[desktop] FAILED
-    kotlinx.coroutines.TimeoutCancellationException
-```
-
-断続的に起きる。複数のランナー OS で観測されているが、同一 run の複数ジョブで起きたことはなく、
-`UpdateDownloader` にもそのテストにも触れていないコミットで起きている。
-
-### なぜ失敗から何も分からなかったのか
-
-`UpdateDownloader.download` は通常の失敗を例外ではなく `Result.Err` で報告し
-（[error-design.ja.md](error-design.ja.md) 参照）、`Result.Err` を返す経路はログも出さない。
-テストは進捗の `CompletableDeferred` だけを待っていたため、**進捗を 1 度も出さずにダウンロードが
-終わると Deferred は永久に未完了**になり、さらに外側の `finally` が理由を保持している `Deferred` を
-キャンセルしてしまう。`shared/build.gradle.kts` には `testLogging` 設定が無いので、唯一の
-`Log.warn` 経路すら CI の出力には現れない。
-
-### 切り分け済み（原因ではないもの）
-
-- **ローカルでは再現しない**: 無負荷で 40 回、さらに CPU を 3 倍に過負荷させた状態で 15 回
-  （macOS/arm64、JDK 26）——すべて成功。
-- **書き込み側の背圧でテストのフィーダーが止まっているわけではない。** Ktor 3.5.2 の `ByteChannel`
-  が書き手をサスペンドさせるのは flush バッファが `CHANNEL_MAX_SIZE`（1 MiB。`ktor-io` の
-  `ByteChannel.kt`）を超えてからで、テストが書くのは 320 KiB。つまり `writeFully` は読み手を
-  一切待たずに返る。
-- **MockEngine が本文をバッファリング／二重に読んでいるわけでもない。** `respond(ByteReadChannel, …)`
-  はテストが作ったチャネルをそのままレスポンス本文として渡す（`ktor-client-mock` の `MockUtils.kt`）。
-  コピーも 2 人目の読み手も存在しない。
-- **`UpdateDownloader` の `timeout {}` 指定でもない。** MockEngine は `HttpTimeoutCapability` を
-  宣言しているだけで自前のタイムアウトを実装していないため、`socketTimeoutMillis` は発火しない。
-
-### 次に再現したときに得られる情報
-
-`awaitFirstProgress` は進捗の到着とダウンロードの完了を競わせるようになったので:
-
-- ダウンロードが先に終われば、その `Result`（`Err` なら `UpdateException` のメッセージ込み）を
-  理由として失敗する
-- ダウンロードが例外で終われば、その例外がそのまま伝播する
-- 本当に停止している場合はタイムアウトするが、ダウンロード用コルーチンがまだ動いているかどうかを報告する
-
-これにより、残る 2 つの仮説——「進捗を出す前に無言で `Result.Err` を返した」のか「ダウンロード用
-コルーチンが時間内にスケジュールされなかっただけ」なのか——を区別できる。上記の素のタイムアウトでは
-区別できなかった。
-
 ## Linux/GNOME: トレイメニューを開いた瞬間、直前のラベルが一瞬表示される
 
 **状態**: 未修正 — 外部（GNOME Shell の AppIndicator 拡張）の設計上の制限であり、そもそも
@@ -894,53 +840,6 @@ detach する。同じログに残っているオーファンプロセスの後�
 おり、この競合は CI ランナーの環境（マウント直後のボリュームを Spotlight がインデックスしようと
 すること）の性質であって、このアプリが設定している何かに起因するものではない。GitHub または JDK
 側が上流で対処しない限り、リトライ以外に取れる緩和策はない。
-
-## iOS: 記事一覧に戻ると `UICollectionView` でクラッシュした
-
-**状態**: 構造上は起きなくなったはず、原因は未確定。記事一覧を `UICollectionView` にしてから、UIKit が後から
-検証する保留のスクロールは残らない（下の「変えたこと」）。クラッシュは再現できていないので、それで止まったのかは
-分かっていない。分かるまで、この項目は残す。
-
-### 症状
-
-v0.27.0、iPhone SE（第3世代）、iOS 26.5 で、プロセス起動の 32 秒後に
-`-[UICollectionView _validateScrollingTargetIndexPath:raisingExceptionIfNecessary:]` の
-`NSInternalInconsistencyException` で異常終了した。Reader からのナビゲーションの pop を始めるレイアウトの中で、
-SwiftUI の `UpdateCoalescingCollectionView.updateContent()` が `layoutSubviews` からスクロールを要求している。
-スタック上の Keryx のフレームは `main` のみで、レポートに例外メッセージがないため、index path と行数は不明。
-Kotlin の GC スレッドは待機中だった。
-
-Reader のスワイプのページャーは collection view ではなく `UIPageViewController` なので、このレイアウトにある
-SwiftUI の collection view は、当時の記事一覧の `List` だけである。
-
-### 除外できたこと
-
-記事一覧がまだ SwiftUI の `List` だったときに、iOS 26.3 シミュレータで計測した。最初の 4 行は pop をコードから行い、最後の 2 行は UI テストで画面端のスワイプを
-行った。
-
-| シナリオ | 結果 |
-| --- | --- |
-| 一覧が Reader の下にある間の `scrollTo` | 発生する（選択の移動、復元した選択） |
-| 51 行目への scroll が保留の状態で行を 60→9 に減らして戻る | クラッシュしない |
-| 起動時に Reader を復元して戻る | クラッシュしない |
-| 起動時に Reader を復元し、行を 59→34 に減らして戻る | クラッシュしない |
-| scroll を保持した状態で、画面端のスワイプで一覧に戻る | クラッシュしない |
-| scroll を保持した状態で、画面端のスワイプをキャンセルする | クラッシュしない |
-
-したがって、行の減少で保留の scroll が古くなるだけでは足りない。
-
-### 変えたこと
-
-記事一覧は、サイドバーと同じ `UICollectionView` のリストになった（`Home/ArticleCollectionView.swift`。
-[app-architecture.ja.md](app-architecture.ja.md) の「記事一覧（iOS）」）。`ScrollViewProxy.scrollTo` はもう
-使わない。コントローラーは、一覧が画面に出ているときだけ、その時点でデータソースが持っている行に対して
-`scrollToItem` でその場でスクロールする。それまでは最新のスクロールだけを待たせ、その時点で行がなくなっていれば
-捨てる。後のレイアウトで検証される保留が、UIKit の中に残らない。
-
-### 再確認
-
-この変更を含むビルドで同じスタックのクラッシュが報告されたら、原因は別にある。新しいレポートをもとに、
-この項目を見直す。
 
 ## macOS: フォルダーをフォルダーの間に落とすと SwiftUI の中でクラッシュした
 

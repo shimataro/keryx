@@ -2175,8 +2175,11 @@ The iOS article list is a UIKit `UICollectionView` list rather than SwiftUI's `L
 the empty states and the new-articles pill — and only swaps the rows on iOS. Why it is not a `List`:
 
 - **Scrolls run against the rows the list holds.** A `List` scrolls through `ScrollViewProxy.scrollTo`,
-  which SwiftUI carries out in a later layout, against rows that may have changed by then ("iOS: going
-  back to the article list crashed in `UICollectionView`" in [known-issues.md](known-issues.md)).
+  which SwiftUI carries out in a later layout, against rows that may have changed by then. v0.27.0
+  crashed in UIKit's validation of such a scroll as the reader was popped (`NSInternalInconsistencyException`
+  from `-[UICollectionView _validateScrollingTargetIndexPath:…]`); the crash was never reproduced, so
+  that this change is what stops it is not confirmed — a report of the same stack from a later build
+  means the cause is elsewhere.
 - **The refresh control is the list's own.** SwiftUI hung a `.refreshable` list's control under the
   navigation bar and dropped it once the column was popped, so the list had to be rebuilt each time a
   phone-width split view brought it back from the sidebar, which lost its scroll position.
