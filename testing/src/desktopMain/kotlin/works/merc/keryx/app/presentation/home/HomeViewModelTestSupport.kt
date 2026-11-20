@@ -33,9 +33,11 @@ import works.merc.keryx.app.domain.ArticleRepository
 import works.merc.keryx.app.domain.CloudConnectionService
 import works.merc.keryx.app.domain.FeedRepository
 import works.merc.keryx.app.domain.FolderRepository
+import works.merc.keryx.app.domain.LocalWriteFailureReporter
 import works.merc.keryx.app.domain.NewArticleNotifier
 import works.merc.keryx.app.domain.FakeNotificationMessages
 import works.merc.keryx.app.domain.NotificationCenter
+import works.merc.keryx.app.domain.PendingLocalWrites
 import works.merc.keryx.app.domain.RefreshCycleRunner
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SyncRepository
@@ -160,6 +162,13 @@ fun newHomeViewModel(
     // The ViewModel's background dispatcher (its flows and selectArticle's body lookup) — overridable
     // so a test can hold a hydration mid-flight with a HoldingDispatcher.
     dispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
+    // Where the ViewModel's read/star writes run — overridable so a test can hold one mid-flight.
+    dbWriteDispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
+    // The counter of the ViewModel's requested-but-not-yet-run local writes — overridable so a test
+    // can observe it.
+    pendingLocalWrites: PendingLocalWrites = PendingLocalWrites(),
+    // Where the ViewModel reports a write that failed — overridable so a test can observe it.
+    localWriteFailureReporter: LocalWriteFailureReporter = LocalWriteFailureReporter(NotificationCenter(), clock),
 ): HomeViewModelFixture {
     // A fresh, unique directory per call (not a fixed name shared across every test in this file):
     // LocalSettingsStore persists lastFilter/collapsedFolderIds/etc. to a JSON file there, and a
@@ -223,7 +232,8 @@ fun newHomeViewModel(
         val vm = HomeViewModel(
             feedRepository, articleRepository, tagRepository, folderRepository, settingsRepository,
             syncRepository, activityCenter, clock, refreshCycleRunner, effectiveManualSync,
-            dispatcher, Dispatchers.Unconfined,
+            dispatcher, dbWriteDispatcher, pendingLocalWrites,
+            localWriteFailureReporter = localWriteFailureReporter,
         )
         return HomeViewModelFixture(
             vm, driver, syncScope, listOf(fetcherClient, faviconClient, authClient), ownedManualSync,

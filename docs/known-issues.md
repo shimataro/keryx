@@ -355,10 +355,16 @@ upgrade could deadlock against another connection that is itself waiting to upgr
 *acquire* a lock that has no conflicting upgrade in progress — it does not apply here.
 
 The two overlapping writers in the failing test: the first `subscribeFeedWrite` call holds RESERVED
-inside `subscribePlacementMutex.withLock { db.transaction { ... } }`, but the *next* thing that
+inside `feedPlacementMutex.withLock { db.transaction { ... } }`, but the *next* thing that
 call does after releasing the mutex — `articleRepository.upsertParsed(feedId, fetched.articles)`, a
 separate per-feed `db.transaction {}` — can still be mid-flight, still holding a lock, when the
 second call's own transaction tries to upgrade its SHARED read lock to RESERVED for its write.
+
+(That is the code as it was observed. A subscribe has since written its articles inside the same
+transaction as its feed row, under the mutex, so a refresh cannot commit between the two; the search
+index's catch-up still writes after the mutex. The transaction still reads before it writes
+(`getByUrl` → `upsert`), so another writer — a refresh, say — can still make its upgrade fail the same
+way, and the conclusion below stands: the real fix is `BEGIN IMMEDIATE`.)
 
 ### Ruled out
 
@@ -389,17 +395,19 @@ Confirmed by inspection (not by triggering each one) — a transaction reads bef
 
 - `FeedRepository.subscribeFeedWrite` (`FeedRepository.kt`, the `db.transaction {}` covering
   `getByUrl`/`nextSortOrderInGroup` then `upsert`) — the one this was observed against.
-- `FeedRepository.moveFeedsOutOfFolder` (reads `nextSortOrderInGroup` then writes per feed in the
-  same transaction), reachable directly and via `FolderRepository.deleteFolder`'s transaction.
+- `FeedRepository.moveFeedsOutOfFolderLocked` (reads `nextSortOrderInGroup` then writes per feed in
+  the same transaction), reached via `FolderRepository.deleteFolder`'s transaction.
 
 `FeedRepository.moveFeed` and `FolderRepository.reorderFolders` read their ordering *before*
-opening `db.transaction {}`, so they don't have this shape. Neither does the feed-refresh apply
+opening `db.transaction {}`, so they don't have this shape. (`moveFeed` holds `feedPlacementMutex`
+across that read and its transaction, so it cannot interleave with a subscribe placing a feed in the
+same group, while keeping the read outside the transaction.) Neither does the feed-refresh apply
 transaction (`FeedRepository.kt`, around `applyFetch`), which only writes.
 
 ### How the test was worked around
 
 `FeedRepositoryTest.subscribeFeedSerializesSortOrderAllocationAcrossConcurrentCalls` now subscribes
-a feed with no `<item>`s. With nothing for `articleRepository.upsertParsed` to insert, the first
+a feed with no `<item>`s. With no articles to write and no search-index catch-up, the first
 call's post-mutex work is read-only, so there is no longer a second writer left to race the upgrade.
 See `testing.md`'s note on concurrent-write tests for the general pattern.
 

@@ -27,6 +27,7 @@ import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.FAVICON_RETRY_INTERVAL_MS
+import works.merc.keryx.app.core.FEED_FETCH_CONCURRENCY
 import works.merc.keryx.app.core.FEED_ERROR_REASON_GONE
 import works.merc.keryx.app.core.FeedNotFoundException
 import works.merc.keryx.app.core.Log
@@ -44,20 +45,13 @@ import works.merc.keryx.app.data.remote.FeedFetcher
 import works.merc.keryx.app.data.remote.FetchedFeed
 
 /**
- * Max feeds fetched concurrently in [FeedRepository.refreshAll] / [FeedRepository.refreshFeeds]'s
- * network phase. Bounded so a large subscription list doesn't open an unbounded number of sockets
- * at once; DB writes stay serial.
- */
-private const val REFRESH_FETCH_CONCURRENCY = 6
-
-/**
  * Max feeds a refresh holds between starting their fetch and the writer committing them — the
  * fetched results queued for the single writer included. Every queued result keeps its feed's parsed
  * articles resident, so without this a writer held back (a sync merge's write lock) would let a large
  * subscription list fetch its whole contents into memory at once. Twice the fetch concurrency, so a
  * writer that keeps up never stalls a fetch slot.
  */
-internal const val REFRESH_PENDING_APPLY_LIMIT = 2 * REFRESH_FETCH_CONCURRENCY
+internal const val REFRESH_PENDING_APPLY_LIMIT = 2 * FEED_FETCH_CONCURRENCY
 
 private const val TAG = "FeedRepository"
 
@@ -77,21 +71,24 @@ class FeedRepository(
     private val clock: Clock,
     private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
     private val faviconMisses: FaviconMissStore,
-    // Guards subscribe placement — see the "[subscribePlacementMutex] guards" comment below. A constructor parameter only so
-    // FeedRepositoryTest can wrap it and observe a second subscribe waiting on it.
-    private val subscribePlacementMutex: Mutex = Mutex(),
+    // Guards feed placement — see the "[feedPlacementMutex] guards" comment below. A constructor parameter only so
+    // tests can wrap or hold it and observe a placement waiting on it.
+    private val feedPlacementMutex: Mutex = Mutex(),
 ) {
     private val feeds get() = db.feedsQueries
 
-    // [subscribePlacementMutex] guards subscribeFeedWrite's sort-order allocation + upsert + folder assignment. A
-    // db.transaction alone isn't enough: SQLite's deferred BEGIN means the nextSortOrderInGroup
-    // SELECT below doesn't take a write lock, so two overlapping transactions could still both
-    // read the same stale MAX before either writes. This mutex is the piece that actually
-    // serializes that read-then-write, the same way OpmlImporter's own mutex serializes concurrent
-    // import() runs against each other — but that lock doesn't cover a concurrent call through
-    // this class's other entry point (AddFeedPreviewResolver's "Add Feed" dialog path), so the
-    // two need their own shared guard here where they converge. (Injected — see the constructor's
-    // subscribePlacementMutex parameter.)
+    // [feedPlacementMutex] guards every read-then-write of `feeds.sort_order` within a group:
+    // subscribeFeedWrite's sort-order allocation + upsert + folder assignment, moveFeed's renumbering
+    // of its target group, and moveFeedsOutOfFolderLocked's append to the no-folder group (reached
+    // through FolderRepository.deleteFolder, via withFeedPlacementLock). A db.transaction alone isn't
+    // enough: SQLite's deferred BEGIN means the nextSortOrderInGroup / getByFolder SELECT doesn't take
+    // a write lock, so two overlapping writers could still both read the same stale order before
+    // either writes, leaving duplicate sort_orders. This mutex is the piece that actually serializes
+    // that read-then-write within this process — OpmlImporter's own mutex only serializes import()
+    // runs against each other, not against the "Add Feed" dialog (AddFeedPreviewResolver) or a feed-
+    // list move, so they need this shared guard here where they converge. The sync merge runs on its
+    // own connection outside it; its sort_order changes resolve by last-write-wins. (Injected — see
+    // the constructor's feedPlacementMutex parameter.)
 
     // Per-feed reference count of in-flight refreshes. A count rather than a set membership because a
     // single-feed refresh can overlap a refresh of every feed, and the feed must stay marked until both end.
@@ -209,18 +206,96 @@ class FeedRepository(
         folderId: String? = null,
         afterFeedId: String? = null,
         beforeFeedId: String? = null,
+    ): FeedWriteOutcome = writePrefetchedSubscription(prefetchSubscription(url), folderId, afterFeedId, beforeFeedId)
+
+    /**
+     * The network phase of [subscribeFeedWrite]: the fetched feed, its redirect-resolved URL and its
+     * favicon. Writes nothing to the DB, so a batch (see [OpmlImporter]) can run several of these
+     * concurrently while [writePrefetchedSubscription] keeps the writes serial and in order.
+     *
+     * [storedBeforeFetch] is the feed values of the row stored at the requested URL, read before the
+     * fetch began (`null` when there was none). At write time it tells whether something else — a
+     * refresh of the same feed — changed those values while this fetch was in flight.
+     * [observedBatchWrites] is how many of the batch's own writes had committed when that read was
+     * taken (0 outside a batch) — see [SubscribeBatch].
+     */
+    internal class PrefetchedSubscription(
+        val fetched: FetchedFeed,
+        val effectiveUrl: String,
+        val favicon: String?,
+        val storedBeforeFetch: StoredFeedValues?,
+        val observedBatchWrites: Int,
+    )
+
+    /**
+     * The feed values a subscribe writes over an existing row (everything `feeds.upsert` takes from
+     * the fetch), with the id of the row they were read from.
+     */
+    internal data class StoredFeedValues(val feedId: String, val values: FeedValues)
+
+    /** The feed-level values a subscribe or a refresh writes from a fetch. */
+    internal data class FeedValues(
+        val siteUrl: String?,
+        val title: String,
+        val description: String?,
+        val faviconUrl: String?,
+        val etag: String?,
+        val lastModified: String?,
+    )
+
+    /** These values with the favicon blanked out: the content and the validators that describe it. */
+    private fun FeedValues.withoutFavicon(): FeedValues = copy(faviconUrl = null)
+
+    private val Feeds.feedValues: FeedValues
+        get() = FeedValues(site_url, title, description, favicon_url, etag, last_modified)
+
+    /**
+     * Fetches [url] and resolves its favicon, writing nothing to the DB. A fetch error is returned as
+     * [Result.Err]; the favicon lookup is made only once the fetch succeeded.
+     */
+    internal suspend fun prefetchSubscription(url: String, batch: SubscribeBatch? = null): Result<PrefetchedSubscription> {
+        // Read before the fetch starts, so a write that lands while it is in flight shows as a change.
+        val readRow = { feeds.getByUrl(url).executeAsOneOrNull()?.let { StoredFeedValues(it.id, it.feedValues) } }
+        // In a batch, read together with the count of the batch's committed writes, with no batch write
+        // between the two (see SubscribeBatch); only this one read is held under the batch lock.
+        val (observedBatchWrites, storedBeforeFetch) =
+            if (batch != null) batch.observe(readRow).let { it.writes to it.value } else 0 to readRow()
+        val fetched = feedFetcher.fetch(url).valueOrElse { return it }
+        val effectiveUrl = fetched.redirectUrl ?: url
+        val favicon = faviconResolver.resolve(fetched.siteUrl, effectiveUrl)
+        return Result.Ok(PrefetchedSubscription(fetched, effectiveUrl, favicon, storedBeforeFetch, observedBatchWrites))
+    }
+
+    /**
+     * The write phase of [subscribeFeedWrite]: persists a [prefetchSubscription] result. Everything
+     * that decides the write from the DB or the clock happens here, at write time rather than at
+     * fetch time, so a batch that fetched ahead still sees each earlier entry's write (a duplicate
+     * URL, or two URLs redirecting to the same feed, resolve to the existing row) and stamps the time
+     * of the write. (The prefetch's own read, [PrefetchedSubscription.storedBeforeFetch], is only the
+     * baseline that tells whether the row's feed values changed in between.)
+     * Parameters as for [subscribeFeedWrite], plus:
+     *
+     * @param batch What this caller's batch (an [OpmlImporter] run) has itself written so far, updated
+     *   here with what this call replaces. A row this batch wrote after the prefetch read it — an
+     *   earlier entry redirecting to the same feed — changed only by this batch's own hand, so that
+     *   write, not the prefetch's read, is the baseline for each group it replaced: the later entry's
+     *   fetched values replace it, as they would one entry at a time, while a refresh that changed the
+     *   row after it is still kept — including across further entries, since a group the batch kept
+     *   rather than replaced is never recorded as its own (see [SubscribeBatch]). `null` (a single
+     *   subscribe) keeps no record.
+     */
+    internal suspend fun writePrefetchedSubscription(
+        prefetched: Result<PrefetchedSubscription>,
+        folderId: String? = null,
+        afterFeedId: String? = null,
+        beforeFeedId: String? = null,
+        batch: SubscribeBatch? = null,
     ): FeedWriteOutcome {
-        val fetched = feedFetcher.fetch(url).valueOrElse {
+        val subscription = prefetched.valueOrElse {
             return FeedWriteOutcome(it, hadArticles = false, wasNewlyCreated = false)
         }
-        val effectiveUrl = fetched.redirectUrl ?: url
-        val existing = feeds.getByUrl(effectiveUrl).executeAsOneOrNull()
-        // Deterministic id from the (redirect-resolved) url so two devices that subscribe the same
-        // feed independently get the SAME id and the sync merge can converge them (existing feeds
-        // keep their id). See IdGenerator.feedId.
-        val feedId = existing?.id ?: IdGenerator.feedId(effectiveUrl)
-        val now = clock.nowMillis()
-        val favicon = faviconResolver.resolve(fetched.siteUrl, effectiveUrl)
+        val fetched = subscription.fetched
+        val effectiveUrl = subscription.effectiveUrl
 
         // sort_order: a brand-new feed is inserted right after afterFeedId (or, failing that, right
         // before beforeFeedId) within its target folder's group (the "no folder" group, unless the
@@ -230,10 +305,36 @@ class FeedRepository(
         // feed being re-subscribed is re-numbered to the end of the group it used to belong to (its
         // old relative position may no longer be meaningful after other feeds in that group moved
         // around while it was unsubscribed).
-        val wasNewlyCreated = subscribePlacementMutex.withLock {
-            doSubscribeFeedWrite(effectiveUrl, feedId, folderId, afterFeedId, beforeFeedId, now, favicon, fetched)
+        // The CPU-heavy part of storing the articles (each one's HTML stripped into its search text)
+        // is done here, before the lock and the transaction, for the id a new row gets; the write
+        // itself goes into the feed's own transaction (see doSubscribeFeedWrite).
+        val articleRowsFeedId = IdGenerator.feedId(effectiveUrl)
+        val articleRows = articleRepository.prepareRows(articleRowsFeedId, fetched.articles)
+        val writeAndRecord: suspend () -> SubscribeWrite = {
+            val written = feedPlacementMutex.withLock {
+                doSubscribeFeedWrite(
+                    effectiveUrl, folderId, afterFeedId, beforeFeedId, subscription.favicon, fetched,
+                    subscription.storedBeforeFetch, subscription.observedBatchWrites, batch,
+                    articleRowsFeedId, articleRows,
+                )
+            }
+            // Recorded only once the transaction has committed, so a rolled-back write leaves no
+            // record — and only the groups this write replaced, not values it kept from another writer.
+            batch?.record(
+                written.feedId,
+                content = written.values.withoutFavicon(),
+                replacedContent = written.replacedContent,
+                favicon = written.values.faviconUrl,
+                replacedFavicon = written.replacedFavicon,
+            )
+            written
         }
-        articleRepository.upsertParsed(feedId, fetched.articles)
+        // In a batch, the write and its record exclude the batch's prefetch reads (see SubscribeBatch),
+        // so a prefetch never reads the row and the count from either side of this write. The batch
+        // lock is always taken before the placement lock, and a prefetch takes only the batch lock.
+        val written = if (batch != null) batch.write(writeAndRecord) else writeAndRecord()
+        val feedId = written.feedId
+        val wasNewlyCreated = written.wasNewlyCreated
         syncScheduler.scheduleSync()
         return FeedWriteOutcome(
             Result.Ok(feeds.getById(feedId).executeAsOne()),
@@ -303,26 +404,38 @@ class FeedRepository(
      * @param folderId The destination folder ID, or `null` for no folder.
      * @param targetFeedId The ID of the feed to place the moved feed before, or `null` to place it last.
      */
-    fun moveFeed(feedId: String, folderId: String?, targetFeedId: String? = null) {
-        val current = feeds.getByFolder(folderId).executeAsList()
-        val sortOrderOf = current.associate { it.id to it.sort_order }
-        val newOrder = reorderIds(current.map { it.id }, feedId, targetFeedId)
-        val now = clock.nowMillis()
-        db.transaction {
-            applyReorderUpdates(newOrder, sortOrderOf, feedId, now, feeds) { index ->
-                feeds.updateFolderAndSortOrder(folderId, index.toLong(), now, now, now, feedId)
+    suspend fun moveFeed(feedId: String, folderId: String?, targetFeedId: String? = null) {
+        feedPlacementMutex.withLock {
+            // The group is read *outside* the transaction on purpose: a deferred transaction that
+            // reads and then writes has to upgrade its lock, which SQLite can refuse with an
+            // immediate SQLITE_BUSY (see docs/known-issues.md). The mutex serializes the read and
+            // the write against every other placement in this process instead.
+            val current = feeds.getByFolder(folderId).executeAsList()
+            val sortOrderOf = current.associate { it.id to it.sort_order }
+            val newOrder = reorderIds(current.map { it.id }, feedId, targetFeedId)
+            val now = clock.nowMillis()
+            db.transaction {
+                applyReorderUpdates(newOrder, sortOrderOf, feedId, now, feeds) { index ->
+                    feeds.updateFolderAndSortOrder(folderId, index.toLong(), now, now, now, feedId)
+                }
             }
         }
         syncScheduler.scheduleSync()
     }
 
     /**
-     * Moves all feeds in a folder into the ungrouped feed list while preserving their relative order.
-     *
-     * @param folderId The ID of the folder whose feeds should be moved.
-     * @param now The timestamp to apply to the moved feeds.
+     * Runs [block] holding the feed placement lock (see [feedPlacementMutex]), for a caller that
+     * places feeds as part of its own transaction — `FolderRepository.deleteFolder`, which calls
+     * [moveFeedsOutOfFolderLocked] inside it.
      */
-    fun moveFeedsOutOfFolder(folderId: String, now: Long = clock.nowMillis()) {
+    internal suspend fun <T> withFeedPlacementLock(block: () -> T): T = feedPlacementMutex.withLock { block() }
+
+    /**
+     * Moves all feeds in [folderId] into the ungrouped feed list, appended after its current feeds
+     * while preserving their relative order, stamping [now]. The caller must already hold the feed
+     * placement lock ([withFeedPlacementLock]) — `FolderRepository.deleteFolder`, the one caller.
+     */
+    internal fun moveFeedsOutOfFolderLocked(folderId: String, now: Long) {
         val feedsInFolder = feeds.getByFolder(folderId).executeAsList()
         val startOrder = feeds.nextSortOrderInGroup(null).executeAsOne()
         db.transaction {
@@ -333,39 +446,89 @@ class FeedRepository(
     }
 
     /**
-     * The locked internals of [subscribeFeedWrite]. Re-reads the current feed row under the mutex
-     * (the pre-lock snapshot may be stale), computes its sort order, upserts the feed, and returns
-     * whether the row was newly created.
+     * The locked internals of [subscribeFeedWrite]. Reads the current feed row under the mutex,
+     * decides the feed id and sort order from it, upserts the feed and its articles in one
+     * transaction, and returns what it wrote.
+     *
+     * @param articleRowsFeedId The feed id [articleRows] were prepared for (the id a new row gets).
+     * @param articleRows The fetched articles, prepared outside the lock.
      */
     private fun doSubscribeFeedWrite(
         effectiveUrl: String,
-        feedId: String,
         folderId: String?,
         afterFeedId: String?,
         beforeFeedId: String?,
-        now: Long,
         favicon: String?,
         fetched: FetchedFeed,
-    ): Boolean {
+        storedBeforeFetch: StoredFeedValues?,
+        observedBatchWrites: Int,
+        batch: SubscribeBatch?,
+        articleRowsFeedId: String,
+        articleRows: List<ArticleRepository.PreparedInsert>,
+    ): SubscribeWrite {
+        // Taken under the lock, not before waiting for it: a write committed while this call waited
+        // (a refresh, a move) must not end up newer than the time stamped here.
+        val now = clock.nowMillis()
         return db.transactionWithResult {
-            // Re-read under the lock: the snapshot taken before the fetch/favicon calls can be
-            // stale, so a concurrent subscribe of the same url may already have created the row.
+            // Read under the lock, and decide the id from this read only: a concurrent subscribe of
+            // the same url, or a sync merge bringing it in under another device's id, may have
+            // created the row while this call waited, and upserting a different id for the same url
+            // would violate UNIQUE(url).
             val current = feeds.getByUrl(effectiveUrl).executeAsOneOrNull()
+            // Deterministic id from the (redirect-resolved) url so two devices that subscribe the
+            // same feed independently get the SAME id and the sync merge can converge them (existing
+            // feeds keep their id). See IdGenerator.feedId.
+            val feedId = current?.id ?: IdGenerator.feedId(effectiveUrl)
             val sortOrder = when {
                 current == null -> insertionSortOrderForNewFeed(feedId, folderId, afterFeedId, beforeFeedId, now)
                 current.deleted_at == null -> current.sort_order
                 else -> feeds.nextSortOrderInGroup(current.folder_id).executeAsOne()
             }
+            // A live row whose feed values changed since the prefetch read them (a refresh of the
+            // same feed, typically during an OPML re-import that fetched ahead) holds newer values
+            // than [fetched]; keep them rather than roll them back. Two groups are judged on their
+            // own: the content with the validators describing it (site URL, title, description,
+            // ETag, Last-Modified — kept or replaced together, so a validator never ends up beside
+            // content it does not describe), and the favicon, which a refresh's favicon lookup
+            // writes alone (applyFavicon) — so a favicon stored meanwhile does not discard the
+            // fetched content, nor the other way round. A change to anything else — a move, a
+            // rename, a reorder — leaves both alone, so the fetched values are written. So are they
+            // for a new row, a resubscribed one, and a row the prefetch never saw (no row yet, or a
+            // redirect to another feed's URL). (error_count / last_error need no such guard: upsert
+            // never updates them on an existing row.) The articles follow this decision, below.
+            val fetchedValues = FeedValues(
+                siteUrl = fetched.siteUrl,
+                title = fetched.title ?: effectiveUrl,
+                description = fetched.description,
+                faviconUrl = favicon,
+                etag = fetched.etag,
+                lastModified = fetched.lastModified,
+            )
+            // Each group's baseline is this batch's own last write of that group to the row, when that
+            // write came after the prefetch's read (see writePrefetchedSubscription's batch), else the
+            // prefetch's read — only when it read this very row. No baseline means the fetched values
+            // are written.
+            val stored = current?.takeIf { it.deleted_at == null }?.feedValues
+            val prefetchRead = storedBeforeFetch?.takeIf { current != null && it.feedId == current.id }?.values
+            val contentBaseline = current?.let { batch?.contentWrittenAfter(it.id, observedBatchWrites) } ?: prefetchRead?.withoutFavicon()
+            // The favicon can legitimately be null, so "a baseline exists" is tracked apart from its value.
+            val ownFavicon = current?.let { batch?.faviconWrittenAfter(it.id, observedBatchWrites) }
+            val hasFaviconBaseline = ownFavicon != null || prefetchRead != null
+            val faviconBaseline = if (ownFavicon != null) ownFavicon.value else prefetchRead?.faviconUrl
+            val keepContent = stored != null && contentBaseline != null && stored.withoutFavicon() != contentBaseline
+            val keepFavicon = stored != null && hasFaviconBaseline && stored.faviconUrl != faviconBaseline
+            val values = (if (keepContent) stored!! else fetchedValues)
+                .copy(faviconUrl = if (keepFavicon) stored!!.faviconUrl else fetchedValues.faviconUrl)
 
             feeds.upsert(
                 id = feedId,
                 url = effectiveUrl,
-                site_url = fetched.siteUrl,
-                title = fetched.title ?: effectiveUrl,
-                description = fetched.description,
-                favicon_url = favicon,
-                etag = fetched.etag,
-                last_modified = fetched.lastModified,
+                site_url = values.siteUrl,
+                title = values.title,
+                description = values.description,
+                favicon_url = values.faviconUrl,
+                etag = values.etag,
+                last_modified = values.lastModified,
                 error_count = 0,
                 last_error = null,
                 custom_title = current?.custom_title,
@@ -382,9 +545,33 @@ class FeedRepository(
             // last-wins timestamp so it propagates over another device's refresh on the next sync.
             if (current?.deleted_at != null) feeds.stampResubscribed(now, feedId)
 
-            current == null
+            // The articles follow the feed values, in this same transaction: one that kept another
+            // writer's newer content and validators (a refresh that landed after the prefetch) only
+            // adds the articles not stored yet. Its own fetch is the older response, so overwriting
+            // would put older bodies back under the kept validators — and a conditional request
+            // answered 304 would never repair them. Written here rather than after the transaction,
+            // so a refresh (which writes its validators and articles in one transaction too) can only
+            // commit wholly before this write — and then shows in `current` above — or wholly after.
+            // Rows prepared for another id (an existing row whose id predates deterministic ids) are
+            // prepared again here: rare, and the only case doing that CPU work inside the transaction.
+            val rows = if (feedId == articleRowsFeedId) articleRows else articleRepository.prepareRows(feedId, fetched.articles)
+            articleRepository.insertPrepared(articleRepository.countPrepared(feedId, rows), overwriteExisting = !keepContent)
+
+            SubscribeWrite(feedId, wasNewlyCreated = current == null, values, replacedContent = !keepContent, replacedFavicon = !keepFavicon)
         }
     }
+
+    /**
+     * What [doSubscribeFeedWrite] wrote: the feed's id, whether the row is new, its feed values, and
+     * which of the two groups it replaced with fetched values rather than kept from another writer.
+     */
+    private class SubscribeWrite(
+        val feedId: String,
+        val wasNewlyCreated: Boolean,
+        val values: FeedValues,
+        val replacedContent: Boolean,
+        val replacedFavicon: Boolean,
+    )
 
     /**
      * Refreshes a feed and indexes any newly fetched articles.
@@ -681,7 +868,7 @@ class FeedRepository(
      * is closed once every fetch has finished.
      */
     private fun CoroutineScope.launchFetches(feedList: List<Feeds>, steps: SendChannel<RefreshStep>) {
-        val semaphore = Semaphore(REFRESH_FETCH_CONCURRENCY)
+        val semaphore = Semaphore(FEED_FETCH_CONCURRENCY)
         val pendingApply = Semaphore(REFRESH_PENDING_APPLY_LIMIT)
         val fetches = feedList.map { feed ->
             launch(dispatcher) {

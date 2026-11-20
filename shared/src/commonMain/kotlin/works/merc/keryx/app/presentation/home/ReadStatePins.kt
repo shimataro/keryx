@@ -92,3 +92,29 @@ internal fun reconciledUnstarredPins(
     // once the article's current is_starred no longer matches what was optimistically pinned
     // (deleted, or externally re-starred), not just once it is deleted.
     pinned.filterKeys { pinReplacedSince(snapshot[it], pinned.getValue(it)) || flags[it]?.isStarred == pinned.getValue(it).is_starred }
+
+/**
+ * The pins after a failed write's revert over [ids]: each of those pins takes the DB's flags
+ * ([revert], as a fresh instance), or is dropped when its article is no longer alive (missing from
+ * [flags]); every other pin is kept as it is.
+ *
+ * @param ids The articles the revert applies to.
+ * @param flags The current flags of the alive articles among [ids].
+ * @param revert Lays the DB's value of the reverted flag over a pin.
+ */
+internal fun Map<String, ArticleListRow>.revertedPins(
+    ids: Set<String>,
+    flags: Map<String, ArticleFlags>,
+    revert: (ArticleListRow, ArticleFlags) -> ArticleListRow,
+): Map<String, ArticleListRow> {
+    if (keys.none { it in ids }) return this
+    return buildMap {
+        this@revertedPins.forEach { (id, pin) ->
+            if (id !in ids) put(id, pin) else flags[id]?.let { put(id, revert(pin, it)) }
+        }
+    }
+}
+
+/** These pins minus each one that is still the very instance in [set] (compared by identity). */
+internal fun Map<String, ArticleListRow>.withoutPinsOf(set: Map<String, ArticleListRow>): Map<String, ArticleListRow> =
+    if (set.isEmpty()) this else filterNot { (id, pin) -> set[id] === pin }

@@ -27,6 +27,7 @@ import works.merc.keryx.app.core.CloudDataIncompatibleException
 import works.merc.keryx.app.core.CloudStorageException
 import works.merc.keryx.app.core.DEFERRED_SYNC_DEBOUNCE_MS
 import works.merc.keryx.app.core.ErrorKind
+import works.merc.keryx.app.core.LOCAL_WRITES_FLUSH_WAIT_MS
 import works.merc.keryx.app.core.FeedDiscoveryException
 import works.merc.keryx.app.core.FeedFetchException
 import works.merc.keryx.app.core.FeedNotFoundException
@@ -113,6 +114,12 @@ class SyncRepository(
      * allowed) is for tests that do not exercise the gate.
      */
     private val automaticSyncAllowedFlow: () -> Flow<Boolean> = { flowOf(true) },
+    /**
+     * The local writes queued but not yet run (a global-setting change, a feed-list action), which
+     * schedule their sync only once they run; [flushPendingSync] waits for them. Shared with
+     * `SettingsRepository` and `HomeViewModel` in production.
+     */
+    private val pendingLocalWrites: PendingLocalWrites = PendingLocalWrites(),
 ) : SyncScheduler {
 
     private val mutex = Mutex()
@@ -317,8 +324,14 @@ class SyncRepository(
      * background task on return, letting the OS suspend that upload. Should that sync fail or be
      * cancelled (iOS cancels the refresh cycle's on backgrounding), it restores the flag, and this
      * flush sends the changes itself.
+     *
+     * Before that, local writes still queued ([pendingLocalWrites] — a global setting changed, or a
+     * feed-list action, just before leaving) are waited for, for at most [LOCAL_WRITES_FLUSH_WAIT_MS]:
+     * such a write schedules its sync only once it runs, so checking first would miss it. A sync the
+     * write's own schedule starts meanwhile is then waited out like any other.
      */
     suspend fun flushPendingSync() {
+        withTimeoutOrNull(LOCAL_WRITES_FLUSH_WAIT_MS) { pendingLocalWrites.awaitIdle() }
         mutex.withLock { }
         if (!unsyncedChanges.value) return
         sync(SyncTrigger.AUTOMATIC)

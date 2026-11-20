@@ -67,13 +67,18 @@ ON CONFLICT(id) DO UPDATE SET
     updated_at = excluded.updated_at,
     sort_order = excluded.sort_order;
 
+-- deleted_updated_at never goes backwards or repeats on a row: MAX(now, previous + 1), so an
+-- unsubscribe and a resubscribe made within the same millisecond still order strictly. The sync
+-- merge's last-write-wins on it compares with a strict ">", so an equal stamp would leave the later
+-- event unpropagated. See docs/db-schema.md.
 softDelete:
-UPDATE feeds SET deleted_at = ?, updated_at = ?, deleted_updated_at = ? WHERE id = ?;
+UPDATE feeds SET deleted_at = ?, updated_at = ?, deleted_updated_at = MAX(?, COALESCE(deleted_updated_at, 0) + 1) WHERE id = ?;
 
 -- Stamps the subscription-state timestamp on re-subscribe (upsert has already cleared
--- deleted_at back to NULL); lets an unsubscribe -> re-subscribe propagate over a refresh.
+-- deleted_at back to NULL); lets an unsubscribe -> re-subscribe propagate over a refresh. Moves only
+-- forward, as in softDelete.
 stampResubscribed:
-UPDATE feeds SET deleted_updated_at = ? WHERE id = ?;
+UPDATE feeds SET deleted_updated_at = MAX(?, COALESCE(deleted_updated_at, 0) + 1) WHERE id = ?;
 
 updateCustomTitle:
 UPDATE feeds SET custom_title = ?, updated_at = ?, custom_title_updated_at = ? WHERE id = ?;

@@ -8,6 +8,7 @@ import io.ktor.client.plugins.HttpTimeout
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
@@ -31,6 +32,7 @@ import works.merc.keryx.app.core.NotificationText
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.data.local.FtsManager
 import works.merc.keryx.app.data.local.FtsSearch
+import works.merc.keryx.app.data.remote.ParsedArticle
 import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.data.remote.FaviconResolver
 import works.merc.keryx.app.data.remote.FeedFetcher
@@ -50,6 +52,7 @@ import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.test.fail
 
 private const val RSS = """<?xml version="1.0"?><rss version="2.0"><channel>
 <title>Feed</title><link>https://ex.com</link>
@@ -58,8 +61,11 @@ private const val RSS = """<?xml version="1.0"?><rss version="2.0"><channel>
 
 /**
  * A feed with no items, so a subscribe performs no article or FTS writes after releasing
- * subscribePlacementMutex. Used by the concurrent-subscribe test — see its own comment.
+ * feedPlacementMutex. Used by the concurrent-subscribe test — see its own comment.
  */
+/** How long the race test's move waits for its concurrent subscribe — see its own comment. */
+private const val MOVE_WAIT_FOR_SUBSCRIBE_MS = 500L
+
 private const val RSS_NO_ITEMS = """<?xml version="1.0"?><rss version="2.0"><channel>
 <title>Feed</title><link>https://ex.com</link>
 </channel></rss>"""
@@ -80,7 +86,7 @@ private const val RSS_WITH_NEW_SEARCHABLE_ARTICLE = """<?xml version="1.0"?><rss
 /**
  * Pauses the first `nextSortOrderInGroup` SELECT on a latch and records whether a second,
  * overlapping call reaches the same statement while the first is still gated, so
- * [FeedRepository]'s `subscribePlacementMutex` can be checked without depending on timing.
+ * [FeedRepository]'s `feedPlacementMutex` can be checked without depending on timing.
  */
 private class GatedSortOrderDriver(private val delegate: SqlDriver) : SqlDriver {
     val firstReadEntered = CountDownLatch(1)
@@ -127,6 +133,55 @@ private class GatedSortOrderDriver(private val delegate: SqlDriver) : SqlDriver 
         delegate.removeListener(queryKeys = queryKeys, listener = listener)
     override fun notifyListeners(vararg queryKeys: String) = delegate.notifyListeners(queryKeys = queryKeys)
     override fun close() = delegate.close()
+}
+
+/**
+ * Runs [beforeFeedByUrlRead] once, right before the next read of a feed by URL (`feeds.getByUrl`) it is
+ * asked to run, and passes everything through — for a test that has to put other writers' commits
+ * between a prefetch's read of the batch count and its read of the row.
+ */
+private class BeforeFeedByUrlReadDriver(private val delegate: app.cash.sqldelight.db.SqlDriver) :
+    app.cash.sqldelight.db.SqlDriver by delegate {
+    @Volatile var beforeFeedByUrlRead: (() -> Unit)? = null
+
+    override fun <R> executeQuery(
+        identifier: Int?,
+        sql: String,
+        mapper: (app.cash.sqldelight.db.SqlCursor) -> app.cash.sqldelight.db.QueryResult<R>,
+        parameters: Int,
+        binders: (app.cash.sqldelight.db.SqlPreparedStatement.() -> Unit)?,
+    ): app.cash.sqldelight.db.QueryResult<R> {
+        if (sql.endsWith("FROM feeds WHERE url = ?")) {
+            val hook = beforeFeedByUrlRead
+            beforeFeedByUrlRead = null
+            hook?.invoke()
+        }
+        return delegate.executeQuery(identifier, sql, mapper, parameters, binders)
+    }
+}
+
+/**
+ * Runs [beforeFirstArticleInsert] once, right before the first `INSERT INTO articles` it is asked to
+ * run, and passes everything through — for a test that has to put another writer's commit at that
+ * exact point.
+ */
+private class BeforeFirstArticleInsertDriver(private val delegate: app.cash.sqldelight.db.SqlDriver) :
+    app.cash.sqldelight.db.SqlDriver by delegate {
+    @Volatile var beforeFirstArticleInsert: (() -> Unit)? = null
+
+    override fun execute(
+        identifier: Int?,
+        sql: String,
+        parameters: Int,
+        binders: (app.cash.sqldelight.db.SqlPreparedStatement.() -> Unit)?,
+    ): app.cash.sqldelight.db.QueryResult<Long> {
+        if (sql.startsWith("INSERT INTO articles")) {
+            val hook = beforeFirstArticleInsert
+            beforeFirstArticleInsert = null
+            hook?.invoke()
+        }
+        return delegate.execute(identifier, sql, parameters, binders)
+    }
 }
 
 /**
@@ -203,6 +258,20 @@ private class CountingMutex(private val inner: Mutex = Mutex()) : Mutex by inner
     }
 }
 
+/**
+ * Delegates to [inner], and counts down [contendedLockRequested] when [lock] is asked for while
+ * someone else already holds it — so a test can tell a lock request that had to wait from one that
+ * never came.
+ */
+private class ContentionSignallingMutex(private val inner: Mutex = Mutex()) : Mutex by inner {
+    val contendedLockRequested = CountDownLatch(1)
+
+    override suspend fun lock(owner: Any?) {
+        if (inner.isLocked) contendedLockRequested.countDown()
+        inner.lock(owner)
+    }
+}
+
 class FeedRepositoryTest {
 
     private fun fetcherWith(handler: MockRequestHandler): FeedFetcher {
@@ -233,7 +302,7 @@ class FeedRepositoryTest {
         notificationCenter: NotificationCenter = NotificationCenter(),
         messages: NotificationMessages = FakeNotificationMessages(),
         clock: Clock = Clock { 1000L },
-        subscribePlacementMutex: Mutex = Mutex(),
+        feedPlacementMutex: Mutex = Mutex(),
     ): FeedRepository {
         val articleRepository = ArticleRepository(db, FtsSearch(driver), syncScheduler, clock, Dispatchers.Unconfined)
         // Mirror startup: ensureIndexed() creates articles_fts so the refresh path's indexMissing() works.
@@ -242,7 +311,7 @@ class FeedRepositoryTest {
             db, feedFetcher, faviconResolver, articleRepository, ftsManager, syncScheduler,
             notificationCenter, clock, Dispatchers.Unconfined,
             faviconMisses = InMemoryFaviconMissStore(),
-            subscribePlacementMutex = subscribePlacementMutex,
+            feedPlacementMutex = feedPlacementMutex,
         )
     }
 
@@ -381,12 +450,13 @@ class FeedRepositoryTest {
         // RSS_NO_ITEMS (not RSS) matters too: subscribeFeedWrite's db.transaction {} does a read
         // (getByUrl / nextSortOrderInGroup) before its write (upsert), so SQLite's deferred BEGIN
         // means that transaction only takes a SHARED lock up front and has to upgrade to RESERVED at
-        // the write. If the first call's articleRepository.upsertParsed (a separate, per-feed
-        // transaction, run after subscribePlacementMutex is released) is still holding RESERVED when
-        // the second call tries to upgrade, SQLite treats the upgrade as a potential deadlock and
-        // fails it with SQLITE_BUSY *without* invoking the busy handler at all — busy_timeout does
-        // not apply to a failed lock upgrade, only to acquiring a lock that has no other waiter ahead
-        // of it. A feed with no items means upsertParsed's insert loop runs zero times and
+        // the write. If a write of the first call is still holding RESERVED when the second call
+        // tries to upgrade, SQLite treats the upgrade as a potential deadlock and fails it with
+        // SQLITE_BUSY *without* invoking the busy handler at all — busy_timeout does not apply to a
+        // failed lock upgrade, only to acquiring a lock that has no other waiter ahead of it. (The
+        // articles are now written inside the feed's own transaction, under the mutex, rather than
+        // in a separate one after it — the overlap first observed — but the search index's catch-up
+        // still writes after it.) A feed with no items means no articles are written and
         // indexMissing() is skipped (hadArticles == false), so nothing outside the mutex writes to
         // the DB — the only thing left to overlap the second call's read is the first call's own
         // read-only feeds.getById, which cannot block a SHARED-lock acquisition.
@@ -401,7 +471,7 @@ class FeedRepositoryTest {
                 respond(RSS_NO_ITEMS, HttpStatusCode.OK)
             }
             val placementMutex = CountingMutex()
-            val repo = newRepo(db, driver, fetcher, subscribePlacementMutex = placementMutex)
+            val repo = newRepo(db, driver, fetcher, feedPlacementMutex = placementMutex)
 
             val firstResult = java.util.concurrent.atomic.AtomicReference<Result<Feeds>>()
             val secondResult = java.util.concurrent.atomic.AtomicReference<Result<Feeds>>()
@@ -596,6 +666,32 @@ class FeedRepositoryTest {
             assertEquals(resubscribed, result2.value)
             assertEquals(original.id, resubscribed.id)
             assertNull(resubscribed.deleted_at)
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
+     * An unsubscribe and a resubscribe within the same millisecond still order strictly on
+     * deleted_updated_at, so the sync merge's strict last-write-wins carries each over the one before.
+     */
+    @Test
+    fun unsubscribeAndResubscribeInTheSameMillisecondStampStrictlyIncreasingTimes(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val repo = newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK) }, clock = Clock { 1000L })
+            val id = (repo.subscribeFeed("https://ex.com/feed") as Result.Ok<Feeds>).value.id
+
+            repo.unsubscribeFeed(id)
+            val afterUnsubscribe = db.feedsQueries.getById(id).executeAsOne().deleted_updated_at!!
+            repo.subscribeFeed("https://ex.com/feed")
+            val afterResubscribe = db.feedsQueries.getById(id).executeAsOne().deleted_updated_at!!
+            repo.unsubscribeFeed(id)
+            val afterSecondUnsubscribe = db.feedsQueries.getById(id).executeAsOne().deleted_updated_at!!
+
+            assertEquals(1000L, afterUnsubscribe)
+            assertTrue(afterResubscribe > afterUnsubscribe)
+            assertTrue(afterSecondUnsubscribe > afterResubscribe)
         } finally {
             driver.close()
         }
@@ -1668,6 +1764,662 @@ class FeedRepositoryTest {
 
             // The refresh must not revert the concurrent reorder.
             assertEquals(99L, db.feedsQueries.getById(id).executeAsOne().sort_order)
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
+     * The feed id is decided from the row re-read under the placement lock, not from a read made
+     * before waiting for it: a sync merge can bring in the same URL under another id meanwhile, and
+     * upserting the URL's deterministic id then would violate `UNIQUE(url)`.
+     */
+    @Test
+    fun writePrefetchedSubscriptionUsesTheIdOfARowThatAppearedWhileWaitingForTheLock(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val url = "https://ex.com/feed"
+            val placement = Mutex()
+            val repo = newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK) }, feedPlacementMutex = placement)
+            val prefetched = repo.prefetchSubscription(url)
+            placement.lock()
+
+            val write = async(start = CoroutineStart.UNDISPATCHED) { repo.writePrefetchedSubscription(prefetched) }
+            // Another device's subscription of the same URL, under its own id, lands via a merge.
+            db.insertFeed("merged-id", url = url)
+            placement.unlock()
+            val outcome = write.await()
+
+            val stored = assertIs<Result.Ok<Feeds>>(outcome.result).value
+            assertEquals("merged-id", stored.id)
+            assertEquals(listOf("merged-id"), db.feedsQueries.watchAll().executeAsList().map { it.id })
+            assertEquals(
+                listOf("merged-id"),
+                db.articlesQueries.watchAll().executeAsList().map { it.feed_id }.distinct(),
+            )
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
+     * A re-import writes what it fetched earlier; a refresh of the same feed that changed the row's
+     * feed values after the prefetch read them holds newer values, which the import must not
+     * overwrite with its older ones. Its articles are still added.
+     */
+    @Test
+    fun writePrefetchedSubscriptionKeepsFeedValuesWrittenAfterItsFetchStarted(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val url = "https://ex.com/feed"
+            var now = 1000L
+            val repo = newRepo(
+                db, driver,
+                fetcherWith { respond(RSS, HttpStatusCode.OK, headersOf(HttpHeaders.ETag, "fetched-etag")) },
+                clock = Clock { now },
+            )
+            db.insertFeed("f1", now = 500L, url = url)
+            val prefetched = repo.prefetchSubscription(url) // fetch starts at 1000
+            // A refresh of the same feed lands afterwards, with newer values and a failure on record.
+            now = 2000L
+            db.feedsQueries.updateCacheHeaders("refreshed-etag", "refreshed-lm", 2000L, "f1")
+            db.feedsQueries.updateContent("https://refreshed.site", "Refreshed title", "Refreshed desc", 2000L, "f1")
+            db.feedsQueries.incrementErrorCount("boom", 2000L, "f1")
+            now = 3000L
+            // (error_count / last_error survive either way: feeds.upsert never updates them on an
+            // existing row.)
+
+            repo.writePrefetchedSubscription(prefetched)
+
+            val row = db.feedsQueries.getById("f1").executeAsOne()
+            assertEquals("refreshed-etag", row.etag)
+            assertEquals("refreshed-lm", row.last_modified)
+            assertEquals("https://refreshed.site", row.site_url)
+            assertEquals("Refreshed title", row.title)
+            assertEquals("Refreshed desc", row.description)
+            assertEquals(1L, row.error_count)
+            assertEquals("boom", row.last_error)
+            assertEquals(listOf("f1"), db.articlesQueries.watchAll().executeAsList().map { it.feed_id })
+        } finally {
+            driver.close()
+        }
+    }
+
+    /** A feed whose fetch answers article g1 with [g1Body], plus a second article g2. */
+    private fun twoArticleFetcher(g1Body: String) = fetcherWith {
+        respond(
+            """<?xml version="1.0"?><rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/"><channel>
+<title>Feed</title><link>https://ex.com</link>
+<item><title>Post</title><link>https://ex.com/1</link><guid>g1</guid><content:encoded>$g1Body</content:encoded></item>
+<item><title>Other</title><link>https://ex.com/2</link><guid>g2</guid><content:encoded>g2 body</content:encoded></item>
+</channel></rss>""",
+            HttpStatusCode.OK,
+            headersOf(HttpHeaders.ETag, "fetched-etag"),
+        )
+    }
+
+    /**
+     * A refresh that commits right where the subscribe's feed write ends and its article write
+     * begins must not end up with its validators beside the subscribe's older bodies. The two are one
+     * transaction, so the refresh (another connection, as in production) can only commit after it:
+     * then its own write puts its validators and bodies together.
+     */
+    @Test
+    fun writePrefetchedSubscriptionKeepsARefreshCommittedBetweenItsFeedAndArticleWrites(): Unit = runBlocking {
+        val (_, rawDriver, rawDb) = fileDb()
+        val driver = BeforeFirstArticleInsertDriver(rawDriver)
+        val db = works.merc.keryx.app.data.local.db.KeryxDatabase(driver)
+        try {
+            val url = "https://ex.com/feed"
+            val repo = newRepo(db, driver, twoArticleFetcher("fetched body"), clock = Clock { 1000L })
+            val refreshArticles = ArticleRepository(rawDb, FtsSearch(rawDriver), SyncScheduler {}, Clock { 2000L }, Dispatchers.Unconfined)
+            rawDb.insertFeed("f1", now = 500L, url = url)
+            refreshArticles.upsertParsed("f1", listOf(ParsedArticle(guid = "g1", title = "Post", content = "old body")))
+            val prefetched = repo.prefetchSubscription(url)
+            var refresh: Thread? = null
+            driver.beforeFirstArticleInsert = {
+                val refreshDone = CountDownLatch(1)
+                // A refresh on another thread — so another connection — writing its validators and
+                // body in one transaction, as the refresh's apply does. Waited for only briefly: it
+                // must not be able to commit while the subscribe's transaction holds the write lock.
+                refresh = Thread {
+                    rawDb.transaction {
+                        rawDb.feedsQueries.updateCacheHeaders("E2", null, 2000L, "f1")
+                        refreshArticles.upsertParsed("f1", listOf(ParsedArticle(guid = "g1", title = "Post", content = "refreshed body")))
+                    }
+                    refreshDone.countDown()
+                }.apply { start() }
+                refreshDone.await(500, TimeUnit.MILLISECONDS)
+            }
+
+            repo.writePrefetchedSubscription(prefetched)
+            assertNotNull(refresh).join(10_000)
+
+            assertEquals("E2", rawDb.feedsQueries.getById("f1").executeAsOne().etag)
+            assertEquals("refreshed body", rawDb.articlesQueries.getByFeedAndGuid("f1", "g1").executeAsOne().content)
+        } finally {
+            rawDriver.close()
+        }
+    }
+
+    /**
+     * A refresh that lands after the prefetch, with newer validators and a newer body for an article,
+     * keeps both: the subscribe's own fetch is the older response, so it neither puts its validators
+     * nor its article bodies back over the refresh's. Articles only it fetched are still added.
+     */
+    @Test
+    fun writePrefetchedSubscriptionKeepsArticleBodiesARefreshWroteAfterItsFetchStarted(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val url = "https://ex.com/feed"
+            val repo = newRepo(db, driver, twoArticleFetcher("fetched body"), clock = Clock { 1000L })
+            val articles = ArticleRepository(db, FtsSearch(driver), SyncScheduler {}, Clock { 1000L }, Dispatchers.Unconfined)
+            db.insertFeed("f1", now = 500L, url = url)
+            articles.upsertParsed("f1", listOf(ParsedArticle(guid = "g1", title = "Post", content = "old body")))
+            val prefetched = repo.prefetchSubscription(url)
+            // A refresh of the same feed lands afterwards, with newer validators and a newer body.
+            db.feedsQueries.updateCacheHeaders("refreshed-etag", null, 2000L, "f1")
+            articles.upsertParsed("f1", listOf(ParsedArticle(guid = "g1", title = "Post", content = "refreshed body")))
+
+            repo.writePrefetchedSubscription(prefetched)
+
+            assertEquals("refreshed-etag", db.feedsQueries.getById("f1").executeAsOne().etag)
+            assertEquals("refreshed body", db.articlesQueries.getByFeedAndGuid("f1", "g1").executeAsOne().content)
+            assertEquals("g2 body", db.articlesQueries.getByFeedAndGuid("f1", "g2").executeAsOne().content)
+        } finally {
+            driver.close()
+        }
+    }
+
+    /** With nothing written since the prefetch, its fetched article bodies replace the stored ones. */
+    @Test
+    fun writePrefetchedSubscriptionOverwritesArticleBodiesWhenTheRowIsUnchangedSinceThePrefetch(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val url = "https://ex.com/feed"
+            val repo = newRepo(db, driver, twoArticleFetcher("fetched body"), clock = Clock { 1000L })
+            val articles = ArticleRepository(db, FtsSearch(driver), SyncScheduler {}, Clock { 1000L }, Dispatchers.Unconfined)
+            db.insertFeed("f1", now = 500L, url = url)
+            articles.upsertParsed("f1", listOf(ParsedArticle(guid = "g1", title = "Post", content = "old body")))
+            val prefetched = repo.prefetchSubscription(url)
+
+            repo.writePrefetchedSubscription(prefetched)
+
+            assertEquals("fetched-etag", db.feedsQueries.getById("f1").executeAsOne().etag)
+            assertEquals("fetched body", db.articlesQueries.getByFeedAndGuid("f1", "g1").executeAsOne().content)
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
+     * A refresh's favicon lookup that stores a favicon after the prefetch read the row changes the
+     * favicon alone: that favicon is kept, and the fetched content and validators are still written
+     * rather than discarded with it.
+     */
+    @Test
+    fun writePrefetchedSubscriptionKeepsAFaviconStoredMeanwhileAndStillWritesTheFetchedContent(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val url = "https://ex.com/feed"
+            val repo = newRepo(
+                db, driver,
+                fetcherWith { respond(RSS, HttpStatusCode.OK, headersOf(HttpHeaders.ETag, "fetched-etag")) },
+                clock = Clock { 1000L },
+            )
+            db.insertFeed("f1", now = 500L, url = url)
+            db.feedsQueries.updateCacheHeaders("stored-etag", null, 500L, "f1")
+            val prefetched = repo.prefetchSubscription(url)
+            db.feedsQueries.updateFaviconUrlIfMissing("https://ex.com/stored.ico", 2000L, "f1")
+
+            repo.writePrefetchedSubscription(prefetched)
+
+            val row = db.feedsQueries.getById("f1").executeAsOne()
+            assertEquals("https://ex.com/stored.ico", row.favicon_url)
+            assertEquals("fetched-etag", row.etag)
+            assertEquals("Feed", row.title)
+        } finally {
+            driver.close()
+        }
+    }
+
+    /** Redirects [alias] to [target] and answers [target] with ETag `v1`, `v2`, … in fetch order. */
+    private fun aliasFetcher(alias: String, target: String): FeedFetcher {
+        var hits = 0
+        return fetcherWith { request ->
+            if (request.url.toString() == alias) {
+                respond("", HttpStatusCode.MovedPermanently, headersOf(HttpHeaders.Location, target))
+            } else {
+                hits++
+                respond(RSS, HttpStatusCode.OK, headersOf(HttpHeaders.ETag, "v$hits"))
+            }
+        }
+    }
+
+    /**
+     * An OPML import that lists an alias redirecting to an existing feed before that feed itself:
+     * the second entry's prefetch read the row before the alias's write, but that write was the
+     * batch's own, so the second entry's values replace it — the result of importing one at a time.
+     */
+    @Test
+    fun writePrefetchedSubscriptionOverwritesTheBatchsOwnEarlierWriteToTheSameRow(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val alias = "https://ex.com/old"
+            val target = "https://ex.com/feed"
+            val repo = newRepo(db, driver, aliasFetcher(alias, target), clock = Clock { 1000L })
+            db.insertFeed("f1", now = 500L, url = target)
+            db.feedsQueries.updateCacheHeaders("v0", null, 500L, "f1")
+            val batch = SubscribeBatch()
+            val viaAlias = repo.prefetchSubscription(alias) // v1
+            val direct = repo.prefetchSubscription(target) // v2, baseline read before the alias's write
+
+            repo.writePrefetchedSubscription(viaAlias, batch = batch)
+            assertEquals("v1", db.feedsQueries.getById("f1").executeAsOne().etag)
+            repo.writePrefetchedSubscription(direct, batch = batch)
+
+            assertEquals("v2", db.feedsQueries.getById("f1").executeAsOne().etag)
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
+     * The batch's own earlier write is only the baseline: a refresh that changes the row after it is
+     * still newer than the later entry's fetch, and is kept.
+     */
+    @Test
+    fun writePrefetchedSubscriptionKeepsARefreshThatLandedAfterTheBatchsOwnWrite(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val alias = "https://ex.com/old"
+            val target = "https://ex.com/feed"
+            val repo = newRepo(db, driver, aliasFetcher(alias, target), clock = Clock { 1000L })
+            db.insertFeed("f1", now = 500L, url = target)
+            db.feedsQueries.updateCacheHeaders("v0", null, 500L, "f1")
+            val batch = SubscribeBatch()
+            val viaAlias = repo.prefetchSubscription(alias)
+            val direct = repo.prefetchSubscription(target)
+
+            repo.writePrefetchedSubscription(viaAlias, batch = batch)
+            db.feedsQueries.updateCacheHeaders("refreshed", null, 2000L, "f1")
+            repo.writePrefetchedSubscription(direct, batch = batch)
+
+            assertEquals("refreshed", db.feedsQueries.getById("f1").executeAsOne().etag)
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
+     * A refresh that a later entry kept is not the batch's own write: a third entry for the same row
+     * still sees it as someone else's change and keeps it, rather than taking it as the batch's
+     * baseline and overwriting it with an older fetch.
+     */
+    @Test
+    fun writePrefetchedSubscriptionKeepsARefreshAcrossFurtherEntriesOfTheBatch(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val alias = "https://ex.com/old"
+            val target = "https://ex.com/feed"
+            val repo = newRepo(db, driver, aliasFetcher(alias, target), clock = Clock { 1000L })
+            db.insertFeed("f1", now = 500L, url = target)
+            db.feedsQueries.updateCacheHeaders("v0", null, 500L, "f1")
+            val batch = SubscribeBatch()
+            val viaAlias = repo.prefetchSubscription(alias) // v1
+            val second = repo.prefetchSubscription(target) // v2
+            val third = repo.prefetchSubscription(target) // v3
+
+            repo.writePrefetchedSubscription(viaAlias, batch = batch)
+            db.feedsQueries.updateCacheHeaders("refreshed", null, 2000L, "f1")
+            repo.writePrefetchedSubscription(second, batch = batch)
+            assertEquals("refreshed", db.feedsQueries.getById("f1").executeAsOne().etag)
+            repo.writePrefetchedSubscription(third, batch = batch)
+
+            assertEquals("refreshed", db.feedsQueries.getById("f1").executeAsOne().etag)
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
+     * An entry whose prefetch read the row only after the batch's own write and a refresh that
+     * followed it — the canonical feed listed past the prefetch window of an alias before it — takes
+     * that read, not the older batch write, as its baseline: the refresh was already there when it
+     * fetched, so its newer fetch is written.
+     */
+    @Test
+    fun writePrefetchedSubscriptionIgnoresABatchWriteThePrefetchHadAlreadySeen(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val alias = "https://ex.com/old"
+            val target = "https://ex.com/feed"
+            val repo = newRepo(db, driver, aliasFetcher(alias, target), clock = Clock { 1000L })
+            db.insertFeed("f1", now = 500L, url = target)
+            db.feedsQueries.updateCacheHeaders("v0", null, 500L, "f1")
+            val batch = SubscribeBatch()
+            val viaAlias = repo.prefetchSubscription(alias, batch) // v1
+
+            repo.writePrefetchedSubscription(viaAlias, batch = batch)
+            db.feedsQueries.updateCacheHeaders("refreshed", null, 2000L, "f1")
+            val direct = repo.prefetchSubscription(target, batch) // v2, read after both writes
+            repo.writePrefetchedSubscription(direct, batch = batch)
+
+            assertEquals("v2", db.feedsQueries.getById("f1").executeAsOne().etag)
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
+     * A batch write and a refresh after it can no longer commit between a prefetch's read of the batch
+     * count and its read of the row: the batch write waits on the prefetch's read. Otherwise the
+     * prefetch would read the refresh's values with a count from before the batch write, take that
+     * older write as its baseline, and drop its own newer fetch.
+     */
+    @Test
+    fun writePrefetchedSubscriptionReadsTheBatchCountAndTheRowAsOfOneMoment(): Unit = runBlocking {
+        val (_, rawDriver, rawDb) = fileDb()
+        val driver = BeforeFeedByUrlReadDriver(rawDriver)
+        val db = works.merc.keryx.app.data.local.db.KeryxDatabase(driver)
+        try {
+            val alias = "https://ex.com/old"
+            val target = "https://ex.com/feed"
+            val repo = newRepo(db, driver, aliasFetcher(alias, target), clock = Clock { 1000L })
+            rawDb.insertFeed("f1", now = 500L, url = target)
+            rawDb.feedsQueries.updateCacheHeaders("v0", null, 500L, "f1")
+            val batchLock = ContentionSignallingMutex()
+            val batch = SubscribeBatch(batchLock)
+            val viaAlias = repo.prefetchSubscription(alias, batch) // v1
+            var aliasWrite: Thread? = null
+            // Runs inside the canonical entry's prefetch read, which holds the batch lock.
+            driver.beforeFeedByUrlRead = {
+                // The alias entry's write, on another thread (so another connection), then a refresh —
+                // both trying to land in the middle of the canonical entry's prefetch read.
+                val writer = Thread {
+                    runBlocking { repo.writePrefetchedSubscription(viaAlias, batch = batch) }
+                }.apply { start() }
+                aliasWrite = writer
+                // The write must have asked for the batch lock while this read holds it...
+                if (!batchLock.contendedLockRequested.await(10, TimeUnit.SECONDS)) {
+                    fail("the alias write never asked for the batch lock while the prefetch held it")
+                }
+                // ...and must not be able to commit until the read is over.
+                writer.join(200)
+                assertTrue(writer.isAlive, "the alias write finished while the prefetch held the batch lock")
+                assertEquals("v0", rawDb.feedsQueries.getById("f1").executeAsOne().etag)
+                rawDb.feedsQueries.updateCacheHeaders("refreshed", null, 2000L, "f1")
+            }
+
+            val direct = repo.prefetchSubscription(target, batch) // v2
+            assertNotNull(aliasWrite).join(10_000)
+            repo.writePrefetchedSubscription(direct, batch = batch)
+
+            // The refresh was there when the canonical entry fetched, so its newer fetch is written.
+            assertEquals("v2", rawDb.feedsQueries.getById("f1").executeAsOne().etag)
+        } finally {
+            rawDriver.close()
+        }
+    }
+
+    /** With no other writer in between, the last of several entries for the same row wins. */
+    @Test
+    fun writePrefetchedSubscriptionLetsTheLastOfSeveralEntriesWin(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val alias = "https://ex.com/old"
+            val target = "https://ex.com/feed"
+            val repo = newRepo(db, driver, aliasFetcher(alias, target), clock = Clock { 1000L })
+            db.insertFeed("f1", now = 500L, url = target)
+            db.feedsQueries.updateCacheHeaders("v0", null, 500L, "f1")
+            val batch = SubscribeBatch()
+            val viaAlias = repo.prefetchSubscription(alias) // v1
+            val second = repo.prefetchSubscription(target) // v2
+            val third = repo.prefetchSubscription(target) // v3
+
+            repo.writePrefetchedSubscription(viaAlias, batch = batch)
+            repo.writePrefetchedSubscription(second, batch = batch)
+            repo.writePrefetchedSubscription(third, batch = batch)
+
+            assertEquals("v3", db.feedsQueries.getById("f1").executeAsOne().etag)
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
+     * With the row's feed values unchanged since the prefetch read them — here last written at the
+     * very time the fetch started — the fetched values are written.
+     */
+    @Test
+    fun writePrefetchedSubscriptionWritesFetchedValuesWhenTheRowIsUnchangedSinceThePrefetch(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val url = "https://ex.com/feed"
+            val repo = newRepo(
+                db, driver,
+                fetcherWith { respond(RSS, HttpStatusCode.OK, headersOf(HttpHeaders.ETag, "fetched-etag")) },
+                clock = Clock { 1000L },
+            )
+            db.insertFeed("f1", now = 500L, url = url)
+            db.feedsQueries.updateCacheHeaders("stored-etag", null, 1000L, "f1")
+            val prefetched = repo.prefetchSubscription(url)
+
+            repo.writePrefetchedSubscription(prefetched)
+
+            val row = db.feedsQueries.getById("f1").executeAsOne()
+            assertEquals("fetched-etag", row.etag)
+            assertEquals("Feed", row.title)
+            assertEquals(listOf("f1"), db.articlesQueries.watchAll().executeAsList().map { it.feed_id })
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
+     * The subscribe's write time is taken once it holds the placement lock, so it is never older than
+     * a write committed while it waited — a refresh's `updated_at` must not be rolled back below its
+     * own time.
+     */
+    @Test
+    fun writePrefetchedSubscriptionStampsTheTimeItGotThePlacementLock(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val url = "https://ex.com/feed"
+            var now = 1000L
+            val placement = Mutex()
+            val repo = newRepo(
+                db, driver,
+                fetcherWith { respond(RSS, HttpStatusCode.OK, headersOf(HttpHeaders.ETag, "fetched-etag")) },
+                clock = Clock { now },
+                feedPlacementMutex = placement,
+            )
+            db.insertFeed("f1", now = 500L, url = url)
+            val prefetched = repo.prefetchSubscription(url)
+            now = 2000L
+            placement.lock()
+            val write = launch(start = CoroutineStart.UNDISPATCHED) { repo.writePrefetchedSubscription(prefetched) }
+            now = 3000L
+            db.feedsQueries.updateCacheHeaders("refreshed", null, 3000L, "f1")
+            now = 4000L
+
+            placement.unlock()
+            write.join()
+
+            val row = db.feedsQueries.getById("f1").executeAsOne()
+            assertTrue(row.updated_at >= 3000L, "updated_at ${row.updated_at} rolled back below the refresh's 3000")
+            assertEquals("refreshed", row.etag)
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
+     * A move between the prefetch and its write changes none of the feed values the subscribe
+     * writes, so the fetched values are written — the move only bumped the row's `updated_at`. The
+     * move itself survives.
+     */
+    @Test
+    fun writePrefetchedSubscriptionWritesFetchedValuesOverAMoveMadeAfterThePrefetch(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val url = "https://ex.com/feed"
+            var now = 1000L
+            val repo = newRepo(
+                db, driver,
+                fetcherWith { respond(RSS, HttpStatusCode.OK, headersOf(HttpHeaders.ETag, "fetched-etag")) },
+                clock = Clock { now },
+            )
+            db.insertFolder("d1", "Kotlin")
+            db.insertFeed("f1", now = 500L, url = url)
+            val prefetched = repo.prefetchSubscription(url)
+            now = 2000L
+            repo.moveFeed("f1", "d1")
+            now = 3000L
+
+            repo.writePrefetchedSubscription(prefetched)
+
+            val row = db.feedsQueries.getById("f1").executeAsOne()
+            assertEquals("fetched-etag", row.etag)
+            assertEquals("Feed", row.title)
+            assertEquals("d1", row.folder_id)
+        } finally {
+            driver.close()
+        }
+    }
+
+    /** As [writePrefetchedSubscriptionWritesFetchedValuesOverAMoveMadeAfterThePrefetch], for a rename. */
+    @Test
+    fun writePrefetchedSubscriptionWritesFetchedValuesOverARenameMadeAfterThePrefetch(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val url = "https://ex.com/feed"
+            var now = 1000L
+            val repo = newRepo(
+                db, driver,
+                fetcherWith { respond(RSS, HttpStatusCode.OK, headersOf(HttpHeaders.ETag, "fetched-etag")) },
+                clock = Clock { now },
+            )
+            db.insertFeed("f1", now = 500L, url = url)
+            val prefetched = repo.prefetchSubscription(url)
+            now = 2000L
+            repo.renameFeed("f1", "My name")
+            now = 3000L
+
+            repo.writePrefetchedSubscription(prefetched)
+
+            val row = db.feedsQueries.getById("f1").executeAsOne()
+            assertEquals("fetched-etag", row.etag)
+            assertEquals("Feed", row.title)
+            assertEquals("My name", row.custom_title)
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
+     * moveFeed reads its target group's order and then writes it, so it must hold the same placement
+     * lock a subscribe holds while it allocates a sort_order in that group — otherwise the two can
+     * interleave and leave duplicate sort_orders.
+     */
+    @Test
+    fun moveFeedWaitsForTheFeedPlacementLock(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f1", sortOrder = 0L)
+            db.insertFeed("f2", sortOrder = 1L)
+            val placement = Mutex()
+            val repo = newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK) }, feedPlacementMutex = placement)
+            placement.lock()
+
+            val move = launch(start = CoroutineStart.UNDISPATCHED) { repo.moveFeed("f2", null, "f1") }
+
+            assertEquals(listOf("f1", "f2"), db.feedsQueries.getByFolder(null).executeAsList().map { it.id })
+
+            placement.unlock()
+            move.join()
+
+            assertEquals(listOf("f2", "f1"), db.feedsQueries.getByFolder(null).executeAsList().map { it.id })
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
+     * The race the feed placement lock prevents, run for real: a move reads its target group's
+     * order, and a subscribe placing a new feed in the same group gets a chance to run before the
+     * move writes. With the lock the subscribe cannot get in, so the two take different sort_orders;
+     * without it, both would read the same next order and collide.
+     *
+     * The move's clock read (taken after its group read, before its write) starts the subscribe on
+     * another thread and waits up to [MOVE_WAIT_FOR_SUBSCRIBE_MS] for it to finish. A file-backed DB
+     * and a feed with no items, as in [subscribeFeedSerializesSortOrderAllocationAcrossConcurrentCalls].
+     */
+    @Test
+    fun aSubscribeCannotTakeTheSortOrderAConcurrentMoveIntoTheSameGroupIsAboutToWrite(): Unit = runBlocking {
+        val (_, driver, db) = fileDb()
+        try {
+            db.insertFolder("d1", "Kotlin")
+            db.insertFeed("a", sortOrder = 0L)
+            db.insertFeed("b", sortOrder = 1L)
+            db.insertFeed("x", folderId = "d1", sortOrder = 0L)
+            val subscribed = CountDownLatch(1)
+            val subscribeResult = java.util.concurrent.atomic.AtomicReference<Result<Feeds>>()
+            val armed = AtomicBoolean(false)
+            var subscriber: Thread? = null
+            lateinit var repo: FeedRepository
+            val clock = Clock {
+                if (armed.compareAndSet(true, false)) {
+                    subscriber = Thread {
+                        runBlocking { subscribeResult.set(repo.subscribeFeed("https://ex.com/new")) }
+                        subscribed.countDown()
+                    }.apply { start() }
+                    subscribed.await(MOVE_WAIT_FOR_SUBSCRIBE_MS, TimeUnit.MILLISECONDS)
+                }
+                1000L
+            }
+            repo = newRepo(db, driver, fetcherWith { respond(RSS_NO_ITEMS, HttpStatusCode.OK) }, clock = clock)
+
+            armed.set(true)
+            repo.moveFeed("x", null)
+            val thread = assertNotNull(subscriber, "the move never read the clock")
+            thread.join(5_000)
+            assertFalse(thread.isAlive, "subscribeFeed did not finish within 5s")
+            assertIs<Result.Ok<Feeds>>(subscribeResult.get())
+
+            val orders = db.feedsQueries.getByFolder(null).executeAsList().map { it.sort_order }
+            assertEquals(4, orders.size)
+            assertEquals(orders.size, orders.toSet().size, "duplicate sort_orders in the group: $orders")
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
+     * As [moveFeedWaitsForTheFeedPlacementLock], for the no-folder group a deleted folder's feeds
+     * move into (FolderRepository.deleteFolder's path: withFeedPlacementLock + moveFeedsOutOfFolderLocked).
+     */
+    @Test
+    fun moveFeedsOutOfFolderWaitsForTheFeedPlacementLock(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFolder("d1", "Kotlin")
+            db.insertFeed("existing", sortOrder = 0L)
+            db.insertFeed("f1", folderId = "d1", sortOrder = 0L)
+            val placement = Mutex()
+            val repo = newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK) }, feedPlacementMutex = placement)
+            placement.lock()
+
+            val move = launch(start = CoroutineStart.UNDISPATCHED) {
+                repo.withFeedPlacementLock { repo.moveFeedsOutOfFolderLocked("d1", now = 100L) }
+            }
+
+            assertEquals("d1", db.feedsQueries.getById("f1").executeAsOne().folder_id)
+
+            placement.unlock()
+            move.join()
+
+            assertEquals(listOf("existing", "f1"), db.feedsQueries.getByFolder(null).executeAsList().map { it.id })
         } finally {
             driver.close()
         }

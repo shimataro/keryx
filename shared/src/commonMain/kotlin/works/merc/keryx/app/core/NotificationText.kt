@@ -39,6 +39,12 @@ sealed interface NotificationText {
 
     /** A feed refresh reached none of the feeds it covered (offline, most likely). */
     data object RefreshFailed : NotificationText
+
+    /**
+     * A change the user made could not be saved to the local database, for the reason [kind] names;
+     * the change was undone on screen (see `domain/LocalWriteFailureReporter`).
+     */
+    data class LocalWriteFailed(val kind: LocalWriteFailureKind) : NotificationText
 }
 
 /** The explanatory dialog body (cause + fix) an [AppNotificationAction.ShowInfoDialog] opens. */
@@ -47,7 +53,18 @@ enum class InfoDialogText {
     TOKEN_STORAGE_NOT_PERSISTED,
     APP_TRANSLOCATED,
     REFRESH_FAILED,
+    LOCAL_WRITE_FAILED_BUSY,
+    LOCAL_WRITE_FAILED_DISK_FULL,
+    LOCAL_WRITE_FAILED_OTHER,
 }
+
+/** The explanatory dialog for a [NotificationText.LocalWriteFailed] of this kind. */
+val LocalWriteFailureKind.infoDialogText: InfoDialogText
+    get() = when (this) {
+        LocalWriteFailureKind.BUSY -> InfoDialogText.LOCAL_WRITE_FAILED_BUSY
+        LocalWriteFailureKind.DISK_FULL -> InfoDialogText.LOCAL_WRITE_FAILED_DISK_FULL
+        LocalWriteFailureKind.OTHER -> InfoDialogText.LOCAL_WRITE_FAILED_OTHER
+    }
 
 /**
  * The user-facing category of a [KeryxException] — what each UI localizes into an error message.

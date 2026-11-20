@@ -3,7 +3,6 @@ package works.merc.keryx.app.platform
 import app.cash.sqldelight.db.QueryResult
 import app.cash.sqldelight.driver.native.NativeSqliteDriver
 import co.touchlab.sqliter.JournalMode
-import co.touchlab.sqliter.interop.SQLiteExceptionErrorCode
 import works.merc.keryx.app.core.CloudDataIncompatibleException
 import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.SQLITE_BUSY_TIMEOUT_MS
@@ -86,27 +85,6 @@ actual object DatabaseMerger {
         return classified
     }
 
-    /**
-     * Walks the cause chain for a SQLite result code: this file's own [SqliteException] (from
-     * [RawSqliteConnection]), or SQLiter's [SQLiteExceptionErrorCode], which is what
-     * [NativeSqliteDriver] throws while [migrateCloudIfOlder] opens and migrates the cloud file.
-     * SQLiter keeps the raw code private and exposes only its primary code, through `errorType`;
-     * that getter throws for a code it has no enum entry for, which is treated as "no code found".
-     * Bounded so a (theoretical) cause cycle cannot loop forever.
-     */
-    private fun Throwable.findSqliteResultCode(): Int? {
-        var current: Throwable? = this
-        repeat(CAUSE_CHAIN_MAX_DEPTH) {
-            val c = current ?: return null
-            when (c) {
-                is SqliteException -> return c.resultCode
-                is SQLiteExceptionErrorCode -> return runCatching { c.errorType.code }.getOrNull()
-            }
-            current = c.cause
-        }
-        return null
-    }
-
     /** Same mapping as the desktop actual, on the primary result code (an extended code's low byte). */
     private fun failureCategory(resultCode: Int): SqliteFailureCategory =
         when (resultCode and 0xFF) {
@@ -175,8 +153,6 @@ actual object DatabaseMerger {
 
     private const val TAG = "DatabaseMerger"
 
-    /** Bounds [findSqliteResultCode]'s cause-chain walk against a theoretical cause cycle. */
-    private const val CAUSE_CHAIN_MAX_DEPTH = 8
     private const val SQLITE_ERROR = 1
     private const val SQLITE_CORRUPT = 11
     private const val SQLITE_EMPTY = 16

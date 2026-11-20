@@ -1,13 +1,24 @@
 package works.merc.keryx.app.domain
 
+import app.cash.sqldelight.db.QueryResult
+import app.cash.sqldelight.db.SqlDriver
+import app.cash.sqldelight.db.SqlPreparedStatement
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
+import works.merc.keryx.app.HoldingDispatcher
 import works.merc.keryx.app.core.Clock
+import works.merc.keryx.app.core.LocalWriteFailureKind
+import works.merc.keryx.app.core.NotificationText
 import works.merc.keryx.app.data.local.LocalSettings
 import works.merc.keryx.app.data.local.LocalSettingsStore
+import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertGlobalSetting
 import works.merc.keryx.app.platform.AppDirs
@@ -27,6 +38,23 @@ private class SettingsCountingSyncScheduler : SyncScheduler {
 
     override fun scheduleSync() {
         callCount++
+    }
+}
+
+/** Fails the first `global_settings` write it sees, as a DB failure (e.g. a locked database) would. */
+private class FailFirstGlobalWriteDriver(private val delegate: SqlDriver) : SqlDriver by delegate {
+    private val failed = AtomicBoolean(false)
+
+    override fun execute(
+        identifier: Int?,
+        sql: String,
+        parameters: Int,
+        binders: (SqlPreparedStatement.() -> Unit)?,
+    ): QueryResult<Long> {
+        if (sql.contains("global_settings") && failed.compareAndSet(false, true)) {
+            throw IllegalStateException("database is locked")
+        }
+        return delegate.execute(identifier, sql, parameters, binders)
     }
 }
 
@@ -218,6 +246,174 @@ class SettingsRepositoryTest {
 
             assertTrue(repo.isSetupComplete())
             assertEquals(store.isSetupComplete(), repo.isSetupComplete())
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
+     * A global setter is called from the UI thread (the settings screen), so its DB write must run
+     * on the write dispatcher rather than block the caller on the SQLite write lock.
+     */
+    @Test
+    fun globalSettersWriteOnTheWriteDispatcherNotTheCallersThread() {
+        val (driver, db) = inMemoryDb()
+        try {
+            val scheduler = SettingsCountingSyncScheduler()
+            val writes = HoldingDispatcher()
+            val repo = SettingsRepository(
+                db, LocalSettingsStore(dirOverride = dir), scheduler, Clock { 0L }, writeDispatcher = writes,
+            )
+            writes.hold()
+
+            repo.setReadTimeoutSeconds(60)
+            repo.setCacheRetentionDays(null)
+            repo.setArticleListDefaultUnreadOnly(true)
+
+            // Nothing written, nor a sync scheduled, until the write dispatcher runs.
+            assertEquals(30, repo.getReadTimeoutSeconds())
+            assertEquals(30, repo.getCacheRetentionDays())
+            assertFalse(repo.getArticleListDefaultUnreadOnly())
+            assertEquals(0, scheduler.callCount)
+
+            writes.release()
+
+            assertEquals(60, repo.getReadTimeoutSeconds())
+            assertNull(repo.getCacheRetentionDays())
+            assertTrue(repo.getArticleListDefaultUnreadOnly())
+            assertEquals(3, scheduler.callCount)
+        } finally {
+            driver.close()
+        }
+    }
+
+    /** [SettingsRepository.flush] returns only after a global write queued before it has landed. */
+    @Test
+    fun flushWaitsForAPendingGlobalWrite() {
+        val (driver, db) = inMemoryDb()
+        try {
+            val writes = HoldingDispatcher()
+            val repo = SettingsRepository(
+                db, LocalSettingsStore(dirOverride = dir), SyncScheduler {}, Clock { 0L }, writeDispatcher = writes,
+            )
+            writes.hold()
+            repo.setReadTimeoutSeconds(60)
+
+            runBlocking {
+                var flushed = false
+                val flush = launch(start = CoroutineStart.UNDISPATCHED) {
+                    repo.flush()
+                    flushed = true
+                }
+                assertFalse(flushed)
+
+                writes.release()
+                flush.join()
+
+                assertTrue(flushed)
+                assertEquals(60, repo.getReadTimeoutSeconds())
+            }
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
+     * A failed global write is reported (not thrown), runs only its own onFailed, and leaves the next
+     * setter's write working.
+     */
+    @Test
+    fun aFailedGlobalWriteIsReportedRunsItsOnFailedAndDoesNotStopTheNextOne() {
+        val (inner, _) = inMemoryDb()
+        try {
+            val notifications = NotificationCenter()
+            val repo = SettingsRepository(
+                KeryxDatabase(FailFirstGlobalWriteDriver(inner)), LocalSettingsStore(dirOverride = dir),
+                SyncScheduler {}, Clock { 0L }, writeDispatcher = Dispatchers.Unconfined,
+                localWriteFailureReporter = LocalWriteFailureReporter(notifications, Clock { 0L }),
+            )
+            val failed = mutableListOf<Int>()
+
+            repo.setReadTimeoutSeconds(60) { failed += 60 }
+            repo.setReadTimeoutSeconds(90) { failed += 90 }
+
+            assertEquals(listOf(60), failed)
+            assertEquals(90, repo.getReadTimeoutSeconds())
+            assertEquals(
+                NotificationText.LocalWriteFailed(LocalWriteFailureKind.OTHER),
+                notifications.items.value.single().text,
+            )
+        } finally {
+            inner.close()
+        }
+    }
+
+    /**
+     * A global write is counted as pending from the setter until it has run, so a foreground-exit
+     * sync flush made in between waits for the sync it schedules.
+     */
+    @Test
+    fun aGlobalWriteStaysPendingUntilItHasRun() {
+        val (driver, db) = inMemoryDb()
+        try {
+            val writes = HoldingDispatcher()
+            val pending = PendingLocalWrites()
+            val repo = SettingsRepository(
+                db, LocalSettingsStore(dirOverride = dir), SyncScheduler {}, Clock { 0L },
+                writeDispatcher = writes, pendingLocalWrites = pending,
+            )
+            writes.hold()
+            repo.setReadTimeoutSeconds(60)
+
+            runBlocking {
+                val idle = launch(start = CoroutineStart.UNDISPATCHED) { pending.awaitIdle() }
+                assertFalse(idle.isCompleted)
+
+                writes.release()
+                idle.join()
+            }
+        } finally {
+            driver.close()
+        }
+    }
+
+    /** A failed global write still counts itself finished, or every later flush would wait it out. */
+    @Test
+    fun aFailedGlobalWriteIsNoLongerPending() {
+        val (inner, _) = inMemoryDb()
+        try {
+            val pending = PendingLocalWrites()
+            val repo = SettingsRepository(
+                KeryxDatabase(FailFirstGlobalWriteDriver(inner)), LocalSettingsStore(dirOverride = dir),
+                SyncScheduler {}, Clock { 0L }, writeDispatcher = Dispatchers.Unconfined,
+                pendingLocalWrites = pending,
+            )
+
+            repo.setReadTimeoutSeconds(60)
+
+            runBlocking { withTimeout(1_000L) { pending.awaitIdle() } }
+        } finally {
+            inner.close()
+        }
+    }
+
+    /** A global write queued behind close() never runs, and is not left counted either. */
+    @Test
+    fun aGlobalWriteDroppedByCloseIsNoLongerPending() {
+        val (driver, db) = inMemoryDb()
+        try {
+            val pending = PendingLocalWrites()
+            val repo = SettingsRepository(
+                db, LocalSettingsStore(dirOverride = dir), SyncScheduler {}, Clock { 0L },
+                pendingLocalWrites = pending,
+            )
+            runBlocking {
+                repo.close()
+                repo.setReadTimeoutSeconds(60)
+
+                withTimeout(1_000L) { pending.awaitIdle() }
+            }
+            assertEquals(30, repo.getReadTimeoutSeconds())
         } finally {
             driver.close()
         }

@@ -400,7 +400,7 @@ private struct SidebarCreateSheets: ViewModifier {
                     placeholderKey: "home_new_folder_hint",
                     duplicateMessageKey: "home_folder_name_duplicate",
                     isDuplicate: { NameValidationKt.isDuplicateFolderName(name: $0, folders: home.folders, excludeId: nil) },
-                    onConfirm: { name, _ in _ = home.viewModel.createFolder(name: name) },
+                    onConfirm: { name, _ in home.viewModel.createFolder(name: name, moveFeedId: nil) },
                     isPresented: $dialogs.isAddingFolder
                 )
             }
@@ -413,7 +413,7 @@ private struct SidebarCreateSheets: ViewModifier {
                     // (`FeedListDialogs.kt`'s `var color by remember { mutableStateOf<String?>(null) }`).
                     showColorPicker: true,
                     isDuplicate: { NameValidationKt.isDuplicateTagName(name: $0, tags: home.tags, excludeId: nil) },
-                    onConfirm: { name, color in _ = home.viewModel.createTag(name: name, color: color) },
+                    onConfirm: { name, color in home.viewModel.createTag(name: name, color: color, attachToFeedId: nil) },
                     isPresented: $dialogs.isAddingTag
                 )
             }
@@ -427,9 +427,7 @@ private struct SidebarCreateSheets: ViewModifier {
                     duplicateMessageKey: "home_folder_name_duplicate",
                     isDuplicate: { NameValidationKt.isDuplicateFolderName(name: $0, folders: home.folders, excludeId: nil) },
                     onConfirm: { name, _ in
-                        if let id = home.viewModel.createFolder(name: name) {
-                            home.viewModel.moveFeed(feedId: feed.id, folderId: id, targetFeedId: nil)
-                        }
+                        home.viewModel.createFolder(name: name, moveFeedId: feed.id)
                     },
                     isPresented: Binding(get: { dialogs.creatingFolderForFeed != nil }, set: { if !$0 { dialogs.creatingFolderForFeed = nil } })
                 )
@@ -442,9 +440,7 @@ private struct SidebarCreateSheets: ViewModifier {
                     showColorPicker: true,
                     isDuplicate: { NameValidationKt.isDuplicateTagName(name: $0, tags: home.tags, excludeId: nil) },
                     onConfirm: { name, color in
-                        if let id = home.viewModel.createTag(name: name, color: color) {
-                            home.viewModel.setFeedTag(feedId: feed.id, tagId: id, attached: true)
-                        }
+                        home.viewModel.createTag(name: name, color: color, attachToFeedId: feed.id)
                     },
                     isPresented: Binding(get: { dialogs.creatingTagForFeed != nil }, set: { if !$0 { dialogs.creatingTagForFeed = nil } })
                 )

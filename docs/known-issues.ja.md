@@ -346,11 +346,17 @@ SQLite 自身のロック昇格ルール（`sqlite3_busy_handler` の公式ド�
 ロックの**取得**を待つ場合にのみ効き、この経路には効かない。
 
 失敗したテストにおける並行書き込み元は次の 2 つ: 1 本目の `subscribeFeedWrite` は
-`subscribePlacementMutex.withLock { db.transaction { ... } }` の中で RESERVED を保持するが、
+`feedPlacementMutex.withLock { db.transaction { ... } }` の中で RESERVED を保持するが、
 mutex を解放した**直後**にその呼び出しが行う次の処理 —
 `articleRepository.upsertParsed(feedId, fetched.articles)`（フィードごとの別トランザクション）—
 がまだ進行中でロックを保持している間に、2 本目の呼び出しが自分の SHARED read ロックを RESERVED へ
 昇格させようとする、という重なりである。
+
+（これは観測した当時のコードの説明である。その後、購読は記事をフィード行と同じトランザクションの中で、mutex を
+保持したまま書くようになったので、更新（refresh）がその 2 つの間に確定することはない。検索インデックスの追いつき
+処理は、今も mutex の解放後に書く。また、このトランザクションは今も書く前に読む（`getByUrl` → `upsert`）ので、
+別の書き込み元（更新など）によって同じように昇格が失敗することはありうる。そのため、本当の直し方は
+`BEGIN IMMEDIATE` だという下の結論は変わらない。）
 
 ### 除外した仮説
 
@@ -384,20 +390,21 @@ read を行っている箇所:
 
 - `FeedRepository.subscribeFeedWrite`（`FeedRepository.kt`。`getByUrl`/`nextSortOrderInGroup` の後に
   `upsert` を行う `db.transaction {}`）— 今回観測された箇所。
-- `FeedRepository.moveFeedsOutOfFolder`（同一トランザクション内で `nextSortOrderInGroup` を読んでから
-  フィードごとに書き込む）。直接呼ばれる経路に加え、`FolderRepository.deleteFolder` の
-  トランザクション経由でも到達する。
+- `FeedRepository.moveFeedsOutOfFolderLocked`（同一トランザクション内で `nextSortOrderInGroup` を読んでから
+  フィードごとに書き込む）。`FolderRepository.deleteFolder` のトランザクション経由で到達する。
 
 `FeedRepository.moveFeed` と `FolderRepository.reorderFolders` は並び順の read を
-`db.transaction {}` を開く**前**に済ませているため、この形状には当てはまらない。
+`db.transaction {}` を開く**前**に済ませているため、この形状には当てはまらない。（`moveFeed` は
+その read からトランザクションまでの間 `feedPlacementMutex` を保持するので、同じグループへフィードを
+配置する購読と交互に実行されることはない。read はトランザクションの外に置いたままである。）
 フィード更新の反映トランザクション（`FeedRepository.kt` の `applyFetch` 周辺）も write のみで
 該当しない。
 
 ### テスト側でどう回避したか
 
 `FeedRepositoryTest.subscribeFeedSerializesSortOrderAllocationAcrossConcurrentCalls` は、
-`<item>` を持たないフィードを購読するようにした。`articleRepository.upsertParsed` が挿入する
-記事が無くなるため、1 本目の呼び出しが mutex 解放後に行う処理は読み取りのみになり、
+`<item>` を持たないフィードを購読するようにした。書き込む記事も検索インデックスの追いつき処理も
+無くなるため、1 本目の呼び出しが mutex 解放後に行う処理は読み取りのみになり、
 昇格と競合し得る 2 本目の書き込み側が存在しなくなる。並行書き込みテストの一般的な指針は
 `testing.ja.md` の該当箇所を参照。
 

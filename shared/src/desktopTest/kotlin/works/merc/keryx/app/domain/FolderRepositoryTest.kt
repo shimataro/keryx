@@ -6,7 +6,11 @@ import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.http.HttpStatusCode
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import works.merc.keryx.app.InMemoryFaviconMissStore
@@ -15,6 +19,8 @@ import works.merc.keryx.app.data.local.FtsManager
 import works.merc.keryx.app.data.local.FtsSearch
 import works.merc.keryx.app.data.remote.FaviconResolver
 import works.merc.keryx.app.data.remote.FeedFetcher
+import works.merc.keryx.app.SameNameInsertingDriver
+import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
 import works.merc.keryx.app.insertFolder
@@ -48,6 +54,7 @@ class FolderRepositoryTest {
         driver: SqlDriver,
         syncScheduler: SyncScheduler = SyncScheduler {},
         clock: Clock = Clock { 0L },
+        placementMutex: Mutex = Mutex(),
     ): FolderRepository {
         val articleRepository = ArticleRepository(db, FtsSearch(driver), syncScheduler, clock, Dispatchers.Unconfined)
         // Mirror startup: ensureIndexed() creates articles_fts so indexMissing() (unused here) works.
@@ -57,6 +64,7 @@ class FolderRepositoryTest {
             articleRepository, ftsManager, syncScheduler, NotificationCenter(),
             clock, Dispatchers.Unconfined,
             faviconMisses = InMemoryFaviconMissStore(),
+            feedPlacementMutex = placementMutex,
         )
         return FolderRepository(db, feedRepository, syncScheduler, clock, Dispatchers.Unconfined)
     }
@@ -74,6 +82,100 @@ class FolderRepositoryTest {
             assertEquals("Kotlin", row.name)
             assertNull(row.deleted_at)
             assertEquals(1, scheduler.callCount)
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
+     * A create, a delete and a recreation within the same millisecond still stamp strictly increasing
+     * updated_at, so neither the list value nor the sync merge's strict last-write-wins can mistake the
+     * recreated folder for the one before the delete.
+     */
+    @Test
+    fun deleteAndRecreateInTheSameMillisecondStampStrictlyIncreasingTimes() = runTest {
+        val (driver, db) = inMemoryDb()
+        try {
+            val repo = newRepo(db, driver, clock = Clock { 100L })
+            val id = repo.createFolder("Kotlin")
+            val created = db.foldersQueries.getById(id).executeAsOne().updated_at
+
+            repo.deleteFolder(id)
+            val deleted = db.foldersQueries.getById(id).executeAsOne().updated_at
+            repo.createFolder("Kotlin")
+            val recreated = db.foldersQueries.getById(id).executeAsOne().updated_at
+
+            assertEquals(100L, created)
+            assertTrue(deleted > created)
+            assertTrue(recreated > deleted)
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
+     * A rename right after a same-millisecond recreation — which moved the stamp ahead of the clock —
+     * is still stamped newest, so a device that already has the recreated row takes the rename.
+     */
+    @Test
+    fun aRenameRightAfterASameMillisecondRecreationIsStampedNewest() = runTest {
+        val (driver, db) = inMemoryDb()
+        try {
+            var now = 100L
+            val repo = newRepo(db, driver, clock = Clock { now })
+            val id = repo.createFolder("Kotlin")
+            repo.deleteFolder(id)
+            repo.createFolder("Kotlin")
+            val recreated = db.foldersQueries.getById(id).executeAsOne().updated_at
+            now = 101L
+
+            repo.updateFolder(id, "Renamed")
+
+            val row = db.foldersQueries.getById(id).executeAsOne()
+            assertEquals("Renamed", row.name)
+            assertTrue(row.updated_at > recreated)
+        } finally {
+            driver.close()
+        }
+    }
+
+    /** As [aRenameRightAfterASameMillisecondRecreationIsStampedNewest], for a reorder. */
+    @Test
+    fun aReorderRightAfterASameMillisecondRecreationIsStampedNewest() = runTest {
+        val (driver, db) = inMemoryDb()
+        try {
+            var now = 100L
+            val repo = newRepo(db, driver, clock = Clock { now })
+            val other = repo.createFolder("Other")
+            val id = repo.createFolder("Kotlin")
+            repo.deleteFolder(id)
+            repo.createFolder("Kotlin")
+            val recreated = db.foldersQueries.getById(id).executeAsOne().updated_at
+            now = 101L
+
+            repo.reorderFolders(id, other)
+
+            val row = db.foldersQueries.getById(id).executeAsOne()
+            assertEquals(0L, row.sort_order)
+            assertTrue(row.updated_at > recreated)
+        } finally {
+            driver.close()
+        }
+    }
+
+    /** With the clock well past the row's stamp, a rename is stamped with the current time as before. */
+    @Test
+    fun aRenameWithTheClockAheadOfTheRowIsStampedWithTheCurrentTime() = runTest {
+        val (driver, db) = inMemoryDb()
+        try {
+            var now = 100L
+            val repo = newRepo(db, driver, clock = Clock { now })
+            val id = repo.createFolder("Kotlin")
+            now = 5000L
+
+            repo.updateFolder(id, "Renamed")
+
+            assertEquals(5000L, db.foldersQueries.getById(id).executeAsOne().updated_at)
         } finally {
             driver.close()
         }
@@ -249,7 +351,7 @@ class FolderRepositoryTest {
             val scheduler = FolderCountingSyncScheduler()
             val repo = newRepo(db, driver, syncScheduler = scheduler, clock = Clock { 300L })
 
-            repo.deleteFolder("d1")
+            runBlocking { repo.deleteFolder("d1") }
 
             val row = db.foldersQueries.getById("d1").executeAsOne()
             assertNotNull(row.deleted_at)
@@ -271,7 +373,7 @@ class FolderRepositoryTest {
             val scheduler = FolderCountingSyncScheduler()
             val repo = newRepo(db, driver, syncScheduler = scheduler, clock = Clock { 400L })
 
-            repo.deleteFolder("d1")
+            runBlocking { repo.deleteFolder("d1") }
 
             assertNull(db.feedsQueries.getById("f1").executeAsOne().folder_id)
             assertNull(db.feedsQueries.getById("f2").executeAsOne().folder_id)
@@ -280,6 +382,68 @@ class FolderRepositoryTest {
             assertNotNull(folder.deleted_at)
             assertEquals(400L, folder.deleted_at)
             assertEquals(1, scheduler.callCount)
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
+     * Deleting a folder appends its feeds to the no-folder group, reading that group's next
+     * sort_order first — so it must hold the feed placement lock a concurrent subscribe into that
+     * group holds, or the two can allocate the same sort_order.
+     */
+    @Test
+    fun deleteFolderWaitsForTheFeedPlacementLock(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFolder("d1", "Kotlin", now = 10L)
+            db.insertFeed("f1", now = 10L, folderId = "d1")
+            val placement = Mutex()
+            val repo = newRepo(db, driver, clock = Clock { 400L }, placementMutex = placement)
+            placement.lock()
+
+            val delete = launch(start = CoroutineStart.UNDISPATCHED) { repo.deleteFolder("d1") }
+
+            assertEquals("d1", db.feedsQueries.getById("f1").executeAsOne().folder_id)
+            assertNull(db.foldersQueries.getById("d1").executeAsOne().deleted_at)
+
+            placement.unlock()
+            delete.join()
+
+            assertNull(db.feedsQueries.getById("f1").executeAsOne().folder_id)
+            assertEquals(400L, db.foldersQueries.getById("d1").executeAsOne().deleted_at)
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
+     * The delete's time is taken once it holds the placement lock: a move that files a feed into the
+     * folder while the delete waits commits a newer `folder_updated_at`, and the delete's
+     * unassignment must not be stamped older than it, or a last-write-wins merge keeps that move.
+     */
+    @Test
+    fun deleteFolderStampsTheTimeItGotThePlacementLock(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFolder("d1", "Kotlin", now = 10L)
+            db.insertFeed("f1", now = 10L)
+            var now = 400L
+            val placement = Mutex()
+            val repo = newRepo(db, driver, clock = Clock { now }, placementMutex = placement)
+            placement.lock()
+
+            val delete = launch(start = CoroutineStart.UNDISPATCHED) { repo.deleteFolder("d1") }
+            // A move commits while the delete waits for the lock.
+            db.feedsQueries.updateFolder("d1", 600L, 600L, "f1")
+            now = 900L
+            placement.unlock()
+            delete.join()
+
+            val feed = db.feedsQueries.getById("f1").executeAsOne()
+            assertNull(feed.folder_id)
+            assertEquals(900L, feed.folder_updated_at)
+            assertEquals(900L, db.foldersQueries.getById("d1").executeAsOne().deleted_at)
         } finally {
             driver.close()
         }
@@ -297,7 +461,7 @@ class FolderRepositoryTest {
             db.insertFeed("f1", now = 10L, folderId = "d1", sortOrder = 1L)
             val repo = newRepo(db, driver, clock = Clock { 400L })
 
-            repo.deleteFolder("d1")
+            runBlocking { repo.deleteFolder("d1") }
 
             val noFolderOrdered = db.feedsQueries.getByFolder(null).executeAsList()
             assertEquals(listOf("existing", "f2", "f1"), noFolderOrdered.map { it.id })
@@ -397,6 +561,132 @@ class FolderRepositoryTest {
 
             assertEquals(listOf("alpha", "Zebra"), names)
             assertTrue(names.isNotEmpty())
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun createFolderOfAnActiveFolderNameMovesThatFolderToTheEnd() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFolder("d1", "Kotlin", sortOrder = 0L)
+            db.insertFolder("d2", "Swift", sortOrder = 1L)
+            val repo = newRepo(db, driver, clock = Clock { 100L })
+
+            val id = repo.createFolder("Kotlin")
+
+            assertEquals("d1", id)
+            val row = db.foldersQueries.getById("d1").executeAsOne()
+            assertEquals(2L, row.sort_order)
+            assertEquals(100L, row.updated_at)
+            assertEquals(2, db.foldersQueries.watchAll().executeAsList().size)
+        } finally {
+            driver.close()
+        }
+    }
+
+    // --- A same-named folder another writer inserts mid-call (a sync merge, a concurrent create) ---
+
+    @Test
+    fun createFolderReusesASameNamedFolderInsertedByAnotherWriterInsteadOfFailing() {
+        val (base, _) = inMemoryDb()
+        try {
+            val driver = SameNameInsertingDriver(base, table = "folders", name = "Kotlin", otherId = "cloud-id")
+            val db = KeryxDatabase(driver)
+            val repo = newRepo(db, driver, clock = Clock { 100L })
+
+            val id = repo.createFolder("Kotlin")
+
+            assertTrue(driver.fired)
+            val rows = db.foldersQueries.watchAll().executeAsList()
+            assertEquals(listOf(id), rows.map { it.id })
+            assertEquals("Kotlin", rows.single().name)
+        } finally {
+            base.close()
+        }
+    }
+
+    @Test
+    fun createFolderAndMoveFeedReusesASameNamedFolderInsertedByAnotherWriterInsteadOfFailing() = runTest {
+        val (base, baseDb) = inMemoryDb()
+        try {
+            baseDb.insertFeed("f1")
+            val driver = SameNameInsertingDriver(base, table = "folders", name = "Kotlin", otherId = "cloud-id")
+            val db = KeryxDatabase(driver)
+            val repo = newRepo(db, driver, clock = Clock { 100L })
+
+            val id = repo.createFolderAndMoveFeed("Kotlin", "f1")
+
+            assertTrue(driver.fired)
+            assertEquals(listOf(id), db.foldersQueries.watchAll().executeAsList().map { it.id })
+            assertEquals(id, db.feedsQueries.getById("f1").executeAsOne().folder_id)
+        } finally {
+            base.close()
+        }
+    }
+
+    // --- createFolderAndMoveFeed ---
+
+    @Test
+    fun createFolderAndMoveFeedPlacesTheFeedFirstInTheNewFolderAndSchedulesOneSync() = runTest {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f1", sortOrder = 4L)
+            val scheduler = FolderCountingSyncScheduler()
+            val repo = newRepo(db, driver, syncScheduler = scheduler, clock = Clock { 100L })
+
+            val id = repo.createFolderAndMoveFeed("Kotlin", "f1")
+
+            assertEquals("Kotlin", db.foldersQueries.getById(id).executeAsOne().name)
+            val feed = db.feedsQueries.getById("f1").executeAsOne()
+            assertEquals(id, feed.folder_id)
+            assertEquals(0L, feed.sort_order)
+            assertEquals(100L, feed.folder_updated_at)
+            assertEquals(1, scheduler.callCount)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun createFolderAndMoveFeedAppendsAfterFeedsAReactivatedFolderStillHolds() = runTest {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFolder("d1", "Kotlin", now = 10L, deletedAt = 20L)
+            // Left pointing at the deleted folder, as a sync from another device can.
+            db.insertFeed("f0", folderId = "d1", sortOrder = 0L)
+            db.insertFeed("f1")
+            val repo = newRepo(db, driver, clock = Clock { 100L })
+
+            val id = repo.createFolderAndMoveFeed("Kotlin", "f1")
+
+            assertEquals("d1", id)
+            assertEquals(1L, db.feedsQueries.getById("f1").executeAsOne().sort_order)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun createFolderAndMoveFeedLeavesNoFolderBehindWhenTheMoveFails() = runTest {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f1")
+            driver.execute(
+                null,
+                "CREATE TRIGGER fail_move BEFORE UPDATE OF folder_id ON feeds BEGIN SELECT RAISE(ABORT, 'move failed'); END",
+                0,
+            )
+            val scheduler = FolderCountingSyncScheduler()
+            val repo = newRepo(db, driver, syncScheduler = scheduler, clock = Clock { 100L })
+
+            kotlin.test.assertFails { repo.createFolderAndMoveFeed("Kotlin", "f1") }
+
+            assertTrue(db.foldersQueries.watchAll().executeAsList().isEmpty())
+            assertNull(db.foldersQueries.getByName("Kotlin").executeAsOneOrNull())
+            assertNull(db.feedsQueries.getById("f1").executeAsOne().folder_id)
+            assertEquals(0, scheduler.callCount)
         } finally {
             driver.close()
         }

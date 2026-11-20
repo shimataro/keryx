@@ -5,6 +5,7 @@ import org.jetbrains.compose.resources.getPluralString
 import org.jetbrains.compose.resources.getString
 import works.merc.keryx.app.core.ErrorKind
 import works.merc.keryx.app.core.InfoDialogText
+import works.merc.keryx.app.core.LocalWriteFailureKind
 import works.merc.keryx.app.core.NotificationText
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.error_cloud_auth
@@ -17,6 +18,12 @@ import works.merc.keryx.app.resources.feed_gone_message
 import works.merc.keryx.app.resources.feed_url_changed
 import works.merc.keryx.app.resources.notification_app_translocated
 import works.merc.keryx.app.resources.notification_app_translocated_detail
+import works.merc.keryx.app.resources.notification_local_write_failed_busy
+import works.merc.keryx.app.resources.notification_local_write_failed_busy_detail
+import works.merc.keryx.app.resources.notification_local_write_failed_disk_full
+import works.merc.keryx.app.resources.notification_local_write_failed_disk_full_detail
+import works.merc.keryx.app.resources.notification_local_write_failed_other
+import works.merc.keryx.app.resources.notification_local_write_failed_other_detail
 import works.merc.keryx.app.resources.notification_refresh_failed
 import works.merc.keryx.app.resources.notification_refresh_failed_detail
 import works.merc.keryx.app.resources.notification_token_storage_fallback
@@ -90,5 +97,19 @@ class NotificationTextsTest {
         assertEquals(getString(Res.string.notification_token_storage_not_persisted_detail), resolveInfoDialogText(InfoDialogText.TOKEN_STORAGE_NOT_PERSISTED))
         assertEquals(getString(Res.string.notification_app_translocated_detail), resolveInfoDialogText(InfoDialogText.APP_TRANSLOCATED))
         assertEquals(getString(Res.string.notification_refresh_failed_detail), resolveInfoDialogText(InfoDialogText.REFRESH_FAILED))
+    }
+
+    @Test
+    fun localWriteFailuresResolveEachKindToItsOwnRowAndDetail() = runTest {
+        for ((kind, row, detail) in listOf(
+            Triple(LocalWriteFailureKind.BUSY, Res.string.notification_local_write_failed_busy, InfoDialogText.LOCAL_WRITE_FAILED_BUSY),
+            Triple(LocalWriteFailureKind.DISK_FULL, Res.string.notification_local_write_failed_disk_full, InfoDialogText.LOCAL_WRITE_FAILED_DISK_FULL),
+            Triple(LocalWriteFailureKind.OTHER, Res.string.notification_local_write_failed_other, InfoDialogText.LOCAL_WRITE_FAILED_OTHER),
+        )) {
+            assertEquals(getString(row), resolveNotificationText(NotificationText.LocalWriteFailed(kind)), kind.name)
+        }
+        assertEquals(getString(Res.string.notification_local_write_failed_busy_detail), resolveInfoDialogText(InfoDialogText.LOCAL_WRITE_FAILED_BUSY))
+        assertEquals(getString(Res.string.notification_local_write_failed_disk_full_detail), resolveInfoDialogText(InfoDialogText.LOCAL_WRITE_FAILED_DISK_FULL))
+        assertEquals(getString(Res.string.notification_local_write_failed_other_detail), resolveInfoDialogText(InfoDialogText.LOCAL_WRITE_FAILED_OTHER))
     }
 }

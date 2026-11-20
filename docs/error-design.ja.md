@@ -41,10 +41,52 @@
   ものとして記事を復元しない。本文の読み込みに失敗した選択も次の起動のために保存されるので、毎回失敗する読み込み
   （Android の `CursorWindow` に収まらない大きな行など）だと、伝播させれば起動のたびに ViewModel の生成が例外で
   失敗し、Home が開かなくなってしまう。
+- この ViewModel が削除したのに一覧にまだ表示されている項目の、生存チェック（`DeletedItemFallback`。
+  `HomeViewModel` が `getFeedById` / `getTagById` / `getFolderById` で配線する）。一覧がまだ項目を表示している
+  ときに削除の切り替えが要求された時点と、項目をまだ含む一覧の値が届くたびに走る。つまり別の書き込みの直後や
+  同期マージの最中で書き込みロックが握られていそうなときに走るので、
+  `busy_timeout` を待ち切ることがある。失敗したときは「生きていない」とみなし、選択のフォールバックを
+  保留したままにして、次に届く一覧の値で決める。伝播させると、Android と Apple ではアプリが終了する。
 
 これ以外の DB アクセスは従来どおり例外を伝播させる。新しい best-effort のアクセスは、理由とともにこの一覧に追加する。
 （ユーザーが始めた操作——OPML の import や export——が失敗した場合は、この例外に当たらない。握りつぶさず、その操作の
 失敗としてユーザーに知らせる。）
+
+## ローカル書き込みの失敗
+
+「DB アクセスの失敗 → 例外」に対する、文書化されたもう 1 つの例外。UI が引き渡してすぐに戻るローカル書き込みが対象である。
+呼び出し元のスレッドを離れた書き込みには、例外を投げ返す相手がもういない。投げれば Android と Apple ではアプリが終了し、
+デスクトップでは変更が黙って失われる。そのため、次の書き込みだけは（キャンセルを除いて）捕捉して通知する。
+
+- フィード一覧の操作——タグ・フォルダの作成・名前変更・削除、タグの付け外し、フィードの移動、フォルダの並べ替え、購読解除、
+  フィード名の変更（`presentation/home/SerialWriteQueue`）
+- 既読・スターの変更——記事の選択、既読・未読、スター・スター解除、すべて既読（`HomeViewModel.launchArticleWrite`）
+- グローバル設定（`SettingsRepository.setGlobal`。表示は `PreferencesController`）
+
+どれも `domain/LocalWriteFailureReporter.runLocalWrite` を通して実行する。失敗はスタックトレース付きで `Log.error` に残し、
+分類ごとにまとめた `ERROR` を 1 件、`NotificationText.LocalWriteFailed(kind)` として通知センターに出す。次のアクションは、
+その分類の説明を開く `ShowInfoDialog` である。分類は失敗の原因になった SQLite のリザルトコードで決め
+（`platform/LocalWriteFailure.kt` の `localWriteFailureKind`。プラットフォームごとに `actual` がある）、メッセージの文字列は
+使わない。`BUSY`（`SQLITE_BUSY`/`SQLITE_LOCKED`——もう一度試す）、`DISK_FULL`（`SQLITE_FULL`——空き容量を増やす）、
+`OTHER`（それ以外。SQLite のコードがない失敗も含む——アプリを再起動する）の 3 つ。Android の Snackbar と iOS のトーストは、
+ほかの `ERROR` と同じようにこれを知らせる。
+
+そのうえで、書き込みに先回りして画面に出していた状態を DB の値に戻し、データと表示を一致させる。ただし、同じ項目にその後
+ユーザーが操作していれば、その新しい操作の結果に任せる。
+
+- **既読・スター**: 記事のピン・選択・既読/スターの intent を、書き込みキューの後ろで読み直した DB の値に戻す。対象は、
+  最新の既読（またはスター）の書き込みがまだ失敗したものである記事だけ。ピンは外さずに値を入れ替えるので、行が一覧から
+  消えることはない。tombstone になった記事はピンを外す。[app-architecture.ja.md](app-architecture.ja.md) の
+  「楽観的な既読/スターピン留め」を参照。
+- **フィード一覧**: フォルダやタグの削除と、フィードの購読解除が画面を変える（選択を「すべて」に戻し、それに伴って
+  開いている記事を閉じ、フォルダやタグの折りたたみ・展開の状態を消す）のは、書き込みが成功し、フィード一覧から項目が
+  消えた後だけ。そのため、失敗してもどれも元のまま変わらない。フィード行からのタグ・フォルダの作成は 1 つの
+  トランザクション（`TagRepository.createTagAndAttach`、`FolderRepository.createFolderAndMoveFeed`）なので、失敗しても
+  片方だけが残ることはない。ほかの操作は、書き込みより先に画面を変えていない。
+- **グローバル設定**: `PreferencesController` は保存されている値を表示し直す。ただし、その後同じ設定が変更されていれば
+  戻さない。保存されている値の読み直しも失敗したときは、設定の書き込み側で読み直しを繰り返す
+  （`SettingsRepository.retryOnWriter`。最初は 1 秒待ち、倍にしながら最大 30 秒）。読めた時点か、同じ設定がより新しく
+  変更された時点でやめるので、保存されなかった値が表示されたまま残ることはない。
 
 ## エラー型（`core/KeryxException.kt`, `core/Result.kt`）
 
@@ -241,6 +283,7 @@ SwiftUI アプリは String Catalog で。唯一の例外は新着記事の OS �
 | `ShowInfoDialog(detail)` | フィード更新で、対象のどのフィードにも接続できなかったとき——すべてがタイムアウトしたか、応答をまったく得られなかった（`RefreshCycleRunner` から `reportRefreshOutcome` の `isUnreachable` 経由）——多くはオフライン。エラーで応答したフィード（HTTP ステータス、404/410、読めない内容）は数えない: 接続を確認しても解決せず、フィード一覧がすでに印を付けているため。同じ内容はまとめるので、失敗が続いても 1 件のまま。更新がすでに到達不能で終わった自動サイクルに手動の更新が合流したとき（`RefreshCycleRunner.joinAutomaticCycle`）は、同期中にこの通知が消されていることがあり、合流した操作も同じ失敗を結果として表示するため、通知をもう一度出す | 原因と対処法の説明ダイアログを表示（画面遷移しない） |
 | `ShowInfoDialog(detail)` | トークンが平文ファイルに残ったとき（`CloudSession`）——`TokenStorage.save()` が `TokenSaveOutcome.PLAINTEXT_FILE` を返した場合。OS のセキュアな認証情報ストアに到達できなかったか、（Android で）セキュアな書き込みは成功したが古い平文のコピーを削除できなかった場合 | 原因と対処法の説明ダイアログを表示（画面遷移しない） |
 | `ShowInfoDialog(detail)` | トークンをどこにも保存できなかったとき（`CloudSession`）——セキュアストアにも平文フォールバックファイルにも書き込めず `TokenSaveOutcome.NOT_PERSISTED` が返った場合。再起動後に再接続が必要 | 原因と対処法の説明ダイアログを表示（画面遷移しない） |
+| `ShowInfoDialog(detail)` | UI が引き渡したローカル書き込みが失敗したとき（`LocalWriteFailureReporter`。上記「ローカル書き込みの失敗」参照）——`LocalWriteFailureKind` ごとに 1 件にまとめ、`ERROR` レベルで出す | その分類の原因と対処法の説明ダイアログを表示（画面遷移しない） |
 | `ResetCloudData` | `CloudDataIncompatibleException` | 専用のインラインボタン → 確認ダイアログ → クラウドDBをタイムスタンプ付き名前で退避してから作り直す（[sync-architecture.ja.md](sync-architecture.ja.md)「クラウドデータのリセット（退避）」参照） |
 
 `AppNotification(id, level: INFO|WARNING|ERROR, text: NotificationText, timestampMillis, action)`。
@@ -259,6 +302,7 @@ Repository は通知の `text` をデータ（`NotificationText.FeedGone(title)`
 | `CloudAuthException` / `SchemaVersionException` | ❌ | ✅ |
 | `CloudDataIncompatibleException`（破損/非互換なクラウドDB／制約違反データ） | ❌（リセットまたは手動同期の成功まで**自動**同期そのものが抑制される — `SyncTrigger.AUTOMATIC` ゲート。[sync-architecture.ja.md](sync-architecture.ja.md)「自動同期の抑制」参照） | ✅ |
 | `FeedNotFoundException(isGone=true)` | ❌ | ✅ |
+| ローカル書き込みの失敗（フィード一覧・既読/スター・グローバル設定。「ローカル書き込みの失敗」参照） | ❌（画面を元に戻すので、ユーザーがもう一度操作する） | ✅（分類ごとにまとめて 1 件） |
 | `UpdateException`（チェック/ダウンロード/検証/インストールの失敗） | ❌（ユーザーが Updates 設定タブの「再試行」、またはトレイ／Help メニューのアップデート項目（Updates タブを開く）を押した時のみ再試行） | ❌（代わりに Updates タブ（とトレイ／Help メニュー項目のラベル）で提示する——[background-update.ja.md](background-update.ja.md) の「アプリ内アップデート」参照。通知センターに届くのは「更新があります」/「インストール準備完了」という情報通知のみで、上記の `ShowSettingsTab`/`OpenUrl` 経由） |
 
 \* `FeedFetcher` が自動リトライするのは実際のタイムアウト時のみで、`FEED_TIMEOUT_RETRY_COUNT` 回まで追加試行する。

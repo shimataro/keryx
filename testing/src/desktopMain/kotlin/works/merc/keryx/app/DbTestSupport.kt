@@ -232,3 +232,46 @@ fun SqlDriver.stampArticleDeleted(id: String, deletedAt: Long?, deletedUpdatedAt
         bindString(2, id)
     }
 }
+
+/**
+ * Plays another writer — a sync merge, or a create running elsewhere — that inserts a row named
+ * [name] into [table] (`folders` or `tags`) under [otherId] right after the first lookup by name on
+ * that table this driver runs. The insert carries `MergeSql`'s own guard (nothing is inserted while a
+ * row of that name exists), so it only lands when the lookup came before the caller's own write:
+ * exactly the window a create that looks the name up and then writes would race.
+ */
+class SameNameInsertingDriver(
+    private val delegate: SqlDriver,
+    private val table: String,
+    private val name: String,
+    private val otherId: String,
+) : SqlDriver by delegate {
+    /** Whether the lookup has been seen and the insert attempted. */
+    var fired = false
+        private set
+
+    override fun <R> executeQuery(
+        identifier: Int?,
+        sql: String,
+        mapper: (app.cash.sqldelight.db.SqlCursor) -> app.cash.sqldelight.db.QueryResult<R>,
+        parameters: Int,
+        binders: (app.cash.sqldelight.db.SqlPreparedStatement.() -> Unit)?,
+    ): app.cash.sqldelight.db.QueryResult<R> {
+        val result = delegate.executeQuery(identifier, sql, mapper, parameters, binders)
+        if (!fired && sql.contains("FROM $table WHERE name = ?")) {
+            fired = true
+            val columns = if (table == "tags") "id, name, color, sort_order, deleted_at, updated_at, created_at" else "id, name, sort_order, deleted_at, updated_at, created_at"
+            val values = if (table == "tags") "?, ?, NULL, 0, NULL, 1, 1" else "?, ?, 0, NULL, 1, 1"
+            delegate.execute(
+                null,
+                "INSERT INTO $table ($columns) SELECT $values WHERE NOT EXISTS (SELECT 1 FROM $table WHERE name = ?)",
+                3,
+            ) {
+                bindString(0, otherId)
+                bindString(1, name)
+                bindString(2, name)
+            }
+        }
+        return result
+    }
+}

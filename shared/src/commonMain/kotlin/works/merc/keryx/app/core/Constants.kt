@@ -23,6 +23,26 @@ const val SETTINGS_TAB_UPDATES = "updates"
  */
 const val SQLITE_BUSY_TIMEOUT_MS = 5_000L
 
+/**
+ * The longest `SyncRepository.flushPendingSync` waits for local writes still queued
+ * (`PendingLocalWrites`) before going ahead without them. Each queued write can wait out the whole
+ * [SQLITE_BUSY_TIMEOUT_MS] behind another connection's write lock, so this allows two; the bound
+ * keeps a write that never finishes from holding the foreground-exit flush — and the OS's background
+ * grace period on iOS — indefinitely.
+ */
+const val LOCAL_WRITES_FLUSH_WAIT_MS = 2 * SQLITE_BUSY_TIMEOUT_MS
+
+/**
+ * How long `SettingsRepository.retryOnWriter` first waits before reading a setting again, when the
+ * read that should show a failed setting write's stored value has failed too; it doubles after each
+ * failed attempt up to [LOCAL_WRITE_REREAD_RETRY_MAX_MS], so the shown value catches up with the
+ * database once it can be read again without polling a database that stays unreadable.
+ */
+const val LOCAL_WRITE_REREAD_RETRY_INITIAL_MS = 1_000L
+
+/** The longest wait between attempts in `SettingsRepository.retryOnWriter`. */
+const val LOCAL_WRITE_REREAD_RETRY_MAX_MS = 30_000L
+
 // --- Time ---
 const val MILLIS_PER_HOUR = 60 * 60 * 1000L
 const val MILLIS_PER_DAY = 24 * MILLIS_PER_HOUR
@@ -83,6 +103,13 @@ const val DEFERRED_SYNC_DEBOUNCE_MS = 5 * MILLIS_PER_MINUTE
 const val CONNECTION_TIMEOUT_MS = 10_000L
 const val READ_TIMEOUT_SECONDS_DEFAULT = 30
 const val MAX_REDIRECTS = 5 // redirect loop guard
+
+/**
+ * Max feeds fetched concurrently when many are fetched at once — a refresh's network phase
+ * (`FeedRepository.refreshFeeds`) and an OPML import's prefetch (`OpmlImporter`). Bounded so a large
+ * subscription list doesn't open an unbounded number of sockets at once; DB writes stay serial.
+ */
+const val FEED_FETCH_CONCURRENCY = 6
 
 /**
  * How long a refresh leaves a feed's favicon alone after a lookup found none, before looking again.

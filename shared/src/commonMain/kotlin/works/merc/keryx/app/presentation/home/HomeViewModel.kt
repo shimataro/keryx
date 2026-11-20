@@ -2,6 +2,7 @@ package works.merc.keryx.app.presentation.home
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
@@ -50,6 +51,9 @@ import works.merc.keryx.app.domain.AddFeedPreviewResolver
 import works.merc.keryx.app.domain.ArticleListRow
 import works.merc.keryx.app.domain.ArticleReaderRow
 import works.merc.keryx.app.domain.ArticleRepository
+import works.merc.keryx.app.domain.ArticleFlags
+import works.merc.keryx.app.domain.LocalWriteFailureReporter
+import works.merc.keryx.app.domain.PendingLocalWrites
 import works.merc.keryx.app.domain.ArticleSearchResult
 import works.merc.keryx.app.domain.displayTitle
 import works.merc.keryx.app.domain.toListRow
@@ -88,12 +92,21 @@ class HomeViewModel(
     // The one "Sync now" every route shares (CloudSyncController in production) — see [sync].
     private val manualSync: ManualSync,
     private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
-    // Imperative read/star DB writes run here instead of the UI thread. Single-threaded so writes
+    // Imperative DB writes — read/star, and the feed list's unsubscribe/rename and tag/folder
+    // structure actions — run here instead of the UI thread. Single-threaded so writes
     // stay serialized (one writer, as they were on the UI thread) — the JVM SQLite driver opens a
     // fresh connection per statement, so concurrent writes would contend for the write lock and
     // only avoid SQLITE_BUSY by burning the busy_timeout DatabaseDriverFactory sets. UI state is
-    // updated optimistically before the write is dispatched.
+    // updated optimistically before the write is dispatched. Feed-list writes additionally go
+    // through [feedListWrites], which keeps them in order across their suspensions too. Every write
+    // is counted in [pendingLocalWrites] until it has run, so a foreground-exit sync flush waits for it.
     private val dbWriteDispatcher: CoroutineDispatcher = Dispatchers.Default.limitedParallelism(1),
+    // Counts the feed-list writes queued but not yet run, so a foreground-exit sync flush waits for
+    // them (see [PendingLocalWrites]). Shared with `SyncRepository` in production.
+    private val pendingLocalWrites: PendingLocalWrites = PendingLocalWrites(),
+    // Reports a read/star or feed-list write that failed off the UI thread (its optimistic state is
+    // then undone here — see [revertFailedArticleWrite]). The app's one instance in production.
+    private val localWriteFailureReporter: LocalWriteFailureReporter,
 ) : ViewModel() {
 
     // Eagerly (not WhileSubscribed) so these start populating as soon as the ViewModel is
@@ -789,6 +802,53 @@ class HomeViewModel(
 
     private val expansion = FeedListExpansion(settingsRepository)
 
+    /**
+     * The feed list's writes — unsubscribe, rename, and [FeedListActions]' tag/folder/move actions —
+     * each run to completion, in the order they were made, before the next starts (see
+     * [SerialWriteQueue]); a move waiting on the feed placement lock holds back an unsubscribe made
+     * after it instead of letting it land first.
+     *
+     * Read/star writes ([selectArticle], [toggleRead], [toggleStar], …) are not queued here: they go
+     * straight to [dbWriteDispatcher], so one can run while a queued feed-list write is suspended on
+     * that lock. They write only `articles`' read/star columns, which no feed-list write touches —
+     * but marking a whole filter read (All Feeds, a tag or a folder, [markAllRead]) picks its articles
+     * by `feeds`, `feed_tags` and `folder_id` as they stand when it runs, so it can land ahead of a
+     * queued move, tag change or unsubscribe and act on the membership from before it. That is
+     * deliberately left unordered: the queued write has not reached the list yet either, so what is
+     * marked read is what the article list showed when the user asked.
+     */
+    private val feedListWrites = SerialWriteQueue(viewModelScope, dbWriteDispatcher, localWriteFailureReporter, pendingLocalWrites)
+
+    // A delete's second selection fallback, run once the list the feed list renders from stops
+    // showing the deleted item (see [DeletedItemFallback]) — the feed list renders feeds from
+    // [structuralFeeds], which can lag [feeds]. Whether a still-shown item is live is read on
+    // [dispatcher], off the main thread.
+    private val deletedFeedFallback = DeletedItemFallback(
+        viewModelScope,
+        structuralFeeds,
+        dispatcher,
+        isLive = { id -> feedRepository.getFeedById(id).let { it != null && it.deleted_at == null } },
+    ) { it.id }
+    private val deletedTagFallback = DeletedItemFallback(
+        viewModelScope,
+        tags,
+        dispatcher,
+        isLive = { id -> tagRepository.getTagById(id).let { it != null && it.deleted_at == null } },
+    ) { it.id }
+    private val deletedFolderFallback = DeletedItemFallback(
+        viewModelScope,
+        folders,
+        dispatcher,
+        isLive = { id -> folderRepository.getFolderById(id).let { it != null && it.deleted_at == null } },
+    ) { it.id }
+
+    /** Runs [fallback] once the feed list stops showing [target] — see [DeletedItemFallback]. */
+    private fun fallBackOnceHidden(target: DeletedTarget, fallback: () -> Unit) = when (target) {
+        is DeletedTarget.Feed -> deletedFeedFallback.fallBackOnceHidden(target.id, fallback)
+        is DeletedTarget.Tag -> deletedTagFallback.fallBackOnceHidden(target.id, fallback)
+        is DeletedTarget.Folder -> deletedFolderFallback.fallBackOnceHidden(target.id, fallback)
+    }
+
     // Tag/folder structure actions live in their own class; this ViewModel only delegates to it.
     private val feedListActions = FeedListActions(
         feedRepository = feedRepository,
@@ -798,6 +858,8 @@ class HomeViewModel(
         selectedRowInstance = _selectedRowInstance,
         currentFilter = { _filter.value },
         selectFilter = { selectFilter(it) },
+        launchWrite = { write, afterWrite -> feedListWrites.enqueue(write, afterWrite) },
+        fallBackOnceHidden = ::fallBackOnceHidden,
     )
 
     /** The feed list's collapsed folders — see [FeedListExpansion.collapsedFolderIds]. */
@@ -958,7 +1020,7 @@ class HomeViewModel(
         // sync merge tombstone the row concurrently, marking it read only stamps read_at/updated_at;
         // deletion's last-write-wins runs on deleted_updated_at, which this write never touches, so
         // it cannot revive or otherwise disturb the deletion.
-        viewModelScope.launch(dbWriteDispatcher) { articleRepository.markAsRead(article.id) }
+        val write = launchArticleWrite(ArticleWriteField.READ, listOf(article.id)) { articleRepository.markAsRead(article.id) }
         // Set before the cursor, so selectedArticleRow never resolves the new cursor against the
         // previous selection's row.
         _pendingSelectedRow.value = article.copy(is_read = 1L)
@@ -992,8 +1054,9 @@ class HomeViewModel(
         // even if a newer selection supersedes this one, so an unread-only list cannot collapse
         // under a held key.
         val pinnedAtSelect = article.is_read == 0L
-        if (pinnedAtSelect) {
-            _pinnedReadStates.update { it + (article.id to article.copy(is_read = 1L)) }
+        val pin = article.copy(is_read = 1L).takeIf { pinnedAtSelect }
+        if (pin != null) {
+            _pinnedReadStates.update { it + (article.id to pin) }
         }
         // Read intents recorded after this point override this selection's implicit "read". Begun
         // synchronously and ended in the coroutine's `finally`; UNDISPATCHED runs the body up to its
@@ -1009,6 +1072,9 @@ class HomeViewModel(
                 starIntents.end()
             }
         }
+        // Last, once everything above is in place — the hydration's read intents included, which is
+        // what a failed write's revert lays the DB's value into for a hydration still loading.
+        write.register(readPins = pin?.let { mapOf(article.id to it) }.orEmpty())
     }
 
     /** The asynchronous half of [selectArticle]: loads the body and applies the selection. */
@@ -1210,7 +1276,7 @@ class HomeViewModel(
         // own KDoc for why this order is load-bearing: it is what guarantees a concurrent reconcile
         // pass can never observe (and revert) this optimistic pin/selection using DB flags from
         // before this write has landed.
-        viewModelScope.launch(dbWriteDispatcher) {
+        val write = launchArticleWrite(ArticleWriteField.READ, listOf(article.id)) {
             if (read) articleRepository.markAsRead(article.id) else articleRepository.markAsUnread(article.id)
         }
         readIntents.record(article.id, read)
@@ -1218,8 +1284,10 @@ class HomeViewModel(
         // lands the raw query still says "read", and an unread-only list that had lost the pin would
         // drop the row for that window — the reader's pager then collapses to the selected article and
         // rebuilds every page it holds, so the open article visibly reloads. Same reasoning as setStarred.
-        _pinnedReadStates.update { it + (article.id to article.copy(is_read = read.toDbFlag())) }
+        val pin = article.copy(is_read = read.toDbFlag())
+        _pinnedReadStates.update { it + (article.id to pin) }
         applyToSelection(article.id, { it.copy(is_read = read.toDbFlag()) }, { it.copy(is_read = read.toDbFlag()) })
+        write.register(readPins = mapOf(article.id to pin))
     }
 
     /**
@@ -1294,22 +1362,34 @@ class HomeViewModel(
         // own KDoc for why this order is load-bearing: it is what guarantees a concurrent reconcile
         // pass can never observe (and revert) this optimistic pin/selection using DB flags from
         // before this write has landed.
-        viewModelScope.launch(dbWriteDispatcher) { articleRepository.setStarred(article.id, starred = starred) }
+        val write = launchArticleWrite(ArticleWriteField.STAR, listOf(article.id)) {
+            articleRepository.setStarred(article.id, starred = starred)
+        }
+        var unstarredPin: ArticleListRow? = null
         if (_filter.value == ArticleFilter.Starred || currentMode() == ArticleListMode.Starred) {
-            _pinnedUnstarredArticles.update { it + (article.id to article.copy(is_starred = starred.toDbFlag())) }
+            val pin = article.copy(is_starred = starred.toDbFlag())
+            unstarredPin = pin
+            _pinnedUnstarredArticles.update { it + (article.id to pin) }
         } else if (starred) {
             _pinnedUnstarredArticles.update { it - article.id }
         }
         // A row the raw query no longer returns is drawn from its read pin (the `articles` combine's
         // extra rows), so that pin carries the star too. A fresh instance, as for any user write.
+        var readPin: ArticleListRow? = null
         _pinnedReadStates.update { pins ->
-            pins[article.id]?.let { pins + (article.id to it.copy(is_starred = starred.toDbFlag())) } ?: pins
+            val replaced = pins[article.id]?.copy(is_starred = starred.toDbFlag())
+            readPin = replaced
+            if (replaced != null) pins + (article.id to replaced) else pins
         }
         starIntents.record(article.id, starred)
         applyToSelection(
             article.id,
             { it.copy(is_starred = starred.toDbFlag()) },
             { it.copy(is_starred = starred.toDbFlag()) },
+        )
+        write.register(
+            readPins = readPin?.let { mapOf(article.id to it) }.orEmpty(),
+            unstarredPins = unstarredPin?.let { mapOf(article.id to it) }.orEmpty(),
         )
     }
 
@@ -1359,6 +1439,11 @@ class HomeViewModel(
     fun markAllRead() {
         val requested = currentScope()
         if (displayedScope() == requested) return markShownRead()
+        // Counted as a pending local write while it waits, too: the write it leads to is decided only
+        // once the list shows the requested scope, and a foreground-exit flush must not miss it. The
+        // wait ends without the UI — the displayed scope comes from the eagerly collected DB queries —
+        // and the write markShownRead dispatches counts itself before this one ends.
+        pendingLocalWrites.begin()
         viewModelScope.launch {
             // From the source flows, as currentScope() is: the derived mode/narrowing lag behind them.
             combine(
@@ -1367,7 +1452,149 @@ class HomeViewModel(
                 shown == scopeOf(filter, unread, unreadStarred, starred)
             }.first { it }
             if (currentScope() == requested) markShownRead()
+        }.invokeOnCompletion { pendingLocalWrites.end() }
+    }
+
+    /**
+     * Runs a read/star write on [dbWriteDispatcher], in call order, and returns at once. Counted in
+     * [pendingLocalWrites] from the call until it has finished — run, failed, or cancelled before it
+     * started — since the write schedules its deferred sync only once it runs, and a foreground-exit
+     * flush made in between must still send it.
+     *
+     * A write that fails is reported ([LocalWriteFailureReporter]) rather than thrown, and the
+     * optimistic state it stood behind is undone ([revertFailedArticleWrite]) once the caller has
+     * [ArticleWrite.register]ed it — which every caller does last, after setting that state.
+     *
+     * @param field Which flag [write] sets.
+     * @param ids The articles whose [field] the optimistic state shows ahead of [write] — the ones a
+     *   failure is undone on.
+     */
+    private fun launchArticleWrite(field: ArticleWriteField, ids: Collection<String>, write: suspend () -> Unit): ArticleWrite {
+        val generations = generationsOf(field)
+        val pending = ArticleWrite(field, ids, generations.stamp(ids))
+        pendingLocalWrites.begin()
+        viewModelScope.launch(dbWriteDispatcher) {
+            val landed = localWriteFailureReporter.runLocalWrite(write)
+            // Back on the main thread, which owns the generations and every piece of optimistic state.
+            viewModelScope.launch {
+                if (landed) generations.release(ids, pending.generation) else revertFailedArticleWrite(pending)
+            }
+        }.invokeOnCompletion { pendingLocalWrites.end() }
+        return pending
+    }
+
+    /** Which of an article's two flags a read/star write sets. */
+    private enum class ArticleWriteField { READ, STAR }
+
+    /** The latest read write per article — see [ArticleWriteGenerations]. */
+    private val readWriteGenerations = ArticleWriteGenerations()
+
+    /** The latest star write per article — see [ArticleWriteGenerations]. */
+    private val starWriteGenerations = ArticleWriteGenerations()
+
+    private fun generationsOf(field: ArticleWriteField) = when (field) {
+        ArticleWriteField.READ -> readWriteGenerations
+        ArticleWriteField.STAR -> starWriteGenerations
+    }
+
+    /**
+     * A read/star write [launchArticleWrite] dispatched: what it writes, its generation, and the
+     * optimistic pins its caller set for it ([register]ed once they are in place).
+     */
+    private class ArticleWrite(val field: ArticleWriteField, val ids: Collection<String>, val generation: Long) {
+        private val registered = CompletableDeferred<Unit>()
+
+        /** The read-state pins the caller set for this write, by article id. */
+        var readPins: Map<String, ArticleListRow> = emptyMap()
+            private set
+
+        /** The unstarred pins the caller set for this write, by article id. */
+        var unstarredPins: Map<String, ArticleListRow> = emptyMap()
+            private set
+
+        /** Records the pins the caller set, and lets a failed write's revert run. Call exactly once. */
+        fun register(
+            readPins: Map<String, ArticleListRow> = emptyMap(),
+            unstarredPins: Map<String, ArticleListRow> = emptyMap(),
+        ) {
+            this.readPins = readPins
+            this.unstarredPins = unstarredPins
+            registered.complete(Unit)
         }
+
+        /** Suspends until [register] has been called. */
+        suspend fun awaitRegistered() = registered.await()
+    }
+
+    /**
+     * Undoes the optimistic state a failed read/star [write] stood behind, so what is shown matches
+     * the DB again — on each article only while [write] is still the latest write of its kind made
+     * on it ([ArticleWriteGenerations]): on any other, a newer user action owns what is shown.
+     *
+     * The DB's current flags are read through [dbWriteDispatcher], behind every write queued before
+     * this read, so they include whatever landed after [write] failed. Then, on each such article:
+     * its pins ([_pinnedReadStates], and for a star write [_pinnedUnstarredArticles]) take the DB's
+     * value, as fresh instances — kept rather than dropped, so the row does not vanish from a list
+     * that shows it only through its pin; the selection ([_selectedArticle], [_pendingSelectedRow])
+     * takes it too; and it is recorded as the article's latest intent ([readIntents] / [starIntents]),
+     * so a selection still loading its body lays the DB's value over its row rather than the failed
+     * one. An article the DB no longer has alive (a sync merge tombstoned it) loses its pins instead,
+     * as in [reconcilePinnedArticlesAndSelection]. Search results showing are re-run.
+     *
+     * Should the read itself fail, only the pins [write] set — as long as they are still in place —
+     * are dropped; the next change to `articles` reconciles the rest.
+     */
+    private suspend fun revertFailedArticleWrite(write: ArticleWrite) {
+        write.awaitRegistered()
+        val generations = generationsOf(write.field)
+        try {
+            val flags = runCatchingUnlessCancelled {
+                withContext(dbWriteDispatcher) { articleRepository.aliveArticleFlags(write.ids) }
+            }.getOrElse { e ->
+                Log.warn(TAG, "Re-reading the articles of a failed read/star write failed", e)
+                _pinnedReadStates.update { pins -> pins.withoutPinsOf(write.readPins) }
+                _pinnedUnstarredArticles.update { pins -> pins.withoutPinsOf(write.unstarredPins) }
+                return
+            }
+            val ids = write.ids.filterTo(HashSet()) { generations.isLatest(it, write.generation) }
+            if (ids.isEmpty()) return
+            when (write.field) {
+                ArticleWriteField.READ -> revertReadState(ids, flags)
+                ArticleWriteField.STAR -> revertStarState(ids, flags)
+            }
+            if (searchActive.value) _searchRefreshTrigger.update { it + 1 }
+        } finally {
+            generations.release(write.ids, write.generation)
+        }
+    }
+
+    /** [revertFailedArticleWrite]'s read-state half, over the articles [ids] it reverts. */
+    private fun revertReadState(ids: Set<String>, flags: Map<String, ArticleFlags>) {
+        _pinnedReadStates.update { pins -> pins.revertedPins(ids, flags) { pin, f -> pin.copy(is_read = f.isRead) } }
+        _selectedArticle.update { article ->
+            val f = article?.takeIf { it.id in ids }?.let { flags[it.id] }
+            if (f != null) article.copy(is_read = f.isRead) else article
+        }
+        _pendingSelectedRow.update { row ->
+            val f = row?.takeIf { it.id in ids }?.let { flags[it.id] }
+            if (f != null) row.copy(is_read = f.isRead) else row
+        }
+        ids.forEach { id -> flags[id]?.let { readIntents.record(id, read = it.isRead == 1L) } }
+    }
+
+    /** [revertFailedArticleWrite]'s star half, over the articles [ids] it reverts. */
+    private fun revertStarState(ids: Set<String>, flags: Map<String, ArticleFlags>) {
+        _pinnedUnstarredArticles.update { pins -> pins.revertedPins(ids, flags) { pin, f -> pin.copy(is_starred = f.isStarred) } }
+        _pinnedReadStates.update { pins -> pins.revertedPins(ids, flags) { pin, f -> pin.copy(is_starred = f.isStarred) } }
+        _selectedArticle.update { article ->
+            val f = article?.takeIf { it.id in ids }?.let { flags[it.id] }
+            if (f != null) article.copy(is_starred = f.isStarred) else article
+        }
+        _pendingSelectedRow.update { row ->
+            val f = row?.takeIf { it.id in ids }?.let { flags[it.id] }
+            if (f != null) row.copy(is_starred = f.isStarred) else row
+        }
+        ids.forEach { id -> flags[id]?.let { starIntents.record(id, read = it.isStarred == 1L) } }
     }
 
     /** [markAllRead] over the rows on screen, once they belong to the current [ListScope]. */
@@ -1404,7 +1631,20 @@ class HomeViewModel(
         // own KDoc for why this order is load-bearing: it is what guarantees a concurrent reconcile
         // pass can never observe (and revert) this optimistic pin/selection using DB flags from
         // before this write has landed.
-        viewModelScope.launch(dbWriteDispatcher) {
+        // An explicit "read" for everything this writes, so a selection still loading its body cannot
+        // apply an earlier "mark as unread" over it (see SelectionReadIntents). When scoped that is
+        // exactly idsToMark; otherwise markAllAsRead marks the whole filter, which holds every row
+        // listed — the ones shown read included — as well as the selection (including one still
+        // loading). Also the write's generation (see ArticleWriteGenerations): a row shown read only
+        // because of an earlier write that failed is written read here too, so that failure's revert
+        // must not put its older unread state back over this one. And what a failure of the write
+        // below is undone on.
+        val marked = if (scoped) {
+            idsToMark
+        } else {
+            (currentArticles().map { it.id } + listOfNotNull(selected?.id, selectionCursorId)).distinct()
+        }
+        val write = launchArticleWrite(ArticleWriteField.READ, marked) {
             if (scoped) {
                 articleRepository.markArticlesAsRead(idsToMark)
                 // Re-run search only after the write lands so the freshly-read state shows up.
@@ -1413,11 +1653,6 @@ class HomeViewModel(
                 articleRepository.markAllAsRead(filter)
             }
         }
-        // An explicit "read" for everything this writes, so a selection still loading its body cannot
-        // apply an earlier "mark as unread" over it (see SelectionReadIntents). When scoped that is
-        // exactly idsToMark; otherwise markAllAsRead marks the whole filter, which holds every
-        // visible row as well as the selection (including one still loading).
-        val marked = if (scoped) idsToMark else visibleUnread.map { it.id } + listOfNotNull(selected?.id, selectionCursorId)
         marked.forEach { readIntents.record(it, read = true) }
         // Optimistic update: pin every currently-visible unread article in its read state so the list
         // doesn't collapse the instant the user presses "mark all read" under unread-only.
@@ -1436,6 +1671,7 @@ class HomeViewModel(
         // back a snapshot taken before that pass dropped a pin. The new pins stay fresh instances:
         // they are new writes, which that pass's identity check must not judge.
         _pinnedReadStates.update { it + newPins }
+        write.register(readPins = newPins)
     }
 
     /**
@@ -1690,16 +1926,32 @@ class HomeViewModel(
     }
 
     /**
-     * Unsubscribes from a feed and switches to the all-articles filter if it is selected.
+     * Unsubscribes from a feed and switches to the all-articles filter if it is selected. The DB
+     * write is queued behind the feed list's earlier writes ([feedListWrites]); the filter falls back
+     * only once the write has landed and the feed list has stopped showing the feed
+     * ([DeletedItemFallback]) — until then the feed is still shown, so the selection stays on it, and
+     * selecting it again in between still falls back. A write that fails leaves the filter and the
+     * open article as they were, since the feed is still subscribed.
+     *
+     * Only this action's own successful write moves the selection: a feed removed by a sync merge
+     * leaves the selection alone (external-spec §9, "Least surprise").
      *
      * @param id The identifier of the feed to unsubscribe from.
      */
     fun unsubscribeFeed(id: String) {
-        feedRepository.unsubscribeFeed(id)
-        if (_filter.value == ArticleFilter.Feed(id)) selectFilter(ArticleFilter.All)
+        val fallBack = { if (_filter.value == ArticleFilter.Feed(id)) selectFilter(ArticleFilter.All) }
+        feedListWrites.enqueue({ feedRepository.unsubscribeFeed(id) }) {
+            fallBackOnceHidden(DeletedTarget.Feed(id), fallBack)
+        }
     }
 
-    fun renameFeed(id: String, title: String?) = feedRepository.renameFeed(id, title)
+    /**
+     * Sets (or, with `null`, clears) a feed's custom title. The DB write is queued behind the feed
+     * list's earlier writes ([feedListWrites]).
+     */
+    fun renameFeed(id: String, title: String?) {
+        feedListWrites.enqueue { feedRepository.renameFeed(id, title) }
+    }
 
     /**
      * What's in flight right now — feed refreshes, syncs (manual, debounced, or background), and
@@ -1803,8 +2055,22 @@ class HomeViewModel(
     val cloudConnected: StateFlow<Boolean> get() = manualSync.connected
 
     // --- Tag actions ---
+    //
+    // These and the folder actions below queue their write on [feedListWrites] and return at once
+    // (see [FeedListActions]); the state they show catches up through the DB-backed flows.
 
-    fun createTag(name: String, color: String? = null): String? = feedListActions.createTag(name, color)
+    /**
+     * Creates a tag and, when [attachToFeedId] is given, attaches it to that feed in the same write
+     * (a feed row's "New tag…").
+     *
+     * Blank names are ignored.
+     *
+     * @param name The tag's name (trimmed).
+     * @param color The tag's color, or `null` for none.
+     * @param attachToFeedId The feed to attach the new tag to, or `null` to only create it.
+     */
+    fun createTag(name: String, color: String? = null, attachToFeedId: String? = null) =
+        feedListActions.createTag(name, color, attachToFeedId)
 
     /**
      * Updates a tag with the specified name and color.
@@ -1818,7 +2084,9 @@ class HomeViewModel(
     fun updateTag(id: String, name: String, color: String?) = feedListActions.updateTag(id, name, color)
 
     /**
-     * Deletes a tag and resets the active filter if it references the deleted tag.
+     * Deletes a tag and resets the active filter if it references the deleted tag — once the queued
+     * write has landed and the feed list has stopped showing the tag, so a delete that fails changes
+     * nothing (see [FeedListActions.deleteTag]).
      *
      * @param id The identifier of the tag to delete.
      */
@@ -1836,12 +2104,24 @@ class HomeViewModel(
 
     // --- Folder actions ---
 
-    fun createFolder(name: String): String? = feedListActions.createFolder(name)
+    /**
+     * Creates a folder and, when [moveFeedId] is given, moves that feed into it in the same write
+     * (a feed row's "New folder…").
+     *
+     * Blank names are ignored.
+     *
+     * @param name The folder's name (trimmed).
+     * @param moveFeedId The feed to move into the new folder, or `null` to only create it.
+     */
+    fun createFolder(name: String, moveFeedId: String? = null) = feedListActions.createFolder(name, moveFeedId)
 
+    /** Renames a folder. Blank names are ignored. */
     fun updateFolder(id: String, name: String) = feedListActions.updateFolder(id, name)
 
     /**
-     * Deletes a folder and removes it from the collapsed-folder state.
+     * Deletes a folder, removes it from the collapsed-folder state and resets the active filter if
+     * it is the deleted folder — once the queued write has landed and the feed list has stopped
+     * showing the folder, so a delete that fails changes nothing (see [FeedListActions.deleteFolder]).
      *
      * @param id The identifier of the folder to delete.
      */
