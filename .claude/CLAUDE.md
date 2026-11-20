@@ -109,6 +109,27 @@ workaround as a complete fix. (This concerns *bug fixing*; behavior-preserving
 refactors and perf work still follow the small, independently-revertible-batch
 discipline of the `refactor` / `perf-tune` skills.)
 
+## Error handling and race conditions
+
+**Improbable is not impossible — "it practically never happens" means "it will happen someday".**
+Every failure path, and every interleaving that produces a wrong result or breaks a required outcome,
+that reading the code shows to be reachable is a defect to close, however narrow its window: two operations completing within the same millisecond, a
+cancellation between two steps, a check-then-act gap (TOCTOU), concurrent operations finishing in the
+other order, a sync merge or another process/device writing in between, an exception thrown halfway
+through a multi-step update.
+
+- **Close it structurally; never just narrow the window.** Use a mutex, an atomic operation or
+  conditional `UPDATE`, a transaction, a latest-wins token, or `finally` / `NonCancellable` cleanup.
+  A `delay` used for ordering, a retry that relies on timing, or an assumption that "this side
+  finishes first" does not close a hole.
+- **Rate it by consequence, not likelihood.** A narrow window never lowers a finding's severity or
+  makes it optional (`.claude/etc/review/common.md` §4–§6).
+- **A race fix is tested by forcing the interleaving**, not by hoping a loop hits the window
+  (`docs/testing.md` "Conventions").
+- **A hole that genuinely cannot be closed** — its root cause is external, or closing it needs a
+  redesign outside the scope of the change that found it — is recorded in `docs/known-issues.md`
+  with what a real fix would need, and reported to the user as such (see "Bug fixes" above). "It is rare" is never the reason.
+
 ## Review
 
 Code review runs through the **`reviewer` agent**, which dispatches to eleven specialists

@@ -1255,6 +1255,624 @@ class SyncMergerTest {
         verifyDriver.close()
     }
 
+    // ---- Ties: equal timestamps, different values. The cloud side wins every tie in every
+    // last-write-wins statement, so two devices that stamped different values in the same
+    // millisecond converge instead of each keeping (and re-uploading) its own. ----
+
+    /** Builds a local and a cloud file via the given setups, merges cloud into local, then runs [verify]. */
+    private fun mergeThenVerify(
+        local: (KeryxDatabase) -> Unit,
+        cloud: (KeryxDatabase) -> Unit,
+        verify: (KeryxDatabase) -> Unit,
+    ) {
+        val (cloudFile, cloudDriver, cloudDb) = fileDb()
+        cloud(cloudDb)
+        cloudDriver.close()
+
+        val (localFile, localDriver, localDb) = fileDb()
+        local(localDb)
+        localDriver.close()
+
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+
+        val (_, verifyDriver, verifyDb) = reopen(localFile)
+        try {
+            verify(verifyDb)
+        } finally {
+            verifyDriver.close()
+        }
+    }
+
+    @Test
+    fun tieOnFolderByIdGoesToCloud() = mergeThenVerify(
+        local = { it.insertFolder("d1", "Local name", now = 100, sortOrder = 1L) },
+        cloud = { it.insertFolder("d1", "Cloud name", now = 100, sortOrder = 5L) },
+        verify = {
+            val folder = it.foldersQueries.getById("d1").executeAsOne()
+            assertEquals("Cloud name", folder.name)
+            assertEquals(5L, folder.sort_order)
+        },
+    )
+
+    @Test
+    fun tieOnFolderByNameGoesToCloud() = mergeThenVerify(
+        local = { it.insertFolder("d-local", "IT", now = 100, sortOrder = 1L) },
+        cloud = { it.insertFolder("d-cloud", "IT", now = 100, sortOrder = 5L) },
+        verify = {
+            assertEquals(5L, it.foldersQueries.getById("d-local").executeAsOne().sort_order)
+        },
+    )
+
+    @Test
+    fun tieOnFeedContentRowGoesToCloud() = mergeThenVerify(
+        local = { it.insertFeed("f1", now = 100, url = "https://local/feed") },
+        cloud = { it.insertFeed("f1", now = 100, url = "https://cloud/feed") },
+        verify = {
+            assertEquals("https://cloud/feed", it.feedsQueries.getById("f1").executeAsOne().url)
+        },
+    )
+
+    @Test
+    fun tieOnTagByIdGoesToCloud() = mergeThenVerify(
+        local = { it.insertTag("t1", "Local name", now = 100, sortOrder = 1L) },
+        cloud = { it.insertTag("t1", "Cloud name", now = 100, sortOrder = 5L) },
+        verify = {
+            val tag = it.tagsQueries.getById("t1").executeAsOne()
+            assertEquals("Cloud name", tag.name)
+            assertEquals(5L, tag.sort_order)
+        },
+    )
+
+    @Test
+    fun tieOnTagByNameGoesToCloud() = mergeThenVerify(
+        local = { it.insertTag("t-local", "News", now = 100, sortOrder = 1L) },
+        cloud = { it.insertTag("t-cloud", "News", now = 100, sortOrder = 5L) },
+        verify = {
+            assertEquals(5L, it.tagsQueries.getById("t-local").executeAsOne().sort_order)
+        },
+    )
+
+    @Test
+    fun tieOnFeedTagGoesToCloud() = mergeThenVerify(
+        local = {
+            it.insertFeed("f1", now = 100)
+            it.insertTag("t1", "tag", now = 100)
+            it.insertFeedTag("f1", "t1", now = 100, deletedAt = null)
+        },
+        cloud = {
+            it.insertFeed("f1", now = 100)
+            it.insertTag("t1", "tag", now = 100)
+            it.insertFeedTag("f1", "t1", now = 100, deletedAt = 100) // detached at the same stamp
+        },
+        verify = {
+            // The detached link is soft-deleted, so it is no longer listed for the feed.
+            assertEquals(emptyList(), it.feed_tagsQueries.watchTagIdsForFeed("f1").executeAsList())
+        },
+    )
+
+    @Test
+    fun tieOnGlobalSettingGoesToCloud() = mergeThenVerify(
+        local = { it.insertGlobalSetting("k1", "local-value", now = 100) },
+        cloud = { it.insertGlobalSetting("k1", "cloud-value", now = 100) },
+        verify = { assertEquals("cloud-value", it.global_settingsQueries.get("k1").executeAsOne()) },
+    )
+
+    // Per-field ties. The local row's content stamp is newer (500) than the cloud's (400) so only
+    // the per-field statement can bring the cloud value in.
+
+    @Test
+    fun tieOnFeedFolderIdGoesToCloud() = mergeThenVerify(
+        local = {
+            it.insertFolder("d1", "One", now = 100)
+            it.insertFolder("d2", "Two", now = 100)
+            it.insertFeed("f1", now = 500)
+            it.feedsQueries.updateFolder("d1", 500L, 100L, "f1")
+        },
+        cloud = {
+            it.insertFolder("d1", "One", now = 100)
+            it.insertFolder("d2", "Two", now = 100)
+            it.insertFeed("f1", now = 400)
+            it.feedsQueries.updateFolder("d2", 400L, 100L, "f1")
+        },
+        verify = { assertEquals("d2", it.feedsQueries.getById("f1").executeAsOne().folder_id) },
+    )
+
+    @Test
+    fun tieOnFeedSortOrderGoesToCloud() = mergeThenVerify(
+        local = {
+            it.insertFeed("f1", now = 500)
+            it.feedsQueries.updateSortOrder(1L, 500L, 100L, "f1")
+        },
+        cloud = {
+            it.insertFeed("f1", now = 400)
+            it.feedsQueries.updateSortOrder(9L, 400L, 100L, "f1")
+        },
+        verify = { assertEquals(9L, it.feedsQueries.getById("f1").executeAsOne().sort_order) },
+    )
+
+    @Test
+    fun tieOnFeedCustomTitleGoesToCloud() = mergeThenVerify(
+        local = {
+            it.insertFeed("f1", now = 500)
+            it.feedsQueries.updateCustomTitle("Local name", 500L, 100L, "f1")
+        },
+        cloud = {
+            it.insertFeed("f1", now = 400)
+            it.feedsQueries.updateCustomTitle("Cloud name", 400L, 100L, "f1")
+        },
+        verify = { assertEquals("Cloud name", it.feedsQueries.getById("f1").executeAsOne().custom_title) },
+    )
+
+    @Test
+    fun tieOnFeedDeletedAtGoesToCloud() = mergeThenVerify(
+        local = {
+            it.insertFeed("f1", now = 500)
+            it.feedsQueries.stampResubscribed(100L, "f1") // alive, subscription state stamped at 100
+        },
+        cloud = {
+            it.insertFeed("f1", now = 400)
+            it.feedsQueries.softDelete(77L, 400L, 100L, "f1") // unsubscribed at the same stamp
+        },
+        verify = { assertEquals(77L, it.feedsQueries.getById("f1").executeAsOne().deleted_at) },
+    )
+
+    @Test
+    fun strictlyNewerLocalValuesAreStillKeptOverCloud() = mergeThenVerify(
+        local = {
+            it.insertFolder("d1", "Local name", now = 200)
+            it.insertTag("t1", "Local tag", now = 200)
+            it.insertGlobalSetting("k1", "local-value", now = 200)
+            it.insertFeed("f1", now = 500, url = "https://local/feed")
+            it.feedsQueries.updateCustomTitle("Local title", 500L, 200L, "f1")
+            it.feedsQueries.updateSortOrder(1L, 500L, 200L, "f1")
+        },
+        cloud = {
+            it.insertFolder("d1", "Cloud name", now = 100)
+            it.insertTag("t1", "Cloud tag", now = 100)
+            it.insertGlobalSetting("k1", "cloud-value", now = 100)
+            it.insertFeed("f1", now = 400, url = "https://cloud/feed")
+            it.feedsQueries.updateCustomTitle("Cloud title", 400L, 100L, "f1")
+            it.feedsQueries.updateSortOrder(9L, 400L, 100L, "f1")
+        },
+        verify = {
+            assertEquals("Local name", it.foldersQueries.getById("d1").executeAsOne().name)
+            assertEquals("Local tag", it.tagsQueries.getById("t1").executeAsOne().name)
+            assertEquals("local-value", it.global_settingsQueries.get("k1").executeAsOne())
+            val feed = it.feedsQueries.getById("f1").executeAsOne()
+            assertEquals("https://local/feed", feed.url)
+            assertEquals("Local title", feed.custom_title)
+            assertEquals(1L, feed.sort_order)
+        },
+    )
+
+    @Test
+    fun twoDevicesHoldingTiedDifferentValuesConverge() {
+        fun deviceA(db: KeryxDatabase) {
+            db.insertGlobalSetting("k1", "value-A", now = 100)
+            db.insertFeed("f1", now = 500)
+            db.feedsQueries.updateCustomTitle("Title A", 500L, 100L, "f1")
+        }
+        fun deviceB(db: KeryxDatabase) {
+            db.insertGlobalSetting("k1", "value-B", now = 100)
+            db.insertFeed("f1", now = 500)
+            db.feedsQueries.updateCustomTitle("Title B", 500L, 100L, "f1")
+        }
+
+        // Step 1: the cloud holds B's database; A merges it and must adopt B's values.
+        val (cloudFile, cloudDriver, cloudDb) = fileDb()
+        deviceB(cloudDb)
+        cloudDriver.close()
+        val (aFile, aDriver, aDb) = fileDb()
+        deviceA(aDb)
+        aDriver.close()
+        DatabaseMerger.merge(aFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+
+        val (_, aVerifyDriver, aVerifyDb) = reopen(aFile)
+        assertEquals("value-B", aVerifyDb.global_settingsQueries.get("k1").executeAsOne())
+        assertEquals("Title B", aVerifyDb.feedsQueries.getById("f1").executeAsOne().custom_title)
+        aVerifyDriver.close()
+
+        // Step 2: A uploads its merged database (a copy of it becomes the cloud); B merges it.
+        val uploaded = java.io.File.createTempFile("cloud-after-A", ".db").also { it.deleteOnExit() }
+        aFile.copyTo(uploaded, overwrite = true)
+        val (bFile, bDriver, bDb) = fileDb()
+        deviceB(bDb)
+        bDriver.close()
+        DatabaseMerger.merge(bFile.absolutePath, uploaded.absolutePath, 1L, MergeSql.all)
+
+        val (_, bVerifyDriver, bVerifyDb) = reopen(bFile)
+        assertEquals("value-B", bVerifyDb.global_settingsQueries.get("k1").executeAsOne())
+        assertEquals("Title B", bVerifyDb.feedsQueries.getById("f1").executeAsOne().custom_title)
+        bVerifyDriver.close()
+    }
+
+    /** `PRAGMA main.foreign_key_check` rows as "table|rowid|parent|fkid" keys (a raw connection, FKs not enforced). */
+    private fun foreignKeyViolations(file: java.io.File): Set<String> =
+        java.sql.DriverManager.getConnection("jdbc:sqlite:${file.absolutePath}").use { conn ->
+            conn.createStatement().use { st ->
+                st.executeQuery("PRAGMA main.foreign_key_check").use { rs ->
+                    buildSet {
+                        while (rs.next()) {
+                            add("${rs.getString(1)}|${rs.getObject(2)}|${rs.getString(3)}|${rs.getObject(4)}")
+                        }
+                    }
+                }
+            }
+        }
+
+    // MergeSql's invariant (MergeFailureClassifier.mainRuledOut): no statement brings in an FK violation.
+    // SQLite counts immediate FK violations per statement net, so the merge would not fail on one; only
+    // foreign_key_check afterwards can show it.
+    @Test
+    fun mergeSqlBringsInNoForeignKeyViolation() {
+        val (cloudFile, cloudDriver, cloudDb) = fileDb()
+        // feeds.folder_id -> folders: the folder is absent from the cloud file.
+        cloudDb.insertFeed("f-cloud", now = 100, folderId = "gone-folder")
+        // articles.feed_id -> feeds: the feed is absent.
+        insertArticle(cloudDb, "a-orphan", "gone-feed", "g1", isRead = 0, readAt = null, updatedAt = 100)
+        // feed_tags.feed_id -> feeds and feed_tags.tag_id -> tags: each parent absent.
+        cloudDb.insertTag("t-cloud", "tag", now = 100)
+        cloudDb.insertFeedTag("gone-feed", "t-cloud", now = 100)
+        cloudDb.insertFeedTag("f-cloud", "gone-tag", now = 100)
+        cloudDriver.close()
+
+        val (localFile, localDriver, localDb) = fileDb()
+        localDb.insertFeed("f-local", now = 50)
+        localDriver.close()
+        assertEquals(emptySet(), foreignKeyViolations(localFile))
+
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+
+        assertEquals(emptySet(), foreignKeyViolations(localFile))
+        val (_, verifyDriver, verifyDb) = reopen(localFile)
+        assertNotNull(verifyDb.feedsQueries.getById("f-cloud").executeAsOneOrNull())
+        assertNull(verifyDb.articlesQueries.getById("a-orphan").executeAsOneOrNull())
+        verifyDriver.close()
+    }
+
+    // The other half of the invariant: no statement modifies an existing local orphan's FK column to
+    // add a violation, whichever merge path a cloud row takes to it.
+    @Test
+    fun mergeSqlNeverAddsToALocalForeignKeyOrphan() {
+        val (cloudFile, cloudDriver, cloudDb) = fileDb()
+        cloudDb.insertFolder("folder-ok", "ok", now = 100)
+        cloudDb.insertTag("t-ok", "tag-ok", now = 100)
+        // Same feeds as local, every user-edited field newer; the folder assignment points at a folder the
+        // cloud file lacks.
+        cloudDb.insertFeed("f-orphan-new", now = 500, folderId = "gone-folder")
+        cloudDb.insertFeed("f-orphan-old", now = 500)
+        cloudDb.insertFeed("f-valid", now = 500, folderId = "gone-folder")
+        for (id in listOf("f-orphan-new", "f-orphan-old", "f-valid")) {
+            cloudDriver.execute(
+                null,
+                "UPDATE feeds SET sort_order = 9, sort_order_updated_at = 500, custom_title = 'cloud', " +
+                    "custom_title_updated_at = 500, deleted_at = 500, deleted_updated_at = 500 WHERE id = '$id'",
+                0,
+            )
+        }
+        // An older folder stamp for the second one: its assignment must not be adopted.
+        cloudDriver.execute(null, "UPDATE feeds SET folder_updated_at = 50 WHERE id = 'f-orphan-old'", 0)
+        cloudDb.insertFeed("f-ok", now = 100)
+        // The local orphan articles' ids, newer read / star / deleted stamps; one with a valid feed in cloud.
+        insertArticle(cloudDb, "a-orphan", "f-ok", "g1", isRead = 1, readAt = 500, updatedAt = 500, isStarred = 1, starredAt = 500)
+        insertArticle(cloudDb, "a-orphan-gone", "gone-feed", "g2", isRead = 1, readAt = 500, updatedAt = 500, isStarred = 1, starredAt = 500)
+        cloudDriver.stampArticleDeleted("a-orphan", 500)
+        cloudDriver.stampArticleDeleted("a-orphan-gone", 500)
+        cloudDb.insertFeedTag("f-orphan-new", "gone-tag", now = 500, deletedAt = 500)
+        cloudDb.insertFeedTag("gone-feed", "t-ok", now = 500, deletedAt = 500)
+        cloudDb.insertFeedTag("f-ok", "gone-tag", now = 500)
+        cloudDriver.close()
+
+        val (localFile, localDriver, localDb) = fileDb()
+        localDb.insertFolder("folder-ok", "ok", now = 100)
+        localDb.insertTag("t-ok", "tag-ok", now = 100)
+        localDb.insertFeed("f-ok", now = 100)
+        localDb.insertFeed("f-orphan-new", now = 100, folderId = "gone-folder")
+        localDb.insertFeed("f-orphan-old", now = 100, folderId = "gone-folder")
+        localDriver.execute(null, "UPDATE feeds SET folder_updated_at = 400 WHERE id = 'f-orphan-old'", 0)
+        // A valid assignment: copying the cloud's dangling folder_id here would add a violation.
+        localDb.insertFeed("f-valid", now = 100, folderId = "folder-ok")
+        insertArticle(localDb, "a-orphan", "gone-feed", "g1", isRead = 0, readAt = 100, updatedAt = 100)
+        insertArticle(localDb, "a-orphan-gone", "gone-feed", "g2", isRead = 0, readAt = 100, updatedAt = 100)
+        localDb.insertFeedTag("f-orphan-new", "gone-tag", now = 100)
+        localDb.insertFeedTag("gone-feed", "t-ok", now = 100)
+        localDb.insertFeedTag("f-ok", "gone-tag", now = 100)
+        localDriver.close()
+
+        val before = foreignKeyViolations(localFile)
+        // One orphan per FK relation the schema declares.
+        assertEquals(
+            setOf("feeds", "articles", "feed_tags"),
+            before.map { it.substringBefore('|') }.toSet(),
+        )
+        assertEquals(
+            setOf("folders", "feeds", "tags"),
+            before.map { it.split('|')[2] }.toSet(),
+        )
+
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+
+        val after = foreignKeyViolations(localFile)
+        assertEquals(emptySet(), after - before, "the merge added FK violations")
+        val (_, verifyDriver, verifyDb) = reopen(localFile)
+        // The merge really did reach the rows: their user-edited fields took the cloud's values.
+        assertEquals("cloud", verifyDb.feedsQueries.getById("f-orphan-old").executeAsOne().custom_title)
+        assertEquals(500L, verifyDb.feedsQueries.getById("f-orphan-old").executeAsOne().deleted_at)
+        assertEquals(1L, verifyDb.articlesQueries.getById("a-orphan").executeAsOne().is_read)
+        // The older assignment was not adopted, so that orphan is still there.
+        assertEquals("gone-folder", verifyDb.feedsQueries.getById("f-orphan-old").executeAsOne().folder_id)
+        verifyDriver.close()
+    }
+
+    // ---- A local write stamped at the value the row already holds must still beat the cloud's tie
+    // rule. Every user-edit stamp is written as MAX(now, previous + 1), so a write made in the same
+    // millisecond as the stamp a merge (or an earlier write) brought in stays strictly newer. ----
+
+    private fun scalarLong(driver: app.cash.sqldelight.db.SqlDriver, sql: String): Long? =
+        driver.executeQuery(
+            null, sql,
+            { cursor ->
+                app.cash.sqldelight.db.QueryResult.Value(if (cursor.next().value) cursor.getLong(0) else null)
+            },
+            0,
+        ).value
+
+    /**
+     * Builds the same state on a cloud file and a local file via [setup], performs [write] on the local DB
+     * only, runs [afterWrite] on the local DB, merges the cloud into it, then runs [verify].
+     */
+    private fun localWriteThenMerge(
+        setup: (KeryxDatabase) -> Unit,
+        write: (KeryxDatabase) -> Unit,
+        afterWrite: (KeryxDatabase, app.cash.sqldelight.db.SqlDriver) -> Unit,
+        verify: (KeryxDatabase, app.cash.sqldelight.db.SqlDriver) -> Unit,
+        setupRaw: (app.cash.sqldelight.db.SqlDriver) -> Unit = {},
+    ) {
+        val (cloudFile, cloudDriver, cloudDb) = fileDb()
+        setup(cloudDb)
+        setupRaw(cloudDriver)
+        cloudDriver.close()
+
+        val (localFile, localDriver, localDb) = fileDb()
+        setup(localDb)
+        setupRaw(localDriver)
+        write(localDb)
+        afterWrite(localDb, localDriver)
+        localDriver.close()
+
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+
+        val (_, verifyDriver, verifyDb) = reopen(localFile)
+        try {
+            verify(verifyDb, verifyDriver)
+        } finally {
+            verifyDriver.close()
+        }
+    }
+
+    @Test
+    fun sameMillisecondRenameBeatsTheCloudsOlderCustomTitle() = localWriteThenMerge(
+        setup = {
+            it.insertFeed("f1", now = 100)
+            it.feedsQueries.updateCustomTitle("Old", 500L, 500L, "f1")
+        },
+        write = { it.feedsQueries.updateCustomTitle("New", 500L, 500L, "f1") },
+        afterWrite = { db, _ -> assertEquals(501L, db.feedsQueries.getById("f1").executeAsOne().custom_title_updated_at) },
+        verify = { db, _ ->
+            val feed = db.feedsQueries.getById("f1").executeAsOne()
+            assertEquals("New", feed.custom_title)
+            assertEquals(501L, feed.custom_title_updated_at)
+        },
+    )
+
+    @Test
+    fun twoRenamesWithinOneTickKeepTheSecondTitleAfterMerge() = localWriteThenMerge(
+        // The cloud already holds the first rename (uploaded between the two renames).
+        setup = {
+            it.insertFeed("f1", now = 100)
+            it.feedsQueries.updateCustomTitle("First", 500L, 500L, "f1")
+        },
+        write = { it.feedsQueries.updateCustomTitle("Second", 500L, 500L, "f1") },
+        afterWrite = { db, _ -> assertEquals(501L, db.feedsQueries.getById("f1").executeAsOne().custom_title_updated_at) },
+        verify = { db, _ -> assertEquals("Second", db.feedsQueries.getById("f1").executeAsOne().custom_title) },
+    )
+
+    @Test
+    fun twoRenamesWithinOneTickOnTheSameDbStampStrictlyIncreasing() {
+        val (_, driver, db) = fileDb()
+        db.insertFeed("f1", now = 100)
+        db.feedsQueries.updateCustomTitle("A", 500L, 500L, "f1")
+        db.feedsQueries.updateCustomTitle("B", 500L, 500L, "f1")
+        assertEquals(501L, db.feedsQueries.getById("f1").executeAsOne().custom_title_updated_at)
+        db.feedsQueries.updateCustomTitle("C", 500L, 500L, "f1")
+        assertEquals(502L, db.feedsQueries.getById("f1").executeAsOne().custom_title_updated_at)
+        driver.close()
+    }
+
+    @Test
+    fun renameStampNeverMovesBackwardsWhenTheClockIsBehindTheStoredStamp() {
+        val (_, driver, db) = fileDb()
+        db.insertFeed("f1", now = 100)
+        db.feedsQueries.updateCustomTitle("A", 900L, 900L, "f1")
+        db.feedsQueries.updateCustomTitle("B", 400L, 400L, "f1")
+        assertEquals(901L, db.feedsQueries.getById("f1").executeAsOne().custom_title_updated_at)
+        driver.close()
+    }
+
+    @Test
+    fun sameMillisecondFolderMoveBeatsTheCloudsOlderFolder() = localWriteThenMerge(
+        setup = {
+            it.insertFolder("d1", "One", now = 100)
+            it.insertFolder("d2", "Two", now = 100)
+            it.insertFeed("f1", now = 100)
+            it.feedsQueries.updateFolder("d1", 500L, 500L, "f1")
+        },
+        write = { it.feedsQueries.updateFolder("d2", 500L, 500L, "f1") },
+        afterWrite = { db, _ -> assertEquals(501L, db.feedsQueries.getById("f1").executeAsOne().folder_updated_at) },
+        verify = { db, _ ->
+            val feed = db.feedsQueries.getById("f1").executeAsOne()
+            assertEquals("d2", feed.folder_id)
+            assertEquals(501L, feed.folder_updated_at)
+        },
+    )
+
+    @Test
+    fun sameMillisecondSortOrderBeatsTheCloudsOlderSortOrder() = localWriteThenMerge(
+        setup = {
+            it.insertFeed("f1", now = 100)
+            it.feedsQueries.updateSortOrder(5L, 500L, 500L, "f1")
+        },
+        write = { it.feedsQueries.updateSortOrder(9L, 500L, 500L, "f1") },
+        afterWrite = { db, _ -> assertEquals(501L, db.feedsQueries.getById("f1").executeAsOne().sort_order_updated_at) },
+        verify = { db, _ ->
+            val feed = db.feedsQueries.getById("f1").executeAsOne()
+            assertEquals(9L, feed.sort_order)
+            assertEquals(501L, feed.sort_order_updated_at)
+        },
+    )
+
+    @Test
+    fun sameMillisecondFolderAndSortOrderMoveBeatsTheCloudsOlderValues() = localWriteThenMerge(
+        setup = {
+            it.insertFolder("d1", "One", now = 100)
+            it.insertFolder("d2", "Two", now = 100)
+            it.insertFeed("f1", now = 100)
+            it.feedsQueries.updateFolderAndSortOrder("d1", 5L, 500L, 500L, 500L, "f1")
+        },
+        write = { it.feedsQueries.updateFolderAndSortOrder("d2", 9L, 500L, 500L, 500L, "f1") },
+        afterWrite = { db, _ ->
+            val feed = db.feedsQueries.getById("f1").executeAsOne()
+            assertEquals(501L, feed.folder_updated_at)
+            assertEquals(501L, feed.sort_order_updated_at)
+        },
+        verify = { db, _ ->
+            val feed = db.feedsQueries.getById("f1").executeAsOne()
+            assertEquals("d2", feed.folder_id)
+            assertEquals(9L, feed.sort_order)
+        },
+    )
+
+    /** One unread article (marked unread at 500 on both sides), in a folder and under a tag, for the read-stamp tests. */
+    private fun setupUnreadArticleAt500(db: KeryxDatabase) {
+        db.insertFolder("d1", "One", now = 100)
+        db.insertTag("t1", "tag", now = 100)
+        db.insertFeed("f1", now = 100, folderId = "d1")
+        db.insertFeedTag("f1", "t1", now = 100)
+        insertArticle(db, "a1", "f1", "g1", isRead = 0, readAt = 500, updatedAt = 100)
+    }
+
+    /** Runs [write] (a local mark-read at now = 500) and checks the stamp is 501 and the read survives a merge. */
+    private fun readWriteSurvivesMerge(write: (KeryxDatabase) -> Unit) = localWriteThenMerge(
+        setup = ::setupUnreadArticleAt500,
+        write = write,
+        afterWrite = { db, _ ->
+            val article = db.articlesQueries.getById("a1").executeAsOne()
+            assertEquals(1L, article.is_read)
+            assertEquals(501L, article.read_at)
+        },
+        verify = { db, _ ->
+            val article = db.articlesQueries.getById("a1").executeAsOne()
+            assertEquals(1L, article.is_read)
+            assertEquals(501L, article.read_at)
+        },
+    )
+
+    @Test
+    fun sameMillisecondMarkReadBeatsTheCloudsOlderUnread() =
+        readWriteSurvivesMerge { it.articlesQueries.updateReadStatus(1L, 500L, 500L, "a1") }
+
+    @Test
+    fun sameMillisecondMarkReadByIdsBeatsTheCloudsOlderUnread() =
+        readWriteSurvivesMerge { it.articlesQueries.updateReadStatusByIds(500L, 500L, listOf("a1")) }
+
+    @Test
+    fun sameMillisecondMarkAllReadAllBeatsTheCloudsOlderUnread() =
+        readWriteSurvivesMerge { it.articlesQueries.markAllReadAll(500L, 500L) }
+
+    @Test
+    fun sameMillisecondMarkAllReadByFeedBeatsTheCloudsOlderUnread() =
+        readWriteSurvivesMerge { it.articlesQueries.markAllReadByFeed(500L, 500L, "f1") }
+
+    @Test
+    fun sameMillisecondMarkAllReadByTagBeatsTheCloudsOlderUnread() =
+        readWriteSurvivesMerge { it.articlesQueries.markAllReadByTag(500L, 500L, "t1") }
+
+    @Test
+    fun sameMillisecondMarkAllReadByFolderBeatsTheCloudsOlderUnread() =
+        readWriteSurvivesMerge { it.articlesQueries.markAllReadByFolder(500L, 500L, "d1") }
+
+    @Test
+    fun sameMillisecondStarBeatsTheCloudsOlderUnstar() = localWriteThenMerge(
+        setup = {
+            it.insertFeed("f1", now = 100)
+            insertArticle(it, "a1", "f1", "g1", isRead = 0, readAt = null, updatedAt = 100, isStarred = 0, starredAt = 500)
+        },
+        write = { it.articlesQueries.updateStarStatus(1L, 500L, 500L, "a1") },
+        afterWrite = { db, _ -> assertEquals(501L, db.articlesQueries.getById("a1").executeAsOne().starred_at) },
+        verify = { db, _ ->
+            val article = db.articlesQueries.getById("a1").executeAsOne()
+            assertEquals(1L, article.is_starred)
+            assertEquals(501L, article.starred_at)
+        },
+    )
+
+    @Test
+    fun sameMillisecondCacheCleanupBeatsTheCloudsLiveRowStampedAtTheSameValue() = localWriteThenMerge(
+        // 11 articles in one feed: cleanup protects the newest 10 and expires a00. Both sides hold a00 live
+        // with deleted_updated_at = 500 (an earlier undelete event), the cleanup runs at now = 500.
+        setup = { db ->
+            db.insertFeed("f1", now = 100)
+            for (i in 0..10) {
+                insertArticle(db, "a%02d".format(i), "f1", "g$i", isRead = 0, readAt = null, updatedAt = 100)
+            }
+        },
+        setupRaw = { it.stampArticleDeleted("a00", deletedAt = null, deletedUpdatedAt = 500) },
+        write = { db ->
+            db.articlesQueries.softDeleteExpired(500L, 500L, 500L, 1000L)
+        },
+        afterWrite = { _, driver ->
+            assertEquals(
+                501L,
+                scalarLong(driver, "SELECT deleted_updated_at FROM articles WHERE id = 'a00'"),
+            )
+        },
+        verify = { db, _ ->
+            val article = db.articlesQueries.getById("a00").executeAsOne()
+            assertEquals(500L, article.deleted_at)
+            assertEquals(501L, article.deleted_updated_at)
+        },
+    )
+
+    @Test
+    fun sameMillisecondFeedTagReattachBeatsTheCloudsDetach() = localWriteThenMerge(
+        setup = {
+            it.insertFeed("f1", now = 100)
+            it.insertTag("t1", "tag", now = 100)
+            it.insertFeedTag("f1", "t1", now = 500, deletedAt = 500)
+        },
+        write = { it.insertFeedTag("f1", "t1", now = 500, deletedAt = null) },
+        afterWrite = { _, driver ->
+            assertEquals(501L, scalarLong(driver, "SELECT updated_at FROM feed_tags WHERE feed_id = 'f1' AND tag_id = 't1'"))
+        },
+        verify = { db, driver ->
+            assertEquals(listOf("t1"), db.feed_tagsQueries.watchTagIdsForFeed("f1").executeAsList())
+            assertEquals(501L, scalarLong(driver, "SELECT updated_at FROM feed_tags WHERE feed_id = 'f1' AND tag_id = 't1'"))
+        },
+    )
+
+    @Test
+    fun sameMillisecondGlobalSettingBeatsTheCloudsOlderValue() = localWriteThenMerge(
+        setup = { it.insertGlobalSetting("read_timeout_seconds", "10", now = 500) },
+        write = { it.insertGlobalSetting("read_timeout_seconds", "20", now = 500) },
+        afterWrite = { _, driver ->
+            assertEquals(501L, scalarLong(driver, "SELECT updated_at FROM global_settings WHERE key = 'read_timeout_seconds'"))
+        },
+        verify = { db, driver ->
+            assertEquals("20", db.global_settingsQueries.get("read_timeout_seconds").executeAsOne())
+            assertEquals(501L, scalarLong(driver, "SELECT updated_at FROM global_settings WHERE key = 'read_timeout_seconds'"))
+        },
+    )
+
     private fun reopen(file: java.io.File): Triple<java.io.File, app.cash.sqldelight.db.SqlDriver, KeryxDatabase> {
         val driver = app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver("jdbc:sqlite:${file.absolutePath}")
         return Triple(file, driver, KeryxDatabase(driver))

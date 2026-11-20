@@ -39,13 +39,24 @@ private const val PROVIDER_NAME = "Google Drive"
  * [accessTokenProvider] returns a currently-valid access token (refreshing it if
  * needed); a null result means the user is not connected.
  *
- * Optimistic concurrency uses the file resource's `version` field (a monotonically
- * increasing counter returned for arbitrary binary files) as the opaque `rev`.
+ * Optimistic concurrency uses the opaque `rev` `<file id>:<version>`. `version` is a
+ * monotonically increasing counter, but only per file: two files can carry the same one,
+ * so the id goes into the `rev` as well. Racing first uploads can leave two files of the
+ * same name (see [resolveCreateRace]), and a device whose lookup later moves from its own
+ * file to the winner's must see a different `rev` — otherwise a matching `version` would
+ * make it skip downloading the winner's file and let its next upload overwrite that file
+ * unmerged. A `rev` recorded by an older build (the `version` alone) matches nothing, which
+ * costs one extra download and merge, or one conflict retry, and nothing else.
+ *
  * Drive has no native compare-and-set for content updates, so an [upload] with a
- * non-null `expectedRev` re-reads the current `version` and fails with
- * [SyncConflictException] if it changed since the caller's [download]. This leaves
- * a small check-then-write window, acceptable for the low-risk synced data
- * (read/star state, subscriptions) and reconciled by the sync retry loop.
+ * non-null `expectedRev` re-reads the current `rev` and fails with
+ * [SyncConflictException] if it changed since the caller's [download]. An overwrite
+ * landing between that check and the write is not detected; the overwritten device
+ * merges its changes into the cloud file again on its next sync, and those that survive the
+ * ordinary merge rules return to the cloud. The overwrite itself loses them from the cloud
+ * only if that device never syncs again. Closing the window
+ * needs a server-side precondition Drive does not offer — see "Google Drive: an upload can
+ * overwrite another device's upload unnoticed" in docs/known-issues.md.
  */
 class GoogleDriveStorage(
     private val client: HttpClient,
@@ -91,9 +102,9 @@ class GoogleDriveStorage(
             return@withToken mapError(response.status.value, response.bodyAsText())
         }
         response.writeBodyToFile(destPath, MAX_SYNC_DB_SIZE_BYTES)
-        // The version came from the name lookup above, which is the same read this download is
+        // The rev came from the name lookup above, which is the same read this download is
         // already based on — no extra request to learn what was just fetched.
-        Result.Ok(CloudFileMeta(file.version))
+        Result.Ok(CloudFileMeta(file.rev))
     }
 
     override suspend fun upload(
@@ -104,10 +115,11 @@ class GoogleDriveStorage(
         val name = cloudFileName(path)
         val existing = findFile(token, name).valueOrElse { return@withToken it }
         if (existing == null) {
-            createFile(token, name, sourcePath).map { CloudFileMeta(it.version) }
+            createFile(token, name, sourcePath).map { CloudFileMeta(it.rev) }
         } else {
-            // Best-effort optimistic concurrency: bail if the remote changed since download().
-            if (expectedRev != null && existing.version != expectedRev) {
+            // Client-side optimistic concurrency: bail if the remote changed since download(). Drive
+            // cannot make this check part of the write — see the class KDoc for the window it leaves.
+            if (expectedRev != null && existing.rev != expectedRev) {
                 return@withToken Result.Err(SyncConflictException())
             }
             updateFile(token, existing.id, sourcePath)
@@ -123,9 +135,10 @@ class GoogleDriveStorage(
      */
     override suspend fun create(path: String, sourcePath: String): Result<CloudFileMeta> = withToken { token ->
         val name = cloudFileName(path)
-        // Best-effort create-only: Drive has no atomic create-if-absent, so we check first and
-        // fail with a conflict when the file already exists rather than overwriting it. The small
-        // check-then-write window is reconciled by the sync retry loop, as with upload().
+        // Drive has no atomic create-if-absent, so check first and fail with a conflict when the
+        // file already exists rather than overwriting it. Two creates racing past this check each
+        // produce a file of their own; resolveCreateRace reconciles them afterwards, but only as far
+        // as Drive's listing shows the other file (see its KDoc and docs/known-issues.md).
         val existing = findFile(token, name).valueOrElse { return@withToken it }
         if (existing != null) {
             Result.Err(SyncConflictException())
@@ -143,7 +156,13 @@ class GoogleDriveStorage(
      * A listing that shows only the file we just created is not proof no one else is racing —
      * Drive's list index is not guaranteed to already reflect a just-completed create from a
      * concurrently racing device — so a solitary result is re-checked once more before being
-     * trusted, shrinking (not fully closing) the false-winner window.
+     * trusted. That narrows the false-winner window but cannot close it: with no atomic
+     * create-if-absent and no consistent listing, Drive offers nothing to close it with. A
+     * device that wrongly believes it won keeps writing to its own file until the listing
+     * catches up and [findFile]'s lowest-id rule moves it to the winner's. That move changes the
+     * `rev` it sees (the id is part of it), so its next sync downloads and merges the winner's
+     * file before uploading; its own file is left behind unused — see "Google Drive: an upload
+     * can overwrite another device's upload unnoticed" in docs/known-issues.md.
      *
      * @param token The Google Drive access token.
      * @param name The file name shared by the concurrent creations.
@@ -174,14 +193,14 @@ class GoogleDriveStorage(
             }
             // We are the winner — safely delete every duplicate.
             deleteAll(token, files, keepId = winner.id).valueOrElse { return it }
-            // We won, so the retained file is the one we created — report the version its *own*
+            // We won, so the retained file is the one we created — report the rev its *own*
             // write returned, not the one this listing just read. The listing happens up to
             // RACE_RECHECK_DELAY_MS after that write, and a racing device's upload() landing in
             // between bumps our file's version; returning that would tell SyncRepository we had
             // merged a revision we never saw, and the next sync would skip downloading it.
             // Reporting a *stale* version is safe by comparison: it only costs one extra
             // download+merge next cycle.
-            return Result.Ok(CloudFileMeta(created.version))
+            return Result.Ok(CloudFileMeta(created.rev))
         }
     }
 
@@ -251,9 +270,9 @@ class GoogleDriveStorage(
     }
 
     override suspend fun metadata(path: String): Result<CloudFileMeta?> = withToken { token ->
-        // `version` is already fetched by the same name lookup this call has always made (it
-        // is what upload() compares as the rev), so returning it costs no extra request.
-        findFile(token, cloudFileName(path)).map { file -> file?.let { CloudFileMeta(it.version) } }
+        // `id` and `version` are already fetched by the same name lookup this call has always
+        // made (they are what upload() compares as the rev), so returning it costs no extra request.
+        findFile(token, cloudFileName(path)).map { file -> file?.let { CloudFileMeta(it.rev) } }
     }
 
     /** Lists all app-data files matching [name] (there should be at most one). */
@@ -323,7 +342,7 @@ class GoogleDriveStorage(
         return parseDriveFile(response.bodyAsText())
     }
 
-    /** Overwrites the file's content with a simple media upload. Returns the resulting version. */
+    /** Overwrites the file's content with a simple media upload. Returns the resulting rev. */
     private suspend fun updateFile(token: String, fileId: String, sourcePath: String): Result<CloudFileMeta> {
         val response = client.patch("$uploadBase/files/$fileId") {
             bearerAuth(token)
@@ -338,7 +357,7 @@ class GoogleDriveStorage(
         }
         // `fields=id,version` is already requested, so the write's own response carries the new
         // version — no follow-up lookup, which could otherwise pick up a racing device's write.
-        return parseDriveFile(response.bodyAsText()).map { CloudFileMeta(it.version) }
+        return parseDriveFile(response.bodyAsText()).map { CloudFileMeta(it.rev) }
     }
 
     /**
@@ -379,7 +398,10 @@ class GoogleDriveStorage(
      */
     private fun mapError(status: Int, body: String): Result.Err = cloudStorageError(PROVIDER_NAME, status, body)
 
-    private class DriveFile(val id: String, val version: String)
+    private class DriveFile(val id: String, val version: String) {
+        /** The `rev` this storage reports and compares; see the class KDoc for why it holds the id. */
+        val rev: String get() = "$id:$version"
+    }
 
     private companion object {
         const val APP_DATA_FOLDER = "appDataFolder"

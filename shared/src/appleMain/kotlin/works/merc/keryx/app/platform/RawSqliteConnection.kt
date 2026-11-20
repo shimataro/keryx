@@ -2,6 +2,7 @@ package works.merc.keryx.app.platform
 
 import cnames.structs.sqlite3
 import cnames.structs.sqlite3_stmt
+import co.touchlab.sqliter.sqlite3.SQLITE_DONE
 import co.touchlab.sqliter.sqlite3.SQLITE_OK
 import co.touchlab.sqliter.sqlite3.SQLITE_OPEN_CREATE
 import co.touchlab.sqliter.sqlite3.SQLITE_OPEN_READWRITE
@@ -18,6 +19,7 @@ import co.touchlab.sqliter.sqlite3.sqlite3_exec
 import co.touchlab.sqliter.sqlite3.sqlite3_extended_errcode
 import co.touchlab.sqliter.sqlite3.sqlite3_finalize
 import co.touchlab.sqliter.sqlite3.sqlite3_free
+import co.touchlab.sqliter.sqlite3.sqlite3_get_autocommit
 import co.touchlab.sqliter.sqlite3.sqlite3_open_v2
 import co.touchlab.sqliter.sqlite3.sqlite3_prepare_v2
 import co.touchlab.sqliter.sqlite3.sqlite3_step
@@ -67,6 +69,46 @@ internal class RawSqliteConnection private constructor(private val db: CPointer<
             val message = err.value?.toKString() ?: sqlite3_errmsg(db)?.toKString().orEmpty()
             sqlite3_free(err.value)
             throw SqliteException(sqlite3_extended_errcode(db), message)
+        }
+    }
+
+    /**
+     * Whether a transaction is open on this connection — SQLite's own state
+     * (`sqlite3_get_autocommit`), so it also reflects a transaction SQLite rolled back by itself.
+     */
+    fun inTransaction(): Boolean = sqlite3_get_autocommit(db) == 0
+
+    /**
+     * Every row's first column of [sql] as text. Unlike [queryColumn], a step that fails throws
+     * [SqliteException] instead of ending the list early.
+     */
+    fun queryFirstColumnStrict(sql: String): List<String> = query(sql) { stmt ->
+        buildList {
+            while (true) {
+                when (sqlite3_step(stmt)) {
+                    SQLITE_ROW -> add(sqlite3_column_text(stmt, 0)?.reinterpret<ByteVar>()?.toKString().orEmpty())
+                    SQLITE_DONE -> break
+                    else -> throw SqliteException(sqlite3_extended_errcode(db), sqlite3_errmsg(db)?.toKString().orEmpty())
+                }
+            }
+        }
+    }
+
+    /**
+     * Every row of [sql], each as its columns' text (`null` for SQL NULL). Like
+     * [queryFirstColumnStrict], a step that fails throws [SqliteException] instead of ending the list
+     * early.
+     */
+    fun queryRowsStrict(sql: String): List<List<String?>> = query(sql) { stmt ->
+        val columns = sqlite3_column_count(stmt)
+        buildList {
+            while (true) {
+                when (sqlite3_step(stmt)) {
+                    SQLITE_ROW -> add(List(columns) { sqlite3_column_text(stmt, it)?.reinterpret<ByteVar>()?.toKString() })
+                    SQLITE_DONE -> break
+                    else -> throw SqliteException(sqlite3_extended_errcode(db), sqlite3_errmsg(db)?.toKString().orEmpty())
+                }
+            }
         }
     }
 

@@ -5,6 +5,12 @@
 Defects that are understood but deliberately not fixed, with the evidence behind that decision.
 Each entry records what was ruled out, so a later investigation doesn't repeat the same work.
 
+An entry needs a reason other than low likelihood: the root cause is external (an OS, JDK, library or
+platform limitation), or closing the hole needs a redesign outside the scope of the change that found it.
+"It rarely happens" or "the window is too narrow to hit" is never enough — such a defect is fixed
+(see "Error handling and race conditions" in `.claude/CLAUDE.md`). Every entry whose cause is known
+states what a real fix would need — which may be a change upstream.
+
 ## macOS: clicking a notification banner does not restore a tray-hidden window
 
 **Status**: not fixed — external (JDK/AWT) limitation. Applies to the **Compose macOS build only**,
@@ -326,8 +332,9 @@ There is no bias that fixes both edges, and the platform's own apps do not apply
 
 ## A concurrent write can fail a read-then-write transaction with a non-retryable SQLITE_BUSY
 
-**Status**: not fixed — the affected call sites are narrow and unobserved in production; a real fix
-touches the core data-access layer. Worked around in the one test it made flaky.
+**Status**: not fixed — a real fix needs a purpose-built JDBC driver that issues `BEGIN IMMEDIATE`
+(see "What a real fix would need" below), a change to the core data-access layer outside the scope of
+the change that found it. Worked around in the one test it made flaky.
 
 ### Symptom
 
@@ -410,6 +417,108 @@ transaction (`FeedRepository.kt`, around `applyFetch`), which only writes.
 a feed with no `<item>`s. With no articles to write and no search-index catch-up, the first
 call's post-mutex work is read-only, so there is no longer a second writer left to race the upgrade.
 See `testing.md`'s note on concurrent-write tests for the general pattern.
+
+## A sync merge holds the database's write lock for its whole length
+
+**Status**: not fixed — closing it needs a redesign of the merge outside the scope of the change that
+found it (see "What a real fix would need").
+
+### Symptom
+
+While a sync merges the downloaded cloud file, every other write to the local database waits. A write
+that waits longer than `busy_timeout` (`SQLITE_BUSY_TIMEOUT_MS`, 5 s) fails with `SQLITE_BUSY`: a read/star
+change or a feed-list or settings write handed off by the UI is reported as a local-write failure in the
+notification center (`LocalWriteFailureReporter`) and the UI undoes it, and a feed refresh's apply step
+fails for that cycle.
+
+### Diagnosis
+
+`DatabaseMerger.merge` runs every `MergeSql` statement inside one transaction on its dedicated connection,
+so the write lock is held from the first statement to the commit or rollback, and the time grows with the
+number of rows merged, so with enough articles — which an unlimited cache retention allows — it exceeds
+`busy_timeout`. A constraint failure whose verdict needs the deferred re-run (a FOREIGN KEY failure with
+violations already in main, and on Android any constraint failure with violations already in main) holds
+it longer still, since the remaining statements run a second time; other constraint failures do not re-run
+(see "Merge Failure Classification" in [sync-architecture.md](sync-architecture.md)).
+
+For scale only: a one-off measurement on one desktop machine, with 20,000 articles of about 2 KB each,
+took about 350 ms for a successful merge and about 1.7x that for a failure that needed the re-run. No test
+in the repository reproduces these figures, so they go stale as the merge changes; the claims above do not
+depend on them.
+
+### Ruled out
+
+- **A longer `busy_timeout`** only moves the size at which writes start failing, and makes every write
+  that waits on the merge wait longer.
+- **WAL mode** lets readers run alongside the merge, but writers are still serialized behind it.
+- **Splitting the merge into several transactions as it stands** would let a failure or a crash leave a
+  half-applied merge behind while `cloud_file_rev` says nothing about it.
+
+### What a real fix would need
+
+A merge applied in bounded transactions that each leave the database consistent (foreign-key-safe order)
+and can be re-applied idempotently, with `cloud_file_rev` recorded only after the last one, so the lock is
+released between them and a merge interrupted at any point is simply completed by the next sync. It has to
+keep every guarantee in "Merge (`DatabaseMerger` + `MergeSql`)" and "Merge Failure Classification" in
+[sync-architecture.md](sync-architecture.md) — including the classification's in-transaction checks — and
+the FTS rule that the merge is followed by `indexMissing()`.
+
+## Google Drive: an upload can overwrite another device's upload unnoticed
+
+**Status**: not fixed — external (Google Drive API) limitation: Drive offers no conditional content
+update. While the device that made them keeps syncing, the overwritten changes are merged into the
+cloud again, and those that survive the ordinary merge rules return.
+
+### Symptom
+
+Two devices syncing through Google Drive at the same moment can both pass the upload's revision check;
+the later write then replaces the earlier one in the cloud without either device seeing a conflict.
+The earlier device's changes are missing from the cloud file — and from any device that downloads it —
+until that device syncs again.
+
+### Diagnosis
+
+Every other provider makes the revision check part of the write itself (Dropbox's `rev`, the `If-Match`
+of OneDrive and Nextcloud), so the server refuses a write based on a stale revision. Drive has no such
+precondition: neither `files.update` nor its media upload documents an ETag / `If-Match` check or a
+`412` response in the Drive API v3 reference. `GoogleDriveStorage.upload` therefore reads the current
+`version` and compares it before writing, which leaves a window between the read and the write. To
+re-check whether this still holds, look in the official `files.update` reference (and its media upload)
+for an ETag / `If-Match` precondition or a documented `412`.
+
+The first upload has the same shape. Drive has no atomic create-if-absent, so two devices creating the
+file at once each create one, and `GoogleDriveStorage.resolveCreateRace` keeps the lowest id. Drive's
+file listing is not guaranteed to show a just-created file yet, so a device can see only its own file,
+believe it won, and keep writing there until the listing catches up — the re-check after
+`RACE_RECHECK_DELAY_MS` narrows that window but cannot close it. Once the listing shows both,
+`findFile` resolves every device to the lowest id. The revision a Drive device records holds the file's
+id as well as its `version`, so a device moved off its own file sees a revision it has not merged: its
+next sync downloads and merges the winner's file and uploads the result, so its content reaches the
+cloud. Its own file is left behind unused.
+
+### Why nothing is lost in the usual case
+
+The overwritten device keeps its own changes in its local DB and recorded the revision its own write
+produced. Its next sync finds a different revision in the cloud, downloads and merges that file, and
+uploads the merged result — so its changes return to the cloud, under the same merge rules as any other
+sync: a change that ties with the other device's on the same timestamp goes to the cloud side, exactly as it
+would had the two uploads not raced. The overwrite itself loses them from the cloud only if that device
+never syncs again (uninstalled, reset, or disconnected from Drive first).
+
+### Ruled out
+
+- **The sync retry loop** retries only a conflict it detected; an overwrite inside the window is not
+  one.
+- **Inferring the overwrite from the version the write returns** — `version` counts every server-side
+  change to the file, metadata included, so a jump of more than one does not prove another upload.
+- **A lock file** — creating it is itself an unconditional Drive write, with the same window.
+
+### What a real fix would need
+
+A server-side precondition on Drive's content update (an `If-Match` on `files.update`, or equivalent),
+and an atomic create-if-absent (or a strongly consistent listing) for the first upload. With them,
+`upload` would pass `expectedRev` to the write itself, as the OneDrive and Nextcloud storages do, and
+`create` would fail outright instead of reconciling afterwards.
 
 ## CI-only: `UpdateDownloaderTest.progressArrivesWhileTheBodyIsStillStreaming` times out
 

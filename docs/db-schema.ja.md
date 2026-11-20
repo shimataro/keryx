@@ -19,11 +19,20 @@
 - 論理削除は `deleted_at`（NULL = 生存）。同期タイムスタンプは `updated_at`。
 - 同じ行で、削除と、それを打ち消す操作に同じ時刻がつくことはない。`tags` / `folders` の `updated_at` と、`feeds` の
   `deleted_updated_at` は、論理削除と、作り直し・有効化（`upsertByName`）や再購読（`stampResubscribed`）のときに
-  `MAX(今の時刻, 前の値 + 1)` で書くので、1 ミリ秒の中でも必ず増える。同期マージの last-write-wins は厳密な `>` で
-  比べるので、同じ時刻だと後の操作がほかの端末に伝わらず、作り直した行も削除前の行と区別できなくなる。
+  `MAX(今の時刻, 前の値 + 1)` で書くので、1 ミリ秒の中でも必ず増える。同期マージの last-write-wins が順序をつけられるのは
+  時刻の違う操作だけで、同じ時刻だとタイブレーク規則（クラウド側が勝つ。[sync-architecture.ja.md](sync-architecture.ja.md)
+  参照）で決まる。この規則はどちらが後の操作かを知らないので、同じ時刻だと先の操作が勝つことがあり、作り直した行も
+  削除前の行と区別できなくなる。
   これらの時刻は実際の時刻より数ミリ秒先に進むことがあるので、その行へのほかのローカルの書き込みも同じように時刻を
   前に進め、直後に行った編集が必ず最新になるようにしている。`folders` では、名前変更（`upsert`）と並べ替え
   （`updateSortOrder`）、`tags` では名前・色の変更（`upsert`）がそれにあたる。
+- **ほかの last-write-wins のタイムスタンプも、すべて同じように行の上で前にしか進まない**（`MAX(今の時刻, 前の値 + 1)`）。
+  `feeds.custom_title_updated_at` / `folder_updated_at` / `sort_order_updated_at`（`updateCustomTitle`、`updateFolder`、
+  `updateSortOrder`、`updateFolderAndSortOrder`）、`articles.read_at` / `starred_at`（`updateReadStatus`、
+  `updateReadStatusByIds`、`updateStarStatus`、`markAllRead*` の各クエリ）と `deleted_updated_at`（`softDeleteExpired`）、
+  `feed_tags.updated_at` / `global_settings.updated_at`（`upsert`）がそれにあたる。こうしないと、行がすでに持つ値と同じ
+  時刻の書き込み（1 ミリ秒の中の 2 回の書き込みや、マージがその時刻を取り込んだ直後の書き込み）は、同着はクラウド側が
+  勝つので、次のマージで古い値に負ける。これで同着になるのは、2 台の端末で別々に行った書き込みの間だけになる。
 - 真偽値・タイムスタンプは **INTEGER（`Long`）**。真偽値は 0/1、時刻は Unix ミリ秒。
 - スキーマバージョンは `PRAGMA user_version`（現在 2）。desktop では `DatabaseDriverFactory` がこのプラグマを見て
   create/migrate を自前で駆動するが、Android では `AndroidSqliteDriver` が自身の `onCreate`/`onUpgrade` コールバック内で
@@ -130,7 +139,7 @@
 ### sync_state（KVS, 非同期）
 
 `key`(PK), `value`。既知キー: `last_synced_at`（Unix ミリ秒）, `cloud_file_rev`（**このデバイスがマージ済みの**
-クラウドファイルのリビジョン。Dropbox は `rev`、Google Drive は file resource の `version`、OneDrive は
+クラウドファイルのリビジョン。Dropbox は `rev`、Google Drive は file resource の `id` と `version` を `<id>:<version>` にしたもの、OneDrive は
 DriveItem の `eTag`、Nextcloud は WebDAV の `ETag`（引用符を含む））, `last_uploaded_snapshot_digest`（このデバイスが最後にアップロードしたスナップショットの
 SHA-256 を hex 化したもの）。
 

@@ -23,6 +23,7 @@ import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -67,7 +68,7 @@ class GoogleDriveStorageTest {
         val dest = downloadDestPath()
         val r = s.download(CLOUD_DB_PATH, dest)
         assertIs<Result.Ok<CloudFileMeta>>(r)
-        assertEquals("r42", r.value.rev)
+        assertEquals("F1:r42", r.value.rev)
         assertContentEquals(bytes, bytesAt(dest))
         assertEquals(2, history.size)
         assertEquals("GET", history[0].method.value)
@@ -194,7 +195,7 @@ class GoogleDriveStorageTest {
             { respond(foundFile(version = "r1"), HttpStatusCode.OK) },
             { respond("""{"id":"F1","version":"r2"}""", HttpStatusCode.OK) },
         )
-        val r = s.upload(CLOUD_DB_PATH, uploadSourceOf(byteArrayOf(1)), expectedRev = "r1")
+        val r = s.upload(CLOUD_DB_PATH, uploadSourceOf(byteArrayOf(1)), expectedRev = "F1:r1")
         assertIs<Result.Ok<Unit>>(r)
         assertEquals(2, history.size)
         assertEquals("GET", history[0].method.value)
@@ -207,7 +208,7 @@ class GoogleDriveStorageTest {
     @Test
     fun uploadConflictWhenRevMismatch() = runTest {
         val (s, history, verify) = storage("tok", { respond(foundFile(version = "r2"), HttpStatusCode.OK) })
-        val r = s.upload(CLOUD_DB_PATH, uploadSourceOf(byteArrayOf(1)), expectedRev = "r1")
+        val r = s.upload(CLOUD_DB_PATH, uploadSourceOf(byteArrayOf(1)), expectedRev = "F1:r1")
         assertIs<Result.Err>(r)
         assertIs<SyncConflictException>(r.exception)
         assertEquals(1, history.size)
@@ -239,7 +240,7 @@ class GoogleDriveStorageTest {
         // The rev, not merely its presence: it is what the unchanged-transfer skip compares against
         // sync_state.cloud_file_rev to decide whether a download can be skipped.
         val meta = assertNotNull((yes.metadata(CLOUD_DB_PATH) as Result.Ok<CloudFileMeta?>).value)
-        assertEquals("r1", meta.rev)
+        assertEquals("F1:r1", meta.rev)
         assertEquals(1, yesHistory.size)
         assertEquals("GET", yesHistory[0].method.value)
         assertEquals("/drive/v3/files", yesHistory[0].url.encodedPath)
@@ -293,7 +294,7 @@ class GoogleDriveStorageTest {
         )
         val r = s.create(CLOUD_DB_PATH, uploadSourceOf(byteArrayOf(1)))
         assertIs<Result.Ok<CloudFileMeta>>(r)
-        assertEquals("r-created", r.value.rev)
+        assertEquals("F1:r-created", r.value.rev)
         verify()
     }
 
@@ -667,6 +668,63 @@ class GoogleDriveStorageTest {
         // No leftover under the old name — a subsequent create() must not collide with it.
         assertEquals("DELETE", history[2].method.value)
         assertEquals("/drive/v3/files/F2", history[2].url.encodedPath)
+        verify()
+    }
+
+    @Test
+    fun revDiffersForTwoFilesWithTheSameVersion() = runTest {
+        // Drive's version is per file: two files can carry the same one. A device whose lookup
+        // moves from its own file (B) to the lowest-id winner (A) must see a different rev, or it
+        // would skip downloading the winner's file.
+        val (s, _, verify) = storage(
+            "tok",
+            { respond(foundFile(id = "B", version = "1"), HttpStatusCode.OK) },
+            { respond(foundFile(id = "A", version = "1"), HttpStatusCode.OK) },
+            { respond(foundFile(id = "A", version = "1"), HttpStatusCode.OK) },
+            { respond(byteArrayOf(1), HttpStatusCode.OK) },
+        )
+        val first = assertNotNull((s.metadata(CLOUD_DB_PATH) as Result.Ok<CloudFileMeta?>).value)
+        val second = assertNotNull((s.metadata(CLOUD_DB_PATH) as Result.Ok<CloudFileMeta?>).value)
+        assertEquals("B:1", first.rev)
+        assertEquals("A:1", second.rev)
+        assertNotEquals(first.rev, second.rev)
+
+        val downloaded = s.download(CLOUD_DB_PATH, downloadDestPath())
+        assertIs<Result.Ok<CloudFileMeta>>(downloaded)
+        assertEquals(second.rev, downloaded.value.rev)
+        verify()
+    }
+
+    @Test
+    fun uploadConflictsWhenExpectedRevIsAnotherFilesWithTheSameVersion() = runTest {
+        // The device recorded the rev of its own file (B); by the time it uploads, the lookup has
+        // moved to the lowest-id winner (A), whose version happens to be the same. The upload must
+        // not pass the rev check and overwrite the winner's file unmerged.
+        val (s, history, verify) = storage(
+            "tok",
+            { respond(foundFile(id = "B", version = "1"), HttpStatusCode.OK) },
+            { respond(foundFile(id = "A", version = "1"), HttpStatusCode.OK) },
+        )
+        val recorded = assertNotNull((s.metadata(CLOUD_DB_PATH) as Result.Ok<CloudFileMeta?>).value)
+        val r = s.upload(CLOUD_DB_PATH, uploadSourceOf(byteArrayOf(1)), expectedRev = recorded.rev)
+        assertIs<Result.Err>(r)
+        assertIs<SyncConflictException>(r.exception)
+        // Only the two lookups: nothing was written to the winner's file.
+        assertEquals(2, history.size)
+        assertEquals(listOf("GET", "GET"), history.map { it.method.value })
+        verify()
+    }
+
+    @Test
+    fun uploadConflictsWhenExpectedRevIsTheOldBareVersionFormat() = runTest {
+        // A rev recorded by an older build (the version alone) matches nothing: the cost is one
+        // conflict retry, never an overwrite.
+        val (s, history, verify) = storage("tok", { respond(foundFile(id = "A", version = "1"), HttpStatusCode.OK) })
+        val r = s.upload(CLOUD_DB_PATH, uploadSourceOf(byteArrayOf(1)), expectedRev = "1")
+        assertIs<Result.Err>(r)
+        assertIs<SyncConflictException>(r.exception)
+        assertEquals(1, history.size)
+        assertEquals("GET", history[0].method.value)
         verify()
     }
 }

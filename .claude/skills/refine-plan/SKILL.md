@@ -23,7 +23,9 @@ Resolve which document to work on, in this order:
 1. **Open questions & concerns** — list anything ambiguous, underspecified,
    or that the plan currently glosses over.
 2. **Data integrity** — schema/state changes, concurrent access, merge/
-   conflict handling, invariants that must hold before and after.
+   conflict handling, invariants that must hold before and after. Every
+   reachable interleaving and failure path counts, however narrow its
+   window (`.claude/CLAUDE.md` "Error handling and race conditions").
 3. **UI/UX** — clarity of the resulting flow, reduced user effort, and
    consistent terminology; no regressions to existing patterns.
 4. **Simplicity & efficiency** — drop redundant steps; flag anything doing

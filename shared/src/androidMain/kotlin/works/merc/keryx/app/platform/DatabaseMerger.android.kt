@@ -9,6 +9,9 @@ import works.merc.keryx.app.core.CloudDataIncompatibleException
 import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.SchemaVersionException
 import works.merc.keryx.app.data.local.db.KeryxDatabase
+import works.merc.keryx.app.domain.DeferredRerunOutcome
+import works.merc.keryx.app.domain.ForeignKeyViolation
+import works.merc.keryx.app.domain.MainRuledOutVerdict
 import works.merc.keryx.app.domain.MergeFailureClassifier
 import works.merc.keryx.app.domain.MergeSchema
 import works.merc.keryx.app.domain.SqliteFailureCategory
@@ -36,8 +39,9 @@ actual object DatabaseMerger {
      * @param mergeStatements SQL statements to apply during the merge.
      * @throws SchemaVersionException If the cloud database schema is newer than the local schema.
      * @throws CloudDataIncompatibleException If the cloud database is corrupt, or its data
-     * violates this app's schema constraints (classified from the thrown exception's class — see
-     * [classifyMergeFailure]). Any other failure is rethrown unchanged (transient / an app bug).
+     * violates this app's schema constraints (classified from the thrown exception's class plus
+     * evidence pinning it on the cloud — see [classifyMergeFailure]). Any other failure is rethrown
+     * unchanged (transient / an app bug / a local-side fault).
      */
     actual fun merge(
         localDbPath: String,
@@ -45,27 +49,43 @@ actual object DatabaseMerger {
         localSchemaVersion: Long,
         mergeStatements: List<String>,
     ) {
+        val verdict = MainRuledOutVerdict()
         try {
-            mergeUnclassified(localDbPath, cloudDbPath, localSchemaVersion, mergeStatements)
+            mergeUnclassified(localDbPath, cloudDbPath, localSchemaVersion, mergeStatements, verdict)
         } catch (e: SchemaVersionException) {
             // Already classified — must not fall into the Throwable catch-all below, which would
             // reclassify it as CloudDataIncompatibleException (the wrong recovery action: this
             // needs an app update, not a cloud-data reset).
             throw e
         } catch (e: Throwable) {
-            throw classifyMergeFailure(e, cloudDbPath, localSchemaVersion)
+            throw classifyMergeFailure(e, cloudDbPath, localSchemaVersion, verdict.mainRuledOutFor(e))
         }
     }
 
+    /**
+     * @param verdict receives the "main is not the cause" verdict: `true` for any failure of the
+     * cloud-only phase ([migrateCloudIfOlder], which never touches main), and for a constraint failure
+     * of the merge statements the verdict computed inside the failed transaction before its rollback
+     * (see [mainRuledOut]).
+     */
     private fun mergeUnclassified(
         localDbPath: String,
         cloudDbPath: String,
         localSchemaVersion: Long,
         mergeStatements: List<String>,
+        verdict: MainRuledOutVerdict,
     ) {
         // Bring an older cloud DB up to the local schema first, so the merge statements can
         // reference columns added in newer versions without a "no such column" failure.
-        migrateCloudIfOlder(cloudDbPath, localSchemaVersion)
+        try {
+            migrateCloudIfOlder(cloudDbPath, localSchemaVersion)
+        } catch (e: Throwable) {
+            // This phase touches only the downloaded cloud temp file, never main, so main cannot be
+            // the cause of anything it throws (e.g. a constraint failure while migrating the cloud
+            // file): record that verdict for the classification step.
+            verdict.record(e, mainRuledOut = true)
+            throw e
+        }
 
         SQLiteDatabase.openOrCreateDatabase(localDbPath, null, NoOpDatabaseErrorHandler).use { db ->
             db.execSQL("PRAGMA foreign_keys=ON")
@@ -81,14 +101,38 @@ actual object DatabaseMerger {
                 }
 
                 db.beginTransaction()
+                var failure: Throwable? = null
+                // The merge statement running (or that ran last); see mainRuledOut.
+                var statementIndex = 0
                 try {
-                    for (sql in mergeStatements) db.execSQL(sql)
+                    // Marks this transaction for mainRuledOut: a savepoint lives only as long as the
+                    // transaction it was made in, so it still being there after the checks proves
+                    // they ran inside this transaction. Committed (or rolled back) together with the
+                    // transaction by endTransaction() below.
+                    db.execSQL("SAVEPOINT $MERGE_SAVEPOINT")
+                    for ((index, sql) in mergeStatements.withIndex()) {
+                        statementIndex = index
+                        db.execSQL(sql)
+                    }
                     db.setTransactionSuccessful()
+                } catch (e: Throwable) {
+                    // Must run before endTransaction() rolls back: only while the failed
+                    // transaction (and its write lock on main) is still held can no other writer
+                    // change main between the failure and the check.
+                    if (e.failureCategory() == SqliteFailureCategory.CONSTRAINT) {
+                        verdict.record(e, db.mainRuledOut(MergeFailureClassifier.remainingStatements(mergeStatements, statementIndex), e))
+                    }
+                    failure = e
+                    throw e
                 } finally {
                     // endTransaction() rolls back automatically when setTransactionSuccessful()
                     // was not reached (i.e. a merge statement threw) — the Android transaction
                     // API's equivalent of the desktop actual's explicit connection.rollback().
-                    db.endTransaction()
+                    // Its own failure (e.g. once SQLite has already rolled the transaction back by
+                    // itself) must not replace (and hide) the merge failure being classified.
+                    runCatching { db.endTransaction() }.exceptionOrNull()?.let { endFailure ->
+                        failure?.addSuppressed(endFailure) ?: throw endFailure
+                    }
                 }
             } finally {
                 runCatching { db.execSQL("DETACH DATABASE cloud") }
@@ -107,13 +151,30 @@ actual object DatabaseMerger {
      * ([MergeFailureClassifier]) is unchanged and still only sees the platform-independent
      * [SqliteFailureCategory].
      */
-    private fun classifyMergeFailure(e: Throwable, cloudDbPath: String, localSchemaVersion: Long): Throwable {
+    private fun classifyMergeFailure(
+        e: Throwable,
+        cloudDbPath: String,
+        localSchemaVersion: Long,
+        mainRuledOut: Boolean?,
+    ): Throwable {
         val category = e.failureCategory() ?: return e
         val classified = MergeFailureClassifier.classify(
             category = category,
             errorCodeName = e::class.simpleName ?: "SQLiteException",
+            mainRuledOut = mainRuledOut,
             validateCloudSchema = { validateSchema(cloudDbPath, localSchemaVersion) },
-        ) ?: return e
+            cloudIntegrityOk = { cloudIntegrityOk(cloudDbPath) },
+        )
+        if (classified == null) {
+            if (category == SqliteFailureCategory.CONSTRAINT || category == SqliteFailureCategory.CORRUPT) {
+                Log.warn(
+                    TAG,
+                    "Merge failure not pinned on the cloud DB (category=$category, exception=${e::class.simpleName}, " +
+                        "mainRuledOut=$mainRuledOut): ${e.message}",
+                )
+            }
+            return e
+        }
         Log.warn(TAG, "${classified.message} (category=$category, exception=${e::class.simpleName}): ${e.message}")
         return classified
     }
@@ -138,8 +199,11 @@ actual object DatabaseMerger {
      * checking the category it maps to.
      */
     internal fun Throwable.failureCategory(): SqliteFailureCategory? = when {
-        this is SQLiteConstraintException || this is SQLiteDatabaseCorruptException ->
-            SqliteFailureCategory.CORRUPT_OR_CONSTRAINT
+        // Android exposes no extended code, so a FOREIGN KEY violation cannot be told apart from a
+        // UNIQUE/NOT NULL one here — mainRuledOut tells them apart without the extended code.
+        this is SQLiteConstraintException -> SqliteFailureCategory.CONSTRAINT
+        // Covers SQLITE_CORRUPT and SQLITE_NOTADB alike (both surface as this class).
+        this is SQLiteDatabaseCorruptException -> SqliteFailureCategory.CORRUPT
         // A plain SQLiteException (not one of the more specific subclasses in this file) is what
         // "no such table"/"no such column" looks like — ambiguous, so MergeFailureClassifier
         // disambiguates it against the downloaded cloud file itself (validateCloudSchema).
@@ -147,6 +211,118 @@ actual object DatabaseMerger {
         this is SQLiteException -> SqliteFailureCategory.OTHER
         else -> null
     }
+
+    /**
+     * Whether the local `main` DB is ruled out as the cause of the constraint failure [failure] —
+     * [MergeFailureClassifier.mainRuledOut]'s policy, fed with evidence gathered on this (the merge's)
+     * connection while the failed merge transaction is still open.
+     *
+     * The re-run runs [remainingStatements] (the failed statement and every one after it — see
+     * [MergeFailureClassifier.mainRuledOut] for why that gives the right verdict).
+     *
+     * `inTransaction()` only reflects requery's own transaction bookkeeping, not whether SQLite rolled
+     * the transaction back by itself, so the checks are followed by releasing [MERGE_SAVEPOINT]: that
+     * savepoint disappears with any rollback of the transaction, so releasing it successfully proves
+     * every check read `main` inside the failed transaction. Only then does the verdict count;
+     * endTransaction() then rolls the whole transaction back.
+     *
+     * @return `true` / `false` as [MergeFailureClassifier.mainRuledOut], or `null` when undetermined;
+     * a failure of any check is added to [failure] as suppressed, never replacing it.
+     */
+    private fun SQLiteDatabase.mainRuledOut(remainingStatements: List<String>, failure: Throwable): Boolean? {
+        val ruledOut = try {
+            MergeFailureClassifier.mainRuledOut(
+                // requery exposes no extended result code, so a FOREIGN KEY violation cannot be told
+                // from a UNIQUE / NOT NULL one here: always the full path.
+                isForeignKeyFailure = null,
+                readViolationsBefore = { if (inTransaction()) foreignKeyViolations() else null },
+            ) {
+                rerunWithDeferredForeignKeys(remainingStatements, failure)
+            }
+        } catch (checkFailure: Throwable) {
+            failure.addSuppressed(checkFailure)
+            null
+        }
+        val stillOpen = try {
+            execSQL("RELEASE $MERGE_SAVEPOINT")
+            true
+        } catch (releaseFailure: Throwable) {
+            failure.addSuppressed(releaseFailure)
+            false
+        }
+        return if (stillOpen) ruledOut else null
+    }
+
+    /**
+     * Runs [remainingStatements] again with FOREIGN KEY checks deferred (`PRAGMA defer_foreign_keys`,
+     * which SQLite switches off again when the transaction ends) — see
+     * [MergeFailureClassifier.mainRuledOut]. Its own SQL failures other than a re-run statement's are
+     * thrown to [mainRuledOut].
+     *
+     * First proves the merge transaction is still open, by releasing [MERGE_SAVEPOINT] and making it
+     * again in the same transaction: had SQLite already ended the transaction, the release fails and
+     * nothing runs, so no statement can run outside it and commit straight into main. Whether it
+     * stayed open throughout is proven afterwards, by [mainRuledOut]'s release of the new savepoint.
+     */
+    private fun SQLiteDatabase.rerunWithDeferredForeignKeys(
+        remainingStatements: List<String>,
+        failure: Throwable,
+    ): DeferredRerunOutcome {
+        execSQL("RELEASE $MERGE_SAVEPOINT")
+        execSQL("SAVEPOINT $MERGE_SAVEPOINT")
+        execSQL("PRAGMA defer_foreign_keys=ON")
+        try {
+            for (sql in remainingStatements) execSQL(sql)
+        } catch (rerunFailure: Throwable) {
+            if (rerunFailure.failureCategory() == SqliteFailureCategory.CONSTRAINT) {
+                return DeferredRerunOutcome.ConstraintFailed
+            }
+            failure.addSuppressed(rerunFailure)
+            return DeferredRerunOutcome.Undetermined
+        }
+        return DeferredRerunOutcome.Completed(foreignKeyViolations())
+    }
+
+    /** `PRAGMA main.foreign_key_check`'s rows. */
+    private fun SQLiteDatabase.foreignKeyViolations(): Set<ForeignKeyViolation> =
+        rawQuery("PRAGMA main.foreign_key_check", null).use { cursor ->
+            buildSet {
+                while (cursor.moveToNext()) {
+                    add(
+                        ForeignKeyViolation(
+                            table = cursor.getString(0),
+                            rowId = if (cursor.isNull(1)) null else cursor.getLong(1),
+                            parent = cursor.getString(2),
+                            foreignKeyId = cursor.getLong(3),
+                        ),
+                    )
+                }
+            }
+        }
+
+    /**
+     * Runs `PRAGMA quick_check` against the downloaded cloud file — see
+     * [MergeFailureClassifier.classify]'s `cloudIntegrityOk`. Non-creating (same reason as
+     * [validateSchema]), and through [NoOpDatabaseErrorHandler] so a corrupt file is never deleted.
+     *
+     * @return `true` if the file reports `ok`, `false` if it reports problems or opening/checking it
+     * fails as not-a-database/corrupt, or `null` for any other failure.
+     */
+    private fun cloudIntegrityOk(dbPath: String): Boolean? =
+        try {
+            SQLiteDatabase.openDatabase(dbPath, null, SQLiteDatabase.OPEN_READWRITE, NoOpDatabaseErrorHandler).use { db ->
+                val rows = buildList {
+                    db.rawQuery("PRAGMA quick_check", null).use { cursor ->
+                        while (cursor.moveToNext()) add(cursor.getString(0).orEmpty())
+                    }
+                }
+                if (rows.isEmpty()) null else rows == listOf(QUICK_CHECK_OK)
+            }
+        } catch (_: SQLiteDatabaseCorruptException) {
+            false
+        } catch (_: SQLiteException) {
+            null
+        }
 
     /**
      * Validates that the database at [dbPath] contains the required tables and columns for [schemaVersion].
@@ -222,4 +398,10 @@ actual object DatabaseMerger {
     }
 
     private const val TAG = "DatabaseMerger"
+
+    /** Marks the start of the merge transaction; see [mainRuledOut]. */
+    private const val MERGE_SAVEPOINT = "keryx_merge"
+
+    /** `PRAGMA quick_check`'s single result row for an intact database. */
+    private const val QUICK_CHECK_OK = "ok"
 }

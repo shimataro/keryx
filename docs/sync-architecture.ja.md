@@ -33,14 +33,14 @@
 /keryx-YYYYMMDD-HHMMSS.db.gz.bak       ← クラウドデータのリセットで退避される旧ファイル（自動削除されない）
 ```
 
-競合防止はアップロード時のリビジョンチェックで行う — Dropbox: `rev`、サーバー側の compare-and-set（不一致時 409）。Google Drive: ファイルの `version`、クライアント側で比較後に書き込み（同期のリトライで担保）。OneDrive: DriveItem の `eTag` を `If-Match` で送信（不一致時 412）。Nextcloud: WebDAV の `ETag` をそのまま `If-Match` で送信（不一致時 412、別の書き込みがファイルのロックを持っている間は 423——「Nextcloud（Login Flow v2）」参照）。lock ファイルは使わない。Nextcloud では、これらのファイルはアプリフォルダーではなく利用者自身のファイルの `/Keryx/` フォルダーに置く。
+競合防止はアップロード時のリビジョンチェックで行う — Dropbox: `rev`、サーバー側の compare-and-set（不一致時 409）。Google Drive: ファイルの id と `version`（`<id>:<version>`。`version` はファイルごとの数なので、同じ数を持つ別のファイルを id で見分ける）、クライアント側で比較後に書き込み。Drive には条件付きの内容更新がないため、比較と書き込みの間に入った上書きは検出できない。上書きされた端末は、次の同期で自分の変更をほかのマージと同じ規則でクラウドのファイルに改めてマージする。そのため、他端末の変更と同じタイムスタンプで競って負けた変更（「マージ（`DatabaseMerger` + `MergeSql`）」の同着の規則を参照）は戻らないが、これは 2 つのアップロードが競合しなかった場合と同じ結果である（[known-issues.ja.md](known-issues.ja.md) の「Google Drive: アップロードが他端末のアップロードを気付かれずに上書きすることがある」を参照）。OneDrive: DriveItem の `eTag` を `If-Match` で送信（不一致時 412）。Nextcloud: WebDAV の `ETag` をそのまま `If-Match` で送信（不一致時 412、別の書き込みがファイルのロックを持っている間は 423——「Nextcloud（Login Flow v2）」参照）。lock ファイルは使わない。Nextcloud では、これらのファイルはアプリフォルダーではなく利用者自身のファイルの `/Keryx/` フォルダーに置く。
 
 ## 同期フロー（`SyncRepository.sync()`）
 
 1. `CloudStorage.metadata(CLOUD_DB_GZ_PATH)` で圧縮ファイルのリビジョンを取得する。クラウドにまだ存在
    しなければ `null` が返り、その場合は手順1aへ進む。同期が行う存在・リビジョンチェックはこれだけであり、
    **追加のネットワーク往復は発生しない** — 3 プロバイダともメタデータ応答に元々リビジョンが含まれている
-   （Dropbox `get_metadata` の `rev` / Drive の名前検索が返す `version` / Graph のアイテムの `eTag` / Nextcloud の `PROPFIND` が返す `getetag`）。
+   （Dropbox `get_metadata` の `rev` / Drive の名前検索が返す `id` と `version` / Graph のアイテムの `eTag` / Nextcloud の `PROPFIND` が返す `getetag`）。
    - **1a. 圧縮ファイルが無い場合** — `CloudStorage.metadata(CLOUD_DB_PATH)` でレガシーフォールバックを確認する。
      - **両方とも無い（真の初回同期）**: ローカル DB をエクスポート・圧縮し、create-only で
        アップロードして（`createFresh`）終了する。もし `createFresh` の時点で実はファイルが既に存在
@@ -321,6 +321,13 @@
 マージ SQL（`MergeSql`）の要点:
 
 - **列を明示指定**する（`SELECT *` はスキーマ差異で列数不一致を起こしうるため避ける）。
+- **同着はすべての文でクラウドが勝つ。** 両側のタイムスタンプが等しいときは、クラウド側の値を採用する（クラウド側で
+  `>=`）。クラウドに置かれるファイルはどの時点でも 1 つなので、同着のときに各端末がその値を採用すれば収束する。これは
+  どのプロバイダーでも、他の端末が古いバージョンのアプリでも成り立つ。ローカル側を勝たせると、同じミリ秒に違う値を
+  記録した 2 台の端末が、それぞれ自分の値を残してアップロードし続け、永久に収束しない。値も同じ同着では同じ値を
+  書き直すだけで、害はない。端末自身の書き込みは、マージで取り込んだばかりのものも含め、その行が持つタイムスタンプより
+  必ず大きい値を付ける（[db-schema.ja.md](db-schema.ja.md) の「設計方針」を参照）ので、同着が起きるのは 2 台の端末で
+  別々に行った書き込みの間だけで、取り込んだ値とその後のローカルの編集の間では起きない。
 - feeds / tags / folders / global_settings: タイムスタンプ後勝ち（論理削除含む）。ただし feeds 文の
   `ON CONFLICT` は **ユーザー編集フィールド（`folder_id` / `sort_order` / `custom_title` / `deleted_at`）を
   一切扱わない**（下記の専用文に委譲）。内容が新しいという理由でこれらが上書きされないようにするため。
@@ -356,8 +363,8 @@
   `mergeFeedFolderId`（`folder_id` / `folder_updated_at`）、`mergeFeedSortOrder`（`sort_order` /
   `sort_order_updated_at`）、`mergeFeedCustomTitle`（`custom_title` / `custom_title_updated_at`）、
   `mergeFeedDeletedAt`（`deleted_at` / `deleted_updated_at`）。いずれも NULL 認識の比較
-  （`c.<ts> IS NOT NULL AND (main が NULL または cloud が厳密に新しい)`）で、リフレッシュに妨げられない伝播・
-  収束後の無駄書き込み無し・ローカルが新しければ維持、を満たす。`folder_id` は列に値を持たず専用文が
+  （`c.<ts> IS NOT NULL AND (main が NULL または cloud が同じか新しい)`）で、リフレッシュに妨げられない伝播・
+  ローカルが新しければ維持・同着はクラウドが勝つ（前述）、を満たす。`folder_id` は列に値を持たず専用文が
   次の4分岐で解決する: クラウド側が参照する folder 自体が `cloud.folders` で生存していなければ
   （`deleted_at IS NULL`）無条件で NULL、そうでなければその folder が main にも生存していればクラウド側
   の `folder_id` をそのまま採用、それも無ければ `main.folders`/`cloud.folders` を名前で join した
@@ -382,12 +389,12 @@ cause の循環に備えて深さ上限あり）。`SchemaVersionException` は�
 扱う。
 
 2 層の分担は次のとおり: デスクトップの `actual` が担うのは `resultCode.code and 0xFF` をドライバ非依存の
-`SqliteFailureCategory`（`CORRUPT_OR_CONSTRAINT` / `STATEMENT_ERROR` / `OTHER`）へ落とすことと、判定結果の
-ログ出力だけ。下表の判定ロジック本体は `commonMain` の `domain/MergeFailureClassifier.classify` にあり、
-（カテゴリ、エラーコード名、遅延評価される `validateSchema` コールバック）から
-`CloudDataIncompatibleException` または `null`（= 元の失敗をそのまま再 throw）を返す純粋関数である。
-`validateSchema` コールバックはダウンロード済みファイルを開き直すため、曖昧な `STATEMENT_ERROR` の場合に
-のみ呼ばれる。分類そのものにプラットフォーム固有の要素は無いので、数値エラーコードを公開しないドライバ
+`SqliteFailureCategory`（`CORRUPT` / `CONSTRAINT` / `STATEMENT_ERROR` / `OTHER`）へ落とすこと、下表に必要な
+判断材料を集めること、判定結果のログ出力だけ。下表の判定ロジック本体は `commonMain` の
+`domain/MergeFailureClassifier.classify` にあり、（カテゴリ、エラーコード名、ローカルの外部キー判定、遅延評価される
+`validateSchema` コールバック、遅延評価されるクラウド整合性コールバック）から `CloudDataIncompatibleException` または
+`null`（= 元の失敗をそのまま再 throw）を返す純粋関数である。どちらのコールバックもダウンロード済みファイルを開き直す
+ため、`validateSchema` は曖昧な `STATEMENT_ERROR` の場合にのみ、クラウド整合性は `CORRUPT` の場合にのみ呼ばれる。分類そのものにプラットフォーム固有の要素は無いので、数値エラーコードを公開しないドライバ
 （Android の `android.database.sqlite.SQLiteException`）を持つターゲットでも、同じカテゴリを与えるだけで済む。
 
 Apple の `actual`（`DatabaseMerger.apple.kt`）も同じ対応付けと同じ `MergeFailureClassifier` を使うが、コードの
@@ -408,8 +415,8 @@ ATTACH する前に、Apple の `migrateCloudIfOlder` は古いクラウドフ�
 
 | SQLite の主エラーコード | 分類 |
 | --- | --- |
-| `SQLITE_NOTADB`、`SQLITE_CORRUPT`、`SQLITE_FORMAT`、`SQLITE_EMPTY` | **永続** → `CloudDataIncompatibleException`。ファイル自体が壊れている。 |
-| `SQLITE_CONSTRAINT`（`_UNIQUE`／`_NOTNULL`／`_FOREIGNKEY` 等、全ての拡張 `SQLITE_CONSTRAINT_*` を含む — 拡張コードの下位バイトは常にその主コードに一致する） | **永続** → `CloudDataIncompatibleException`。`MergeSql` の `NOT EXISTS`/`EXISTS` ガード（前述）が main 側の行との衝突は既にすべて潰しているため、マージ文がそれでも制約に触れうるのはクラウド DB 自身の行集合がそれに違反している場合だけ（クラウド DB 内部の url 重複、クラウド側の（より緩い）スキーマが許していた NULL 等）。それはこのアプリのスキーマで表現できないデータであり、まさに `CloudDataIncompatibleException` の意味そのもの。 |
+| `SQLITE_NOTADB`、`SQLITE_CORRUPT`、`SQLITE_FORMAT`、`SQLITE_EMPTY` | **クラウドファイルが壊れていると確かめられたときだけ永続。** ロールバックの後、ダウンロードしたクラウドファイル（他から書き込まれない一時ファイル）を作成せずに開き、`PRAGMA quick_check` で調べる：問題が報告される、または開くか調べるときに `SQLITE_NOTADB`／`SQLITE_CORRUPT` で失敗する → `CloudDataIncompatibleException`。`ok` → 壊れているのは*ローカル*の DB なので、そのまま再 throw。それ以外（判定不能）→ そのまま再 throw。したがってローカル DB の破損にクラウドデータのリセットで応じることはない。 |
+| `SQLITE_CONSTRAINT`（`_UNIQUE`／`_NOTNULL`／`_FOREIGNKEY` 等、全ての拡張 `SQLITE_CONSTRAINT_*` を含む — 拡張コードの下位バイトは常にその主コードに一致する） | ***main* が原因でないと確かめられたときだけ永続** → `CloudDataIncompatibleException`。`MergeSql` の `NOT EXISTS`/`EXISTS` ガード（前述）が main 側の行との衝突は既にすべて潰しており、UNIQUE／NOT NULL は main で常に強制されている。残るのは、クラウド DB 自身の行集合が制約に違反している場合（クラウド DB 内部の url 重複、クラウド側の（より緩い）スキーマが許していた NULL 等）と、**main に元からある外部キー違反**（外部キーを強制する前のデータや移行によるもの）を、文がその行を変更したときにマージの `PRAGMA foreign_keys=ON` が表に出す場合である。今の `MergeSql` が外部キー列に書くのは、main に存在すると保証された値か NULL だけで（`mergeFeedFolderId`）、親も削除しないので、これは今後追加される文への備えである。ドライバが拡張リザルトコードで UNIQUE・PRIMARY KEY・NOT NULL の違反と報告した失敗は、書き込みのたびに強制されている種類なので main の既存の状態が原因になり得ず、以下のチェックや再実行をせずにその場で分類する。再実行しても同じ判定にしかならず、マージの書き込みロックを長く持つだけだからである。desktop と Apple はこのコードを読めるが、Android の requery は公開していないので、Android は常に以下の全経路を通る（main が元から違反しうるのは外部キー制約だけで、スキーマに CHECK 制約やトリガーを足すときはこの判定を見直す必要がある）。以下はすべて、**失敗したマージのトランザクションがまだ開いているうちに**マージの接続で行うので、途中で他の書き込みが main を変えることはない（例: 再購読で孤立した記事の親が補われる）。(1) `PRAGMA main.foreign_key_check` の結果を V0 とする。それより前の文は外部キーの即時チェックを通っているので、V0 は main に元からあった違反である。V0 が空なら main は原因でない → `CloudDataIncompatibleException`。(2) そうでなければ、`PRAGMA defer_foreign_keys=ON` にして、失敗した文とそれ以降のすべての文（`MergeFailureClassifier.remainingStatements`）を同じトランザクションの中で再実行する。こうすると即時に失敗するのは外部キー以外の制約だけになる。失敗した文から続けても、最初からやり直すのと同じ状態になる — それより前の文は外部キーの即時チェックを通っており、制約違反は失敗した文自身の変更を取り消すためである。また Android ではこれしか方法がない。requery は `ROLLBACK` で始まる文をすべてトランザクション全体のロールバックとして扱うので、セーブポイントへの `ROLLBACK TO` を発行できないためである（理由は `MergeFailureClassifier.mainRuledOut` の KDoc にある）。再実行が制約違反で失敗した → クラウドの行による外部キー以外の制約違反 → `CloudDataIncompatibleException`。再実行が成功し、その後の `foreign_key_check`（V1）に V0 になかった行がある → クラウドの行が新しい外部キー違反を持ち込んだ → `CloudDataIncompatibleException`。再実行が成功し、V1 に新しい行がない → 失敗は元からある手元の違反によるもの → そのまま再 throw。それ以外（別の失敗、SQLite がトランザクションを既に終えていた、チェック自体の失敗）→ そのまま再 throw。どの場合もその後トランザクション全体をロールバックし、何もコミットしない。したがって手元の孤児行が、クラウド由来の制約違反を隠すことはない。クラウドファイルだけに触れる `migrateCloudIfOlder` で起きた制約違反は、構造上 main が原因になり得ないので分類する。 |
 | `SQLITE_ERROR`（`no such table`／`no such column`） | **曖昧** — これは外部・レガシーなクラウドスキーマの見た目でもあり、（無関係なアプリのバグによる）ローカル側スキーマの破損の見た目でもある。ダウンロードしたクラウドファイルに対して `validateSchema` を呼んで解決する：`false` なら `CloudDataIncompatibleException`、`true` または `null`（判定不能）ならどちらもクラウド起因と確信できないためそのまま再 throw。 |
 | それ以外（`SQLITE_CANTOPEN`、`SQLITE_IOERR`、`SQLITE_FULL`、`SQLITE_BUSY`、`SQLITE_LOCKED`、`SQLITE_READONLY`、`SQLiteException` が見つからない場合、等） | **一時的／アプリ側** — そのまま再 throw。 |
 
@@ -421,20 +428,20 @@ ATTACH する前に、Apple の `migrateCloudIfOlder` は古いクラウドフ�
 `CloudDataIncompatibleException` には決してならない — マージ自体は既に成功しているので、そのために
 破壊的なクラウドデータリセットを提示するのは誤りである。
 
-許容している残存リスクが一つある：マージのトランザクション中は `PRAGMA foreign_keys=ON` が有効なので、
-main（ローカル）側に既に存在する不整合が、マージの `UPDATE` 文がそれに触れて初めて表面化し、
-`SQLITE_CONSTRAINT_FOREIGNKEY` としてクラウド起因に誤分類される可能性は理論上ゼロではない。実際には
-起きにくい（例えば `mergeFeedFolderId` は `folder_id` を常に既存の `main.folders` 行か `NULL` のどちらかに
-解決する）うえ、誤分類してもデータは失われない — 下記のリセット経路は削除ではなく退避を行うため。
-拡張エラーコードはログに残し、事後診断できるようにしている。
+マージのトランザクションがまだ開いているかの確かめ方は `actual` ごとに異なる。分かりやすいフラグは要求した状態を
+記録するだけで、SQLite が自分で行ったロールバックを反映しないためである：デスクトップはマージのトランザクションに
+ロールバックのリスナー（sqlite-jdbc の `SQLiteCommitListener` 経由の `sqlite3_rollback_hook`）を登録し、Apple は
+`sqlite3_get_autocommit` に問い合わせ、Android はトランザクションとともに `SAVEPOINT` を開き、`RELEASE` が成功した
+ことを、まだその中にいる証拠とする — 再実行の前に 1 回（続けて新しい `SAVEPOINT` を張るので、トランザクションが終わって
+いれば何も再実行しない）、後に 1 回。再実行はトランザクションが開いていると確かめてから始めるので、どの文もトランザクションの
+外で走って main にコミットされることはない。判定結果はその失敗そのものに対してだけ分類の段階へ渡され
+（`MainRuledOutVerdict`）、チェック自体の失敗は suppressed として付け加え、元の失敗を置き換えることはない。
 
-**将来対応**: ダウンロードしたクラウド DB に対する `PRAGMA quick_check`/`integrity_check` は、毎回の同期では
-あえて実行しない — DB サイズに比例したコストがかかるうえ、SQLite はマージが触れた瞬間に破損ページを別個の
-エラーコードとして返す（前述「マージ失敗の分類」参照）ので、マージが触れないページまで毎回全走査しても
-得られるものが無い。またこの機能が本来検出したい失敗モード（クラウド DB 自身のスキーマとしては整合していても、
-このアプリの制約には違反するデータ）も検出できない（`quick_check` は DB が自分自身のスキーマと整合しているかしか
-見ない）。将来追加するとすれば、マージ失敗分類パスの第2段階（曖昧な `SQLITE_ERROR` でスキーマ不一致を除外した後）
-に位置づけるべきで、同期のホットパスには置かない。
+ダウンロードしたクラウド DB に対する `PRAGMA quick_check` は、失敗した経路でだけ、壊れているのがクラウドファイルか
+ローカル DB かを見分けるために実行する（上の表を参照）。毎回の同期ではあえて実行しない — DB サイズに比例した
+コストがかかるうえ、SQLite はマージが触れた瞬間に破損ページを別個のエラーコードとして返すので、マージが触れない
+ページまで毎回全走査しても得られるものが無い。また、クラウド DB 自身のスキーマとしては整合していても、このアプリの
+制約には違反するデータも検出できない（`quick_check` は DB が自分自身のスキーマと整合しているかしか見ない）。
 
 ## スキーマバージョン
 

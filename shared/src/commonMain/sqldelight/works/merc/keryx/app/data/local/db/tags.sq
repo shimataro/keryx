@@ -22,10 +22,11 @@ SELECT * FROM tags WHERE name = ?;
 -- Every local write to a tag row stamps updated_at as MAX(now, previous + 1): never at or before the
 -- stamp the row already has. A delete and a recreation within one millisecond already move it ahead
 -- of the clock (softDelete, upsertByName), and an edit made right after them must still be the
--- newest: the sync merge's last-write-wins compares with a strict ">", so an edit stamped at or below
--- the row's stamp would be dropped by a device that already has the row — and a delete and a
--- recreation with equal stamps would leave the recreated row indistinguishable from the one before
--- the delete. See docs/db-schema.md.
+-- newest: the sync merge's last-write-wins orders only differing stamps, and settles an equal one by
+-- its tie rule (the cloud side wins), which knows nothing of which event came later — so an edit
+-- stamped at or below the row's stamp could lose to the older value on another device, and a delete
+-- and a recreation with equal stamps would leave the recreated row indistinguishable from the one
+-- before the delete. See docs/db-schema.md.
 upsert:
 INSERT INTO tags (id, name, color, sort_order, deleted_at, updated_at, created_at)
 VALUES (?, ?, ?, ?, ?, ?, ?)

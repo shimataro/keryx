@@ -20,11 +20,21 @@ through it rather than composing `AppDirs.appDataDir()` with the filename themse
 - A delete and the event that undoes it never share a stamp on the same row. `tags` / `folders` stamp
   `updated_at`, and `feeds` stamps `deleted_updated_at`, as `MAX(now, previous + 1)` on a soft delete and on a
   recreation / reactivation (`upsertByName`) or resubscribe (`stampResubscribed`), so the stamps strictly increase
-  even within one millisecond. The sync merge's last-write-wins compares with a strict `>`, so an equal stamp would
-  leave the later event unpropagated — and a recreated row indistinguishable from the one before the delete.
+  even within one millisecond. The sync merge's last-write-wins can only order events whose stamps differ: on an
+  equal stamp it falls back to its tie rule (the cloud side wins — see [sync-architecture.md](sync-architecture.md)),
+  which knows nothing of which event came later, so an equal stamp could let the earlier event win — and would
+  leave a recreated row indistinguishable from the one before the delete.
   Because those stamps can run a few milliseconds ahead of the clock, every other local write to such a row moves
   its stamp forward the same way, so an edit made right after them is still the newest: for `folders`, a rename
   (`upsert`) and a reorder (`updateSortOrder`); for `tags`, a rename or color change (`upsert`).
+- **Every other last-write-wins stamp moves only forward on its row the same way**, `MAX(now, previous + 1)`:
+  `feeds.custom_title_updated_at` / `folder_updated_at` / `sort_order_updated_at` (`updateCustomTitle`,
+  `updateFolder`, `updateSortOrder`, `updateFolderAndSortOrder`), `articles.read_at` / `starred_at`
+  (`updateReadStatus`, `updateReadStatusByIds`, `updateStarStatus`, the `markAllRead*` queries) and
+  `deleted_updated_at` (`softDeleteExpired`), and `feed_tags.updated_at` / `global_settings.updated_at` (`upsert`).
+  Without it, a write stamped at the value the row already holds — two writes within one millisecond, or one made
+  right after a merge brought that very stamp in — would lose to the older value on the next merge, since the tie
+  goes to the cloud side. A tie is thereby left only to two devices' independent writes.
 - Booleans and timestamps are **INTEGER (`Long`)**. Booleans are 0/1; times are Unix milliseconds.
 - Schema version is managed by `PRAGMA user_version` (currently 2). On desktop, `DatabaseDriverFactory`
   drives create/migrate manually off this pragma; on Android, `AndroidSqliteDriver` drives it internally via its own
@@ -108,7 +118,7 @@ Indexes: `feed_id`, `is_read`, `is_starred`, and a composite `(published_at DESC
 ### sync_state (KVS, non-sync)
 
 `key`(PK), `value`. Known keys: `last_synced_at` (Unix millis), `cloud_file_rev` (revision of the cloud
-file this device has already merged — Dropbox uses `rev`, Google Drive the file resource's `version`,
+file this device has already merged — Dropbox uses `rev`, Google Drive the file resource's `id` and `version` as `<id>:<version>`,
 OneDrive the DriveItem `eTag`, Nextcloud the WebDAV `ETag`, quotes included), `last_uploaded_snapshot_digest` (hex SHA-256 of the snapshot this device
 last uploaded).
 

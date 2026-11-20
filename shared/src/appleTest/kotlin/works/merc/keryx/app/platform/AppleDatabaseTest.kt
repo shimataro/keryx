@@ -173,8 +173,9 @@ class AppleDatabaseTest {
         // Garble page 1's b-tree (everything after the 100-byte file header, which keeps
         // user_version readable): the version check still sees 1, so the failure surfaces only once
         // NativeSqliteDriver opens the file to migrate it.
+        assertPageSize(path("corrupt-v1.db"))
         val bytes = FileIO.readBytes(path("corrupt-v1.db"))!!
-        for (i in 100 until minOf(bytes.size, 4096)) bytes[i] = 0xFF.toByte()
+        for (i in 100 until minOf(bytes.size, PAGE_SIZE)) bytes[i] = 0xFF.toByte()
         FileIO.writeBytes(path("corrupt-v1.db"), bytes)
         assertEquals(1, RawSqliteConnection.userVersionOf(path("corrupt-v1.db")))
 
@@ -183,10 +184,320 @@ class AppleDatabaseTest {
         }
     }
 
+    /** Asserts the file's page size is [PAGE_SIZE], the offset the corruption helpers assume. */
+    private fun assertPageSize(file: String) {
+        assertEquals(PAGE_SIZE.toLong(), RawSqliteConnection.open(file).use { it.queryLong("PRAGMA page_size") }, "the corruption helpers assume this page size")
+    }
+
+    /**
+     * A corrupt *local* database raises SQLITE_CORRUPT during the merge, but the downloaded cloud file
+     * passes its quick_check, so the corruption is local: the original failure is rethrown, never a
+     * cloud-data reset.
+     */
+    @Test
+    fun aCorruptLocalDatabaseIsNotBlamedOnAnIntactCloudFile() {
+        for (name in listOf("main.db", "cloud.db")) {
+            val driver = open(name)
+            driver.insertFeed("f1")
+            driver.close()
+            drivers -= driver
+        }
+        assertPageSize(path("main.db"))
+        val bytes = FileIO.readBytes(path("main.db"))!!
+        assertTrue(bytes.size > PAGE_SIZE, "the file must have a page past the first to corrupt")
+        for (i in PAGE_SIZE until bytes.size) bytes[i] = bytes[i].inc()
+        FileIO.writeBytes(path("main.db"), bytes)
+
+        val thrown = assertFailsWith<SqliteException> {
+            DatabaseMerger.merge(path("main.db"), path("cloud.db"), KeryxDatabase.Schema.version, MergeSql.all)
+        }
+        assertEquals(SQLITE_CORRUPT, thrown.resultCode and 0xFF, "got ${thrown.resultCode}: ${thrown.message}")
+    }
+
+    /**
+     * Two schema files, `main.db` and `cloud.db`, each holding a folder with id `dup`; [seedLocal]
+     * then runs on a raw connection to `main.db` with foreign keys OFF (so it can plant a violation).
+     */
+    private fun writeFolderCollision(seedLocal: (RawSqliteConnection) -> Unit = {}) {
+        for (name in listOf("main.db", "cloud.db")) {
+            open(name).close()
+        }
+        drivers.clear()
+        for (name in listOf("main.db", "cloud.db")) {
+            RawSqliteConnection.open(path(name)).use { db ->
+                db.exec("INSERT INTO folders (id, name, sort_order, deleted_at, updated_at, created_at) VALUES ('dup', '$name', 0, NULL, 0, 0)")
+            }
+        }
+        RawSqliteConnection.open(path("main.db")).use(seedLocal)
+    }
+
+    private fun RawSqliteConnection.insertOrphanArticle() = exec(
+        "INSERT INTO articles (id, feed_id, guid, url, title, cached_at, updated_at, created_at) " +
+            "VALUES ('orphan', 'no-such-feed', 'g', 'https://ex.com/a', 'Orphan', 0, 0, 0)",
+    )
+
+    @Test
+    fun aConstraintFailureWithASoundLocalDatabaseIsClassifiedAsIncompatible() {
+        writeFolderCollision()
+
+        assertFailsWith<works.merc.keryx.app.core.CloudDataIncompatibleException> {
+            DatabaseMerger.merge(path("main.db"), path("cloud.db"), KeryxDatabase.Schema.version, listOf(UNGUARDED_FOLDER_INSERT))
+        }
+    }
+
+    @Test
+    fun aForeignKeyViolationAlreadyInTheLocalDatabaseIsNotBlamedOnTheCloud() {
+        writeFolderCollision { it.insertOrphanArticle() }
+
+        val thrown = assertFailsWith<SqliteException> {
+            // Re-assigning the FK column makes SQLite check the orphan's missing parent.
+            DatabaseMerger.merge(
+                path("main.db"),
+                path("cloud.db"),
+                KeryxDatabase.Schema.version,
+                listOf("UPDATE main.articles SET feed_id = feed_id"),
+            )
+        }
+        assertEquals(SQLITE_CONSTRAINT_FOREIGNKEY, thrown.resultCode)
+    }
+
+    @Test
+    fun aCloudPrimaryKeyCollisionIsClassifiedAsIncompatibleDespiteALocalForeignKeyViolation() {
+        writeFolderCollision { it.insertOrphanArticle() }
+
+        // The re-run with foreign keys deferred fails on the same collision, pinning it on the cloud.
+        assertFailsWith<works.merc.keryx.app.core.CloudDataIncompatibleException> {
+            DatabaseMerger.merge(path("main.db"), path("cloud.db"), KeryxDatabase.Schema.version, listOf(UNGUARDED_FOLDER_INSERT))
+        }
+    }
+
+    @Test
+    fun aNewForeignKeyViolationFromTheCloudRowsIsClassifiedAsIncompatibleDespiteALocalOne() {
+        writeFolderCollision { it.insertOrphanArticle() }
+        RawSqliteConnection.open(path("cloud.db")).use { db ->
+            db.exec("INSERT INTO feeds (id, url, title, updated_at, created_at) VALUES ('f1', 'https://ex.com/f1', 'Feed f1', 1, 1)")
+            db.exec(
+                "INSERT INTO articles (id, feed_id, guid, url, title, cached_at, updated_at, created_at) " +
+                    "VALUES ('cloud-article', 'f1', 'c', 'https://ex.com/c', 'Cloud', 0, 0, 0)",
+            )
+        }
+
+        // The cloud article's feed exists nowhere in main: the re-run with foreign keys deferred
+        // leaves a violation main did not hold before.
+        assertFailsWith<works.merc.keryx.app.core.CloudDataIncompatibleException> {
+            DatabaseMerger.merge(path("main.db"), path("cloud.db"), KeryxDatabase.Schema.version, listOf(UNGUARDED_ARTICLE_INSERT))
+        }
+    }
+
+    @Test
+    fun aConstraintFailureAfterSqliteEndedTheTransactionIsNotClassified() {
+        writeFolderCollision()
+
+        // The statement's own OR ROLLBACK ends the merge transaction, so a foreign_key_check could no
+        // longer run inside it: undetermined, never classified, though the local database is sound.
+        val thrown = assertFailsWith<SqliteException> {
+            DatabaseMerger.merge(
+                path("main.db"),
+                path("cloud.db"),
+                KeryxDatabase.Schema.version,
+                listOf(UNGUARDED_FOLDER_INSERT.replace("INSERT INTO", "INSERT OR ROLLBACK INTO")),
+            )
+        }
+        assertEquals(SQLITE_CONSTRAINT_PRIMARYKEY, thrown.resultCode)
+    }
+
+    /** Two empty schema files, `main.db` and `cloud.db`, then [seedLocal] / [seedCloud] on raw connections (foreign keys OFF). */
+    private fun writeSchemaFiles(
+        seedLocal: (RawSqliteConnection) -> Unit = {},
+        seedCloud: (RawSqliteConnection) -> Unit = {},
+    ) {
+        for (name in listOf("main.db", "cloud.db")) {
+            open(name).close()
+        }
+        drivers.clear()
+        RawSqliteConnection.open(path("main.db")).use(seedLocal)
+        RawSqliteConnection.open(path("cloud.db")).use(seedCloud)
+    }
+
+    @Test
+    fun aFailureAtALaterStatementRerunsOnlyFromThatStatementAndStaysUnclassified() {
+        writeSchemaFiles(
+            seedLocal = { it.insertOrphanArticle() },
+            seedCloud = { it.exec("INSERT INTO folders (id, name, sort_order, deleted_at, updated_at, created_at) VALUES ('cloud-only', 'Cloud', 0, NULL, 0, 0)") },
+        )
+
+        // Statement 0 succeeds and is not idempotent; the re-run must start at statement 1. Starting at
+        // statement 0 again would hit the folder's PRIMARY KEY and read as the cloud's failure.
+        val thrown = assertFailsWith<SqliteException> {
+            DatabaseMerger.merge(
+                path("main.db"),
+                path("cloud.db"),
+                KeryxDatabase.Schema.version,
+                listOf(UNGUARDED_FOLDER_INSERT, ORPHAN_TOUCHING_UPDATE),
+            )
+        }
+        assertEquals(SQLITE_CONSTRAINT_FOREIGNKEY, thrown.resultCode)
+    }
+
+    @Test
+    fun aNonConstraintFailureDuringTheRerunIsUnclassifiedAndAttachedAsSuppressed() {
+        writeSchemaFiles(seedLocal = { it.insertOrphanArticle() })
+
+        val thrown = assertFailsWith<SqliteException> {
+            DatabaseMerger.merge(
+                path("main.db"),
+                path("cloud.db"),
+                KeryxDatabase.Schema.version,
+                // Statement 1 is only reached by the re-run: statement 0 fails first originally.
+                listOf(ORPHAN_TOUCHING_UPDATE, "INSERT INTO main.no_such_table SELECT * FROM cloud.folders"),
+            )
+        }
+        assertEquals(SQLITE_CONSTRAINT_FOREIGNKEY, thrown.resultCode)
+        assertTrue(
+            thrown.suppressedExceptions.any { it is SqliteException && (it.resultCode and 0xFF) == SQLITE_ERROR },
+            "the re-run's failure must be attached as suppressed, got ${thrown.suppressedExceptions}",
+        )
+    }
+
+    @Test
+    fun aFailingForeignKeyCheckLeavesTheFailureUnclassifiedAndAttachedAsSuppressed() {
+        writeSchemaFiles(seedLocal = { it.insertOrphanArticle() })
+
+        val thrown = assertFailsWith<SqliteException> {
+            DatabaseMerger.merge(
+                path("main.db"),
+                path("cloud.db"),
+                KeryxDatabase.Schema.version,
+                listOf(
+                    // feeds.folder_id references folders(id); a parent without a UNIQUE id is a mismatch
+                    // that makes foreign_key_check itself fail (DDL is transactional).
+                    "DROP TABLE main.folders",
+                    "CREATE TABLE main.folders (id TEXT)",
+                    ORPHAN_TOUCHING_UPDATE,
+                ),
+            )
+        }
+        assertEquals(SQLITE_CONSTRAINT_FOREIGNKEY, thrown.resultCode)
+        assertTrue(
+            thrown.suppressedExceptions.any { "foreign key mismatch" in it.message.orEmpty() },
+            "the failed check must be attached as suppressed, got ${thrown.suppressedExceptions}",
+        )
+    }
+
+    /**
+     * A PRIMARY KEY violation (RawSqliteConnection's extended code says it is not a FOREIGN KEY one)
+     * rules main out without reading main's FOREIGN KEY violations at all: the statements before it
+     * make `PRAGMA main.foreign_key_check` itself fail ("foreign key mismatch"), and main holds an
+     * orphan so that check would otherwise have found a violation and led to the re-run. Read, it
+     * would fail and leave the failure unclassified; skipped, the cloud's colliding tag is classified.
+     */
+    @Test
+    fun aNonForeignKeyConstraintFailureIsClassifiedWithoutReadingMainsViolations() {
+        writeSchemaFiles(
+            seedLocal = { db ->
+                db.insertTag("dup", "Local")
+                db.insertOrphanArticle()
+            },
+            seedCloud = { db -> db.insertTag("dup", "Cloud") },
+        )
+
+        assertFailsWith<works.merc.keryx.app.core.CloudDataIncompatibleException> {
+            DatabaseMerger.merge(
+                path("main.db"),
+                path("cloud.db"),
+                KeryxDatabase.Schema.version,
+                listOf(
+                    // feeds.folder_id references folders(id); a parent without a UNIQUE id is a mismatch
+                    // that makes foreign_key_check itself fail (DDL is transactional).
+                    "DROP TABLE main.folders",
+                    "CREATE TABLE main.folders (id TEXT)",
+                    UNGUARDED_TAG_INSERT,
+                ),
+            )
+        }
+    }
+
+    private fun RawSqliteConnection.insertTag(id: String, name: String) =
+        exec("INSERT INTO tags (id, name, sort_order, deleted_at, updated_at, created_at) VALUES ('$id', '$name', 0, NULL, 0, 0)")
+
+    @Test
+    fun aTransactionEndedBySqliteDuringTheRerunLeavesTheFailureUnclassified() {
+        writeFolderCollision { it.insertOrphanArticle() }
+
+        // The INSERT OR ROLLBACK is only reached by the re-run, where it ends the merge transaction by
+        // itself: its duplicate-key failure would read as the cloud's, but the verdict is dropped.
+        val thrown = assertFailsWith<SqliteException> {
+            DatabaseMerger.merge(
+                path("main.db"),
+                path("cloud.db"),
+                KeryxDatabase.Schema.version,
+                listOf(ORPHAN_TOUCHING_UPDATE, UNGUARDED_FOLDER_INSERT.replace("INSERT INTO", "INSERT OR ROLLBACK INTO")),
+            )
+        }
+        assertEquals(SQLITE_CONSTRAINT_FOREIGNKEY, thrown.resultCode)
+    }
+
+    @Test
+    fun cloudRowsViolatingTheAppSchemaAreClassifiedAsIncompatibleDespiteALocalForeignKeyViolation() {
+        writeSchemaFiles(
+            seedLocal = { it.insertOrphanArticle() },
+            seedCloud = { db ->
+                db.exec("DROP TABLE feeds")
+                db.exec(LAX_FEEDS_TABLE)
+                for (id in listOf("f-dup-1", "f-dup-2")) {
+                    db.exec("INSERT INTO feeds (id, url, title, updated_at, created_at) VALUES ('$id', 'https://dup.example/feed', '$id', 0, 0)")
+                }
+            },
+        )
+
+        // Two cloud feeds share a url, which only the cloud file's laxer feeds table allowed.
+        assertFailsWith<works.merc.keryx.app.core.CloudDataIncompatibleException> {
+            DatabaseMerger.merge(path("main.db"), path("cloud.db"), KeryxDatabase.Schema.version, MergeSql.all)
+        }
+    }
+
     @Test
     fun theSchemaCheckRecognisesTheAppsOwnSchema() {
         open("schema.db").close()
         drivers.clear()
         assertEquals(true, DatabaseMerger.validateSchema(path("schema.db"), KeryxDatabase.Schema.version))
+    }
+
+    private companion object {
+        /** Copies every cloud folder without MergeSql's guards, so a shared id hits the PRIMARY KEY. */
+        const val UNGUARDED_FOLDER_INSERT =
+            "INSERT INTO main.folders (id, name, sort_order, deleted_at, updated_at, created_at) " +
+                "SELECT id, name, sort_order, deleted_at, updated_at, created_at FROM cloud.folders"
+
+        /** Copies every cloud tag without MergeSql's guards, so a shared id (under different names) hits the PRIMARY KEY. */
+        const val UNGUARDED_TAG_INSERT =
+            "INSERT INTO main.tags (id, name, sort_order, deleted_at, updated_at, created_at) " +
+                "SELECT id, name, sort_order, deleted_at, updated_at, created_at FROM cloud.tags"
+
+        /** Copies every cloud article without its feed, so one whose feed main lacks breaks the FOREIGN KEY. */
+        const val UNGUARDED_ARTICLE_INSERT =
+            "INSERT INTO main.articles (id, feed_id, guid, url, title, cached_at, updated_at, created_at) " +
+                "SELECT id, feed_id, guid, url, title, cached_at, updated_at, created_at FROM cloud.articles"
+
+        /** Re-assigning the FK column makes SQLite check the (missing) parent of the orphan main holds. */
+        const val ORPHAN_TOUCHING_UPDATE = "UPDATE main.articles SET feed_id = feed_id"
+
+        /** The app's feeds table without its UNIQUE(url), so a cloud file can hold a duplicate url. */
+        const val LAX_FEEDS_TABLE =
+            "CREATE TABLE feeds (id TEXT NOT NULL PRIMARY KEY, url TEXT NOT NULL, site_url TEXT, " +
+                "title TEXT NOT NULL, description TEXT, favicon_url TEXT, etag TEXT, last_modified TEXT, " +
+                "error_count INTEGER NOT NULL DEFAULT 0, last_error TEXT, custom_title TEXT, folder_id TEXT, " +
+                "deleted_at INTEGER, updated_at INTEGER NOT NULL, created_at INTEGER NOT NULL, " +
+                "sort_order INTEGER NOT NULL DEFAULT 0, folder_updated_at INTEGER, " +
+                "sort_order_updated_at INTEGER, custom_title_updated_at INTEGER, deleted_updated_at INTEGER)"
+
+        /** The page size the corruption helpers start at; asserted against the real file. */
+        const val PAGE_SIZE = 4096
+        const val SQLITE_ERROR = 1
+        const val SQLITE_CORRUPT = 11
+
+        /** Extended result codes (`SQLITE_CONSTRAINT | n << 8`). */
+        const val SQLITE_CONSTRAINT_FOREIGNKEY = 787
+        const val SQLITE_CONSTRAINT_PRIMARYKEY = 1555
     }
 }

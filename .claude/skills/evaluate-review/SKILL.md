@@ -353,6 +353,7 @@ separate verdict per item. Consider:
    - **Security**: authorization checks, input validation, secrets handling, injection vectors, and race conditions (e.g., TOCTOU).
    - **Data integrity**: transaction boundaries, unique / foreign-key constraints, merge semantics (`DatabaseMerger`, `MergeSql`, `SyncRepository`), FTS index consistency (`articles_fts` lifetime rules), and logical-deletion timestamps.
    - Verify the proposal does not violate documented critical constraints (e.g., `.claude/CLAUDE.md` "Critical constraints", `docs/sync-architecture.md`).
+7. **Likelihood is not a verdict** — An item reporting a reachable failure path or race is not Invalid, or only Partially Valid, because its window is narrow or it "practically never happens" (`.claude/CLAUDE.md` "Error handling and race conditions"). Judge whether the interleaving or failure is reachable, not how often.
 
 A review-body item is evaluated only for what it raises **beyond** the review's line-comment
 items. If everything it says is already covered by them, its verdict is **No action needed —

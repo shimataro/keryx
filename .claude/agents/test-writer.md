@@ -37,6 +37,8 @@ Place a new test under the same relative path as the code it targets.
 - Fake time with `Clock { fixedMillis }`; fake scheduling with `SyncScheduler {}`.
 - The merge is tested via `platform/DatabaseMerger.merge(...)` on two `fileDb()`
   files (close the SQLDelight driver before merging on the raw connection).
+- A test for a race fix forces the interleaving deterministically and fails without the
+  fix — never a loop or `sleep` hoping to hit the window (`docs/testing.md` "Conventions").
 
 ## Policy for Result<T> (`docs/error-design.md`, already in your context)
 

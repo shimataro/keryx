@@ -7,6 +7,11 @@ package works.merc.keryx.app.domain
  * - article body: OR-merge (keep whichever side has it)
  * - feeds / tags / feed_tags / global_settings: timestamp-last-wins
  *
+ * A tie (equal timestamps) always goes to the cloud side, in every statement. The cloud holds a
+ * single file at any moment, so every device adopting its value on a tie converges; letting the
+ * local side win instead would leave two devices that stamped different values in the same
+ * millisecond each keeping, and re-uploading, their own value forever.
+ *
  * Columns are listed explicitly (avoiding `SELECT *`, which breaks on any
  * schema drift). NOT-EXISTS guards skip rows that would violate a UNIQUE
  * or FK constraint, so a merge can never abort the whole sync.
@@ -23,19 +28,19 @@ object MergeSql {
         FROM cloud.folders c
         WHERE main.folders.name = c.name
           AND main.folders.id <> c.id
-          AND c.updated_at > main.folders.updated_at;
+          AND c.updated_at >= main.folders.updated_at;
     """.trimIndent()
 
     private val insertFolders = """
         INSERT INTO main.folders (id, name, sort_order, deleted_at, updated_at, created_at)
         SELECT c.id, c.name, c.sort_order, c.deleted_at, c.updated_at, c.created_at
         FROM cloud.folders c
-        WHERE NOT EXISTS (SELECT 1 FROM main.folders l WHERE l.id = c.id AND l.updated_at >= c.updated_at)
+        WHERE NOT EXISTS (SELECT 1 FROM main.folders l WHERE l.id = c.id AND l.updated_at > c.updated_at)
           AND NOT EXISTS (SELECT 1 FROM main.folders l2 WHERE l2.name = c.name AND l2.id <> c.id)
         ON CONFLICT(id) DO UPDATE SET
             name = excluded.name, sort_order = excluded.sort_order,
             deleted_at = excluded.deleted_at, updated_at = excluded.updated_at
-        WHERE excluded.updated_at > updated_at;
+        WHERE excluded.updated_at >= updated_at;
     """.trimIndent()
 
     // The user-editable fields folder_id / sort_order / custom_title / deleted_at are intentionally
@@ -60,7 +65,7 @@ object MergeSql {
                c.deleted_at, c.updated_at, c.created_at, c.sort_order,
                c.sort_order_updated_at, c.custom_title_updated_at, c.deleted_updated_at
         FROM cloud.feeds c
-        WHERE NOT EXISTS (SELECT 1 FROM main.feeds l WHERE l.id = c.id AND l.updated_at >= c.updated_at)
+        WHERE NOT EXISTS (SELECT 1 FROM main.feeds l WHERE l.id = c.id AND l.updated_at > c.updated_at)
           AND NOT EXISTS (SELECT 1 FROM main.feeds l2 WHERE l2.url = c.url AND l2.id <> c.id)
         ON CONFLICT(id) DO UPDATE SET
             url = excluded.url, site_url = excluded.site_url, title = excluded.title,
@@ -68,7 +73,7 @@ object MergeSql {
             etag = excluded.etag, last_modified = excluded.last_modified,
             error_count = excluded.error_count, last_error = excluded.last_error,
             updated_at = excluded.updated_at
-        WHERE excluded.updated_at > updated_at;
+        WHERE excluded.updated_at >= updated_at;
     """.trimIndent()
 
     /**
@@ -79,8 +84,9 @@ object MergeSql {
      * feed is same-or-newer for content reasons.
      *
      * NULL-aware: only adopts the cloud assignment when the cloud has an assignment event
-     * (`folder_updated_at IS NOT NULL`) that is strictly newer than the local one (NULL = "no
-     * event", distinct from an assignment made at epoch 0). The resolved folder_id keeps the id
+     * (`folder_updated_at IS NOT NULL`) that is the same age or newer than the local one (a tie
+     * goes to the cloud, see the object KDoc; NULL = "no event", distinct from an assignment made
+     * at epoch 0). The resolved folder_id keeps the id
      * when the folder is present in `main`, else resolves by folder name, else NULL — the same
      * logic the `feeds` insert used to carry.
      */
@@ -106,7 +112,7 @@ object MergeSql {
         FROM cloud.feeds c
         WHERE main.feeds.id = c.id
           AND c.folder_updated_at IS NOT NULL
-          AND (main.feeds.folder_updated_at IS NULL OR c.folder_updated_at > main.feeds.folder_updated_at);
+          AND (main.feeds.folder_updated_at IS NULL OR c.folder_updated_at >= main.feeds.folder_updated_at);
     """.trimIndent()
 
     /**
@@ -121,7 +127,7 @@ object MergeSql {
         FROM cloud.feeds c
         WHERE main.feeds.id = c.id
           AND c.sort_order_updated_at IS NOT NULL
-          AND (main.feeds.sort_order_updated_at IS NULL OR c.sort_order_updated_at > main.feeds.sort_order_updated_at);
+          AND (main.feeds.sort_order_updated_at IS NULL OR c.sort_order_updated_at >= main.feeds.sort_order_updated_at);
     """.trimIndent()
 
     /** Merges a feed's manual rename (`custom_title`) by its own `custom_title_updated_at`. */
@@ -132,7 +138,7 @@ object MergeSql {
         FROM cloud.feeds c
         WHERE main.feeds.id = c.id
           AND c.custom_title_updated_at IS NOT NULL
-          AND (main.feeds.custom_title_updated_at IS NULL OR c.custom_title_updated_at > main.feeds.custom_title_updated_at);
+          AND (main.feeds.custom_title_updated_at IS NULL OR c.custom_title_updated_at >= main.feeds.custom_title_updated_at);
     """.trimIndent()
 
     /**
@@ -147,7 +153,7 @@ object MergeSql {
         FROM cloud.feeds c
         WHERE main.feeds.id = c.id
           AND c.deleted_updated_at IS NOT NULL
-          AND (main.feeds.deleted_updated_at IS NULL OR c.deleted_updated_at > main.feeds.deleted_updated_at);
+          AND (main.feeds.deleted_updated_at IS NULL OR c.deleted_updated_at >= main.feeds.deleted_updated_at);
     """.trimIndent()
 
     private val articles = """
@@ -235,19 +241,19 @@ object MergeSql {
         FROM cloud.tags c
         WHERE main.tags.name = c.name
           AND main.tags.id <> c.id
-          AND c.updated_at > main.tags.updated_at;
+          AND c.updated_at >= main.tags.updated_at;
     """.trimIndent()
 
     private val insertTags = """
         INSERT INTO main.tags (id, name, color, sort_order, deleted_at, updated_at, created_at)
         SELECT c.id, c.name, c.color, c.sort_order, c.deleted_at, c.updated_at, c.created_at
         FROM cloud.tags c
-        WHERE NOT EXISTS (SELECT 1 FROM main.tags l WHERE l.id = c.id AND l.updated_at >= c.updated_at)
+        WHERE NOT EXISTS (SELECT 1 FROM main.tags l WHERE l.id = c.id AND l.updated_at > c.updated_at)
           AND NOT EXISTS (SELECT 1 FROM main.tags l2 WHERE l2.name = c.name AND l2.id <> c.id)
         ON CONFLICT(id) DO UPDATE SET
             name = excluded.name, color = excluded.color, sort_order = excluded.sort_order,
             deleted_at = excluded.deleted_at, updated_at = excluded.updated_at
-        WHERE excluded.updated_at > updated_at;
+        WHERE excluded.updated_at >= updated_at;
     """.trimIndent()
 
     private val feedTags = """
@@ -273,21 +279,21 @@ object MergeSql {
         WHERE resolved.resolved_tag_id IS NOT NULL
           AND NOT EXISTS (
               SELECT 1 FROM main.feed_tags l
-              WHERE l.feed_id = resolved.feed_id AND l.tag_id = resolved.resolved_tag_id AND l.updated_at >= resolved.updated_at
+              WHERE l.feed_id = resolved.feed_id AND l.tag_id = resolved.resolved_tag_id AND l.updated_at > resolved.updated_at
           )
         ON CONFLICT(feed_id, tag_id) DO UPDATE SET
             deleted_at = excluded.deleted_at, updated_at = excluded.updated_at
-        WHERE excluded.updated_at > updated_at;
+        WHERE excluded.updated_at >= updated_at;
     """.trimIndent()
 
     private val globalSettings = """
         INSERT INTO main.global_settings (key, value, updated_at)
         SELECT c.key, c.value, c.updated_at
         FROM cloud.global_settings c
-        WHERE NOT EXISTS (SELECT 1 FROM main.global_settings l WHERE l.key = c.key AND l.updated_at >= c.updated_at)
+        WHERE NOT EXISTS (SELECT 1 FROM main.global_settings l WHERE l.key = c.key AND l.updated_at > c.updated_at)
         ON CONFLICT(key) DO UPDATE SET
             value = excluded.value, updated_at = excluded.updated_at
-        WHERE excluded.updated_at > updated_at;
+        WHERE excluded.updated_at >= updated_at;
     """.trimIndent()
 
     /** Applied in FK-safe order (parents before children). */

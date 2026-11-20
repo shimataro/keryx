@@ -417,15 +417,17 @@ does not override.
 ATTACH DATABASE merge runs through `platform/DatabaseMerger`, NOT the SQLDelight driver. SQLDelight's JVM `JdbcSqliteDriver` opens a fresh connection per statement for file DBs, so an `ATTACH` on one call is invisible to the merge statements on the next. `DatabaseMerger` does the whole attach → version check → merge → detach on a single dedicated JDBC connection.
 
 Only the SQLite-driver conversation is platform-specific. The decision *policy* lives in
-`commonMain`: `domain/MergeFailureClassifier` (a pure function — failure category + error-code name
-+ a lazy schema-validation callback → `CloudDataIncompatibleException?`) and `domain/MergeSchema`
+`commonMain`: `domain/MergeFailureClassifier` (a pure function of the failure category and the
+evidence each category needs → `CloudDataIncompatibleException?`; the inputs and the checks each
+`actual` runs to gather them are in "Merge Failure Classification" in
+[sync-architecture.md](sync-architecture.md)) and `domain/MergeSchema`
 (the expected tables/columns per schema version, plain data). The desktop `actual` only walks the
 cause chain for an `org.sqlite.SQLiteException`, reduces `resultCode.code and 0xFF` to a
 `SqliteFailureCategory`, logs the verdict, and runs `PRAGMA table_info` for `validateSchema` against
 `MergeSchema.EXPECTED_SCHEMAS`. The Android `actual` supplies the same category by a different
 route — its `android.database.sqlite.SQLiteException` exposes no numeric result code (unlike the
 JDBC driver desktop reads), so it switches on the thrown exception's own subclass instead
-(`SQLiteConstraintException`/`SQLiteDatabaseCorruptException` → `CORRUPT_OR_CONSTRAINT`, a handful
+(`SQLiteConstraintException` → `CONSTRAINT`, `SQLiteDatabaseCorruptException` → `CORRUPT`, a handful
 of other named subclasses → `OTHER`, a plain `SQLiteException` → `STATEMENT_ERROR`, matching the
 ambiguity `validateSchema` exists to resolve) — and otherwise does the same attach → version check
 → merge → detach sequence on a dedicated `io.requery.android.database.sqlite.SQLiteDatabase`

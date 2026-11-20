@@ -60,6 +60,11 @@ Every finding uses exactly these fields, in this order:
 
 A finding whose **Impact** you cannot make concrete is a guess: either establish it or drop it.
 
+For a race, the concrete Impact is the interleaving: the steps each thread or coroutine takes, in the
+order that produces the wrong result. Once you can write that sequence down, the finding is
+established — that its window is narrow (two operations within the same millisecond, a cancellation
+between two lines) is never a reason to drop it.
+
 ## 5. Severity
 
 | Severity | Meaning |
@@ -68,10 +73,18 @@ A finding whose **Impact** you cannot make concrete is a guess: either establish
 | `Medium` | A defect under specific conditions, a performance regression, a missing test, or a convention violation (i18n, English source, license attribution) |
 | `Low` | Readability, minor redundancy, wording |
 
+Severity is the consequence **when the defect occurs**, never discounted by how often it occurs. A
+race that corrupts data only when two operations land within a millisecond is `High`, not `Medium`;
+an exception or empty result the code can reach is reported even if it "practically never happens"
+(`.claude/CLAUDE.md` "Error handling and race conditions").
+
 ## 6. Confidence
 
 `High` — verified by reading the relevant code. `Medium` — the code supports it but you could not
 check every path. `Low` — it looks wrong but you could not confirm it.
+
+A race whose interleaving (§4) you traced through the code end to end — every step reachable,
+nothing in between that serializes it — is `High`, even though you never saw it happen at runtime.
 
 The orchestrator moves every `Low`-confidence finding into a separate **Needs confirmation** section,
 so do not inflate confidence to get attention, and never file a guess at `High`.

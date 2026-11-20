@@ -25,6 +25,12 @@ what the evidence proves — never mock the part the claim is actually about (e.
 behavior, real concurrent execution); observe that part for real. When a mock is used, record what
 it replaced and why that does not affect the conclusion.
 
+**A race is observed by forcing its interleaving**, never by repeating a run until the timing happens
+to line up. Hold each side at the critical point and release it in the order that exposes the race —
+`HoldingDispatcher` / `testThreadDispatcher` in `desktopTest`, `CompletableDeferred` gates and a
+`StandardTestDispatcher` in `commonTest` (`docs/testing.md` "Conventions"). Controlling *when* each
+side runs is allowed; replacing the synchronization the claim is about is the forbidden mock above.
+
 ## 2. Recording the outcome
 
 Record what was inserted and what was observed, wherever the caller says. A claim that cannot be
@@ -35,6 +41,16 @@ A runtime claim the evidence can neither confirm nor refute — no test or loggi
 and a manual run is impossible, declined or inconclusive — is **unconfirmed**: record what was
 tried, make no fix that rests on it, and report it as unconfirmed wherever the caller reports
 outcomes.
+
+A race is **not** unconfirmed merely because its interleaving could not be forced at runtime. If the
+interleaving is traced through the code end to end — every step reachable, nothing in between that
+serializes it — record that trace as the evidence; the claim is confirmed and the fix proceeds. The trace confirms
+the claim only: its outcome is reported as fixed once the fix is made, not before. A confirmed race
+whose fix needs a redesign outside the change's scope follows `.claude/CLAUDE.md`'s procedure for a
+hole that cannot be closed — recorded in `docs/known-issues.md` — and is reported as unfixed. Only a trace with a gap — a step whose
+reachability could not be established — leaves the race unconfirmed. A
+narrow window is never grounds for treating it as unconfirmed (`.claude/CLAUDE.md` "Error handling
+and race conditions").
 
 Whether a reproducing test may stay as a permanent test is the caller's decision; unless the caller
 keeps it, it is temporary code under §3.

@@ -69,8 +69,9 @@ ON CONFLICT(id) DO UPDATE SET
 
 -- deleted_updated_at never goes backwards or repeats on a row: MAX(now, previous + 1), so an
 -- unsubscribe and a resubscribe made within the same millisecond still order strictly. The sync
--- merge's last-write-wins on it compares with a strict ">", so an equal stamp would leave the later
--- event unpropagated. See docs/db-schema.md.
+-- merge's last-write-wins on it orders only differing stamps and settles an equal one by its tie rule
+-- (the cloud side wins), which knows nothing of which event came later, so an equal stamp could let
+-- the earlier event win. See docs/db-schema.md.
 softDelete:
 UPDATE feeds SET deleted_at = ?, updated_at = ?, deleted_updated_at = MAX(?, COALESCE(deleted_updated_at, 0) + 1) WHERE id = ?;
 
@@ -80,8 +81,14 @@ UPDATE feeds SET deleted_at = ?, updated_at = ?, deleted_updated_at = MAX(?, COA
 stampResubscribed:
 UPDATE feeds SET deleted_updated_at = MAX(?, COALESCE(deleted_updated_at, 0) + 1) WHERE id = ?;
 
+-- Each user-edit stamp below (custom_title_updated_at, folder_updated_at, sort_order_updated_at)
+-- moves only forward on its row, as deleted_updated_at does: MAX(now, previous + 1). The sync merge
+-- settles an equal stamp by its tie rule (the cloud side wins), which knows nothing of which write
+-- came later, so an edit stamped at the value the row already holds — two edits within one
+-- millisecond, or one made right after a merge brought that stamp in — would lose to the older
+-- value on the next merge. See docs/db-schema.md.
 updateCustomTitle:
-UPDATE feeds SET custom_title = ?, updated_at = ?, custom_title_updated_at = ? WHERE id = ?;
+UPDATE feeds SET custom_title = ?, updated_at = ?, custom_title_updated_at = MAX(:custom_title_updated_at, COALESCE(custom_title_updated_at, 0) + 1) WHERE id = ?;
 
 -- Refresh path: fills in a favicon resolved after the feed's own writes. Guarded in the statement
 -- itself rather than on a row read beforehand, so a feed unsubscribed — or given a favicon by a
@@ -118,14 +125,14 @@ resetErrorCount:
 UPDATE feeds SET error_count = 0, last_error = NULL, updated_at = ? WHERE id = ?;
 
 updateFolder:
-UPDATE feeds SET folder_id = ?, updated_at = ?, folder_updated_at = ? WHERE id = ?;
+UPDATE feeds SET folder_id = ?, updated_at = ?, folder_updated_at = MAX(:folder_updated_at, COALESCE(folder_updated_at, 0) + 1) WHERE id = ?;
 
 updateSortOrder:
-UPDATE feeds SET sort_order = ?, updated_at = ?, sort_order_updated_at = ? WHERE id = ?;
+UPDATE feeds SET sort_order = ?, updated_at = ?, sort_order_updated_at = MAX(:sort_order_updated_at, COALESCE(sort_order_updated_at, 0) + 1) WHERE id = ?;
 
 -- Updates a moved feed's own folder_id and sort_order together.
 updateFolderAndSortOrder:
-UPDATE feeds SET folder_id = ?, sort_order = ?, updated_at = ?, folder_updated_at = ?, sort_order_updated_at = ? WHERE id = ?;
+UPDATE feeds SET folder_id = ?, sort_order = ?, updated_at = ?, folder_updated_at = MAX(:folder_updated_at, COALESCE(folder_updated_at, 0) + 1), sort_order_updated_at = MAX(:sort_order_updated_at, COALESCE(sort_order_updated_at, 0) + 1) WHERE id = ?;
 
 -- All surviving feeds belonging to the given folder (NULL = "no folder"), in display order.
 getByFolder:

@@ -7,6 +7,11 @@
 - **Exceptions** are for "unexpected errors"; the **`Result` type** is for "expected errors".
 - Network and sync errors can occur frequently, so user notifications are kept restrained (notification center + inline expressions).
 - Errors propagate to the UI layer via ViewModel `StateFlow` (never Compose `mutableStateOf`, which a non-Compose UI could not observe).
+- **Rarity is not a handled case.** Every reachable failure path and every concurrent interleaving is
+  designed for, however unlikely — a failure that "practically never happens" will happen someday.
+  A race is closed structurally (a lock, an atomic or conditional write, a transaction, a latest-wins
+  token), never by narrowing its window. The best-effort accesses below are chosen by the criterion
+  stated there — what their failure costs — not because it is rare.
 
 ## Exception vs Result Type
 
@@ -18,7 +23,8 @@
 | DB access failure / program bug | Exception |
 
 **Documented exception to the last row: best-effort writes and reads.** A DB access that only feeds
-something cosmetic or derived, and that is retried by the next ordinary run anyway, is logged
+something cosmetic or derived, and that is retried by the next ordinary run or the user's next attempt
+anyway, is logged
 (`Log.warn`) and carried on from rather than thrown — because throwing would cancel the work around it
 and lose more than the access itself is worth. The accesses that are, today:
 
@@ -131,11 +137,18 @@ Helper extensions: `isOk` / `isErr` / `valueOrNull` / `valueOrElse` (early-retur
   - `DropboxStorage`: 401/403 → `CloudAuthException`, 409 (upload) → `SyncConflictException`, 409 `path/not_found` (get_metadata) → does not exist.
   - `DatabaseMerger.merge` classifies a merge failure from SQLite's **error code** (`SQLiteException.resultCode`,
     not message text), never from unchanged behavior alone:
-    - → `CloudDataIncompatibleException` for a corrupt file, a constraint violation only the cloud DB's own laxer
-      schema allowed, or — only once `validateSchema` confirms the downloaded file doesn't match the app's schema —
-      a foreign/legacy schema.
-    - → left unchanged (rethrown as-is) for a transient failure, an app bug, or a schema error `validateSchema`
-      couldn't confirm.
+    - → `CloudDataIncompatibleException` only once the cloud is confirmed as the cause: a corrupt file (once
+      `quick_check` on the downloaded file finds it broken), a constraint violation from the cloud rows (once
+      the local DB is ruled out — the driver reports a UNIQUE, PRIMARY KEY or NOT NULL violation by its
+      extended result code, which the local DB's existing rows cannot cause, so neither check below runs
+      (desktop and Apple; Android's driver exposes no extended code); its foreign-key check is clean; or,
+      re-running the failed statement onward in the same transaction with foreign keys deferred, a non-FK
+      constraint still fails or a new FK violation appears), a constraint violation while the downloaded file
+      is migrated to the app's schema (that step touches only the downloaded file, never the local DB), or a
+      foreign/legacy schema (once `validateSchema` confirms the downloaded file doesn't match
+      the app's schema). A local orphan row therefore never hides a violation that comes from the cloud.
+    - → left unchanged (rethrown as-is) for a transient failure, an app bug, a corrupt local DB, a failure
+      caused by a foreign-key violation the local DB already held, or anything those checks couldn't confirm.
     - See "Merge Failure Classification" in [sync-architecture.md](sync-architecture.md) for the full decision table.
 - **Repository layer**: Receives `Result` and applies business logic (retries, etc.).
 - **ViewModel layer**: Converts `Result` into UI state.
