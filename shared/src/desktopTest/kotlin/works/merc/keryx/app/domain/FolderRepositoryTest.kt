@@ -113,6 +113,74 @@ class FolderRepositoryTest {
         }
     }
 
+    /**
+     * A rename right after a same-millisecond recreation — which moved the stamp ahead of the clock —
+     * is still stamped newest, so a device that already has the recreated row takes the rename.
+     */
+    @Test
+    fun aRenameRightAfterASameMillisecondRecreationIsStampedNewest() = runTest {
+        val (driver, db) = inMemoryDb()
+        try {
+            var now = 100L
+            val repo = newRepo(db, driver, clock = Clock { now })
+            val id = repo.createFolder("Kotlin")
+            repo.deleteFolder(id)
+            repo.createFolder("Kotlin")
+            val recreated = db.foldersQueries.getById(id).executeAsOne().updated_at
+            now = 101L
+
+            repo.updateFolder(id, "Renamed")
+
+            val row = db.foldersQueries.getById(id).executeAsOne()
+            assertEquals("Renamed", row.name)
+            assertTrue(row.updated_at > recreated)
+        } finally {
+            driver.close()
+        }
+    }
+
+    /** As [aRenameRightAfterASameMillisecondRecreationIsStampedNewest], for a reorder. */
+    @Test
+    fun aReorderRightAfterASameMillisecondRecreationIsStampedNewest() = runTest {
+        val (driver, db) = inMemoryDb()
+        try {
+            var now = 100L
+            val repo = newRepo(db, driver, clock = Clock { now })
+            val other = repo.createFolder("Other")
+            val id = repo.createFolder("Kotlin")
+            repo.deleteFolder(id)
+            repo.createFolder("Kotlin")
+            val recreated = db.foldersQueries.getById(id).executeAsOne().updated_at
+            now = 101L
+
+            repo.reorderFolders(id, other)
+
+            val row = db.foldersQueries.getById(id).executeAsOne()
+            assertEquals(0L, row.sort_order)
+            assertTrue(row.updated_at > recreated)
+        } finally {
+            driver.close()
+        }
+    }
+
+    /** With the clock well past the row's stamp, a rename is stamped with the current time as before. */
+    @Test
+    fun aRenameWithTheClockAheadOfTheRowIsStampedWithTheCurrentTime() = runTest {
+        val (driver, db) = inMemoryDb()
+        try {
+            var now = 100L
+            val repo = newRepo(db, driver, clock = Clock { now })
+            val id = repo.createFolder("Kotlin")
+            now = 5000L
+
+            repo.updateFolder(id, "Renamed")
+
+            assertEquals(5000L, db.foldersQueries.getById(id).executeAsOne().updated_at)
+        } finally {
+            driver.close()
+        }
+    }
+
     @Test
     fun createFolderReactivatesSoftDeletedFolderWithSameNameInsteadOfDuplicating() {
         val (driver, db) = inMemoryDb()

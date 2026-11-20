@@ -16,34 +16,39 @@ SELECT * FROM folders WHERE id = ?;
 getByName:
 SELECT * FROM folders WHERE name = ?;
 
+-- Every local write to a folder row stamps updated_at as MAX(now, previous + 1): never at or before
+-- the stamp the row already has. A delete and a recreation within one millisecond already move it
+-- ahead of the clock (softDelete, upsertByName), and an edit made right after them must still be the
+-- newest: the sync merge's last-write-wins compares with a strict ">", so an edit stamped at or
+-- below the row's stamp would be dropped by a device that already has the row — and a delete and a
+-- recreation with equal stamps would leave the recreated row indistinguishable from the one before
+-- the delete. See docs/db-schema.md.
 upsert:
 INSERT INTO folders (id, name, sort_order, deleted_at, updated_at, created_at)
 VALUES (?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
     name = excluded.name, sort_order = excluded.sort_order,
-    deleted_at = excluded.deleted_at, updated_at = excluded.updated_at;
+    deleted_at = excluded.deleted_at, updated_at = MAX(excluded.updated_at, updated_at + 1);
 
 -- Creates the folder named :name, or reactivates the existing one of that name in place (same id,
 -- created_at kept), appending it to the end of the active folders either way. The name conflict is
 -- resolved by the statement itself rather than by a lookup before it, so a row of the same name
 -- that another writer (a sync merge, a concurrent create) inserted in between is reused instead of
--- failing UNIQUE(name). :id is used only when no row has the name. A reactivation's updated_at is never
--- at or before the row's previous one (see softDelete).
+-- failing UNIQUE(name). :id is used only when no row has the name. A reactivation's updated_at moves
+-- forward like every local write (see upsert).
 upsertByName:
 INSERT INTO folders (id, name, sort_order, deleted_at, updated_at, created_at)
 VALUES (:id, :name, (SELECT COALESCE(MAX(sort_order), -1) + 1 FROM folders WHERE deleted_at IS NULL), NULL, :now, :now)
 ON CONFLICT(name) DO UPDATE SET
     sort_order = excluded.sort_order, deleted_at = NULL, updated_at = MAX(excluded.updated_at, updated_at + 1);
 
--- updated_at never goes backwards or repeats on a row here: MAX(now, previous + 1), so a delete and a
--- recreation made within the same millisecond still order strictly. The sync merge's last-write-wins
--- compares with a strict ">", so an equal stamp would leave the later event unpropagated — and the
--- recreated row indistinguishable from the one before the delete. See docs/db-schema.md.
+-- updated_at moves forward like every local write (see upsert).
 softDelete:
 UPDATE folders SET deleted_at = ?, updated_at = MAX(?, updated_at + 1) WHERE id = ?;
 
+-- updated_at moves forward like every local write (see upsert).
 updateSortOrder:
-UPDATE folders SET sort_order = ?, updated_at = ? WHERE id = ?;
+UPDATE folders SET sort_order = ?, updated_at = MAX(?, updated_at + 1) WHERE id = ?;
 
 nextSortOrder:
 SELECT COALESCE(MAX(sort_order), -1) + 1 FROM folders WHERE deleted_at IS NULL;
