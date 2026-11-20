@@ -33,7 +33,7 @@
 /keryx-YYYYMMDD-HHMMSS.db.gz.bak       ← クラウドデータのリセットで退避される旧ファイル（自動削除されない）
 ```
 
-競合防止はアップロード時のリビジョンチェックで行う — Dropbox: `rev`、サーバー側の compare-and-set（不一致時 409）。Google Drive: ファイルの `version`、クライアント側で比較後に書き込み。Drive には条件付きの内容更新がないため、比較と書き込みの間に入った上書きは検出できない。上書きされた端末は次の同期で自分の変更を戻す（[known-issues.ja.md](known-issues.ja.md) の「Google Drive: アップロードが他端末のアップロードを気付かれずに上書きすることがある」を参照）。OneDrive: DriveItem の `eTag` を `If-Match` で送信（不一致時 412）。Nextcloud: WebDAV の `ETag` をそのまま `If-Match` で送信（不一致時 412、別の書き込みがファイルのロックを持っている間は 423——「Nextcloud（Login Flow v2）」参照）。lock ファイルは使わない。Nextcloud では、これらのファイルはアプリフォルダーではなく利用者自身のファイルの `/Keryx/` フォルダーに置く。
+競合防止はアップロード時のリビジョンチェックで行う — Dropbox: `rev`、サーバー側の compare-and-set（不一致時 409）。Google Drive: ファイルの `version`、クライアント側で比較後に書き込み。Drive には条件付きの内容更新がないため、比較と書き込みの間に入った上書きは検出できない。上書きされた端末は、次の同期で自分の変更をほかのマージと同じ規則でクラウドのファイルに改めてマージする。そのため、他端末の変更と同じタイムスタンプで競って負けた変更（「マージ（`DatabaseMerger` + `MergeSql`）」の同点の規則を参照）は戻らないが、これは 2 つのアップロードが競合しなかった場合と同じ結果である（[known-issues.ja.md](known-issues.ja.md) の「Google Drive: アップロードが他端末のアップロードを気付かれずに上書きすることがある」を参照）。OneDrive: DriveItem の `eTag` を `If-Match` で送信（不一致時 412）。Nextcloud: WebDAV の `ETag` をそのまま `If-Match` で送信（不一致時 412、別の書き込みがファイルのロックを持っている間は 423——「Nextcloud（Login Flow v2）」参照）。lock ファイルは使わない。Nextcloud では、これらのファイルはアプリフォルダーではなく利用者自身のファイルの `/Keryx/` フォルダーに置く。
 
 ## 同期フロー（`SyncRepository.sync()`）
 

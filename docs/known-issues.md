@@ -496,8 +496,10 @@ believe it won, and keep writing there until the listing catches up — the re-c
 
 The overwritten device keeps its own changes in its local DB and recorded the revision its own write
 produced. Its next sync finds a different revision in the cloud, downloads and merges that file, and
-uploads the merged result — so its changes return to the cloud. They are lost from the cloud only if
-that device never syncs again (uninstalled, reset, or disconnected from Drive first).
+uploads the merged result — so its changes return to the cloud, under the same merge rules as any other
+sync: a change that ties with the other device's on the same timestamp goes to the cloud side, exactly as it
+would had the two uploads not raced. They are lost from the cloud only if that device never syncs again
+(uninstalled, reset, or disconnected from Drive first).
 
 ### Ruled out
 
