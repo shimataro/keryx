@@ -7,6 +7,11 @@
 - **Exceptions** are for "unexpected errors"; the **`Result` type** is for "expected errors".
 - Network and sync errors can occur frequently, so user notifications are kept restrained (notification center + inline expressions).
 - Errors propagate to the UI layer via ViewModel `StateFlow` (never Compose `mutableStateOf`, which a non-Compose UI could not observe).
+- **Rarity is not a handled case.** Every reachable failure path and every concurrent interleaving is
+  designed for, however unlikely — a failure that "practically never happens" will happen someday.
+  A race is closed structurally (a lock, an atomic or conditional write, a transaction, a latest-wins
+  token), never by narrowing its window. The best-effort accesses below are chosen because their
+  failure is cosmetic or recovers by itself on the next ordinary run, not because it is rare.
 
 ## Exception vs Result Type
 

@@ -5,6 +5,12 @@
 Defects that are understood but deliberately not fixed, with the evidence behind that decision.
 Each entry records what was ruled out, so a later investigation doesn't repeat the same work.
 
+An entry needs a reason other than low likelihood: the root cause is external (an OS, JDK, library or
+platform limitation), or closing the hole needs a redesign outside the scope of the change that found it.
+"It rarely happens" or "the window is too narrow to hit" is never enough — such a defect is fixed
+(see "Error handling and race conditions" in `.claude/CLAUDE.md`). Every entry whose cause is known
+states what a real fix would need — which may be a change upstream.
+
 ## macOS: clicking a notification banner does not restore a tray-hidden window
 
 **Status**: not fixed — external (JDK/AWT) limitation. Applies to the **Compose macOS build only**,
@@ -326,8 +332,9 @@ There is no bias that fixes both edges, and the platform's own apps do not apply
 
 ## A concurrent write can fail a read-then-write transaction with a non-retryable SQLITE_BUSY
 
-**Status**: not fixed — the affected call sites are narrow and unobserved in production; a real fix
-touches the core data-access layer. Worked around in the one test it made flaky.
+**Status**: not fixed — a real fix needs a purpose-built JDBC driver that issues `BEGIN IMMEDIATE`
+(see "What a real fix would need" below), a change to the core data-access layer outside the scope of
+the change that found it. Worked around in the one test it made flaky.
 
 ### Symptom
 

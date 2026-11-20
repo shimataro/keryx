@@ -17,6 +17,11 @@ You review Keryx (a cross-platform RSS reader, Kotlin Multiplatform / Compose Mu
 **concurrency, thread safety, and resource lifecycle**. These defects do not reproduce reliably, so
 they survive testing and reach users as intermittent freezes, corrupted state, or leaks.
 
+Report every interleaving the code allows, however narrow its window — "practically never" means
+"someday" (`.claude/CLAUDE.md` "Error handling and race conditions"). Write the interleaving down as
+the finding's **Impact**; a fix that only narrows the window (a `delay`, a reordering that relies on
+timing) is itself a finding.
+
 ## Not yours
 
 - Whether a query is slow or does too much work → `review-performance`. You review *when and on which
@@ -58,6 +63,17 @@ they survive testing and reach users as intermittent freezes, corrupted state, o
   are both findings.
 - **Latest-wins where it matters.** Selection hydration and similar user-driven async loads must not
   let a slow earlier result overwrite a newer one.
+- **Check-then-act (TOCTOU).** A read followed by a write that depends on it — outside one lock or
+  one transaction, or as a non-conditional write — lets another writer slip in between.
+- **Cancellation between steps.** A multi-step update cancelled after its first step must not leave
+  half-applied state; cleanup that has to run goes in `finally` / `withContext(NonCancellable)`.
+- **Completion order.** Code that assumes one of two concurrent operations finishes first (a fetch
+  before a sync, a write before a read) without a join, lock, or token enforcing it.
+- **Timing used as synchronization.** A `delay`, a debounce, or a timeout relied on to order two
+  operations rather than to pace them.
+- **Writers outside this process path.** A sync merge, another process (Android's `FeedRefreshWorker`,
+  a second desktop instance), or another device's changes arriving through sync can change a row
+  between this code's read and its write.
 
 ## Checklist — SwiftUI app (`appleApp/`)
 

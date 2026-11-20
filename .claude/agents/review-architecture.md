@@ -82,6 +82,12 @@ section heading the diff touches and read only that section.
 - Are external exceptions converted to `KeryxException` subclasses at the
   DataSource layer? Do expected errors use `Result<T>`?
 - Are unexpected fatal errors swallowed by `Result<T>` when they should throw?
+- Is a reachable failure left unhandled because it "can't happen in practice" — a `!!`, `first()` or
+  `single()` on data a sync merge or a concurrent writer can empty, an `error("unreachable")` on input
+  that can arrive, a `catch` that assumes only one exception type? Rarity is not a handled case
+  (`docs/error-design.md` "Design Philosophy").
+- Does a failure halfway through a multi-step operation leave inconsistent state behind (one write
+  applied, the next not, outside a transaction)?
 - Does a notification kept in the bell carry a next action (`AppNotificationAction`), and is its text
   built through `NotificationMessages` rather than hardcoded?
 - Is a new or changed `ErrorKind` / `NotificationText` fine-grained enough for the UI to say why the

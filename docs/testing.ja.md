@@ -151,6 +151,14 @@
   **コレクタ側**が最終値に到達するのを待つこと（コレクタは別スレッドで動くので `flow.value` に遅れる）。
   記録先はスレッドセーフなリスト（`CopyOnWriteArrayList`）にすること —— `Dispatchers.Default` から
   追記し、テストスレッドから読む素の `ArrayList` には両者間の happens-before がない。
+- **レースの修正に対するテストは、インターリーブを強制して作る。時間窓に当たるのを期待しない。** ループや
+  `delay` / `Thread.sleep`、失敗するまでの繰り返し実行は、タイミングの違うマシンでは何も証明しない。各処理をクリティカルな
+  地点で止め、レースが表に出る順に流す。`desktopTest` では `HoldingDispatcher` と `testThreadDispatcher` を使う（どちらも
+  `testing/src/desktopMain` にあるため `desktopTest` 専用）。`commonTest` では `CompletableDeferred` のゲート（クリティカルな
+  地点でそれを待って suspend する fake）と `StandardTestDispatcher` を使う。制御するのは各処理が *いつ* 走るかであり、テスト対象の
+  同期機構そのものを置き換えてはならない。修正なしでテストが失敗することを確認する —— 修正の有無にかかわらず通るレースのテストは何も
+  カバーしていない。「現実には起きない」ほど狭い窓でも、このテストを書く（`.claude/CLAUDE.md` の「Error handling and race
+  conditions」を参照）。
 - 実スレッドで DB への並行書き込みを行うテストは `inMemoryDb()` ではなく `fileDb()` を使うこと —— 前者は全呼び出し元を、同期機構を持たない 1 本の共有 JDBC コネクションに固定するため、実スレッド 2 本で SQLDelight のトランザクション管理そのものが壊れ得る。`fileDb()` を使う場合でも、テスト対象と無関係な書き込みを fixture に残さないこと: SQLite の deferred `BEGIN` により、write の前に read を行うトランザクションは、無関係な並行書き込み側のロック昇格を、`busy_timeout` では救済されないリトライ不能な `SQLITE_BUSY` で失敗させることがある —— 詳細は `known-issues.md` の「並行書き込みにより read→write トランザクションがリトライ不能な SQLITE_BUSY で失敗する」を参照。
 - 新規の Android Compose UI 計装テストは `androidApp/src/androidTest/` に置く（`composeApp` は
   ライブラリモジュールなので、その計装テストはアプリケーションモジュール側に置く — 上記「構成」

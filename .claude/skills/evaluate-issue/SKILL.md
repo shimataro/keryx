@@ -267,6 +267,7 @@ than working from memory.
 | Accessibility and i18n | external-spec §8, CLAUDE.md constraint #3 |
 | Performance | measure it (`.claude/etc/temporary-instrumentation.md`), never estimate |
 | Known defects | `docs/known-issues.md` |
+| Error handling and races (a narrow window or "practically never" is not grounds for Invalid; judge reachability, not frequency) | CLAUDE.md "Error handling and race conditions" |
 
 Record **Validity** (Valid / Invalid / Partially Valid), **Confidence** (High / Medium / Low, as
 defined in `.claude/etc/review/common.md` §6) and **Reasoning**. A point whose Confidence is

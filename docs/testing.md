@@ -128,6 +128,15 @@ New tests are placed at the same relative path as the code under test.
   threads and lag it; and record into a thread-safe list (`CopyOnWriteArrayList`), since a plain
   `ArrayList` appended from `Dispatchers.Default` and read from the test thread has no happens-before
   edge between the two.
+- **A test for a race fix forces the interleaving; it never hopes to hit the window.** A loop, a
+  `delay`/`Thread.sleep`, or repeating the test until it fails proves nothing on a machine whose timing
+  differs. Hold each side at the critical point and release it in the order that exposes the race: in
+  `desktopTest`, with `HoldingDispatcher` and `testThreadDispatcher` (both in `testing/src/desktopMain`,
+  so `desktopTest` only); in `commonTest`, with `CompletableDeferred` gates (a fake that suspends on one
+  at the critical point) and a `StandardTestDispatcher`. Control *when* each side runs, never replace the
+  synchronization the test is about. Confirm the test fails without the fix — a race test that passes
+  either way covers nothing. A window too narrow to occur "in practice" still gets this test (see
+  "Error handling and race conditions" in `.claude/CLAUDE.md`).
 - A test that drives concurrent DB writes with real `Thread`s needs `fileDb()`, not `inMemoryDb()` — the latter pins every caller to one shared JDBC connection with no synchronization of its own, so two real threads can corrupt SQLDelight's transaction bookkeeping. Even with `fileDb()`, keep fixtures free of writes the test doesn't care about: SQLite's deferred `BEGIN` means a transaction that reads before it writes can fail an unrelated concurrent writer's lock upgrade with a non-retryable `SQLITE_BUSY` that `busy_timeout` does not cover — see "A concurrent write can fail a read-then-write transaction with a non-retryable SQLITE_BUSY" in `known-issues.md`.
 - New Android Compose UI instrumented tests go in `androidApp/src/androidTest/` (`composeApp` is a
   library module, so its own instrumented tests live in the application module instead — see

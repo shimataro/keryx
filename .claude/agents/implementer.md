@@ -52,6 +52,8 @@ AppKit/UIKit differences) — CLAUDE.md constraint #4.
 - At the DataSource layer, convert external exceptions (Ktor, SQLite) into
   `KeryxException` subclasses; don't leak raw exceptions upward.
 - ViewModels expose state via `StateFlow` only (no Compose `mutableStateOf` — the Apple app must be able to observe it too); map `Result` to UI state.
+- Close every reachable failure path and race, however unlikely, structurally rather than by
+  narrowing its window — see "Error handling and race conditions" in `.claude/CLAUDE.md`.
 
 ## Post-implementation checklist
 
