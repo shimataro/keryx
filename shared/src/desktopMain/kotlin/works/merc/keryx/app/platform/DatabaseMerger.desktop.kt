@@ -227,6 +227,13 @@ actual object DatabaseMerger {
         }
 
     /**
+     * Whether this constraint failure is a FOREIGN KEY violation, from its *extended* result code
+     * (sqlite-jdbc reports extended codes) — see [MergeFailureClassifier.isForeignKeyFailure].
+     */
+    private fun SQLiteException.isForeignKeyFailure(): Boolean? =
+        MergeFailureClassifier.isForeignKeyFailure(resultCode.code)
+
+    /**
      * Whether the local `main` DB is ruled out as the cause of the constraint failure [failure] —
      * [MergeFailureClassifier.mainRuledOut]'s policy, fed with evidence gathered on this (the merge's)
      * connection while the failed merge transaction is still open. The re-run runs
@@ -249,8 +256,10 @@ actual object DatabaseMerger {
     ): Boolean? {
         val transactionOpen = { !autoCommit && !transactionEnded.ended }
         val ruledOut = try {
-            val violationsBefore = if (transactionOpen()) foreignKeyViolations() else null
-            MergeFailureClassifier.mainRuledOut(violationsBefore) {
+            MergeFailureClassifier.mainRuledOut(
+                isForeignKeyFailure = failure.findSqliteCause()?.isForeignKeyFailure(),
+                readViolationsBefore = { if (transactionOpen()) foreignKeyViolations() else null },
+            ) {
                 rerunWithDeferredForeignKeys(remainingStatements, transactionOpen, failure)
             }
         } catch (checkFailure: Throwable) {

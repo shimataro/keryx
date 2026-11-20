@@ -283,6 +283,40 @@ class DatabaseMergerTest {
     }
 
     /**
+     * A PRIMARY KEY violation (the extended code says it is not a FOREIGN KEY one) rules main out
+     * without reading main's FOREIGN KEY violations at all: the merge statements before it make
+     * `PRAGMA main.foreign_key_check` itself fail ("foreign key mismatch"), and main holds an orphan so
+     * that check would otherwise have found a violation and led to the re-run. Read, it would fail and
+     * leave the failure unclassified; skipped, the cloud's colliding tag is classified.
+     */
+    @Test
+    fun nonForeignKeyConstraintFailureIsClassifiedWithoutReadingMainsViolations() {
+        val cloudFile = soundDbFile { driver -> insertTag(driver, "dup", "Cloud") }
+        val localFile = soundDbFile { driver ->
+            insertTag(driver, "dup", "Local")
+            insertOrphanArticle(driver)
+        }
+
+        val thrown = assertFailsWith<CloudDataIncompatibleException> {
+            DatabaseMerger.merge(
+                localFile.absolutePath,
+                cloudFile.absolutePath,
+                SCHEMA_VERSION,
+                listOf(
+                    // feeds.folder_id references folders(id); a parent without a UNIQUE id is a mismatch.
+                    "DROP TABLE main.folders",
+                    "CREATE TABLE main.folders (id TEXT)",
+                    UNGUARDED_TAG_INSERT,
+                ),
+            )
+        }
+        assertTrue(
+            "SQLITE_CONSTRAINT_PRIMARYKEY" in thrown.messageText,
+            "expected the PRIMARY KEY failure, got ${thrown.messageText}",
+        )
+    }
+
+    /**
      * SQLite ends the transaction by itself during the re-run (an `INSERT OR ROLLBACK` that is only
      * reached there, and hits a duplicate key): the re-run's constraint failure would read as the
      * cloud's, but the evidence was not all gathered inside the merge transaction, so the verdict is
@@ -388,6 +422,14 @@ class DatabaseMergerTest {
         )
     }
 
+    private fun insertTag(driver: app.cash.sqldelight.db.SqlDriver, id: String, name: String) {
+        driver.execute(
+            null,
+            "INSERT INTO tags (id, name, sort_order, deleted_at, updated_at, created_at) VALUES ('$id', '$name', 0, NULL, 0, 0)",
+            0,
+        )
+    }
+
     /** An article whose feed does not exist — only insertable with foreign keys OFF. */
     private fun insertOrphanArticle(driver: app.cash.sqldelight.db.SqlDriver) {
         driver.execute(
@@ -448,6 +490,14 @@ class DatabaseMergerTest {
         const val UNGUARDED_FOLDER_INSERT =
             "INSERT INTO main.folders (id, name, sort_order, deleted_at, updated_at, created_at) " +
                 "SELECT id, name, sort_order, deleted_at, updated_at, created_at FROM cloud.folders"
+
+        /**
+         * Copies every cloud tag without MergeSql's NOT EXISTS guards, so a tag id present on both
+         * sides (under different names) hits the PRIMARY KEY.
+         */
+        const val UNGUARDED_TAG_INSERT =
+            "INSERT INTO main.tags (id, name, sort_order, deleted_at, updated_at, created_at) " +
+                "SELECT id, name, sort_order, deleted_at, updated_at, created_at FROM cloud.tags"
 
         /** Re-assigning the FK column makes SQLite check the (missing) parent of the orphan main holds. */
         const val ORPHAN_TOUCHING_UPDATE = "UPDATE main.articles SET feed_id = feed_id"

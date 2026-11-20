@@ -384,6 +384,42 @@ class AppleDatabaseTest {
         )
     }
 
+    /**
+     * A PRIMARY KEY violation (RawSqliteConnection's extended code says it is not a FOREIGN KEY one)
+     * rules main out without reading main's FOREIGN KEY violations at all: the statements before it
+     * make `PRAGMA main.foreign_key_check` itself fail ("foreign key mismatch"), and main holds an
+     * orphan so that check would otherwise have found a violation and led to the re-run. Read, it
+     * would fail and leave the failure unclassified; skipped, the cloud's colliding tag is classified.
+     */
+    @Test
+    fun aNonForeignKeyConstraintFailureIsClassifiedWithoutReadingMainsViolations() {
+        writeSchemaFiles(
+            seedLocal = { db ->
+                db.insertTag("dup", "Local")
+                db.insertOrphanArticle()
+            },
+            seedCloud = { db -> db.insertTag("dup", "Cloud") },
+        )
+
+        assertFailsWith<works.merc.keryx.app.core.CloudDataIncompatibleException> {
+            DatabaseMerger.merge(
+                path("main.db"),
+                path("cloud.db"),
+                KeryxDatabase.Schema.version,
+                listOf(
+                    // feeds.folder_id references folders(id); a parent without a UNIQUE id is a mismatch
+                    // that makes foreign_key_check itself fail (DDL is transactional).
+                    "DROP TABLE main.folders",
+                    "CREATE TABLE main.folders (id TEXT)",
+                    UNGUARDED_TAG_INSERT,
+                ),
+            )
+        }
+    }
+
+    private fun RawSqliteConnection.insertTag(id: String, name: String) =
+        exec("INSERT INTO tags (id, name, sort_order, deleted_at, updated_at, created_at) VALUES ('$id', '$name', 0, NULL, 0, 0)")
+
     @Test
     fun aTransactionEndedBySqliteDuringTheRerunLeavesTheFailureUnclassified() {
         writeFolderCollision { it.insertOrphanArticle() }
@@ -432,6 +468,11 @@ class AppleDatabaseTest {
         const val UNGUARDED_FOLDER_INSERT =
             "INSERT INTO main.folders (id, name, sort_order, deleted_at, updated_at, created_at) " +
                 "SELECT id, name, sort_order, deleted_at, updated_at, created_at FROM cloud.folders"
+
+        /** Copies every cloud tag without MergeSql's guards, so a shared id (under different names) hits the PRIMARY KEY. */
+        const val UNGUARDED_TAG_INSERT =
+            "INSERT INTO main.tags (id, name, sort_order, deleted_at, updated_at, created_at) " +
+                "SELECT id, name, sort_order, deleted_at, updated_at, created_at FROM cloud.tags"
 
         /** Copies every cloud article without its feed, so one whose feed main lacks breaks the FOREIGN KEY. */
         const val UNGUARDED_ARTICLE_INSERT =

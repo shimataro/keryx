@@ -119,8 +119,25 @@ object MergeFailureClassifier {
      * transaction (and its write lock on `main`) is still open, so no other writer can change `main`
      * in between; only the decision lives here, so every platform applies the same policy.
      *
+     * **Shortcut for a failure known not to be a FOREIGN KEY violation.** When the
+     * `isForeignKeyFailure` parameter is `false` (the driver's extended result code says UNIQUE /
+     * PRIMARY KEY / NOT NULL), `main` is ruled out at once: [readViolationsBefore] and
+     * [rerunWithDeferredForeignKeys] are never invoked. The verdict is the one the full path below
+     * would reach anyway — only the cost differs. `main`'s existing state cannot cause such a
+     * violation (those constraints are enforced on every write, and `MergeSql`'s guards rule out
+     * collisions with `main`'s own rows), and re-running the same statement with FOREIGN KEY checks
+     * deferred fails on the same violation ([DeferredRerunOutcome.ConstraintFailed] → `true`). Skipping
+     * the re-run keeps the failed merge from holding its write lock on `main` for the re-run's whole
+     * duration, which would push other writers toward `busy_timeout` for no information.
+     *
+     * This rests on `main` only ever already violating FOREIGN KEY constraints. Adding CHECK
+     * constraints or triggers to the schema (it has none today) breaks that assumption — a CHECK added
+     * by a migration need not hold for existing rows, and a trigger can fail a statement for reasons
+     * of `main`'s state — so such a change must revisit both this shortcut and the re-run verdict
+     * below ([DeferredRerunOutcome.ConstraintFailed] → `true`).
+     *
      * Every merge statement runs with immediate FOREIGN KEY checking, so the violations
-     * `PRAGMA main.foreign_key_check` reports right after the failure ([violationsBefore]) are ones
+     * `PRAGMA main.foreign_key_check` reports right after the failure ([readViolationsBefore]) are ones
      * `main` already held — data from before foreign keys were enforced, or a migration. With none,
      * `main` cannot be the cause and the failure is the cloud rows'. Otherwise the failure may only
      * have exposed one of them (a merge statement touching an orphaned row), so
@@ -129,7 +146,7 @@ object MergeFailureClassifier {
      * fail:
      * - [DeferredRerunOutcome.ConstraintFailed]: a UNIQUE / NOT NULL / … violation by the cloud rows
      *   → `true`.
-     * - [DeferredRerunOutcome.Completed] with a violation not in [violationsBefore] (a set
+     * - [DeferredRerunOutcome.Completed] with a violation not in V0 (a set
      *   difference, not a count: the re-run may also resolve an old violation while adding a new
      *   one) → the merge brought in a FOREIGN KEY violation of the cloud rows' own → `true`.
      * - [DeferredRerunOutcome.Completed] with nothing new → the original failure came from touching
@@ -156,25 +173,50 @@ object MergeFailureClassifier {
      * proves that its own way before running anything — so no statement can run outside it and commit
      * into `main`; and it rolls the whole transaction back afterwards, never committing.
      *
-     * @param violationsBefore `PRAGMA main.foreign_key_check`'s rows right after the failure, or
-     * `null` when they could not be read inside the failed merge transaction (it had already ended,
-     * or the check failed).
+     * @param isForeignKeyFailure whether the failure is a FOREIGN KEY violation, from the driver's
+     * extended result code (mapped by [MergeFailureClassifier.isForeignKeyFailure]): `true` for
+     * `SQLITE_CONSTRAINT_FOREIGNKEY`, `false` for UNIQUE / PRIMARY KEY / NOT NULL (the shortcut above),
+     * `null` when the driver exposes no extended code or it is any other. `true` and `null` both take
+     * the full path.
+     * @param readViolationsBefore reads `PRAGMA main.foreign_key_check`'s rows right after the
+     * failure (V0), returning `null` when they could not be read inside the failed merge transaction
+     * (it had already ended); a failing check may throw instead. Not invoked when
+     * [isForeignKeyFailure] is `false`.
      * @param rerunWithDeferredForeignKeys runs the failed statement and every one after it (see
-     * [remainingStatements]) with FOREIGN KEY checks deferred; invoked only when [violationsBefore] is
-     * non-empty.
+     * [remainingStatements]) with FOREIGN KEY checks deferred; invoked only when [isForeignKeyFailure]
+     * is not `false` and V0 is non-empty.
      * @return `true` if `main` is ruled out, `false` if `main` is the cause, `null` if undetermined.
      */
     fun mainRuledOut(
-        violationsBefore: Set<ForeignKeyViolation>?,
+        isForeignKeyFailure: Boolean?,
+        readViolationsBefore: () -> Set<ForeignKeyViolation>?,
         rerunWithDeferredForeignKeys: () -> DeferredRerunOutcome,
-    ): Boolean? = when {
-        violationsBefore == null -> null
-        violationsBefore.isEmpty() -> true
-        else -> when (val outcome = rerunWithDeferredForeignKeys()) {
+    ): Boolean? {
+        if (isForeignKeyFailure == false) return true
+        val violationsBefore = readViolationsBefore() ?: return null
+        if (violationsBefore.isEmpty()) return true
+        return when (val outcome = rerunWithDeferredForeignKeys()) {
             DeferredRerunOutcome.ConstraintFailed -> true
             is DeferredRerunOutcome.Completed -> (outcome.violationsAfter - violationsBefore).isNotEmpty()
             DeferredRerunOutcome.Undetermined -> null
         }
+    }
+
+    /**
+     * Whether a constraint failure with SQLite *extended* result code [extendedResultCode] is a
+     * FOREIGN KEY violation — the observation [mainRuledOut]'s `isForeignKeyFailure` takes, mapped here
+     * so every platform whose driver exposes the extended code reads it the same way.
+     *
+     * @return `true` for `SQLITE_CONSTRAINT_FOREIGNKEY`; `false` for `SQLITE_CONSTRAINT_UNIQUE`,
+     * `SQLITE_CONSTRAINT_PRIMARYKEY` and `SQLITE_CONSTRAINT_NOTNULL`, which `main`'s existing state
+     * cannot cause; `null` for any other code — the bare primary `SQLITE_CONSTRAINT` (all a driver
+     * without extended codes reports), `SQLITE_CONSTRAINT_CHECK`, `SQLITE_CONSTRAINT_TRIGGER`, … — so
+     * an unrecognized code takes [mainRuledOut]'s full path rather than the shortcut.
+     */
+    fun isForeignKeyFailure(extendedResultCode: Int): Boolean? = when (extendedResultCode) {
+        SQLITE_CONSTRAINT_FOREIGNKEY -> true
+        SQLITE_CONSTRAINT_UNIQUE, SQLITE_CONSTRAINT_PRIMARYKEY, SQLITE_CONSTRAINT_NOTNULL -> false
+        else -> null
     }
 
     /**
@@ -183,6 +225,12 @@ object MergeFailureClassifier {
      */
     fun remainingStatements(mergeStatements: List<String>, failedIndex: Int): List<String> =
         mergeStatements.drop(failedIndex)
+
+    // SQLite extended result codes (sqlite3.h: SQLITE_CONSTRAINT | (n << 8)).
+    private const val SQLITE_CONSTRAINT_FOREIGNKEY = 787
+    private const val SQLITE_CONSTRAINT_NOTNULL = 1299
+    private const val SQLITE_CONSTRAINT_PRIMARYKEY = 1555
+    private const val SQLITE_CONSTRAINT_UNIQUE = 2067
 }
 
 /**

@@ -231,8 +231,12 @@ actual object DatabaseMerger {
      */
     private fun SQLiteDatabase.mainRuledOut(remainingStatements: List<String>, failure: Throwable): Boolean? {
         val ruledOut = try {
-            val violationsBefore = if (inTransaction()) foreignKeyViolations() else null
-            MergeFailureClassifier.mainRuledOut(violationsBefore) {
+            MergeFailureClassifier.mainRuledOut(
+                // requery exposes no extended result code, so a FOREIGN KEY violation cannot be told
+                // from a UNIQUE / NOT NULL one here: always the full path.
+                isForeignKeyFailure = null,
+                readViolationsBefore = { if (inTransaction()) foreignKeyViolations() else null },
+            ) {
                 rerunWithDeferredForeignKeys(remainingStatements, failure)
             }
         } catch (checkFailure: Throwable) {

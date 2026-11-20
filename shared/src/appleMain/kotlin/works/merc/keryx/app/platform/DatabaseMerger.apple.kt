@@ -161,8 +161,12 @@ actual object DatabaseMerger {
      */
     private fun RawSqliteConnection.mainRuledOut(remainingStatements: List<String>, failure: Throwable): Boolean? {
         val ruledOut = try {
-            val violationsBefore = if (inTransaction()) foreignKeyViolations() else null
-            MergeFailureClassifier.mainRuledOut(violationsBefore) { rerunWithDeferredForeignKeys(remainingStatements, failure) }
+            MergeFailureClassifier.mainRuledOut(
+                // RawSqliteConnection's SqliteException carries the extended result code; SQLiter's
+                // exception only the primary one, which maps to null (the full path).
+                isForeignKeyFailure = failure.findSqliteResultCode()?.let(MergeFailureClassifier::isForeignKeyFailure),
+                readViolationsBefore = { if (inTransaction()) foreignKeyViolations() else null },
+            ) { rerunWithDeferredForeignKeys(remainingStatements, failure) }
         } catch (checkFailure: Throwable) {
             failure.addSuppressed(checkFailure)
             null
