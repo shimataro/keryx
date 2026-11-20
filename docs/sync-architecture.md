@@ -22,7 +22,7 @@ Target: cloud sync (Dropbox / OneDrive / Google Drive / Nextcloud). Implementati
 /keryx-YYYYMMDD-HHMMSS.db.gz.bak       ← archive left behind by a cloud-data reset (never pruned)
 ```
 
-Conflict prevention is done via a revision check on upload — Dropbox: `rev`, a real server-side compare-and-set (409 on mismatch); Google Drive: the file's `version` field, compared client-side before writing (mitigated by the sync retry loop); OneDrive: the DriveItem `eTag`, sent via `If-Match` (412 on mismatch); Nextcloud: the WebDAV `ETag`, sent verbatim via `If-Match` (412 on mismatch, 423 while another write holds the file's lock — see "Nextcloud (Login Flow v2)"). No lock file is used. On Nextcloud these files live in the `/Keryx/` folder of the user's own files rather than an app folder.
+Conflict prevention is done via a revision check on upload — Dropbox: `rev`, a real server-side compare-and-set (409 on mismatch); Google Drive: the file's `version` field, compared client-side before writing — Drive offers no conditional content update, so an overwrite landing between the check and the write is not detected; the overwritten device restores its changes on its next sync (see "Google Drive: an upload can overwrite another device's upload unnoticed" in [known-issues.md](known-issues.md)); OneDrive: the DriveItem `eTag`, sent via `If-Match` (412 on mismatch); Nextcloud: the WebDAV `ETag`, sent verbatim via `If-Match` (412 on mismatch, 423 while another write holds the file's lock — see "Nextcloud (Login Flow v2)"). No lock file is used. On Nextcloud these files live in the `/Keryx/` folder of the user's own files rather than an app folder.
 
 ## Sync Flow (`SyncRepository.sync()`)
 

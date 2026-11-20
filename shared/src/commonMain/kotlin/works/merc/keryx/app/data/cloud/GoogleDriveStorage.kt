@@ -43,9 +43,12 @@ private const val PROVIDER_NAME = "Google Drive"
  * increasing counter returned for arbitrary binary files) as the opaque `rev`.
  * Drive has no native compare-and-set for content updates, so an [upload] with a
  * non-null `expectedRev` re-reads the current `version` and fails with
- * [SyncConflictException] if it changed since the caller's [download]. This leaves
- * a small check-then-write window, acceptable for the low-risk synced data
- * (read/star state, subscriptions) and reconciled by the sync retry loop.
+ * [SyncConflictException] if it changed since the caller's [download]. An overwrite
+ * landing between that check and the write is not detected; the overwritten device
+ * restores its changes on its next sync, and they are lost from the cloud only if it
+ * never syncs again. Closing the window needs a server-side precondition Drive does
+ * not offer — see "Google Drive: an upload can overwrite another device's upload
+ * unnoticed" in docs/known-issues.md.
  */
 class GoogleDriveStorage(
     private val client: HttpClient,
@@ -106,7 +109,8 @@ class GoogleDriveStorage(
         if (existing == null) {
             createFile(token, name, sourcePath).map { CloudFileMeta(it.version) }
         } else {
-            // Best-effort optimistic concurrency: bail if the remote changed since download().
+            // Client-side optimistic concurrency: bail if the remote changed since download(). Drive
+            // cannot make this check part of the write — see the class KDoc for the window it leaves.
             if (expectedRev != null && existing.version != expectedRev) {
                 return@withToken Result.Err(SyncConflictException())
             }
@@ -123,9 +127,10 @@ class GoogleDriveStorage(
      */
     override suspend fun create(path: String, sourcePath: String): Result<CloudFileMeta> = withToken { token ->
         val name = cloudFileName(path)
-        // Best-effort create-only: Drive has no atomic create-if-absent, so we check first and
-        // fail with a conflict when the file already exists rather than overwriting it. The small
-        // check-then-write window is reconciled by the sync retry loop, as with upload().
+        // Drive has no atomic create-if-absent, so check first and fail with a conflict when the
+        // file already exists rather than overwriting it. Two creates racing past this check each
+        // produce a file of their own; resolveCreateRace reconciles them afterwards, but only as far
+        // as Drive's listing shows the other file (see its KDoc and docs/known-issues.md).
         val existing = findFile(token, name).valueOrElse { return@withToken it }
         if (existing != null) {
             Result.Err(SyncConflictException())
@@ -143,7 +148,11 @@ class GoogleDriveStorage(
      * A listing that shows only the file we just created is not proof no one else is racing —
      * Drive's list index is not guaranteed to already reflect a just-completed create from a
      * concurrently racing device — so a solitary result is re-checked once more before being
-     * trusted, shrinking (not fully closing) the false-winner window.
+     * trusted. That narrows the false-winner window but cannot close it: with no atomic
+     * create-if-absent and no consistent listing, Drive offers nothing to close it with. A
+     * device that wrongly believes it won keeps writing to its own file until the listing
+     * catches up and [findFile]'s lowest-id rule moves it to the winner's — see "Google
+     * Drive: an upload can overwrite another device's upload unnoticed" in docs/known-issues.md.
      *
      * @param token The Google Drive access token.
      * @param name The file name shared by the concurrent creations.

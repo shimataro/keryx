@@ -418,6 +418,55 @@ a feed with no `<item>`s. With no articles to write and no search-index catch-up
 call's post-mutex work is read-only, so there is no longer a second writer left to race the upgrade.
 See `testing.md`'s note on concurrent-write tests for the general pattern.
 
+## Google Drive: an upload can overwrite another device's upload unnoticed
+
+**Status**: not fixed — external (Google Drive API) limitation: Drive offers no conditional content
+update. The overwritten changes are not lost while the device that made them keeps syncing.
+
+### Symptom
+
+Two devices syncing through Google Drive at the same moment can both pass the upload's revision check;
+the later write then replaces the earlier one in the cloud without either device seeing a conflict.
+The earlier device's changes are missing from the cloud file — and from any device that downloads it —
+until that device syncs again.
+
+### Diagnosis
+
+Every other provider makes the revision check part of the write itself (Dropbox's `rev`, the `If-Match`
+of OneDrive and Nextcloud), so the server refuses a write based on a stale revision. Drive has no such
+precondition: neither `files.update` nor its media upload documents an ETag / `If-Match` check or a
+`412` response (Drive API v3 reference, checked 2026-11). `GoogleDriveStorage.upload` therefore reads the
+current `version` and compares it before writing, which leaves a window between the read and the write.
+
+The first upload has the same shape. Drive has no atomic create-if-absent, so two devices creating the
+file at once each create one, and `GoogleDriveStorage.resolveCreateRace` keeps the lowest id. Drive's
+file listing is not guaranteed to show a just-created file yet, so a device can see only its own file,
+believe it won, and keep writing there until the listing catches up — the re-check after
+`RACE_RECHECK_DELAY_MS` narrows that window but cannot close it. Once the listing shows both,
+`findFile` resolves every device to the lowest id, and the other file's content is left behind.
+
+### Why nothing is lost in the usual case
+
+The overwritten device keeps its own changes in its local DB and recorded the revision its own write
+produced. Its next sync finds a different revision in the cloud, downloads and merges that file, and
+uploads the merged result — so its changes return to the cloud. They are lost from the cloud only if
+that device never syncs again (uninstalled, reset, or disconnected from Drive first).
+
+### Ruled out
+
+- **The sync retry loop** retries only a conflict it detected; an overwrite inside the window is not
+  one.
+- **Inferring the overwrite from the version the write returns** — `version` counts every server-side
+  change to the file, metadata included, so a jump of more than one does not prove another upload.
+- **A lock file** — creating it is itself an unconditional Drive write, with the same window.
+
+### What a real fix would need
+
+A server-side precondition on Drive's content update (an `If-Match` on `files.update`, or equivalent),
+and an atomic create-if-absent (or a strongly consistent listing) for the first upload. With them,
+`upload` would pass `expectedRev` to the write itself, as the OneDrive and Nextcloud storages do, and
+`create` would fail outright instead of reconciling afterwards.
+
 ## CI-only: `UpdateDownloaderTest.progressArrivesWhileTheBodyIsStillStreaming` times out
 
 **Status**: root cause not identified. The test was changed to report what the download actually did
