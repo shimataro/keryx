@@ -149,6 +149,8 @@ Compose 自身のレイジーリスト項目再利用における内部不変条
 同じ表明違反の上流報告:
 [compose-multiplatform#3977](https://github.com/JetBrains/compose-multiplatform/issues/3977)、
 [issuetracker 303256075](https://issuetracker.google.com/issues/303256075)。
+compose-multiplatform#3977 は 2024 年 4 月に close されたが、このアプリが使うバージョンでも今なお再現する
+— 最後に確認した結果は下記「ライブラリ更新後の再検証」を参照。
 
 ### 緩和策: 行あたりのノード数を減らす
 
@@ -221,12 +223,21 @@ Compose 自身のレイジーリスト項目再利用における内部不変条
 実行しても何も分からない。まず `ArticleRow`（`ArticleRowComponents.kt`）を緩和策適用前の構成に戻す
 — 現在の `Modifier.padding` に畳み込んだ隙間と `AsyncImage`/`Spacer` の分岐ではなく、`Spacer` で
 隙間を作り favicon を `Box` で包む元の形に戻す（favicon 分岐直前のインラインコメント、および
-"cut ArticleRow's LazyColumn item node count" コミットに、戻すべき差分の詳細がある）。そのうえで
+"cut ArticleRow's LazyColumn item node count" コミット a0d35cbd（#66）に、戻すべき差分がある。その後
+行は変わっているので、差分を逆適用するのではなく手で組み直し、行の常設ノード数が 12（現在は 8）に
+なっていることを数えて確かめる）。そのうえで
 `@Ignore` を外して数回実行する。
 
 ```bash
 ./gradlew :composeApp:desktopTest --tests '*ArticleReuseCrashRepro*' --rerun-tasks
 ```
+
+ハーネスは選択のたびに `revealRequest` を進める。scroll-into-view の effect を再始動させるのはそれだから
+である（上記「発生条件」を参照）。選択中の id を変えるだけのハーネスでは effect が一度も走らず、
+不具合の有無にかかわらず成功する — effect のキーが変わった後、しばらく実際にそうなっていた。
+
+最後に再確認したのは 2026-11-20（Compose Multiplatform 1.11.1、`compose-material3` 1.9.0）。緩和策適用前の
+構成では 5 / 5 で再現し、現在の構成では 0 / 5 だった。
 
 この緩和策適用前の構成で繰り返し成功するようになっていれば上流で修正済み。この項目を削除する
 （あるいはテストは通常のリグレッションテストとして残す）とともに、`ArticleRow` は緩和策適用前の
@@ -326,10 +337,11 @@ Compose 版デスクトップビルド**（内部の確認用。出荷してい�
 
 ### 症状
 
-並行する書き込みの下で、`FeedRepository.subscribeFeedWrite` の `feeds.upsert` が
+並行する書き込みの下で、購読の `feeds.upsert`（`subscribeFeedWrite` の書き込み段階である
+`FeedRepository.doSubscribeFeedWrite`）が
 `org.sqlite.SQLiteException: [SQLITE_BUSY] The database file is locked` を投げることがある。
 これは `Result.Err` ではなく呼び出し元スレッドの**捕捉されない例外**である —
-`subscribeFeedWrite` の `db.transaction {}` は `try`/`catch` で囲まれておらず、例外は
+その `db.transactionWithResult {}` は `try`/`catch` で囲まれておらず、例外は
 `FeedRepository` の外まで伝播する。
 
 CI でのみ発生する `FeedRepositoryTest.subscribeFeedSerializesSortOrderAllocationAcrossConcurrentCalls`
@@ -338,8 +350,9 @@ CI でのみ発生する `FeedRepositoryTest.subscribeFeedSerializesSortOrderAll
 
 ### 診断
 
-`subscribeFeedWrite` の `db.transaction {}` は write の前に read を行う
-（`feeds.getByUrl` / `feeds.nextSortOrderInGroup` の後に `feeds.upsert`）。SQLDelight の
+購読の書き込みトランザクション（`doSubscribeFeedWrite` の `db.transactionWithResult {}`）は write の前に
+read を行う（`feeds.getByUrl`、新規または再購読の行なら `insertionSortOrderForNewFeed` /
+`feeds.nextSortOrderInGroup`、その後に `feeds.upsert`）。SQLDelight の
 `JdbcSqliteDriver` は常に素の `BEGIN TRANSACTION`（SQLite のデフォルトである deferred モード）を
 発行するため、トランザクションは read の時点では SHARED ロックしか取らず、write の際に
 RESERVED へ**昇格**する必要がある。
@@ -350,18 +363,18 @@ SQLite 自身のロック昇格ルール（`sqlite3_busy_handler` の公式ド�
 `SQLITE_BUSY_TIMEOUT_MS`。`sqliteConnectionProperties()` 経由で適用）は、他の昇格と衝突していない
 ロックの**取得**を待つ場合にのみ効き、この経路には効かない。
 
-失敗したテストにおける並行書き込み元は次の 2 つ: 1 本目の `subscribeFeedWrite` は
-`feedPlacementMutex.withLock { db.transaction { ... } }` の中で RESERVED を保持するが、
+観測した当時のコードで、失敗したテストにおける並行書き込み元は次の 2 つだった: 1 本目の
+`subscribeFeedWrite` は `feedPlacementMutex.withLock { db.transaction { ... } }` の中で RESERVED を保持していたが、
 mutex を解放した**直後**にその呼び出しが行う次の処理 —
 `articleRepository.upsertParsed(feedId, fetched.articles)`（フィードごとの別トランザクション）—
 がまだ進行中でロックを保持している間に、2 本目の呼び出しが自分の SHARED read ロックを RESERVED へ
 昇格させようとする、という重なりである。
 
-（これは観測した当時のコードの説明である。その後、購読は記事をフィード行と同じトランザクションの中で、mutex を
-保持したまま書くようになったので、更新（refresh）がその 2 つの間に確定することはない。検索インデックスの追いつき
-処理は、今も mutex の解放後に書く。また、このトランザクションは今も書く前に読む（`getByUrl` → `upsert`）ので、
-別の書き込み元（更新など）によって同じように昇格が失敗することはありうる。そのため、本当の直し方は
-`BEGIN IMMEDIATE` だという下の結論は変わらない。）
+この重なり自体はもう無い。購読は今、記事をフィード行と同じトランザクションの中で、mutex を保持したまま書く
+（`writePrefetchedSubscription` → `doSubscribeFeedWrite`）。検索インデックスの追いつき処理（`indexMissing()`）は、
+今も mutex の解放後に書く。また、このトランザクションは今も書く前に読むので、別の書き込み元（更新や、先に
+行われた購読の追いつき処理）によって同じように昇格が失敗することはありうる。そのため、本当の直し方は
+`BEGIN IMMEDIATE` だという下の結論は変わらない。
 
 ### 除外した仮説
 
@@ -393,17 +406,21 @@ mutex を解放した**直後**にその呼び出しが行う次の処理 —
 コード上の確認による（実際に発生させて確認したものではない）— トランザクションが write の前に
 read を行っている箇所:
 
-- `FeedRepository.subscribeFeedWrite`（`FeedRepository.kt`。`getByUrl`/`nextSortOrderInGroup` の後に
-  `upsert` を行う `db.transaction {}`）— 今回観測された箇所。
-- `FeedRepository.moveFeedsOutOfFolderLocked`（同一トランザクション内で `nextSortOrderInGroup` を読んでから
-  フィードごとに書き込む）。`FolderRepository.deleteFolder` のトランザクション経由で到達する。
+- `FeedRepository.doSubscribeFeedWrite`（`FeedRepository.kt`。`getByUrl` と
+  `insertionSortOrderForNewFeed`/`nextSortOrderInGroup` の後に、`upsert` と記事の挿入を行う
+  `db.transactionWithResult {}`）— 今回観測された箇所（当時は `subscribeFeedWrite` 自身の `db.transaction {}`）。
+- `FolderRepository.deleteFolder` のトランザクション。`FeedRepository.moveFeedsOutOfFolderLocked` は
+  `getByFolder`/`nextSortOrderInGroup` を自分の `db.transaction {}` を開く前に読むが、`deleteFolder` が
+  自分のトランザクションの中で呼ぶので、その外側のトランザクションでは、フィードごとの書き込みと
+  フォルダーの論理削除より先にこの read が来る。
 
 `FeedRepository.moveFeed` と `FolderRepository.reorderFolders` は並び順の read を
 `db.transaction {}` を開く**前**に済ませているため、この形状には当てはまらない。（`moveFeed` は
 その read からトランザクションまでの間 `feedPlacementMutex` を保持するので、同じグループへフィードを
 配置する購読と交互に実行されることはない。read はトランザクションの外に置いたままである。）
 フィード更新の反映トランザクション（`FeedRepository.kt` の `applyFetch` 周辺）も write のみで
-該当しない。
+該当しない。`TagRepository.createTagAndAttach` と `FolderRepository.createFolderAndMoveFeed` は先に書き
+（名前の `upsertByName`）、その後で読むので、最初の文から書き込みロックを持つ。
 
 ### テスト側でどう回避したか
 
@@ -501,60 +518,6 @@ Google Drive で同期する 2 台の端末が同時に同期すると、両方�
 Drive の内容更新に対するサーバー側の前提条件（`files.update` の `If-Match` など）と、最初のアップロードのための
 不可分な「なければ作成」（または強い整合性を持つ一覧）。それがあれば、`upload` は OneDrive や Nextcloud のストレージと
 同じように `expectedRev` を書き込みそのものに渡せ、`create` は後から調整するのではなく、その場で失敗できる。
-
-## CI でのみ `UpdateDownloaderTest.progressArrivesWhileTheBodyIsStillStreaming` がタイムアウトする
-
-**状態**: 根本原因は未特定。素のタイムアウトではなくダウンロードが実際に何をしたのかを報告するよう
-テストを組み替えたので、次に再現したときは失敗自体が原因を示す。これは**診断性の改善であって、
-引き金そのものの修正ではない**。
-
-### 症状
-
-desktop のテストタスクが、次の情報だけを残して失敗する:
-
-```text
-UpdateDownloaderTest[desktop] > progressArrivesWhileTheBodyIsStillStreaming[desktop] FAILED
-    kotlinx.coroutines.TimeoutCancellationException
-```
-
-断続的に起きる。複数のランナー OS で観測されているが、同一 run の複数ジョブで起きたことはなく、
-`UpdateDownloader` にもそのテストにも触れていないコミットで起きている。
-
-### なぜ失敗から何も分からなかったのか
-
-`UpdateDownloader.download` は通常の失敗を例外ではなく `Result.Err` で報告し
-（[error-design.ja.md](error-design.ja.md) 参照）、`Result.Err` を返す経路はログも出さない。
-テストは進捗の `CompletableDeferred` だけを待っていたため、**進捗を 1 度も出さずにダウンロードが
-終わると Deferred は永久に未完了**になり、さらに外側の `finally` が理由を保持している `Deferred` を
-キャンセルしてしまう。`shared/build.gradle.kts` には `testLogging` 設定が無いので、唯一の
-`Log.warn` 経路すら CI の出力には現れない。
-
-### 切り分け済み（原因ではないもの）
-
-- **ローカルでは再現しない**: 無負荷で 40 回、さらに CPU を 3 倍に過負荷させた状態で 15 回
-  （macOS/arm64、JDK 26）——すべて成功。
-- **書き込み側の背圧でテストのフィーダーが止まっているわけではない。** Ktor 3.5.2 の `ByteChannel`
-  が書き手をサスペンドさせるのは flush バッファが `CHANNEL_MAX_SIZE`（1 MiB。`ktor-io` の
-  `ByteChannel.kt`）を超えてからで、テストが書くのは 320 KiB。つまり `writeFully` は読み手を
-  一切待たずに返る。
-- **MockEngine が本文をバッファリング／二重に読んでいるわけでもない。** `respond(ByteReadChannel, …)`
-  はテストが作ったチャネルをそのままレスポンス本文として渡す（`ktor-client-mock` の `MockUtils.kt`）。
-  コピーも 2 人目の読み手も存在しない。
-- **`UpdateDownloader` の `timeout {}` 指定でもない。** MockEngine は `HttpTimeoutCapability` を
-  宣言しているだけで自前のタイムアウトを実装していないため、`socketTimeoutMillis` は発火しない。
-
-### 次に再現したときに得られる情報
-
-`awaitFirstProgress` は進捗の到着とダウンロードの完了を競わせるようになったので:
-
-- ダウンロードが先に終われば、その `Result`（`Err` なら `UpdateException` のメッセージ込み）を
-  理由として失敗する
-- ダウンロードが例外で終われば、その例外がそのまま伝播する
-- 本当に停止している場合はタイムアウトするが、ダウンロード用コルーチンがまだ動いているかどうかを報告する
-
-これにより、残る 2 つの仮説——「進捗を出す前に無言で `Result.Err` を返した」のか「ダウンロード用
-コルーチンが時間内にスケジュールされなかっただけ」なのか——を区別できる。上記の素のタイムアウトでは
-区別できなかった。
 
 ## Linux/GNOME: トレイメニューを開いた瞬間、直前のラベルが一瞬表示される
 
@@ -693,8 +656,8 @@ Android で `https://alfalfalfa.com/articles/11110022.html` を開くと、1〜2
 ### 意図的に残している範囲
 
 `script-src` は宣言していないので、本文のスクリプトは引き続き実行される。広告・計測コードが動いて
-独自に外部リクエストを発行するため、[external-spec.ja.md](external-spec.ja.md) §10 の「外部サーバへ
-データを送信しない」とは厳密には折り合っていない。また、スクリプトがインラインの `<style>` 要素を
+使っている機能とは関係のないサーバーへ独自にリクエストを発行するため、[external-spec.ja.md](external-spec.ja.md)
+§10 の「使っている機能に直接関係するサーバーにしか接続しない」とは厳密には折り合っていない。また、スクリプトがインラインの `<style>` 要素を
 注入する経路も残る（`'unsafe-inline'` の範囲内。通常のケースはクロームの `!important` で受け止めて
 いるが、受け止められるのは列挙済みの宣言だけで、どのルールも `!important` を付けていない
 プロパティや、本文側の同詳細度の `!important` ルールは、本文が `<style>` ブロックより後ろに来る
@@ -894,53 +857,6 @@ detach する。同じログに残っているオーファンプロセスの後�
 おり、この競合は CI ランナーの環境（マウント直後のボリュームを Spotlight がインデックスしようと
 すること）の性質であって、このアプリが設定している何かに起因するものではない。GitHub または JDK
 側が上流で対処しない限り、リトライ以外に取れる緩和策はない。
-
-## iOS: 記事一覧に戻ると `UICollectionView` でクラッシュした
-
-**状態**: 構造上は起きなくなったはず、原因は未確定。記事一覧を `UICollectionView` にしてから、UIKit が後から
-検証する保留のスクロールは残らない（下の「変えたこと」）。クラッシュは再現できていないので、それで止まったのかは
-分かっていない。分かるまで、この項目は残す。
-
-### 症状
-
-v0.27.0、iPhone SE（第3世代）、iOS 26.5 で、プロセス起動の 32 秒後に
-`-[UICollectionView _validateScrollingTargetIndexPath:raisingExceptionIfNecessary:]` の
-`NSInternalInconsistencyException` で異常終了した。Reader からのナビゲーションの pop を始めるレイアウトの中で、
-SwiftUI の `UpdateCoalescingCollectionView.updateContent()` が `layoutSubviews` からスクロールを要求している。
-スタック上の Keryx のフレームは `main` のみで、レポートに例外メッセージがないため、index path と行数は不明。
-Kotlin の GC スレッドは待機中だった。
-
-Reader のスワイプのページャーは collection view ではなく `UIPageViewController` なので、このレイアウトにある
-SwiftUI の collection view は、当時の記事一覧の `List` だけである。
-
-### 除外できたこと
-
-記事一覧がまだ SwiftUI の `List` だったときに、iOS 26.3 シミュレータで計測した。最初の 4 行は pop をコードから行い、最後の 2 行は UI テストで画面端のスワイプを
-行った。
-
-| シナリオ | 結果 |
-| --- | --- |
-| 一覧が Reader の下にある間の `scrollTo` | 発生する（選択の移動、復元した選択） |
-| 51 行目への scroll が保留の状態で行を 60→9 に減らして戻る | クラッシュしない |
-| 起動時に Reader を復元して戻る | クラッシュしない |
-| 起動時に Reader を復元し、行を 59→34 に減らして戻る | クラッシュしない |
-| scroll を保持した状態で、画面端のスワイプで一覧に戻る | クラッシュしない |
-| scroll を保持した状態で、画面端のスワイプをキャンセルする | クラッシュしない |
-
-したがって、行の減少で保留の scroll が古くなるだけでは足りない。
-
-### 変えたこと
-
-記事一覧は、サイドバーと同じ `UICollectionView` のリストになった（`Home/ArticleCollectionView.swift`。
-[app-architecture.ja.md](app-architecture.ja.md) の「記事一覧（iOS）」）。`ScrollViewProxy.scrollTo` はもう
-使わない。コントローラーは、一覧が画面に出ているときだけ、その時点でデータソースが持っている行に対して
-`scrollToItem` でその場でスクロールする。それまでは最新のスクロールだけを待たせ、その時点で行がなくなっていれば
-捨てる。後のレイアウトで検証される保留が、UIKit の中に残らない。
-
-### 再確認
-
-この変更を含むビルドで同じスタックのクラッシュが報告されたら、原因は別にある。新しいレポートをもとに、
-この項目を見直す。
 
 ## macOS: フォルダーをフォルダーの間に落とすと SwiftUI の中でクラッシュした
 

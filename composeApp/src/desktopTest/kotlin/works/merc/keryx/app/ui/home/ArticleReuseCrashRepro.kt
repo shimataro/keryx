@@ -68,6 +68,7 @@ class ArticleReuseCrashRepro {
                 val items = List(itemCount) { reproArticle("a$it", publishedAt = it.toLong()) }
                 lateinit var state: LazyListState
                 var selected by mutableStateOf<ArticleListRow?>(null)
+                var revealRequest by mutableStateOf(0)
 
                 setContent {
                     state = rememberLazyListState()
@@ -75,6 +76,7 @@ class ArticleReuseCrashRepro {
                         articles = items,
                         feedTitles = mapOf("f1" to "Some Feed With A Fairly Long Title"),
                         selectedId = selected?.id,
+                        revealRequest = revealRequest,
                         listMode = ArticleListMode.All,
                         onSelectListMode = {},
                         onSetNewestFirst = {},
@@ -94,6 +96,9 @@ class ArticleReuseCrashRepro {
                     waitForIdle()
                     // Stands in for key auto-repeat moving the selection under the scroll.
                     selected = items[(cycle * 7) % items.size]
+                    // The scroll-into-view effect keys on revealRequest, not on selectedId: without
+                    // this bump it never runs, and the harness passes whether or not the bug is there.
+                    revealRequest++
                     waitForIdle()
                 }
             }

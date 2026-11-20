@@ -7,7 +7,8 @@ import UIKit
 ///
 /// - A scroll runs at once against the rows the list holds, or waits — only the latest — until the
 ///   list is in a window; nothing is left pending inside UIKit against rows that may have changed
-///   ("iOS: going back to the article list crashed in `UICollectionView`" in `docs/known-issues.md`).
+///   (v0.27.0 crashed in UIKit's validation of such a scroll as the reader was popped — see
+///   "Article list (iOS)" in `docs/app-architecture.md`).
 /// - The refresh control is the list's own, so it is never lost when the column is popped and pushed
 ///   again.
 /// - The long-press menu goes through the collection view's delegate, whose highlight is

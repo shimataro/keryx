@@ -156,6 +156,8 @@ introduce the defect — it only pushed the row past the threshold that exposes 
 Upstream reports of the same assertion:
 [compose-multiplatform#3977](https://github.com/JetBrains/compose-multiplatform/issues/3977),
 [issuetracker 303256075](https://issuetracker.google.com/issues/303256075).
+compose-multiplatform#3977 was closed in April 2024, yet the crash still reproduces on the versions
+this app uses — see "Re-checking after a library update" below for the last check.
 
 ### Mitigation: fewer nodes per row
 
@@ -230,12 +232,22 @@ upstream bug is fixed, so running it as-is proves nothing. First revert `Article
 (`ArticleRowComponents.kt`) to its pre-mitigation structure: `Spacer`-separated gaps and a
 `Box`-wrapped favicon, rather than the `Modifier.padding`-folded gaps and `AsyncImage`/`Spacer`
 branch currently there (see the inline comment at the favicon branch, and the "cut ArticleRow's
-LazyColumn item node count" commit for the exact diff to reverse). Then remove `@Ignore` and run it
+LazyColumn item node count" commit, a0d35cbd (#66), for the diff to reverse — the row has changed
+since, so rebuild that structure by hand rather than reverse-applying it, and count the row's
+always-present nodes: 12, against the current 8). Then remove `@Ignore` and run it
 a few times:
 
 ```bash
 ./gradlew :composeApp:desktopTest --tests '*ArticleReuseCrashRepro*' --rerun-tasks
 ```
+
+The harness bumps `revealRequest` with each selection, since that is what re-keys the scroll-into-view
+effect (see "What triggers it" above). A harness that only changes the selected id never runs the
+effect and passes whether or not the bug is there — which it did for a while, after the effect's key
+changed.
+
+Last re-checked on 2026-11-20, with Compose Multiplatform 1.11.1 and `compose-material3` 1.9.0: the
+pre-mitigation structure reproduced the crash 5 / 5, and the current structure 0 / 5.
 
 If it passes repeatedly at this pre-mitigation structure, the upstream fix has landed: delete this
 entry (or keep the test as a normal regression test), keep `ArticleRow` reverted to the
@@ -338,10 +350,11 @@ the change that found it. Worked around in the one test it made flaky.
 
 ### Symptom
 
-Under concurrent writers, `FeedRepository.subscribeFeedWrite`'s `feeds.upsert` can throw
+Under concurrent writers, a subscribe's `feeds.upsert` (`FeedRepository.doSubscribeFeedWrite`, the
+write phase of `subscribeFeedWrite`) can throw
 `org.sqlite.SQLiteException: [SQLITE_BUSY] The database file is locked`. This is an *uncaught*
-exception on the calling thread, not a `Result.Err` — `subscribeFeedWrite` has no `try`/`catch`
-around its `db.transaction {}` block, so the exception propagates past `FeedRepository` entirely.
+exception on the calling thread, not a `Result.Err` — there is no `try`/`catch` around that
+`db.transactionWithResult {}` block, so the exception propagates past `FeedRepository` entirely.
 
 First observed via a CI-only flake in
 `FeedRepositoryTest.subscribeFeedSerializesSortOrderAllocationAcrossConcurrentCalls` (two real
@@ -350,7 +363,8 @@ First observed via a CI-only flake in
 
 ### Diagnosis
 
-`subscribeFeedWrite`'s `db.transaction {}` reads before it writes (`feeds.getByUrl` /
+A subscribe's write transaction (`doSubscribeFeedWrite`'s `db.transactionWithResult {}`) reads before
+it writes (`feeds.getByUrl`, and for a new or resubscribed row `insertionSortOrderForNewFeed` /
 `feeds.nextSortOrderInGroup`, then `feeds.upsert`). SQLDelight's `JdbcSqliteDriver` always issues a
 plain `BEGIN TRANSACTION` (SQLite's default *deferred* mode), so the transaction starts by taking
 only a SHARED lock at the read and has to **upgrade** to RESERVED at the write.
@@ -361,17 +375,17 @@ upgrade could deadlock against another connection that is itself waiting to upgr
 `SQLITE_BUSY_TIMEOUT_MS`, applied via `sqliteConnectionProperties()`) only governs waiting to
 *acquire* a lock that has no conflicting upgrade in progress — it does not apply here.
 
-The two overlapping writers in the failing test: the first `subscribeFeedWrite` call holds RESERVED
-inside `feedPlacementMutex.withLock { db.transaction { ... } }`, but the *next* thing that
-call does after releasing the mutex — `articleRepository.upsertParsed(feedId, fetched.articles)`, a
-separate per-feed `db.transaction {}` — can still be mid-flight, still holding a lock, when the
-second call's own transaction tries to upgrade its SHARED read lock to RESERVED for its write.
+The two overlapping writers in the failing test, as the code stood when it was observed: the first
+`subscribeFeedWrite` call held RESERVED inside `feedPlacementMutex.withLock { db.transaction { ... } }`,
+but the *next* thing that call did after releasing the mutex — `articleRepository.upsertParsed(feedId, fetched.articles)`, a
+separate per-feed `db.transaction {}` — could still be mid-flight, still holding a lock, when the
+second call's own transaction tried to upgrade its SHARED read lock to RESERVED for its write.
 
-(That is the code as it was observed. A subscribe has since written its articles inside the same
-transaction as its feed row, under the mutex, so a refresh cannot commit between the two; the search
-index's catch-up still writes after the mutex. The transaction still reads before it writes
-(`getByUrl` → `upsert`), so another writer — a refresh, say — can still make its upgrade fail the same
-way, and the conclusion below stands: the real fix is `BEGIN IMMEDIATE`.)
+That particular overlap is gone: a subscribe now writes its articles inside the same transaction as its
+feed row, under the mutex (`writePrefetchedSubscription` → `doSubscribeFeedWrite`). The search index's
+catch-up (`indexMissing()`) still writes after the mutex is released. The transaction still reads before
+it writes, so another writer — a refresh, or an earlier subscribe's catch-up — can still make its upgrade
+fail the same way, and the conclusion below stands: the real fix is `BEGIN IMMEDIATE`.
 
 ### Ruled out
 
@@ -400,16 +414,23 @@ could be applied — out of scope for a CI-flake fix.
 
 Confirmed by inspection (not by triggering each one) — a transaction reads before it writes:
 
-- `FeedRepository.subscribeFeedWrite` (`FeedRepository.kt`, the `db.transaction {}` covering
-  `getByUrl`/`nextSortOrderInGroup` then `upsert`) — the one this was observed against.
-- `FeedRepository.moveFeedsOutOfFolderLocked` (reads `nextSortOrderInGroup` then writes per feed in
-  the same transaction), reached via `FolderRepository.deleteFolder`'s transaction.
+- `FeedRepository.doSubscribeFeedWrite` (`FeedRepository.kt`, the `db.transactionWithResult {}`
+  covering `getByUrl` and `insertionSortOrderForNewFeed`/`nextSortOrderInGroup`, then `upsert` and the
+  articles' insert) — the one this was observed against, back when it was `subscribeFeedWrite`'s own
+  `db.transaction {}`.
+- `FolderRepository.deleteFolder`'s transaction. `FeedRepository.moveFeedsOutOfFolderLocked` reads
+  `getByFolder`/`nextSortOrderInGroup` before opening its own `db.transaction {}`, but `deleteFolder`
+  calls it inside its transaction, so those reads still come first in that outer transaction, ahead of
+  the per-feed writes and the folder's soft delete.
 
 `FeedRepository.moveFeed` and `FolderRepository.reorderFolders` read their ordering *before*
 opening `db.transaction {}`, so they don't have this shape. (`moveFeed` holds `feedPlacementMutex`
 across that read and its transaction, so it cannot interleave with a subscribe placing a feed in the
 same group, while keeping the read outside the transaction.) Neither does the feed-refresh apply
 transaction (`FeedRepository.kt`, around `applyFetch`), which only writes.
+`TagRepository.createTagAndAttach` and `FolderRepository.createFolderAndMoveFeed` write first (the
+name's `upsertByName`) and read only after it, so their transactions hold the write lock from their
+first statement.
 
 ### How the test was worked around
 
@@ -519,58 +540,6 @@ A server-side precondition on Drive's content update (an `If-Match` on `files.up
 and an atomic create-if-absent (or a strongly consistent listing) for the first upload. With them,
 `upload` would pass `expectedRev` to the write itself, as the OneDrive and Nextcloud storages do, and
 `create` would fail outright instead of reconciling afterwards.
-
-## CI-only: `UpdateDownloaderTest.progressArrivesWhileTheBodyIsStillStreaming` times out
-
-**Status**: root cause not identified. The test was changed to report what the download actually did
-instead of a bare timeout, so the next occurrence diagnoses itself — a diagnosability improvement,
-**not** a fix for the underlying trigger.
-
-### Symptom
-
-The desktop test task fails with nothing but:
-
-```text
-UpdateDownloaderTest[desktop] > progressArrivesWhileTheBodyIsStillStreaming[desktop] FAILED
-    kotlinx.coroutines.TimeoutCancellationException
-```
-
-It is intermittent: seen on more than one runner OS, never on more than one job of the same run,
-and on commits that do not touch `UpdateDownloader` or its test.
-
-### Why the failure carried no information
-
-`UpdateDownloader.download` reports an ordinary failure as a `Result.Err` rather than throwing (see
-[error-design.md](error-design.md)), and its `Result.Err` paths log nothing. The test waited only on
-the progress `CompletableDeferred`, so a download that gave up before emitting any progress left
-that deferred uncompleted forever — and the enclosing `finally` then cancelled the `Deferred`
-holding the reason. `shared/build.gradle.kts` configures no `testLogging`, so even the one
-`Log.warn` path would not appear in CI output.
-
-### Ruled out
-
-- **Not reproducible locally**: 40 runs on an idle machine plus 15 more with the CPU oversubscribed
-  3× (macOS/arm64, JDK 26) — all green.
-- **Not write backpressure stalling the test's feeder.** Ktor 3.5.2's `ByteChannel` suspends a writer
-  only once its flush buffer passes `CHANNEL_MAX_SIZE` (1 MiB, `ktor-io`'s `ByteChannel.kt`); the
-  test writes 320 KiB, so `writeFully` returns without waiting for the reader at all.
-- **Not MockEngine buffering or duplicating the body.** `respond(ByteReadChannel, …)` passes the
-  test's own channel straight through as the response body (`ktor-client-mock`'s `MockUtils.kt`) —
-  no copy, no second reader.
-- **Not `UpdateDownloader`'s `timeout {}` overrides.** MockEngine declares `HttpTimeoutCapability`
-  and implements no timeout of its own, so `socketTimeoutMillis` never fires against it.
-
-### What the next occurrence will show
-
-`awaitFirstProgress` now races the progress reading against the download's own completion, so:
-
-- a download that finishes first fails with its `Result` (including an `Err`'s `UpdateException`
-  message),
-- a download that throws propagates that exception as itself, and
-- a genuine stall still times out, but reports whether the download coroutine is still running.
-
-That separates the two remaining hypotheses — an early silent `Result.Err` versus the download
-coroutine simply not being scheduled in time — which the bare timeout above cannot.
 
 ## Linux/GNOME: the tray menu briefly shows the previous label when it opens
 
@@ -708,8 +677,9 @@ lower-specificity override — hardening, not isolation (see "Article Reader" in
 ### What is deliberately left
 
 No `script-src` is declared, so the body's scripts still run: ad and analytics code executes and
-makes its own network requests, which does not sit comfortably with "no data sent to external
-servers" in [external-spec.md](external-spec.md) §10, and a script can still inject an inline
+makes its own network requests to servers that have nothing to do with the feature in use, which
+does not sit comfortably with [external-spec.md](external-spec.md) §10's "Keryx contacts only servers
+directly relevant to the feature in use", and a script can still inject an inline
 `<style>` element (which `'unsafe-inline'` admits — the `!important` chrome rules absorb the
 ordinary case, but only for the declarations they list: a property none of them marks
 `!important`, or an equally-specific `!important` rule of the body's own, still restyles the
@@ -912,53 +882,6 @@ There is no app-side lever here — the mount/detach is entirely inside jpackage
 assembly, and the race is a property of the CI runner's environment (Spotlight indexing a freshly
 mounted volume), not of anything this app configures. A retry is the only available mitigation
 short of GitHub or the JDK addressing it upstream.
-
-## iOS: going back to the article list crashed in `UICollectionView`
-
-**Status**: no longer reachable by design, cause not confirmed. Since the article list became a
-`UICollectionView`, no pending scroll is left for UIKit to validate (see "What changed" below); the crash
-was never reproduced, so whether that is what stops it is unknown. The entry stays until that is known.
-
-### Symptom
-
-v0.27.0 on an iPhone SE (3rd generation), iOS 26.5, aborted on an `NSInternalInconsistencyException` from
-`-[UICollectionView _validateScrollingTargetIndexPath:raisingExceptionIfNecessary:]`, 32 seconds after the
-process launched. SwiftUI's `UpdateCoalescingCollectionView.updateContent()` asked for the scroll, in
-`layoutSubviews`, during the layout that starts the navigation pop from the reader. No Keryx frame is on the
-stack but `main`, and the report does not hold the exception's message, so the index path and row count are
-unknown. The Kotlin GC threads were idle.
-
-The reader's swipe pager is a `UIPageViewController`, not a collection view, so the `List` the article list
-then was is the only SwiftUI collection view in this layout.
-
-### What was ruled out
-
-Measured on the iOS 26.3 simulator, with the article list still a SwiftUI `List`. The first four rows made the pop from code, the last two with an edge swipe
-driven by a UI test:
-
-| Scenario | Result |
-| --- | --- |
-| `scrollTo` asked while the list is under the reader | Happens (selection moves, restored selection) |
-| Pending scroll to row 51, rows shrink from 60 to 9, go back | No crash |
-| Reader restored at launch, go back | No crash |
-| Reader restored at launch, rows shrink from 59 to 34, go back | No crash |
-| Scroll held, edge swipe back to the list | No crash |
-| Scroll held, edge swipe cancelled | No crash |
-
-So a pending scroll made stale by rows shrinking is not enough on its own.
-
-### What changed
-
-The article list is now a `UICollectionView` list, as the sidebar is (`Home/ArticleCollectionView.swift`;
-see "Article list (iOS)" in [app-architecture.md](app-architecture.md)). `ScrollViewProxy.scrollTo` is no
-longer used: the controller carries a scroll out at once with `scrollToItem`, against the rows its data source
-holds at that moment, and only once the list is on screen; until then only the latest scroll waits, and one
-whose row is gone by then is dropped. Nothing is left pending inside UIKit for a later layout to validate.
-
-### Re-checking
-
-If a crash with the same stack is reported from a build with this change, the cause is elsewhere: reopen this
-entry with the new report.
 
 ## macOS: dropping a folder between folders crashed inside SwiftUI
 

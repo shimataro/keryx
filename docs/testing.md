@@ -1439,8 +1439,8 @@ orientations), with a feed of a few dozen articles whose bodies are longer than 
 ### (iOS) Going back to the article list
 
 `ArticleListScrollRequestTests` covers when the list counts as showing rows. Whether a scroll is carried
-out once the list is back on screen, and the crash itself (see "iOS: going back to the article list crashed in
-`UICollectionView`" in [known-issues.md](known-issues.md)), need a simulator or device. On an iPhone, with a
+out once the list is back on screen, and the crash itself (v0.27.0's crash on going back, see "Article list (iOS)"
+in [app-architecture.md](app-architecture.md)), need a simulator or device. On an iPhone, with a
 feed of a few dozen articles:
 
 - No crash: open an article, swipe through a few, and edge-swipe back to the list; repeat with the back
