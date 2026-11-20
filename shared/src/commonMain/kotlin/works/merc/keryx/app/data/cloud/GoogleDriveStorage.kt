@@ -52,8 +52,9 @@ private const val PROVIDER_NAME = "Google Drive"
  * non-null `expectedRev` re-reads the current `rev` and fails with
  * [SyncConflictException] if it changed since the caller's [download]. An overwrite
  * landing between that check and the write is not detected; the overwritten device
- * merges its changes into the cloud file again on its next sync, under the ordinary merge
- * rules, and they are lost from the cloud only if it never syncs again. Closing the window
+ * merges its changes into the cloud file again on its next sync, and those that survive the
+ * ordinary merge rules return to the cloud. The overwrite itself loses them from the cloud
+ * only if that device never syncs again. Closing the window
  * needs a server-side precondition Drive does not offer — see "Google Drive: an upload can
  * overwrite another device's upload unnoticed" in docs/known-issues.md.
  */
