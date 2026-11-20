@@ -180,6 +180,137 @@ class MergeFailureClassificationDeviceTest {
         }
     }
 
+    private val orphanTouchingUpdate = "UPDATE main.articles SET feed_id = feed_id"
+
+    /**
+     * The failing statement is not the first one. Statement 0 (an unguarded cloud-folder INSERT)
+     * succeeded and is not idempotent; statement 1 touches the local orphan and fails on its FOREIGN
+     * KEY. The re-run must continue from statement 1: starting again at statement 0 would collide with
+     * the folder it already inserted (a PRIMARY KEY failure that reads as the cloud's).
+     */
+    @Test
+    fun failureAtALaterStatementRerunsOnlyFromThatStatementAndStaysUnclassified() {
+        val localFile = createSchemaDbFile().also { cleanup += it }
+        val cloudFile = createSchemaDbFile().also { cleanup += it }
+        seedOrphanArticle(localFile.absolutePath)
+        seedFolder(cloudFile.absolutePath, "cloud-only", "Cloud")
+
+        assertFailsWith<SQLiteConstraintException> {
+            DatabaseMerger.merge(
+                localDbPath = localFile.absolutePath,
+                cloudDbPath = cloudFile.absolutePath,
+                localSchemaVersion = SCHEMA_VERSION,
+                mergeStatements = listOf(unguardedFolderInsert, orphanTouchingUpdate),
+            )
+        }
+    }
+
+    /**
+     * A non-constraint failure during the deferred re-run (a missing table) says nothing about the cloud
+     * rows: the original failure is rethrown unclassified, with the re-run's error attached as suppressed.
+     */
+    @Test
+    fun nonConstraintFailureDuringTheRerunIsUnclassifiedAndAttachedAsSuppressed() {
+        val localFile = createSchemaDbFile().also { cleanup += it }
+        val cloudFile = createSchemaDbFile().also { cleanup += it }
+        seedOrphanArticle(localFile.absolutePath)
+
+        val thrown = assertFailsWith<SQLiteConstraintException> {
+            DatabaseMerger.merge(
+                localDbPath = localFile.absolutePath,
+                cloudDbPath = cloudFile.absolutePath,
+                localSchemaVersion = SCHEMA_VERSION,
+                // Statement 1 is only reached by the re-run: statement 0 fails first originally.
+                mergeStatements = listOf(orphanTouchingUpdate, "INSERT INTO main.no_such_table SELECT * FROM cloud.folders"),
+            )
+        }
+        assertTrue(
+            thrown.suppressedExceptions.any { it::class == SQLiteException::class },
+            "the re-run's failure must be attached as suppressed, got ${thrown.suppressedExceptions}",
+        )
+    }
+
+    /** `PRAGMA main.foreign_key_check` itself fails (a parent key that is no longer UNIQUE). */
+    @Test
+    fun failingForeignKeyCheckLeavesTheFailureUnclassifiedAndAttachedAsSuppressed() {
+        val localFile = createSchemaDbFile().also { cleanup += it }
+        val cloudFile = createSchemaDbFile().also { cleanup += it }
+        seedOrphanArticle(localFile.absolutePath)
+
+        val thrown = assertFailsWith<SQLiteConstraintException> {
+            DatabaseMerger.merge(
+                localDbPath = localFile.absolutePath,
+                cloudDbPath = cloudFile.absolutePath,
+                localSchemaVersion = SCHEMA_VERSION,
+                mergeStatements = listOf(
+                    // feeds.folder_id references folders(id); a parent without a UNIQUE id is a mismatch
+                    // that makes foreign_key_check itself fail (DDL is transactional).
+                    "DROP TABLE main.folders",
+                    "CREATE TABLE main.folders (id TEXT)",
+                    orphanTouchingUpdate,
+                ),
+            )
+        }
+        assertTrue(
+            thrown.suppressedExceptions.any { "foreign key mismatch" in it.message.orEmpty() },
+            "the failed check must be attached as suppressed, got ${thrown.suppressedExceptions}",
+        )
+    }
+
+    /**
+     * SQLite ends the transaction by itself during the re-run (an `INSERT OR ROLLBACK` only reached
+     * there, hitting a duplicate key): the re-run's constraint failure would read as the cloud's, but
+     * the merge savepoint can no longer be released, so the verdict is dropped and the failure stays
+     * unclassified. Ignoring the failed RELEASE (the "no such savepoint" branch of `mainRuledOut`)
+     * would classify it, so the exception type alone guards that branch; requery's message text is
+     * deliberately not asserted.
+     */
+    @Test
+    fun transactionEndedBySqliteDuringTheRerunLeavesTheFailureUnclassified() {
+        val localFile = createSchemaDbFile().also { cleanup += it }
+        val cloudFile = createSchemaDbFile().also { cleanup += it }
+        seedFolder(localFile.absolutePath, "dup", "Local")
+        seedFolder(cloudFile.absolutePath, "dup", "CloudDup")
+        seedOrphanArticle(localFile.absolutePath)
+
+        assertFailsWith<SQLiteConstraintException> {
+            DatabaseMerger.merge(
+                localDbPath = localFile.absolutePath,
+                cloudDbPath = cloudFile.absolutePath,
+                localSchemaVersion = SCHEMA_VERSION,
+                mergeStatements = listOf(orphanTouchingUpdate, unguardedFolderInsert.replace("INSERT INTO", "INSERT OR ROLLBACK INTO")),
+            )
+        }
+    }
+
+    /**
+     * The real merge statements against a cloud DB whose own rows break this app's schema (two feeds
+     * sharing a url, which only the cloud file's laxer feeds table allowed) are still classified while
+     * main holds an unrelated FOREIGN KEY violation.
+     */
+    @Test
+    fun cloudRowsViolatingTheAppSchemaAreClassifiedDespiteALocalForeignKeyViolation() {
+        val localFile = createSchemaDbFile().also { cleanup += it }
+        val cloudFile = createSchemaDbFile().also { cleanup += it }
+        seedOrphanArticle(localFile.absolutePath)
+        SQLiteDatabase.openOrCreateDatabase(cloudFile.absolutePath, null, NoOpDatabaseErrorHandler).use { db ->
+            db.execSQL("DROP TABLE feeds")
+            db.execSQL(LAX_FEEDS_TABLE)
+            for (id in listOf("f-dup-1", "f-dup-2")) {
+                db.execSQL("INSERT INTO feeds (id, url, title, updated_at, created_at) VALUES ('$id', 'https://dup.example/feed', '$id', 0, 0)")
+            }
+        }
+
+        assertFailsWith<CloudDataIncompatibleException> {
+            DatabaseMerger.merge(
+                localDbPath = localFile.absolutePath,
+                cloudDbPath = cloudFile.absolutePath,
+                localSchemaVersion = SCHEMA_VERSION,
+                mergeStatements = MergeSql.all,
+            )
+        }
+    }
+
     private fun seedFeed(dbPath: String) {
         SQLiteDatabase.openOrCreateDatabase(dbPath, null, NoOpDatabaseErrorHandler).use { db ->
             db.execSQL("INSERT INTO feeds (id, url, title, updated_at, created_at) VALUES ('f1', 'https://example.com/f1', 'Feed', 0, 0)")
@@ -291,7 +422,7 @@ class MergeFailureClassificationDeviceTest {
     @Test
     fun noOpDatabaseErrorHandlerDoesNotDeleteACorruptFile() {
         val file = createSchemaDbFile().also { cleanup += it }
-        // Corrupt the header ("SQLite format 3 ") so SQLite's own integrity checks flag this
+        // Corrupt the header ("SQLite format 3\0") so SQLite's own integrity checks flag this
         // as SQLITE_NOTADB/SQLITE_CORRUPT the next time it's opened and queried.
         RandomAccessFile(file, "rw").use { raf ->
             raf.seek(0)
@@ -362,6 +493,15 @@ class MergeFailureClassificationDeviceTest {
 
     private companion object {
         const val SCHEMA_VERSION = 2L
+
+        /** The app's feeds table without its UNIQUE(url), so a cloud file can hold a duplicate url. */
+        const val LAX_FEEDS_TABLE =
+            "CREATE TABLE feeds (id TEXT NOT NULL PRIMARY KEY, url TEXT NOT NULL, site_url TEXT, " +
+                "title TEXT NOT NULL, description TEXT, favicon_url TEXT, etag TEXT, last_modified TEXT, " +
+                "error_count INTEGER NOT NULL DEFAULT 0, last_error TEXT, custom_title TEXT, folder_id TEXT, " +
+                "deleted_at INTEGER, updated_at INTEGER NOT NULL, created_at INTEGER NOT NULL, " +
+                "sort_order INTEGER NOT NULL DEFAULT 0, folder_updated_at INTEGER, " +
+                "sort_order_updated_at INTEGER, custom_title_updated_at INTEGER, deleted_updated_at INTEGER)"
 
         /** The page size [corruptPastFirstPage] starts corrupting at; asserted against the file. */
         const val ASSUMED_PAGE_SIZE = 1024

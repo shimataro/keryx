@@ -203,6 +203,111 @@ class DatabaseMergerTest {
     }
 
     /**
+     * The failing statement is not the first one. Statement 0 (an unguarded cloud-folder INSERT)
+     * succeeded and is not idempotent; statement 1 touches the local orphan and fails on its FOREIGN
+     * KEY. The re-run must continue from statement 1: starting again at statement 0 would collide with
+     * the folder it already inserted (a PRIMARY KEY failure that reads as the cloud's) and classify a
+     * failure that is the local orphan's.
+     */
+    @Test
+    fun failureAtALaterStatementRerunsOnlyFromThatStatementAndStaysUnclassified() {
+        val cloudFile = soundDbFile { driver -> insertFolder(driver, "cloud-only", "Cloud") }
+        val localFile = soundDbFile { driver -> insertOrphanArticle(driver) }
+
+        val thrown = assertFailsWith<SQLiteException> {
+            DatabaseMerger.merge(
+                localFile.absolutePath,
+                cloudFile.absolutePath,
+                SCHEMA_VERSION,
+                listOf(UNGUARDED_FOLDER_INSERT, ORPHAN_TOUCHING_UPDATE),
+            )
+        }
+        assertEquals(SQLiteErrorCode.SQLITE_CONSTRAINT_FOREIGNKEY, thrown.resultCode)
+    }
+
+    /**
+     * A non-constraint failure during the deferred re-run (here a missing table) says nothing about the
+     * cloud rows: the verdict is undetermined, the original FOREIGN KEY failure is rethrown, and the
+     * re-run's own error is attached to it as suppressed.
+     */
+    @Test
+    fun nonConstraintFailureDuringTheRerunIsUnclassifiedAndAttachedAsSuppressed() {
+        val cloudFile = soundDbFile()
+        val localFile = soundDbFile { driver -> insertOrphanArticle(driver) }
+
+        val thrown = assertFailsWith<SQLiteException> {
+            DatabaseMerger.merge(
+                localFile.absolutePath,
+                cloudFile.absolutePath,
+                SCHEMA_VERSION,
+                // Statement 1 is only reached by the re-run: statement 0 fails first originally.
+                listOf(ORPHAN_TOUCHING_UPDATE, "INSERT INTO main.no_such_table SELECT * FROM cloud.folders"),
+            )
+        }
+        assertEquals(SQLiteErrorCode.SQLITE_CONSTRAINT_FOREIGNKEY, thrown.resultCode)
+        assertTrue(
+            thrown.suppressed.any { it is SQLiteException && it.resultCode == SQLiteErrorCode.SQLITE_ERROR },
+            "the re-run's failure must be attached as suppressed, got ${thrown.suppressed.toList()}",
+        )
+    }
+
+    /**
+     * `PRAGMA main.foreign_key_check` itself fails — a parent key that is no longer UNIQUE ("foreign key
+     * mismatch"), which the merge statements before the failing one created inside the transaction (DDL
+     * is transactional). The verdict is undetermined, the original FOREIGN KEY failure is rethrown, and
+     * the check's own error is attached as suppressed.
+     */
+    @Test
+    fun failingForeignKeyCheckLeavesTheFailureUnclassifiedAndAttachedAsSuppressed() {
+        val cloudFile = soundDbFile()
+        val localFile = soundDbFile { driver -> insertOrphanArticle(driver) }
+
+        val thrown = assertFailsWith<SQLiteException> {
+            DatabaseMerger.merge(
+                localFile.absolutePath,
+                cloudFile.absolutePath,
+                SCHEMA_VERSION,
+                listOf(
+                    // feeds.folder_id references folders(id); a parent without a UNIQUE id is a mismatch.
+                    "DROP TABLE main.folders",
+                    "CREATE TABLE main.folders (id TEXT)",
+                    ORPHAN_TOUCHING_UPDATE,
+                ),
+            )
+        }
+        assertEquals(SQLiteErrorCode.SQLITE_CONSTRAINT_FOREIGNKEY, thrown.resultCode)
+        assertTrue(
+            thrown.suppressed.any { it is SQLiteException && "foreign key mismatch" in it.message.orEmpty() },
+            "the failed check must be attached as suppressed, got ${thrown.suppressed.toList()}",
+        )
+    }
+
+    /**
+     * SQLite ends the transaction by itself during the re-run (an `INSERT OR ROLLBACK` that is only
+     * reached there, and hits a duplicate key): the re-run's constraint failure would read as the
+     * cloud's, but the evidence was not all gathered inside the merge transaction, so the verdict is
+     * dropped and the failure stays unclassified.
+     */
+    @Test
+    fun transactionEndedBySqliteDuringTheRerunLeavesTheFailureUnclassified() {
+        val cloudFile = soundDbFile { driver -> insertFolder(driver, "dup", "Cloud") }
+        val localFile = soundDbFile { driver ->
+            insertFolder(driver, "dup", "Local")
+            insertOrphanArticle(driver)
+        }
+
+        val thrown = assertFailsWith<SQLiteException> {
+            DatabaseMerger.merge(
+                localFile.absolutePath,
+                cloudFile.absolutePath,
+                SCHEMA_VERSION,
+                listOf(ORPHAN_TOUCHING_UPDATE, UNGUARDED_FOLDER_INSERT.replace("INSERT INTO", "INSERT OR ROLLBACK INTO")),
+            )
+        }
+        assertEquals(SQLiteErrorCode.SQLITE_CONSTRAINT_FOREIGNKEY, thrown.resultCode)
+    }
+
+    /**
      * A constraint failure thrown while migrating the cloud file touched only the downloaded cloud
      * temp file — main is not involved — so it is the cloud's and stays classified, with no local
      * FOREIGN KEY check needed (and even though main itself holds a violation here).
@@ -343,6 +448,9 @@ class DatabaseMergerTest {
         const val UNGUARDED_FOLDER_INSERT =
             "INSERT INTO main.folders (id, name, sort_order, deleted_at, updated_at, created_at) " +
                 "SELECT id, name, sort_order, deleted_at, updated_at, created_at FROM cloud.folders"
+
+        /** Re-assigning the FK column makes SQLite check the (missing) parent of the orphan main holds. */
+        const val ORPHAN_TOUCHING_UPDATE = "UPDATE main.articles SET feed_id = feed_id"
 
         /**
          * Copies every cloud article without its feed, so an article whose feed main lacks breaks
