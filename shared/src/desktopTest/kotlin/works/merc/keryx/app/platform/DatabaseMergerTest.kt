@@ -109,21 +109,64 @@ class DatabaseMergerTest {
     }
 
     /**
-     * Even a constraint failure that really comes from the cloud rows is left unclassified while
-     * the local DB holds a FOREIGN KEY violation: the failure cannot be pinned on the cloud.
+     * A FOREIGN KEY violation the local DB already holds (an orphan article) has nothing to do with a
+     * PRIMARY KEY collision the cloud rows cause: the re-run with foreign keys deferred fails on the
+     * same collision, which pins the failure on the cloud.
      */
     @Test
-    fun constraintFailureIsLeftUnclassifiedWhileTheLocalDbHoldsAForeignKeyViolation() {
+    fun cloudPrimaryKeyViolationIsCloudDataIncompatibleDespiteALocalForeignKeyViolation() {
         val cloudFile = soundDbFile { driver -> insertFolder(driver, "dup", "Cloud") }
         val localFile = soundDbFile { driver ->
             insertFolder(driver, "dup", "Local")
             insertOrphanArticle(driver)
         }
 
-        val thrown = assertFailsWith<Exception> {
+        assertFailsWith<CloudDataIncompatibleException> {
             DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, SCHEMA_VERSION, listOf(UNGUARDED_FOLDER_INSERT))
         }
-        assertFalse(thrown is CloudDataIncompatibleException)
+    }
+
+    /**
+     * A cloud article whose feed exists nowhere in main is a FOREIGN KEY violation of the cloud rows'
+     * own, even while main holds an unrelated one: the re-run with foreign keys deferred leaves a
+     * violation that was not there before.
+     */
+    @Test
+    fun newForeignKeyViolationFromTheCloudRowsIsCloudDataIncompatibleDespiteALocalOne() {
+        val cloudFile = soundDbFile { driver ->
+            insertFeedRow(driver)
+            insertArticle(driver, id = "cloud-article", feedId = "f1")
+        }
+        val localFile = soundDbFile { driver -> insertOrphanArticle(driver) }
+
+        assertFailsWith<CloudDataIncompatibleException> {
+            DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, SCHEMA_VERSION, listOf(UNGUARDED_ARTICLE_INSERT))
+        }
+    }
+
+    /**
+     * The real merge statements against a cloud DB whose own rows break this app's schema (two feeds
+     * sharing a url, which only the cloud file's laxer feeds table allowed) are still classified while
+     * main holds an unrelated FOREIGN KEY violation.
+     */
+    @Test
+    fun cloudRowsViolatingTheAppSchemaAreCloudDataIncompatibleDespiteALocalForeignKeyViolation() {
+        val cloudFile = soundDbFile { driver ->
+            driver.execute(null, "DROP TABLE feeds", 0)
+            driver.execute(null, LAX_FEEDS_TABLE, 0)
+            for (id in listOf("f-dup-1", "f-dup-2")) {
+                driver.execute(
+                    null,
+                    "INSERT INTO feeds (id, url, title, updated_at, created_at) VALUES ('$id', 'https://dup.example/feed', '$id', 0, 0)",
+                    0,
+                )
+            }
+        }
+        val localFile = soundDbFile { driver -> insertOrphanArticle(driver) }
+
+        assertFailsWith<CloudDataIncompatibleException> {
+            DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, SCHEMA_VERSION, MergeSql.all)
+        }
     }
 
     /** With a sound local DB, a constraint failure from the cloud rows is still the cloud's. */
@@ -251,6 +294,15 @@ class DatabaseMergerTest {
         )
     }
 
+    private fun insertArticle(driver: app.cash.sqldelight.db.SqlDriver, id: String, feedId: String) {
+        driver.execute(
+            null,
+            "INSERT INTO articles (id, feed_id, guid, url, title, cached_at, updated_at, created_at) " +
+                "VALUES ('$id', '$feedId', '$id', 'https://example.com/$id', '$id', 0, 0, 0)",
+            0,
+        )
+    }
+
     private fun insertFeedRow(driver: app.cash.sqldelight.db.SqlDriver) {
         KeryxDatabase(driver).insertFeed("f1", now = 0)
     }
@@ -280,5 +332,22 @@ class DatabaseMergerTest {
         const val UNGUARDED_FOLDER_INSERT =
             "INSERT INTO main.folders (id, name, sort_order, deleted_at, updated_at, created_at) " +
                 "SELECT id, name, sort_order, deleted_at, updated_at, created_at FROM cloud.folders"
+
+        /**
+         * Copies every cloud article without its feed, so an article whose feed main lacks breaks
+         * the FOREIGN KEY — a violation caused by the cloud's rows.
+         */
+        const val UNGUARDED_ARTICLE_INSERT =
+            "INSERT INTO main.articles (id, feed_id, guid, url, title, cached_at, updated_at, created_at) " +
+                "SELECT id, feed_id, guid, url, title, cached_at, updated_at, created_at FROM cloud.articles"
+
+        /** The app's feeds table without its UNIQUE(url), so a cloud file can hold a duplicate url. */
+        const val LAX_FEEDS_TABLE =
+            "CREATE TABLE feeds (id TEXT NOT NULL PRIMARY KEY, url TEXT NOT NULL, site_url TEXT, " +
+                "title TEXT NOT NULL, description TEXT, favicon_url TEXT, etag TEXT, last_modified TEXT, " +
+                "error_count INTEGER NOT NULL DEFAULT 0, last_error TEXT, custom_title TEXT, folder_id TEXT, " +
+                "deleted_at INTEGER, updated_at INTEGER NOT NULL, created_at INTEGER NOT NULL, " +
+                "sort_order INTEGER NOT NULL DEFAULT 0, folder_updated_at INTEGER, " +
+                "sort_order_updated_at INTEGER, custom_title_updated_at INTEGER, deleted_updated_at INTEGER)"
     }
 }

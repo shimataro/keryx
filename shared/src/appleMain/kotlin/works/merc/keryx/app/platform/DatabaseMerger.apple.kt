@@ -8,7 +8,9 @@ import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.SQLITE_BUSY_TIMEOUT_MS
 import works.merc.keryx.app.core.SchemaVersionException
 import works.merc.keryx.app.data.local.db.KeryxDatabase
-import works.merc.keryx.app.domain.LocalForeignKeyVerdict
+import works.merc.keryx.app.domain.DeferredRerunOutcome
+import works.merc.keryx.app.domain.ForeignKeyViolation
+import works.merc.keryx.app.domain.MainRuledOutVerdict
 import works.merc.keryx.app.domain.MergeFailureClassifier
 import works.merc.keryx.app.domain.MergeSchema
 import works.merc.keryx.app.domain.SqliteFailureCategory
@@ -25,30 +27,30 @@ actual object DatabaseMerger {
         localSchemaVersion: Long,
         mergeStatements: List<String>,
     ) {
-        val fkVerdict = LocalForeignKeyVerdict()
+        val verdict = MainRuledOutVerdict()
         try {
-            mergeUnclassified(localDbPath, cloudDbPath, localSchemaVersion, mergeStatements, fkVerdict)
+            mergeUnclassified(localDbPath, cloudDbPath, localSchemaVersion, mergeStatements, verdict)
         } catch (e: SchemaVersionException) {
             // Already classified — must not fall into the catch-all below (it needs an app
             // update, not a cloud-data reset).
             throw e
         } catch (e: Throwable) {
-            throw classifyMergeFailure(e, cloudDbPath, localSchemaVersion, fkVerdict.soundFor(e))
+            throw classifyMergeFailure(e, cloudDbPath, localSchemaVersion, verdict.mainRuledOutFor(e))
         }
     }
 
     /**
-     * @param fkVerdict receives the "main is not the cause" verdict: `true` for any failure of the
-     * cloud-only phase ([migrateCloudIfOlder], which never touches main), and for a constraint
-     * failure of the merge statements the local FOREIGN KEY check computed inside the failed
-     * transaction before its rollback (see [localForeignKeysSound]).
+     * @param verdict receives the "main is not the cause" verdict: `true` for any failure of the
+     * cloud-only phase ([migrateCloudIfOlder], which never touches main), and for a constraint failure
+     * of the merge statements the verdict computed inside the failed transaction before its rollback
+     * (see [mainRuledOut]).
      */
     private fun mergeUnclassified(
         localDbPath: String,
         cloudDbPath: String,
         localSchemaVersion: Long,
         mergeStatements: List<String>,
-        fkVerdict: LocalForeignKeyVerdict,
+        verdict: MainRuledOutVerdict,
     ) {
         try {
             migrateCloudIfOlder(cloudDbPath, localSchemaVersion)
@@ -56,7 +58,7 @@ actual object DatabaseMerger {
             // This phase touches only the downloaded cloud temp file, never main, so main cannot be
             // the cause of anything it throws (e.g. a constraint failure while migrating the cloud
             // file): record that verdict for the classification step.
-            fkVerdict.record(e, sound = true)
+            verdict.record(e, mainRuledOut = true)
             throw e
         }
 
@@ -70,8 +72,13 @@ actual object DatabaseMerger {
                     throw SchemaVersionException(localVersion = localSchemaVersion, cloudVersion = cloudVersion)
                 }
                 db.exec("BEGIN")
+                // The merge statement running (or that ran last); see mainRuledOut.
+                var statementIndex = 0
                 try {
-                    for (sql in mergeStatements) db.exec(sql)
+                    for ((index, sql) in mergeStatements.withIndex()) {
+                        statementIndex = index
+                        db.exec(sql)
+                    }
                     db.exec("COMMIT")
                 } catch (e: Throwable) {
                     // Must run before the ROLLBACK below: only while the failed transaction (and
@@ -79,7 +86,7 @@ actual object DatabaseMerger {
                     // between the failure and the check.
                     val code = e.findSqliteResultCode()
                     if (code != null && failureCategory(code) == SqliteFailureCategory.CONSTRAINT) {
-                        fkVerdict.record(e, db.localForeignKeysSound(e))
+                        verdict.record(e, db.mainRuledOut(MergeFailureClassifier.remainingStatements(mergeStatements, statementIndex), e))
                     }
                     // A rollback failure must not replace (and hide) the failure being classified.
                     runCatching { db.exec("ROLLBACK") }.exceptionOrNull()?.let(e::addSuppressed)
@@ -101,7 +108,7 @@ actual object DatabaseMerger {
         e: Throwable,
         cloudDbPath: String,
         localSchemaVersion: Long,
-        localForeignKeysSound: Boolean?,
+        mainRuledOut: Boolean?,
     ): Throwable {
         val code = e.findSqliteResultCode() ?: return e
         val category = failureCategory(code)
@@ -109,7 +116,7 @@ actual object DatabaseMerger {
         val classified: CloudDataIncompatibleException? = MergeFailureClassifier.classify(
             category = category,
             errorCodeName = codeName,
-            localForeignKeysSound = localForeignKeysSound,
+            mainRuledOut = mainRuledOut,
             validateCloudSchema = { validateSchema(cloudDbPath, localSchemaVersion) },
             cloudIntegrityOk = { cloudIntegrityOk(cloudDbPath) },
         )
@@ -118,7 +125,7 @@ actual object DatabaseMerger {
                 Log.warn(
                     TAG,
                     "Merge failure not pinned on the cloud DB (category=$category, code=$code $codeName, " +
-                        "localForeignKeysSound=$localForeignKeysSound): ${e.message}",
+                        "mainRuledOut=$mainRuledOut): ${e.message}",
                 )
             }
             return e
@@ -137,21 +144,72 @@ actual object DatabaseMerger {
         }
 
     /**
-     * Whether the local `main` DB holds no FOREIGN KEY violation, checked with
-     * `PRAGMA main.foreign_key_check` on this (the merge's) connection while the failed merge
-     * transaction is still open — see [MergeFailureClassifier.classify]'s `localForeignKeysSound`.
+     * Whether the local `main` DB is ruled out as the cause of the constraint failure [failure] —
+     * [MergeFailureClassifier.mainRuledOut]'s policy, fed with evidence gathered on this (the merge's)
+     * connection while the failed merge transaction is still open. The re-run runs
+     * [remainingStatements] (the failed statement and every one after it — see
+     * [MergeFailureClassifier.mainRuledOut] for why that gives the right verdict); the caller then
+     * rolls the whole transaction back.
      *
-     * @return `true` for no violation, `false` for any, or `null` when SQLite no longer has a
-     * transaction open (it may roll one back by itself; the check would then read a `main` another
-     * writer may already have changed) or the check itself fails — that failure is added to
-     * [failure] as suppressed, never replacing it.
+     * Each piece of evidence is gathered only while SQLite still has the transaction open
+     * (`sqlite3_get_autocommit`, which also reflects a rollback SQLite performed by itself), and the
+     * verdict counts only if it still has at the end: otherwise some of the evidence may have been
+     * read from a `main` another writer could already have changed.
+     *
+     * @return `true` / `false` as [MergeFailureClassifier.mainRuledOut], or `null` when undetermined;
+     * a failure of any check is added to [failure] as suppressed, never replacing it.
      */
-    private fun RawSqliteConnection.localForeignKeysSound(failure: Throwable): Boolean? =
-        try {
-            if (!inTransaction()) null else !returnsAnyRow("PRAGMA main.foreign_key_check")
+    private fun RawSqliteConnection.mainRuledOut(remainingStatements: List<String>, failure: Throwable): Boolean? {
+        val ruledOut = try {
+            val violationsBefore = if (inTransaction()) foreignKeyViolations() else null
+            MergeFailureClassifier.mainRuledOut(violationsBefore) { rerunWithDeferredForeignKeys(remainingStatements, failure) }
         } catch (checkFailure: Throwable) {
             failure.addSuppressed(checkFailure)
             null
+        }
+        return if (inTransaction()) ruledOut else null
+    }
+
+    /**
+     * Runs [remainingStatements] again with FOREIGN KEY checks deferred (`PRAGMA defer_foreign_keys`,
+     * which SQLite switches off again when the transaction ends) — see
+     * [MergeFailureClassifier.mainRuledOut]. Its own SQL failures other than a re-run statement's are
+     * thrown to [mainRuledOut].
+     *
+     * Runs nothing unless SQLite still has the merge transaction open, so no statement can run outside
+     * it and commit straight into main. Nothing else uses this connection meanwhile, and SQLite ends a
+     * transaction by itself only on a statement's error, which stops the re-run there.
+     */
+    private fun RawSqliteConnection.rerunWithDeferredForeignKeys(
+        remainingStatements: List<String>,
+        failure: Throwable,
+    ): DeferredRerunOutcome {
+        if (!inTransaction()) return DeferredRerunOutcome.Undetermined
+        exec("PRAGMA defer_foreign_keys=ON")
+        try {
+            for (sql in remainingStatements) exec(sql)
+        } catch (rerunFailure: Throwable) {
+            val code = rerunFailure.findSqliteResultCode()
+            if (code != null && failureCategory(code) == SqliteFailureCategory.CONSTRAINT) {
+                return DeferredRerunOutcome.ConstraintFailed
+            }
+            failure.addSuppressed(rerunFailure)
+            return DeferredRerunOutcome.Undetermined
+        }
+        return if (inTransaction()) DeferredRerunOutcome.Completed(foreignKeyViolations()) else DeferredRerunOutcome.Undetermined
+    }
+
+    /** `PRAGMA main.foreign_key_check`'s rows. */
+    private fun RawSqliteConnection.foreignKeyViolations(): Set<ForeignKeyViolation> =
+        queryRowsStrict("PRAGMA main.foreign_key_check").mapTo(mutableSetOf()) { row ->
+            // table, parent and fkid are never NULL; a row that breaks that throws, which mainRuledOut
+            // treats as a failed check (undetermined).
+            ForeignKeyViolation(
+                table = checkNotNull(row[0]) { "foreign_key_check: NULL table" },
+                rowId = row[1]?.toLong(),
+                parent = checkNotNull(row[2]) { "foreign_key_check: NULL parent" },
+                foreignKeyId = checkNotNull(row[3]) { "foreign_key_check: NULL fkid" }.toLong(),
+            )
         }
 
     /**

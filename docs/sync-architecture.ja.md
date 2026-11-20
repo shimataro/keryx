@@ -414,7 +414,7 @@ ATTACH する前に、Apple の `migrateCloudIfOlder` は古いクラウドフ�
 | SQLite の主エラーコード | 分類 |
 | --- | --- |
 | `SQLITE_NOTADB`、`SQLITE_CORRUPT`、`SQLITE_FORMAT`、`SQLITE_EMPTY` | **クラウドファイルが壊れていると確かめられたときだけ永続。** ロールバックの後、ダウンロードしたクラウドファイル（他から書き込まれない一時ファイル）を作成せずに開き、`PRAGMA quick_check` で調べる：問題が報告される、または開くか調べるときに `SQLITE_NOTADB`／`SQLITE_CORRUPT` で失敗する → `CloudDataIncompatibleException`。`ok` → 壊れているのは*ローカル*の DB なので、そのまま再 throw。それ以外（判定不能）→ そのまま再 throw。したがってローカル DB の破損にクラウドデータのリセットで応じることはない。 |
-| `SQLITE_CONSTRAINT`（`_UNIQUE`／`_NOTNULL`／`_FOREIGNKEY` 等、全ての拡張 `SQLITE_CONSTRAINT_*` を含む — 拡張コードの下位バイトは常にその主コードに一致する） | ***main* が原因でないと確かめられたときだけ永続** → `CloudDataIncompatibleException`。`MergeSql` の `NOT EXISTS`/`EXISTS` ガード（前述）が main 側の行との衝突は既にすべて潰しており、UNIQUE／NOT NULL は main で常に強制されている。残るのは、クラウド DB 自身の行集合が制約に違反している場合（クラウド DB 内部の url 重複、クラウド側の（より緩い）スキーマが許していた NULL 等）と、**main に元からある外部キー違反**（外部キーを強制する前のデータや移行によるもの）がマージの `PRAGMA foreign_keys=ON` で表に出た場合である。両者を区別するため、`PRAGMA main.foreign_key_check` を**失敗したマージのトランザクションがまだ開いているうちに、ロールバックの前に**マージの接続で実行する。こうすると失敗からチェックまでの間に他の書き込みが main を変えられない（例: 再購読で孤立した記事の親が補われる）。それより前のマージ文は外部キーの即時チェックを通って成功しているので、見つかる違反は main に元からあったものである。チェックが綺麗 → `CloudDataIncompatibleException`。違反がある、SQLite がトランザクションを既に終えていた、チェック自体が失敗した → そのまま再 throw。クラウドファイルだけに触れる `migrateCloudIfOlder` で起きた制約違反は、構造上 main が原因になり得ないので分類する。 |
+| `SQLITE_CONSTRAINT`（`_UNIQUE`／`_NOTNULL`／`_FOREIGNKEY` 等、全ての拡張 `SQLITE_CONSTRAINT_*` を含む — 拡張コードの下位バイトは常にその主コードに一致する） | ***main* が原因でないと確かめられたときだけ永続** → `CloudDataIncompatibleException`。`MergeSql` の `NOT EXISTS`/`EXISTS` ガード（前述）が main 側の行との衝突は既にすべて潰しており、UNIQUE／NOT NULL は main で常に強制されている。残るのは、クラウド DB 自身の行集合が制約に違反している場合（クラウド DB 内部の url 重複、クラウド側の（より緩い）スキーマが許していた NULL 等）と、**main に元からある外部キー違反**（外部キーを強制する前のデータや移行によるもの）を、文がその行を変更したときにマージの `PRAGMA foreign_keys=ON` が表に出す場合である。今の `MergeSql` は既存の行の外部キー列を変えず、親も削除しないので、これは今後追加される文への備えである。以下はすべて、**失敗したマージのトランザクションがまだ開いているうちに**マージの接続で行うので、途中で他の書き込みが main を変えることはない（例: 再購読で孤立した記事の親が補われる）。(1) `PRAGMA main.foreign_key_check` の結果を V0 とする。それより前の文は外部キーの即時チェックを通っているので、V0 は main に元からあった違反である。V0 が空なら main は原因でない → `CloudDataIncompatibleException`。(2) そうでなければ、`PRAGMA defer_foreign_keys=ON` にして、失敗した文とそれ以降のすべての文（`MergeFailureClassifier.remainingStatements`）を同じトランザクションの中で再実行する。こうすると即時に失敗するのは外部キー以外の制約だけになる。失敗した文から続けても、最初からやり直すのと同じ状態になる — それより前の文は外部キーの即時チェックを通っており、制約違反は失敗した文自身の変更を取り消すためである。また Android ではこれしか方法がない。requery は `ROLLBACK` で始まる文をすべてトランザクション全体のロールバックとして扱うので、セーブポイントへの `ROLLBACK TO` を発行できないためである（理由は `MergeFailureClassifier.mainRuledOut` の KDoc にある）。再実行が制約違反で失敗した → クラウドの行による外部キー以外の制約違反 → `CloudDataIncompatibleException`。再実行が成功し、その後の `foreign_key_check`（V1）に V0 になかった行がある → クラウドの行が新しい外部キー違反を持ち込んだ → `CloudDataIncompatibleException`。再実行が成功し、V1 に新しい行がない → 失敗は元からある手元の違反によるもの → そのまま再 throw。それ以外（別の失敗、SQLite がトランザクションを既に終えていた、チェック自体の失敗）→ そのまま再 throw。どの場合もその後トランザクション全体をロールバックし、何もコミットしない。したがって手元の孤児行が、クラウド由来の制約違反を隠すことはない。クラウドファイルだけに触れる `migrateCloudIfOlder` で起きた制約違反は、構造上 main が原因になり得ないので分類する。 |
 | `SQLITE_ERROR`（`no such table`／`no such column`） | **曖昧** — これは外部・レガシーなクラウドスキーマの見た目でもあり、（無関係なアプリのバグによる）ローカル側スキーマの破損の見た目でもある。ダウンロードしたクラウドファイルに対して `validateSchema` を呼んで解決する：`false` なら `CloudDataIncompatibleException`、`true` または `null`（判定不能）ならどちらもクラウド起因と確信できないためそのまま再 throw。 |
 | それ以外（`SQLITE_CANTOPEN`、`SQLITE_IOERR`、`SQLITE_FULL`、`SQLITE_BUSY`、`SQLITE_LOCKED`、`SQLITE_READONLY`、`SQLiteException` が見つからない場合、等） | **一時的／アプリ側** — そのまま再 throw。 |
 
@@ -429,9 +429,11 @@ ATTACH する前に、Apple の `migrateCloudIfOlder` は古いクラウドフ�
 マージのトランザクションがまだ開いているかの確かめ方は `actual` ごとに異なる。分かりやすいフラグは要求した状態を
 記録するだけで、SQLite が自分で行ったロールバックを反映しないためである：デスクトップはマージのトランザクションに
 ロールバックのリスナー（sqlite-jdbc の `SQLiteCommitListener` 経由の `sqlite3_rollback_hook`）を登録し、Apple は
-`sqlite3_get_autocommit` に問い合わせ、Android はトランザクションとともに `SAVEPOINT` を開き、チェック後の `RELEASE`
-が成功したことを、チェックがその中で走った証拠とする。判定結果はその失敗そのものに対してだけ分類の段階へ渡され
-（`LocalForeignKeyVerdict`）、チェック自体の失敗は suppressed として付け加え、元の失敗を置き換えることはない。
+`sqlite3_get_autocommit` に問い合わせ、Android はトランザクションとともに `SAVEPOINT` を開き、`RELEASE` が成功した
+ことを、まだその中にいる証拠とする — 再実行の前に 1 回（続けて新しい `SAVEPOINT` を張るので、トランザクションが終わって
+いれば何も再実行しない）、後に 1 回。再実行はトランザクションが開いていると確かめてから始めるので、どの文もトランザクションの
+外で走って main にコミットされることはない。判定結果はその失敗そのものに対してだけ分類の段階へ渡され
+（`MainRuledOutVerdict`）、チェック自体の失敗は suppressed として付け加え、元の失敗を置き換えることはない。
 
 ダウンロードしたクラウド DB に対する `PRAGMA quick_check` は、毎回の同期では
 あえて実行しない — DB サイズに比例したコストがかかるうえ、SQLite はマージが触れた瞬間に破損ページを別個の

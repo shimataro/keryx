@@ -79,18 +79,6 @@ internal class RawSqliteConnection private constructor(private val db: CPointer<
     fun inTransaction(): Boolean = sqlite3_get_autocommit(db) == 0
 
     /**
-     * Whether [sql] returns at least one row. Unlike [queryLong], a step that fails (rather than
-     * reporting a row or the end of the rows) throws [SqliteException] instead of reading as "no row".
-     */
-    fun returnsAnyRow(sql: String): Boolean = query(sql) { stmt ->
-        when (sqlite3_step(stmt)) {
-            SQLITE_ROW -> true
-            SQLITE_DONE -> false
-            else -> throw SqliteException(sqlite3_extended_errcode(db), sqlite3_errmsg(db)?.toKString().orEmpty())
-        }
-    }
-
-    /**
      * Every row's first column of [sql] as text. Unlike [queryColumn], a step that fails throws
      * [SqliteException] instead of ending the list early.
      */
@@ -99,6 +87,24 @@ internal class RawSqliteConnection private constructor(private val db: CPointer<
             while (true) {
                 when (sqlite3_step(stmt)) {
                     SQLITE_ROW -> add(sqlite3_column_text(stmt, 0)?.reinterpret<ByteVar>()?.toKString().orEmpty())
+                    SQLITE_DONE -> break
+                    else -> throw SqliteException(sqlite3_extended_errcode(db), sqlite3_errmsg(db)?.toKString().orEmpty())
+                }
+            }
+        }
+    }
+
+    /**
+     * Every row of [sql], each as its columns' text (`null` for SQL NULL). Like
+     * [queryFirstColumnStrict], a step that fails throws [SqliteException] instead of ending the list
+     * early.
+     */
+    fun queryRowsStrict(sql: String): List<List<String?>> = query(sql) { stmt ->
+        val columns = sqlite3_column_count(stmt)
+        buildList {
+            while (true) {
+                when (sqlite3_step(stmt)) {
+                    SQLITE_ROW -> add(List(columns) { sqlite3_column_text(stmt, it)?.reinterpret<ByteVar>()?.toKString() })
                     SQLITE_DONE -> break
                     else -> throw SqliteException(sqlite3_extended_errcode(db), sqlite3_errmsg(db)?.toKString().orEmpty())
                 }

@@ -12,23 +12,23 @@ class MergeFailureClassifierTest {
     private fun classify(
         category: SqliteFailureCategory,
         errorCodeName: String,
-        localForeignKeysSound: Boolean? = null,
+        mainRuledOut: Boolean? = null,
         validateCloudSchema: () -> Boolean? = { error("must not validate the schema for this category") },
         cloudIntegrityOk: () -> Boolean? = { error("must not check the cloud file's integrity for this category") },
     ) = MergeFailureClassifier.classify(
         category = category,
         errorCodeName = errorCodeName,
-        localForeignKeysSound = localForeignKeysSound,
+        mainRuledOut = mainRuledOut,
         validateCloudSchema = validateCloudSchema,
         cloudIntegrityOk = cloudIntegrityOk,
     )
 
     @Test
-    fun constraintIsCloudDataIncompatibleWhenTheLocalForeignKeysAreSound() {
+    fun constraintIsCloudDataIncompatibleWhenMainIsRuledOut() {
         val classified = classify(
             category = SqliteFailureCategory.CONSTRAINT,
             errorCodeName = "SQLITE_CONSTRAINT_UNIQUE",
-            localForeignKeysSound = true,
+            mainRuledOut = true,
         )
 
         assertNotNull(classified)
@@ -36,23 +36,23 @@ class MergeFailureClassifierTest {
     }
 
     @Test
-    fun constraintIsUnclassifiedWhenTheLocalDbAlreadyViolatesAForeignKey() {
+    fun constraintIsUnclassifiedWhenMainIsTheCause() {
         assertNull(
             classify(
                 category = SqliteFailureCategory.CONSTRAINT,
                 errorCodeName = "SQLITE_CONSTRAINT_FOREIGNKEY",
-                localForeignKeysSound = false,
+                mainRuledOut = false,
             ),
         )
     }
 
     @Test
-    fun constraintIsUnclassifiedWhenTheLocalForeignKeyCheckIsUndetermined() {
+    fun constraintIsUnclassifiedWhenWhetherMainIsTheCauseIsUndetermined() {
         assertNull(
             classify(
                 category = SqliteFailureCategory.CONSTRAINT,
                 errorCodeName = "SQLITE_CONSTRAINT_UNIQUE",
-                localForeignKeysSound = null,
+                mainRuledOut = null,
             ),
         )
     }
@@ -63,7 +63,7 @@ class MergeFailureClassifierTest {
             category = SqliteFailureCategory.CORRUPT,
             errorCodeName = "SQLITE_CORRUPT",
             // A verdict about main must not matter for a corrupt-file failure.
-            localForeignKeysSound = false,
+            mainRuledOut = false,
             cloudIntegrityOk = { false },
         )
 
@@ -78,7 +78,7 @@ class MergeFailureClassifierTest {
                 classify(
                     category = SqliteFailureCategory.CORRUPT,
                     errorCodeName = "SQLITE_CORRUPT",
-                    localForeignKeysSound = true,
+                    mainRuledOut = true,
                     cloudIntegrityOk = { verdict },
                 ),
                 "cloudIntegrityOk=$verdict must never be classified as a cloud-data problem",
@@ -91,7 +91,7 @@ class MergeFailureClassifierTest {
         val classified = classify(
             category = SqliteFailureCategory.STATEMENT_ERROR,
             errorCodeName = "SQLITE_ERROR",
-            localForeignKeysSound = true,
+            mainRuledOut = true,
             validateCloudSchema = { false },
         )
 
@@ -106,7 +106,7 @@ class MergeFailureClassifierTest {
                 classify(
                     category = SqliteFailureCategory.STATEMENT_ERROR,
                     errorCodeName = "SQLITE_ERROR",
-                    localForeignKeysSound = true,
+                    mainRuledOut = true,
                     validateCloudSchema = { verdict },
                 ),
                 "verdict=$verdict must never be classified as a cloud-data problem",
@@ -121,7 +121,7 @@ class MergeFailureClassifierTest {
         val classified = classify(
             category = SqliteFailureCategory.OTHER,
             errorCodeName = "SQLITE_BUSY",
-            localForeignKeysSound = true,
+            mainRuledOut = true,
             validateCloudSchema = {
                 validated = true
                 false
@@ -138,15 +138,81 @@ class MergeFailureClassifierTest {
     }
 
     @Test
-    fun localForeignKeyVerdictAppliesOnlyToTheFailureItWasRecordedFor() {
+    fun mainRuledOutVerdictAppliesOnlyToTheFailureItWasRecordedFor() {
         val failure = IllegalStateException("merge statement failed")
-        val verdict = LocalForeignKeyVerdict()
-        assertNull(verdict.soundFor(failure))
+        val verdict = MainRuledOutVerdict()
+        assertNull(verdict.mainRuledOutFor(failure))
 
-        verdict.record(failure, sound = true)
+        verdict.record(failure, mainRuledOut = true)
 
-        assertTrue(verdict.soundFor(failure) == true)
+        assertTrue(verdict.mainRuledOutFor(failure) == true)
         // A different throwable (e.g. one a cleanup step threw instead) gets no verdict.
-        assertNull(verdict.soundFor(IllegalStateException("merge statement failed")))
+        assertNull(verdict.mainRuledOutFor(IllegalStateException("merge statement failed")))
+    }
+
+    // --- mainRuledOut: is main's own FOREIGN KEY violation the cause of a constraint failure? ---
+
+    private val orphan = ForeignKeyViolation(table = "articles", rowId = 1, parent = "feeds", foreignKeyId = 0)
+    private val otherOrphan = ForeignKeyViolation(table = "articles", rowId = 2, parent = "feeds", foreignKeyId = 0)
+    private val folderOrphan = ForeignKeyViolation(table = "feeds", rowId = 1, parent = "folders", foreignKeyId = 0)
+
+    private val noRerun: () -> DeferredRerunOutcome = { error("must not re-run the merge for this case") }
+
+    @Test
+    fun mainIsRuledOutWithoutARerunWhenItHoldsNoForeignKeyViolation() {
+        assertEquals(true, MergeFailureClassifier.mainRuledOut(emptySet(), noRerun))
+    }
+
+    @Test
+    fun undeterminedWithoutARerunWhenMainsViolationsCouldNotBeRead() {
+        assertNull(MergeFailureClassifier.mainRuledOut(null, noRerun))
+    }
+
+    @Test
+    fun mainIsRuledOutWhenTheDeferredRerunFailsOnAConstraint() {
+        assertEquals(true, MergeFailureClassifier.mainRuledOut(setOf(orphan)) { DeferredRerunOutcome.ConstraintFailed })
+    }
+
+    @Test
+    fun mainIsRuledOutWhenTheDeferredRerunLeavesANewViolation() {
+        assertEquals(
+            true,
+            MergeFailureClassifier.mainRuledOut(setOf(orphan)) { DeferredRerunOutcome.Completed(setOf(orphan, folderOrphan)) },
+        )
+    }
+
+    /** Compared by members, not counts: the re-run may resolve an old violation while adding a new one. */
+    @Test
+    fun mainIsRuledOutWhenTheDeferredRerunSwapsAViolationForANewOneOfTheSameCount() {
+        assertEquals(
+            true,
+            MergeFailureClassifier.mainRuledOut(setOf(orphan)) { DeferredRerunOutcome.Completed(setOf(otherOrphan)) },
+        )
+    }
+
+    @Test
+    fun mainIsTheCauseWhenTheDeferredRerunLeavesNoNewViolation() {
+        assertEquals(
+            false,
+            MergeFailureClassifier.mainRuledOut(setOf(orphan, otherOrphan)) { DeferredRerunOutcome.Completed(setOf(orphan, otherOrphan)) },
+        )
+        // Resolving one of main's own violations adds nothing new either.
+        assertEquals(
+            false,
+            MergeFailureClassifier.mainRuledOut(setOf(orphan, otherOrphan)) { DeferredRerunOutcome.Completed(setOf(orphan)) },
+        )
+    }
+
+    @Test
+    fun undeterminedWhenTheDeferredRerunIsUndetermined() {
+        assertNull(MergeFailureClassifier.mainRuledOut(setOf(orphan)) { DeferredRerunOutcome.Undetermined })
+    }
+
+    @Test
+    fun theRerunCoversTheFailedStatementAndEveryOneAfterIt() {
+        val statements = listOf("a", "b", "c")
+        assertEquals(listOf("a", "b", "c"), MergeFailureClassifier.remainingStatements(statements, failedIndex = 0))
+        assertEquals(listOf("b", "c"), MergeFailureClassifier.remainingStatements(statements, failedIndex = 1))
+        assertEquals(listOf("c"), MergeFailureClassifier.remainingStatements(statements, failedIndex = 2))
     }
 }

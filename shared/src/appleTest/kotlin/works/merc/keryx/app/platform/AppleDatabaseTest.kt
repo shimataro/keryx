@@ -231,6 +231,34 @@ class AppleDatabaseTest {
     }
 
     @Test
+    fun aCloudPrimaryKeyCollisionIsClassifiedAsIncompatibleDespiteALocalForeignKeyViolation() {
+        writeFolderCollision { it.insertOrphanArticle() }
+
+        // The re-run with foreign keys deferred fails on the same collision, pinning it on the cloud.
+        assertFailsWith<works.merc.keryx.app.core.CloudDataIncompatibleException> {
+            DatabaseMerger.merge(path("main.db"), path("cloud.db"), KeryxDatabase.Schema.version, listOf(UNGUARDED_FOLDER_INSERT))
+        }
+    }
+
+    @Test
+    fun aNewForeignKeyViolationFromTheCloudRowsIsClassifiedAsIncompatibleDespiteALocalOne() {
+        writeFolderCollision { it.insertOrphanArticle() }
+        RawSqliteConnection.open(path("cloud.db")).use { db ->
+            db.exec("INSERT INTO feeds (id, url, title, updated_at, created_at) VALUES ('f1', 'https://ex.com/f1', 'Feed f1', 1, 1)")
+            db.exec(
+                "INSERT INTO articles (id, feed_id, guid, url, title, cached_at, updated_at, created_at) " +
+                    "VALUES ('cloud-article', 'f1', 'c', 'https://ex.com/c', 'Cloud', 0, 0, 0)",
+            )
+        }
+
+        // The cloud article's feed exists nowhere in main: the re-run with foreign keys deferred
+        // leaves a violation main did not hold before.
+        assertFailsWith<works.merc.keryx.app.core.CloudDataIncompatibleException> {
+            DatabaseMerger.merge(path("main.db"), path("cloud.db"), KeryxDatabase.Schema.version, listOf(UNGUARDED_ARTICLE_INSERT))
+        }
+    }
+
+    @Test
     fun aConstraintFailureAfterSqliteEndedTheTransactionIsNotClassified() {
         writeFolderCollision()
 
@@ -259,6 +287,11 @@ class AppleDatabaseTest {
         const val UNGUARDED_FOLDER_INSERT =
             "INSERT INTO main.folders (id, name, sort_order, deleted_at, updated_at, created_at) " +
                 "SELECT id, name, sort_order, deleted_at, updated_at, created_at FROM cloud.folders"
+
+        /** Copies every cloud article without its feed, so one whose feed main lacks breaks the FOREIGN KEY. */
+        const val UNGUARDED_ARTICLE_INSERT =
+            "INSERT INTO main.articles (id, feed_id, guid, url, title, cached_at, updated_at, created_at) " +
+                "SELECT id, feed_id, guid, url, title, cached_at, updated_at, created_at FROM cloud.articles"
 
         /** Extended result codes (`SQLITE_CONSTRAINT | n << 8`). */
         const val SQLITE_CONSTRAINT_FOREIGNKEY = 787
