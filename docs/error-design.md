@@ -10,8 +10,8 @@
 - **Rarity is not a handled case.** Every reachable failure path and every concurrent interleaving is
   designed for, however unlikely — a failure that "practically never happens" will happen someday.
   A race is closed structurally (a lock, an atomic or conditional write, a transaction, a latest-wins
-  token), never by narrowing its window. The best-effort accesses below are chosen because their
-  failure is cosmetic or recovers by itself on the next ordinary run, not because it is rare.
+  token), never by narrowing its window. The best-effort accesses below are chosen by the criterion
+  stated there — what their failure costs — not because it is rare.
 
 ## Exception vs Result Type
 
@@ -23,7 +23,8 @@
 | DB access failure / program bug | Exception |
 
 **Documented exception to the last row: best-effort writes and reads.** A DB access that only feeds
-something cosmetic or derived, and that is retried by the next ordinary run anyway, is logged
+something cosmetic or derived, and that is retried by the next ordinary run or the user's next attempt
+anyway, is logged
 (`Log.warn`) and carried on from rather than thrown — because throwing would cancel the work around it
 and lose more than the access itself is worth. The accesses that are, today:
 
