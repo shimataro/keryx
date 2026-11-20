@@ -110,7 +110,7 @@ Indexes: `feed_id`, `is_read`, `is_starred`, and a composite `(published_at DESC
 ### sync_state (KVS, non-sync)
 
 `key`(PK), `value`. Known keys: `last_synced_at` (Unix millis), `cloud_file_rev` (revision of the cloud
-file this device has already merged — Dropbox uses `rev`, Google Drive the file resource's `version`,
+file this device has already merged — Dropbox uses `rev`, Google Drive the file resource's `id` and `version` as `<id>:<version>`,
 OneDrive the DriveItem `eTag`, Nextcloud the WebDAV `ETag`, quotes included), `last_uploaded_snapshot_digest` (hex SHA-256 of the snapshot this device
 last uploaded).
 

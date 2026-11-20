@@ -33,14 +33,14 @@
 /keryx-YYYYMMDD-HHMMSS.db.gz.bak       ← クラウドデータのリセットで退避される旧ファイル（自動削除されない）
 ```
 
-競合防止はアップロード時のリビジョンチェックで行う — Dropbox: `rev`、サーバー側の compare-and-set（不一致時 409）。Google Drive: ファイルの `version`、クライアント側で比較後に書き込み。Drive には条件付きの内容更新がないため、比較と書き込みの間に入った上書きは検出できない。上書きされた端末は、次の同期で自分の変更をほかのマージと同じ規則でクラウドのファイルに改めてマージする。そのため、他端末の変更と同じタイムスタンプで競って負けた変更（「マージ（`DatabaseMerger` + `MergeSql`）」の同点の規則を参照）は戻らないが、これは 2 つのアップロードが競合しなかった場合と同じ結果である（[known-issues.ja.md](known-issues.ja.md) の「Google Drive: アップロードが他端末のアップロードを気付かれずに上書きすることがある」を参照）。OneDrive: DriveItem の `eTag` を `If-Match` で送信（不一致時 412）。Nextcloud: WebDAV の `ETag` をそのまま `If-Match` で送信（不一致時 412、別の書き込みがファイルのロックを持っている間は 423——「Nextcloud（Login Flow v2）」参照）。lock ファイルは使わない。Nextcloud では、これらのファイルはアプリフォルダーではなく利用者自身のファイルの `/Keryx/` フォルダーに置く。
+競合防止はアップロード時のリビジョンチェックで行う — Dropbox: `rev`、サーバー側の compare-and-set（不一致時 409）。Google Drive: ファイルの id と `version`（`<id>:<version>`。`version` はファイルごとの数なので、同じ数を持つ別のファイルを id で見分ける）、クライアント側で比較後に書き込み。Drive には条件付きの内容更新がないため、比較と書き込みの間に入った上書きは検出できない。上書きされた端末は、次の同期で自分の変更をほかのマージと同じ規則でクラウドのファイルに改めてマージする。そのため、他端末の変更と同じタイムスタンプで競って負けた変更（「マージ（`DatabaseMerger` + `MergeSql`）」の同点の規則を参照）は戻らないが、これは 2 つのアップロードが競合しなかった場合と同じ結果である（[known-issues.ja.md](known-issues.ja.md) の「Google Drive: アップロードが他端末のアップロードを気付かれずに上書きすることがある」を参照）。OneDrive: DriveItem の `eTag` を `If-Match` で送信（不一致時 412）。Nextcloud: WebDAV の `ETag` をそのまま `If-Match` で送信（不一致時 412、別の書き込みがファイルのロックを持っている間は 423——「Nextcloud（Login Flow v2）」参照）。lock ファイルは使わない。Nextcloud では、これらのファイルはアプリフォルダーではなく利用者自身のファイルの `/Keryx/` フォルダーに置く。
 
 ## 同期フロー（`SyncRepository.sync()`）
 
 1. `CloudStorage.metadata(CLOUD_DB_GZ_PATH)` で圧縮ファイルのリビジョンを取得する。クラウドにまだ存在
    しなければ `null` が返り、その場合は手順1aへ進む。同期が行う存在・リビジョンチェックはこれだけであり、
    **追加のネットワーク往復は発生しない** — 3 プロバイダともメタデータ応答に元々リビジョンが含まれている
-   （Dropbox `get_metadata` の `rev` / Drive の名前検索が返す `version` / Graph のアイテムの `eTag` / Nextcloud の `PROPFIND` が返す `getetag`）。
+   （Dropbox `get_metadata` の `rev` / Drive の名前検索が返す `id` と `version` / Graph のアイテムの `eTag` / Nextcloud の `PROPFIND` が返す `getetag`）。
    - **1a. 圧縮ファイルが無い場合** — `CloudStorage.metadata(CLOUD_DB_PATH)` でレガシーフォールバックを確認する。
      - **両方とも無い（真の初回同期）**: ローカル DB をエクスポート・圧縮し、create-only で
        アップロードして（`createFresh`）終了する。もし `createFresh` の時点で実はファイルが既に存在

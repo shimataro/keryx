@@ -132,7 +132,7 @@
 ### sync_state（KVS, 非同期）
 
 `key`(PK), `value`。既知キー: `last_synced_at`（Unix ミリ秒）, `cloud_file_rev`（**このデバイスがマージ済みの**
-クラウドファイルのリビジョン。Dropbox は `rev`、Google Drive は file resource の `version`、OneDrive は
+クラウドファイルのリビジョン。Dropbox は `rev`、Google Drive は file resource の `id` と `version` を `<id>:<version>` にしたもの、OneDrive は
 DriveItem の `eTag`、Nextcloud は WebDAV の `ETag`（引用符を含む））, `last_uploaded_snapshot_digest`（このデバイスが最後にアップロードしたスナップショットの
 SHA-256 を hex 化したもの）。
 

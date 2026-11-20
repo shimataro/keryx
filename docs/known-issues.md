@@ -490,7 +490,10 @@ file at once each create one, and `GoogleDriveStorage.resolveCreateRace` keeps t
 file listing is not guaranteed to show a just-created file yet, so a device can see only its own file,
 believe it won, and keep writing there until the listing catches up — the re-check after
 `RACE_RECHECK_DELAY_MS` narrows that window but cannot close it. Once the listing shows both,
-`findFile` resolves every device to the lowest id, and the other file's content is left behind.
+`findFile` resolves every device to the lowest id. The revision a Drive device records holds the file's
+id as well as its `version`, so a device moved off its own file sees a revision it has not merged: its
+next sync downloads and merges the winner's file and uploads the result, so its content reaches the
+cloud. Its own file is left behind unused.
 
 ### Why nothing is lost in the usual case
 
