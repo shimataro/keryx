@@ -418,6 +418,48 @@ a feed with no `<item>`s. With no articles to write and no search-index catch-up
 call's post-mutex work is read-only, so there is no longer a second writer left to race the upgrade.
 See `testing.md`'s note on concurrent-write tests for the general pattern.
 
+## A sync merge holds the database's write lock for its whole length
+
+**Status**: not fixed — closing it needs a redesign of the merge outside the scope of the change that
+found it (see "What a real fix would need").
+
+### Symptom
+
+While a sync merges the downloaded cloud file, every other write to the local database waits. A write
+that waits longer than `busy_timeout` (`SQLITE_BUSY_TIMEOUT_MS`, 5 s) fails with `SQLITE_BUSY`: a read/star
+change or a feed-list or settings write handed off by the UI is reported as a local-write failure in the
+notification center (`LocalWriteFailureReporter`) and the UI undoes it, and a feed refresh's apply step
+fails for that cycle.
+
+### Diagnosis
+
+`DatabaseMerger.merge` runs every `MergeSql` statement inside one transaction on its dedicated connection,
+so the write lock is held from the first statement to the commit or rollback, and the time grows with the
+number of rows merged. Measured on desktop with 20,000 articles of about 2 KB each: a successful merge took
+about 350 ms on one machine, so at that rate the lock reaches 5 s somewhere around a few hundred thousand
+articles — a size an unlimited cache retention can reach. A constraint failure whose verdict needs the
+deferred re-run (a FOREIGN KEY failure with violations already in main, and on Android any constraint
+failure with violations already in main) holds it longer still, about 1.7x on the same data; other
+constraint failures no longer re-run (see "Merge Failure Classification" in
+[sync-architecture.md](sync-architecture.md)).
+
+### Ruled out
+
+- **A longer `busy_timeout`** only moves the size at which writes start failing, and makes every write
+  that waits on the merge wait longer.
+- **WAL mode** lets readers run alongside the merge, but writers are still serialized behind it.
+- **Splitting the merge into several transactions as it stands** would let a failure or a crash leave a
+  half-applied merge behind while `cloud_file_rev` says nothing about it.
+
+### What a real fix would need
+
+A merge applied in bounded transactions that each leave the database consistent (foreign-key-safe order)
+and can be re-applied idempotently, with `cloud_file_rev` recorded only after the last one, so the lock is
+released between them and a merge interrupted at any point is simply completed by the next sync. It has to
+keep every guarantee in "Merge (`DatabaseMerger` + `MergeSql`)" and "Merge Failure Classification" in
+[sync-architecture.md](sync-architecture.md) — including the classification's in-transaction checks — and
+the FTS rule that the merge is followed by `indexMissing()`.
+
 ## Google Drive: an upload can overwrite another device's upload unnoticed
 
 **Status**: not fixed — external (Google Drive API) limitation: Drive offers no conditional content
