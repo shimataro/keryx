@@ -407,8 +407,9 @@ ATTACH DATABASE マージは**専用の JDBC コネクション 1 本**で行う
 1 コネクションで完結させる。
 
 プラットフォーム固有なのは SQLite ドライバとのやりとりだけである。判定*ロジック*自体は `commonMain` に
-ある: `domain/MergeFailureClassifier`（純粋関数。失敗カテゴリ + エラーコード名 + 遅延評価のスキーマ検証
-コールバック → `CloudDataIncompatibleException?`）と `domain/MergeSchema`（スキーマバージョンごとの期待
+ある: `domain/MergeFailureClassifier`（純粋関数。失敗カテゴリと、カテゴリごとに必要な判断材料 →
+`CloudDataIncompatibleException?`。入力と、それを集めるために各 `actual` が実行するチェックは
+[sync-architecture.ja.md](sync-architecture.ja.md) の「マージ失敗の分類」を参照）と `domain/MergeSchema`（スキーマバージョンごとの期待
 テーブル/カラム。純粋なデータ）。デスクトップの `actual` が担うのは、原因チェーンを辿って
 `org.sqlite.SQLiteException` を見つけ、`resultCode.code and 0xFF` を `SqliteFailureCategory` へ変換し、
 判定結果をログに出し、`validateSchema` で `MergeSchema.EXPECTED_SCHEMAS` に対して `PRAGMA table_info` を

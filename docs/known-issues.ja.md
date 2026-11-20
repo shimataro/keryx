@@ -428,9 +428,10 @@ Google Drive で同期する 2 台の端末が同時に同期すると、両方�
 
 他のプロバイダーはリビジョンチェックを書き込みそのものの一部にしている（Dropbox の `rev`、OneDrive と Nextcloud の
 `If-Match`）ので、古いリビジョンに基づく書き込みはサーバーが拒否する。Drive にはこの前提条件がない。`files.update`
-にもそのメディアアップロードにも、ETag / `If-Match` のチェックや `412` 応答の記載がない（Drive API v3 リファレンス、
-2026-11 確認）。そのため `GoogleDriveStorage.upload` は現在の `version` を読んでから比較して書き込み、読み取りと
-書き込みの間に窓が残る。
+にもそのメディアアップロードにも、Drive API v3 リファレンスに ETag / `If-Match` のチェックや `412` 応答の記載がない。
+そのため `GoogleDriveStorage.upload` は現在の `version` を読んでから比較して書き込み、読み取りと書き込みの間に窓が残る。
+これが今も成り立つかを確かめるには、公式の `files.update`（とそのメディアアップロード）のリファレンスに、ETag /
+`If-Match` の前提条件か `412` の記載があるかを見る。
 
 最初のアップロードも同じ形をしている。Drive には不可分な「なければ作成」がないため、2 台が同時にファイルを作成すると
 それぞれ 1 つずつ作られ、`GoogleDriveStorage.resolveCreateRace` が id の最も小さいものを残す。Drive のファイル一覧は

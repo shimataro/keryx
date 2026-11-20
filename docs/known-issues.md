@@ -435,8 +435,10 @@ until that device syncs again.
 Every other provider makes the revision check part of the write itself (Dropbox's `rev`, the `If-Match`
 of OneDrive and Nextcloud), so the server refuses a write based on a stale revision. Drive has no such
 precondition: neither `files.update` nor its media upload documents an ETag / `If-Match` check or a
-`412` response (Drive API v3 reference, checked 2026-11). `GoogleDriveStorage.upload` therefore reads the
-current `version` and compares it before writing, which leaves a window between the read and the write.
+`412` response in the Drive API v3 reference. `GoogleDriveStorage.upload` therefore reads the current
+`version` and compares it before writing, which leaves a window between the read and the write. To
+re-check whether this still holds, look in the official `files.update` reference (and its media upload)
+for an ETag / `If-Match` precondition or a documented `412`.
 
 The first upload has the same shape. Drive has no atomic create-if-absent, so two devices creating the
 file at once each create one, and `GoogleDriveStorage.resolveCreateRace` keeps the lowest id. Drive's

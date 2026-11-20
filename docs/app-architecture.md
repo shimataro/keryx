@@ -417,8 +417,10 @@ does not override.
 ATTACH DATABASE merge runs through `platform/DatabaseMerger`, NOT the SQLDelight driver. SQLDelight's JVM `JdbcSqliteDriver` opens a fresh connection per statement for file DBs, so an `ATTACH` on one call is invisible to the merge statements on the next. `DatabaseMerger` does the whole attach → version check → merge → detach on a single dedicated JDBC connection.
 
 Only the SQLite-driver conversation is platform-specific. The decision *policy* lives in
-`commonMain`: `domain/MergeFailureClassifier` (a pure function — failure category + error-code name
-+ a lazy schema-validation callback → `CloudDataIncompatibleException?`) and `domain/MergeSchema`
+`commonMain`: `domain/MergeFailureClassifier` (a pure function of the failure category and the
+evidence each category needs → `CloudDataIncompatibleException?`; the inputs and the checks each
+`actual` runs to gather them are in "Merge Failure Classification" in
+[sync-architecture.md](sync-architecture.md)) and `domain/MergeSchema`
 (the expected tables/columns per schema version, plain data). The desktop `actual` only walks the
 cause chain for an `org.sqlite.SQLiteException`, reduces `resultCode.code and 0xFF` to a
 `SqliteFailureCategory`, logs the verdict, and runs `PRAGMA table_info` for `validateSchema` against
