@@ -1,12 +1,19 @@
 package works.merc.keryx.app.platform
 
+import org.sqlite.SQLiteErrorCode
+import org.sqlite.SQLiteException
+import works.merc.keryx.app.core.CloudDataIncompatibleException
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.domain.MergeSchema
+import works.merc.keryx.app.domain.MergeSql
 import works.merc.keryx.app.fileDb
+import works.merc.keryx.app.insertFeed
 import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertIs
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -75,6 +82,188 @@ class DatabaseMergerTest {
         assertEquals(null, DatabaseMerger.validateSchema("irrelevant", schemaVersion = Long.MAX_VALUE))
     }
 
+    // --- Merge failure classification: pinning a constraint/corruption failure on the cloud ---
+
+    /**
+     * A FOREIGN KEY violation already present in the local DB (an orphan article, left by data
+     * from before foreign keys were enforced) surfaces once a merge statement touches it. The
+     * merge's in-transaction `foreign_key_check` finds it, so the failure must not be blamed on the
+     * cloud — it would offer the destructive cloud-data reset for a local fault.
+     */
+    @Test
+    fun preExistingLocalForeignKeyViolationExposedByTheMergeIsNotBlamedOnTheCloud() {
+        val cloudFile = soundDbFile()
+        val localFile = soundDbFile { driver -> insertOrphanArticle(driver) }
+
+        val thrown = assertFailsWith<SQLiteException> {
+            DatabaseMerger.merge(
+                localFile.absolutePath,
+                cloudFile.absolutePath,
+                SCHEMA_VERSION,
+                // Re-assigning the FK column makes SQLite check the (missing) parent of the
+                // orphan main already holds.
+                listOf("UPDATE main.articles SET feed_id = feed_id"),
+            )
+        }
+        assertEquals(SQLiteErrorCode.SQLITE_CONSTRAINT_FOREIGNKEY, thrown.resultCode)
+    }
+
+    /**
+     * Even a constraint failure that really comes from the cloud rows is left unclassified while
+     * the local DB holds a FOREIGN KEY violation: the failure cannot be pinned on the cloud.
+     */
+    @Test
+    fun constraintFailureIsLeftUnclassifiedWhileTheLocalDbHoldsAForeignKeyViolation() {
+        val cloudFile = soundDbFile { driver -> insertFolder(driver, "dup", "Cloud") }
+        val localFile = soundDbFile { driver ->
+            insertFolder(driver, "dup", "Local")
+            insertOrphanArticle(driver)
+        }
+
+        val thrown = assertFailsWith<Exception> {
+            DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, SCHEMA_VERSION, listOf(UNGUARDED_FOLDER_INSERT))
+        }
+        assertFalse(thrown is CloudDataIncompatibleException)
+    }
+
+    /** With a sound local DB, a constraint failure from the cloud rows is still the cloud's. */
+    @Test
+    fun constraintFailureWithASoundLocalDbIsCloudDataIncompatible() {
+        val cloudFile = soundDbFile { driver -> insertFolder(driver, "dup", "Cloud") }
+        val localFile = soundDbFile { driver -> insertFolder(driver, "dup", "Local") }
+
+        assertFailsWith<CloudDataIncompatibleException> {
+            DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, SCHEMA_VERSION, listOf(UNGUARDED_FOLDER_INSERT))
+        }
+    }
+
+    /**
+     * SQLite itself can end the merge transaction on a failure (here a statement's own
+     * `OR ROLLBACK`). A `foreign_key_check` run then would read a `main` other writers may already
+     * have changed, so the verdict must be undetermined — the failure stays unclassified even
+     * though the local DB is sound. Checking JDBC's `autoCommit` flag alone (still `false` here)
+     * would miss this and classify it.
+     */
+    @Test
+    fun constraintFailureAfterSqliteEndedTheTransactionIsLeftUnclassified() {
+        val cloudFile = soundDbFile { driver -> insertFolder(driver, "dup", "Cloud") }
+        val localFile = soundDbFile { driver -> insertFolder(driver, "dup", "Local") }
+
+        val thrown = assertFailsWith<SQLiteException> {
+            DatabaseMerger.merge(
+                localFile.absolutePath,
+                cloudFile.absolutePath,
+                SCHEMA_VERSION,
+                listOf(UNGUARDED_FOLDER_INSERT.replace("INSERT INTO", "INSERT OR ROLLBACK INTO")),
+            )
+        }
+        assertEquals(SQLiteErrorCode.SQLITE_CONSTRAINT_PRIMARYKEY, thrown.resultCode)
+    }
+
+    /**
+     * A constraint failure thrown while migrating the cloud file touched only the downloaded cloud
+     * temp file — main is not involved — so it is the cloud's and stays classified, with no local
+     * FOREIGN KEY check needed (and even though main itself holds a violation here).
+     *
+     * The real migration (1.sqm's ALTER TABLE ADD COLUMN) cannot be driven to a constraint failure —
+     * SQLite reports ADD COLUMN's re-check of existing rows as SQLITE_ERROR — so the cloud-only phase
+     * is supplied here: it runs a genuinely constraint-violating statement against the cloud file.
+     */
+    @Test
+    fun constraintFailureDuringTheCloudMigrationIsCloudDataIncompatible() {
+        val cloudFile = soundDbFile { driver -> insertFolder(driver, "dup", "Cloud") }
+        val localFile = soundDbFile { driver -> insertOrphanArticle(driver) }
+
+        val thrown = assertFailsWith<CloudDataIncompatibleException> {
+            DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, SCHEMA_VERSION, MergeSql.all) { cloudPath, _ ->
+                java.sql.DriverManager.getConnection("jdbc:sqlite:$cloudPath").use { conn ->
+                    conn.createStatement().use { st ->
+                        st.execute(
+                            "INSERT INTO folders (id, name, sort_order, deleted_at, updated_at, created_at) " +
+                                "VALUES ('dup', 'Again', 0, NULL, 0, 0)",
+                        )
+                    }
+                }
+            }
+        }
+        assertTrue("SQLITE_CONSTRAINT" in thrown.messageText, "expected a constraint failure, got ${thrown.messageText}")
+    }
+
+    /** A cloud file corrupt past its header is still classified: its own quick_check fails. */
+    @Test
+    fun corruptCloudFileIsCloudDataIncompatible() {
+        val cloudFile = soundDbFile { driver -> insertFeedRow(driver) }
+        corruptPastFirstPage(cloudFile, untilByte = 8192)
+        val localFile = soundDbFile()
+
+        assertFailsWith<CloudDataIncompatibleException> {
+            DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, SCHEMA_VERSION, MergeSql.all)
+        }
+    }
+
+    /**
+     * A corrupt *local* DB raises the same SQLITE_CORRUPT during the merge, but the downloaded cloud
+     * file passes its quick_check, so the corruption is local and must not drive a cloud-data reset.
+     */
+    @Test
+    fun corruptLocalDbIsNotBlamedOnAnIntactCloudFile() {
+        val cloudFile = soundDbFile { driver -> insertFeedRow(driver) }
+        val localFile = soundDbFile { driver -> insertFeedRow(driver) }
+        corruptPastFirstPage(localFile, untilByte = Int.MAX_VALUE)
+
+        val thrown = assertFailsWith<Exception> {
+            DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, SCHEMA_VERSION, MergeSql.all)
+        }
+        assertFalse(thrown is CloudDataIncompatibleException, "got $thrown")
+        val sqliteCause = generateSequence<Throwable>(thrown) { it.cause }.firstNotNullOfOrNull { it as? SQLiteException }
+        assertIs<SQLiteException>(sqliteCause, "the original SQLite failure must be rethrown unchanged")
+    }
+
+    /**
+     * A file DB with this app's schema; [seed] runs on a driver with foreign keys OFF (so it can plant
+     * a violation), and the driver is closed before the merge opens the file.
+     */
+    private fun soundDbFile(seed: (app.cash.sqldelight.db.SqlDriver) -> Unit = {}): File {
+        val (file, driver, _) = fileDb()
+        try {
+            seed(driver)
+        } finally {
+            driver.close()
+        }
+        return file
+    }
+
+    private fun insertFolder(driver: app.cash.sqldelight.db.SqlDriver, id: String, name: String) {
+        driver.execute(
+            null,
+            "INSERT INTO folders (id, name, sort_order, deleted_at, updated_at, created_at) VALUES ('$id', '$name', 0, NULL, 0, 0)",
+            0,
+        )
+    }
+
+    /** An article whose feed does not exist — only insertable with foreign keys OFF. */
+    private fun insertOrphanArticle(driver: app.cash.sqldelight.db.SqlDriver) {
+        driver.execute(
+            null,
+            "INSERT INTO articles (id, feed_id, guid, url, title, cached_at, updated_at, created_at) " +
+                "VALUES ('orphan', 'no-such-feed', 'g', 'https://example.com/a', 'Orphan', 0, 0, 0)",
+            0,
+        )
+    }
+
+    private fun insertFeedRow(driver: app.cash.sqldelight.db.SqlDriver) {
+        KeryxDatabase(driver).insertFeed("f1", now = 0)
+    }
+
+    /** Flips every byte from the second page up to [untilByte], leaving the header page intact. */
+    private fun corruptPastFirstPage(file: File, untilByte: Int) {
+        val bytes = file.readBytes()
+        for (i in 4096 until minOf(bytes.size, untilByte)) {
+            bytes[i] = bytes[i].inc()
+        }
+        file.writeBytes(bytes)
+    }
+
     private companion object {
         /**
          * The schema `validateSchema` is actually called with in production (always the running
@@ -83,5 +272,13 @@ class DatabaseMergerTest {
          * no longer have registered.
          */
         val SCHEMA_VERSION = KeryxDatabase.Schema.version
+
+        /**
+         * Copies every cloud folder without MergeSql's NOT EXISTS guards, so a folder id present on
+         * both sides hits the PRIMARY KEY — a constraint failure caused by the cloud's rows.
+         */
+        const val UNGUARDED_FOLDER_INSERT =
+            "INSERT INTO main.folders (id, name, sort_order, deleted_at, updated_at, created_at) " +
+                "SELECT id, name, sort_order, deleted_at, updated_at, created_at FROM cloud.folders"
     }
 }

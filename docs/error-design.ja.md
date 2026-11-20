@@ -131,11 +131,12 @@ Nextcloud サーバーのアドレス）も同様に `NextcloudServerProblem` �
     409 `path/not_found`（get_metadata）→ 存在しない、を判別。
   - `DatabaseMerger.merge` はマージ失敗を SQLite の**エラーコード**（`SQLiteException.resultCode`。
     メッセージ文字列ではない）から分類する:
-    - → `CloudDataIncompatibleException`：破損ファイル、クラウド DB 自身の（より緩い）スキーマが
-      許していた制約違反、または — `validateSchema` がダウンロードしたファイルとアプリのスキーマの
-      不一致を確認できた場合に限り — 外部・レガシースキーマ。
-    - → そのまま変更せず再送出：一時的な失敗、アプリのバグ、または `validateSchema` が確定できなかった
-      スキーマエラー。
+    - → `CloudDataIncompatibleException`：クラウドが原因だと確かめられた場合に限る。破損ファイル（ダウンロードした
+      ファイルの `quick_check` が壊れていると判定した場合）、クラウド DB 自身の（より緩い）スキーマが許していた
+      制約違反（マージのロールバック前に実行するローカル DB の外部キーチェックが綺麗な場合）、または外部・
+      レガシースキーマ（`validateSchema` がダウンロードしたファイルとアプリのスキーマの不一致を確認できた場合）。
+    - → そのまま変更せず再送出：一時的な失敗、アプリのバグ、破損した・外部キー違反を含むローカル DB、または
+      これらのチェックで確定できなかったもの。
     - 詳細な判定表は [sync-architecture.ja.md](sync-architecture.ja.md) の「マージ失敗の分類」を参照。
 - **Repository 層**: `Result` を受けてビジネスロジック（リトライ等）を適用。
 - **ViewModel 層**: `Result` を UI 状態へ変換。

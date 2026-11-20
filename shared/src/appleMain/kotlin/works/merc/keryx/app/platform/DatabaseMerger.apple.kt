@@ -8,6 +8,7 @@ import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.SQLITE_BUSY_TIMEOUT_MS
 import works.merc.keryx.app.core.SchemaVersionException
 import works.merc.keryx.app.data.local.db.KeryxDatabase
+import works.merc.keryx.app.domain.LocalForeignKeyVerdict
 import works.merc.keryx.app.domain.MergeFailureClassifier
 import works.merc.keryx.app.domain.MergeSchema
 import works.merc.keryx.app.domain.SqliteFailureCategory
@@ -24,24 +25,40 @@ actual object DatabaseMerger {
         localSchemaVersion: Long,
         mergeStatements: List<String>,
     ) {
+        val fkVerdict = LocalForeignKeyVerdict()
         try {
-            mergeUnclassified(localDbPath, cloudDbPath, localSchemaVersion, mergeStatements)
+            mergeUnclassified(localDbPath, cloudDbPath, localSchemaVersion, mergeStatements, fkVerdict)
         } catch (e: SchemaVersionException) {
             // Already classified — must not fall into the catch-all below (it needs an app
             // update, not a cloud-data reset).
             throw e
         } catch (e: Throwable) {
-            throw classifyMergeFailure(e, cloudDbPath, localSchemaVersion)
+            throw classifyMergeFailure(e, cloudDbPath, localSchemaVersion, fkVerdict.soundFor(e))
         }
     }
 
+    /**
+     * @param fkVerdict receives the "main is not the cause" verdict: `true` for any failure of the
+     * cloud-only phase ([migrateCloudIfOlder], which never touches main), and for a constraint
+     * failure of the merge statements the local FOREIGN KEY check computed inside the failed
+     * transaction before its rollback (see [localForeignKeysSound]).
+     */
     private fun mergeUnclassified(
         localDbPath: String,
         cloudDbPath: String,
         localSchemaVersion: Long,
         mergeStatements: List<String>,
+        fkVerdict: LocalForeignKeyVerdict,
     ) {
-        migrateCloudIfOlder(cloudDbPath, localSchemaVersion)
+        try {
+            migrateCloudIfOlder(cloudDbPath, localSchemaVersion)
+        } catch (e: Throwable) {
+            // This phase touches only the downloaded cloud temp file, never main, so main cannot be
+            // the cause of anything it throws (e.g. a constraint failure while migrating the cloud
+            // file): record that verdict for the classification step.
+            fkVerdict.record(e, sound = true)
+            throw e
+        }
 
         RawSqliteConnection.open(localDbPath).use { db ->
             db.exec("PRAGMA foreign_keys=ON")
@@ -57,7 +74,15 @@ actual object DatabaseMerger {
                     for (sql in mergeStatements) db.exec(sql)
                     db.exec("COMMIT")
                 } catch (e: Throwable) {
-                    runCatching { db.exec("ROLLBACK") }
+                    // Must run before the ROLLBACK below: only while the failed transaction (and
+                    // its write lock on main) is still held can no other writer change main
+                    // between the failure and the check.
+                    val code = e.findSqliteResultCode()
+                    if (code != null && failureCategory(code) == SqliteFailureCategory.CONSTRAINT) {
+                        fkVerdict.record(e, db.localForeignKeysSound(e))
+                    }
+                    // A rollback failure must not replace (and hide) the failure being classified.
+                    runCatching { db.exec("ROLLBACK") }.exceptionOrNull()?.let(e::addSuppressed)
                     throw e
                 }
             } finally {
@@ -72,15 +97,32 @@ actual object DatabaseMerger {
      * SQLite result code found in its cause chain — the same policy as the desktop actual. A failure
      * with no SQLite result code behind it is rethrown unchanged.
      */
-    private fun classifyMergeFailure(e: Throwable, cloudDbPath: String, localSchemaVersion: Long): Throwable {
+    private fun classifyMergeFailure(
+        e: Throwable,
+        cloudDbPath: String,
+        localSchemaVersion: Long,
+        localForeignKeysSound: Boolean?,
+    ): Throwable {
         val code = e.findSqliteResultCode() ?: return e
         val category = failureCategory(code)
         val codeName = sqliteResultCodeName(code)
-        val classified: CloudDataIncompatibleException = MergeFailureClassifier.classify(
+        val classified: CloudDataIncompatibleException? = MergeFailureClassifier.classify(
             category = category,
             errorCodeName = codeName,
+            localForeignKeysSound = localForeignKeysSound,
             validateCloudSchema = { validateSchema(cloudDbPath, localSchemaVersion) },
-        ) ?: return e
+            cloudIntegrityOk = { cloudIntegrityOk(cloudDbPath) },
+        )
+        if (classified == null) {
+            if (category == SqliteFailureCategory.CONSTRAINT || category == SqliteFailureCategory.CORRUPT) {
+                Log.warn(
+                    TAG,
+                    "Merge failure not pinned on the cloud DB (category=$category, code=$code $codeName, " +
+                        "localForeignKeysSound=$localForeignKeysSound): ${e.message}",
+                )
+            }
+            return e
+        }
         Log.warn(TAG, "${classified.message} (category=$category, code=$code $codeName): ${e.message}")
         return classified
     }
@@ -88,10 +130,47 @@ actual object DatabaseMerger {
     /** Same mapping as the desktop actual, on the primary result code (an extended code's low byte). */
     private fun failureCategory(resultCode: Int): SqliteFailureCategory =
         when (resultCode and 0xFF) {
-            SQLITE_NOTADB, SQLITE_CORRUPT, SQLITE_FORMAT, SQLITE_EMPTY, SQLITE_CONSTRAINT ->
-                SqliteFailureCategory.CORRUPT_OR_CONSTRAINT
+            SQLITE_CONSTRAINT -> SqliteFailureCategory.CONSTRAINT
+            SQLITE_NOTADB, SQLITE_CORRUPT, SQLITE_FORMAT, SQLITE_EMPTY -> SqliteFailureCategory.CORRUPT
             SQLITE_ERROR -> SqliteFailureCategory.STATEMENT_ERROR
             else -> SqliteFailureCategory.OTHER
+        }
+
+    /**
+     * Whether the local `main` DB holds no FOREIGN KEY violation, checked with
+     * `PRAGMA main.foreign_key_check` on this (the merge's) connection while the failed merge
+     * transaction is still open — see [MergeFailureClassifier.classify]'s `localForeignKeysSound`.
+     *
+     * @return `true` for no violation, `false` for any, or `null` when SQLite no longer has a
+     * transaction open (it may roll one back by itself; the check would then read a `main` another
+     * writer may already have changed) or the check itself fails — that failure is added to
+     * [failure] as suppressed, never replacing it.
+     */
+    private fun RawSqliteConnection.localForeignKeysSound(failure: Throwable): Boolean? =
+        try {
+            if (!inTransaction()) null else !returnsAnyRow("PRAGMA main.foreign_key_check")
+        } catch (checkFailure: Throwable) {
+            failure.addSuppressed(checkFailure)
+            null
+        }
+
+    /**
+     * Runs `PRAGMA quick_check` against the downloaded cloud file — see
+     * [MergeFailureClassifier.classify]'s `cloudIntegrityOk`. [RawSqliteConnection.open] does not
+     * create a missing file, so that is a failure (undetermined), not an intact empty database.
+     *
+     * @return `true` if the file reports `ok`, `false` if it reports problems or opening/checking it
+     * fails as not-a-database/corrupt, or `null` for any other failure.
+     */
+    private fun cloudIntegrityOk(dbPath: String): Boolean? =
+        try {
+            RawSqliteConnection.open(dbPath).use { db ->
+                val rows = db.queryFirstColumnStrict("PRAGMA quick_check")
+                if (rows.isEmpty()) null else rows == listOf(QUICK_CHECK_OK)
+            }
+        } catch (e: SqliteException) {
+            val code = e.resultCode and 0xFF
+            if (code == SQLITE_NOTADB || code == SQLITE_CORRUPT) false else null
         }
 
     actual fun validateSchema(dbPath: String, schemaVersion: Long): Boolean? {
@@ -152,6 +231,9 @@ actual object DatabaseMerger {
     }
 
     private const val TAG = "DatabaseMerger"
+
+    /** `PRAGMA quick_check`'s single result row for an intact database. */
+    private const val QUICK_CHECK_OK = "ok"
 
     private const val SQLITE_ERROR = 1
     private const val SQLITE_CORRUPT = 11

@@ -415,7 +415,7 @@ ATTACH DATABASE マージは**専用の JDBC コネクション 1 本**で行う
 実行することだけ。Android の `actual` は別経路で同じカテゴリを供給する — その
 `android.database.sqlite.SQLiteException` は（デスクトップが読む JDBC ドライバの数値コードと違い）
 数値コードを公開しないため、投げられた例外自身のサブクラスで分岐する
-（`SQLiteConstraintException`/`SQLiteDatabaseCorruptException` → `CORRUPT_OR_CONSTRAINT`、
+（`SQLiteConstraintException` → `CONSTRAINT`、`SQLiteDatabaseCorruptException` → `CORRUPT`、
 いくつかの named サブクラス → `OTHER`、素の `SQLiteException` → `STATEMENT_ERROR`。ここは
 `validateSchema` が解消すべき曖昧さそのものと一致する） — それ以外は同じ attach → バージョン確認 →
 マージ → detach の手順を、専用の `io.requery.android.database.sqlite.SQLiteDatabase` 接続上で、

@@ -425,7 +425,7 @@ cause chain for an `org.sqlite.SQLiteException`, reduces `resultCode.code and 0x
 `MergeSchema.EXPECTED_SCHEMAS`. The Android `actual` supplies the same category by a different
 route — its `android.database.sqlite.SQLiteException` exposes no numeric result code (unlike the
 JDBC driver desktop reads), so it switches on the thrown exception's own subclass instead
-(`SQLiteConstraintException`/`SQLiteDatabaseCorruptException` → `CORRUPT_OR_CONSTRAINT`, a handful
+(`SQLiteConstraintException` → `CONSTRAINT`, `SQLiteDatabaseCorruptException` → `CORRUPT`, a handful
 of other named subclasses → `OTHER`, a plain `SQLiteException` → `STATEMENT_ERROR`, matching the
 ambiguity `validateSchema` exists to resolve) — and otherwise does the same attach → version check
 → merge → detach sequence on a dedicated `io.requery.android.database.sqlite.SQLiteDatabase`

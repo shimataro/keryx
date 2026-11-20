@@ -137,11 +137,12 @@ Helper extensions: `isOk` / `isErr` / `valueOrNull` / `valueOrElse` (early-retur
   - `DropboxStorage`: 401/403 → `CloudAuthException`, 409 (upload) → `SyncConflictException`, 409 `path/not_found` (get_metadata) → does not exist.
   - `DatabaseMerger.merge` classifies a merge failure from SQLite's **error code** (`SQLiteException.resultCode`,
     not message text), never from unchanged behavior alone:
-    - → `CloudDataIncompatibleException` for a corrupt file, a constraint violation only the cloud DB's own laxer
-      schema allowed, or — only once `validateSchema` confirms the downloaded file doesn't match the app's schema —
-      a foreign/legacy schema.
-    - → left unchanged (rethrown as-is) for a transient failure, an app bug, or a schema error `validateSchema`
-      couldn't confirm.
+    - → `CloudDataIncompatibleException` only once the cloud is confirmed as the cause: a corrupt file (once
+      `quick_check` on the downloaded file finds it broken), a constraint violation only the cloud DB's own laxer
+      schema allowed (once the local DB's foreign-key check, run before the merge rolls back, is clean), or a
+      foreign/legacy schema (once `validateSchema` confirms the downloaded file doesn't match the app's schema).
+    - → left unchanged (rethrown as-is) for a transient failure, an app bug, a corrupt or FK-violating local DB,
+      or anything those checks couldn't confirm.
     - See "Merge Failure Classification" in [sync-architecture.md](sync-architecture.md) for the full decision table.
 - **Repository layer**: Receives `Result` and applies business logic (retries, etc.).
 - **ViewModel layer**: Converts `Result` into UI state.
