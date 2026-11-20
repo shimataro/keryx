@@ -139,9 +139,13 @@ Helper extensions: `isOk` / `isErr` / `valueOrNull` / `valueOrElse` (early-retur
     not message text), never from unchanged behavior alone:
     - → `CloudDataIncompatibleException` only once the cloud is confirmed as the cause: a corrupt file (once
       `quick_check` on the downloaded file finds it broken), a constraint violation from the cloud rows (once
-      the local DB is ruled out — its foreign-key check is clean, or, re-running the failed statement onward in
-      the same transaction with foreign keys deferred, a non-FK constraint still fails or a new FK violation
-      appears), or a foreign/legacy schema (once `validateSchema` confirms the downloaded file doesn't match
+      the local DB is ruled out — the driver reports a UNIQUE, PRIMARY KEY or NOT NULL violation by its
+      extended result code, which the local DB's existing rows cannot cause, so neither check below runs
+      (desktop and Apple; Android's driver exposes no extended code); its foreign-key check is clean; or,
+      re-running the failed statement onward in the same transaction with foreign keys deferred, a non-FK
+      constraint still fails or a new FK violation appears), a constraint violation while the downloaded file
+      is migrated to the app's schema (that step touches only the downloaded file, never the local DB), or a
+      foreign/legacy schema (once `validateSchema` confirms the downloaded file doesn't match
       the app's schema). A local orphan row therefore never hides a violation that comes from the cloud.
     - → left unchanged (rethrown as-is) for a transient failure, an app bug, a corrupt local DB, a failure
       caused by a foreign-key violation the local DB already held, or anything those checks couldn't confirm.
