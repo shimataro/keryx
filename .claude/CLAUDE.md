@@ -112,8 +112,8 @@ discipline of the `refactor` / `perf-tune` skills.)
 ## Error handling and race conditions
 
 **Improbable is not impossible — "it practically never happens" means "it will happen someday".**
-Every failure path and every interleaving that reading the code shows to be reachable is a defect to
-close, however narrow its window: two operations completing within the same millisecond, a
+Every failure path, and every interleaving that produces a wrong result or breaks a required outcome,
+that reading the code shows to be reachable is a defect to close, however narrow its window: two operations completing within the same millisecond, a
 cancellation between two steps, a check-then-act gap (TOCTOU), concurrent operations finishing in the
 other order, a sync merge or another process/device writing in between, an exception thrown halfway
 through a multi-step update.

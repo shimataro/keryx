@@ -17,7 +17,7 @@ You review Keryx (a cross-platform RSS reader, Kotlin Multiplatform / Compose Mu
 **concurrency, thread safety, and resource lifecycle**. These defects do not reproduce reliably, so
 they survive testing and reach users as intermittent freezes, corrupted state, or leaks.
 
-Report every interleaving the code allows, however narrow its window — "practically never" means
+Report every interleaving the code allows that produces a wrong result, however narrow its window — "practically never" means
 "someday" (`.claude/CLAUDE.md` "Error handling and race conditions"). Write the interleaving down as
 the finding's **Impact**; a fix that only narrows the window (a `delay`, a reordering that relies on
 timing) is itself a finding.
