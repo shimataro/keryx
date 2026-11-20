@@ -20,8 +20,10 @@ through it rather than composing `AppDirs.appDataDir()` with the filename themse
 - A delete and the event that undoes it never share a stamp on the same row. `tags` / `folders` stamp
   `updated_at`, and `feeds` stamps `deleted_updated_at`, as `MAX(now, previous + 1)` on a soft delete and on a
   recreation / reactivation (`upsertByName`) or resubscribe (`stampResubscribed`), so the stamps strictly increase
-  even within one millisecond. The sync merge's last-write-wins compares with a strict `>`, so an equal stamp would
-  leave the later event unpropagated — and a recreated row indistinguishable from the one before the delete.
+  even within one millisecond. The sync merge's last-write-wins can only order events whose stamps differ: on an
+  equal stamp it falls back to its tie rule (the cloud side wins — see [sync-architecture.md](sync-architecture.md)),
+  which knows nothing of which event came later, so an equal stamp could let the earlier event win — and would
+  leave a recreated row indistinguishable from the one before the delete.
   Because those stamps can run a few milliseconds ahead of the clock, every other local write to such a row moves
   its stamp forward the same way, so an edit made right after them is still the newest: for `folders`, a rename
   (`upsert`) and a reorder (`updateSortOrder`); for `tags`, a rename or color change (`upsert`).

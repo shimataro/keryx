@@ -116,7 +116,11 @@
   （外部スキーマ、実スキーマの `UNIQUE(url)`／`NOT NULL` 制約を外した `feeds` テーブル（実スキーマなら
   違反するデータを保持できる）、バイトを改変した破損ファイル、ローカルより新しい `PRAGMA user_version`）
   に対して `merge` を直接呼び、投げられる例外の型を検証する。`SyncRepositoryTest.kt` は同じ分類を
-  `sync()` 経由でエンドツーエンドに検証する。
+  `sync()` 経由でエンドツーエンドに検証する。判定そのものは純粋関数で、commonTest の `MergeFailureClassifierTest`
+  が検証する（カテゴリごとの判定と、`mainRuledOut` の V0／遅延再実行／V1 の各ケース）。各プラットフォームの
+  `actual`（トランザクション内の外部キーチェック、失敗した文からの遅延再実行、生存確認、クラウドファイルの
+  `quick_check`）は、それぞれの SQLite に対して `DatabaseMergerTest`（desktop）、`AppleDatabaseTest`（Apple）、
+  `MergeFailureClassificationDeviceTest`（Android、`androidDeviceTest`）が検証する。
 - `androidx.lifecycle.ViewModel`（`viewModelScope` は `Dispatchers.Main.immediate` 依存）のテストは
   `@BeforeTest` で `Dispatchers.setMain(StandardTestDispatcher())`、`@AfterTest` で `Dispatchers.resetMain()`
   を呼ぶ（`HomeViewModelTest.kt` が最初の導入例）。`StateFlow` が `SharingStarted.WhileSubscribed(...)`

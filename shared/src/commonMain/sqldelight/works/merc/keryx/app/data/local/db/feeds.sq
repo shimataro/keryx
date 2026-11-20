@@ -69,8 +69,9 @@ ON CONFLICT(id) DO UPDATE SET
 
 -- deleted_updated_at never goes backwards or repeats on a row: MAX(now, previous + 1), so an
 -- unsubscribe and a resubscribe made within the same millisecond still order strictly. The sync
--- merge's last-write-wins on it compares with a strict ">", so an equal stamp would leave the later
--- event unpropagated. See docs/db-schema.md.
+-- merge's last-write-wins on it orders only differing stamps and settles an equal one by its tie rule
+-- (the cloud side wins), which knows nothing of which event came later, so an equal stamp could let
+-- the earlier event win. See docs/db-schema.md.
 softDelete:
 UPDATE feeds SET deleted_at = ?, updated_at = ?, deleted_updated_at = MAX(?, COALESCE(deleted_updated_at, 0) + 1) WHERE id = ?;
 

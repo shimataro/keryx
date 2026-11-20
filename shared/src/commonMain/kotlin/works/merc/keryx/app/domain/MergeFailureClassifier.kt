@@ -143,7 +143,12 @@ object MergeFailureClassifier {
      * undone with its failure (a FOREIGN KEY failure always aborts the whole statement; only a
      * non-FOREIGN KEY failure under an explicit `OR FAIL` keeps part of its changes, and re-running
      * such a statement fails on a constraint again — the verdict that failure deserves anyway; neither
-     * `MergeSql` nor the schema uses `OR FAIL`). Going back is not an option on every platform anyway:
+     * `MergeSql` nor the schema uses `OR FAIL`). Both this and reading V0 as "what main already held"
+     * also rest on no single statement bringing in a FOREIGN KEY violation while resolving another one:
+     * SQLite checks an immediate constraint by the statement's net count of violations, so such a
+     * statement would succeed and leave its new violation in V0. `MergeSql`'s statements bring in none
+     * (every foreign-key value they write is guarded to exist in main, or NULL); a statement added later
+     * must keep that property. Going back is not an option on every platform anyway:
      * Android's requery cannot run a `ROLLBACK TO` — its `SQLiteSession` takes any statement starting
      * with `ROLLBACK` (after `trim()` and comments) for a rollback of its own whole transaction.
      *

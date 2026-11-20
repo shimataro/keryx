@@ -110,7 +110,12 @@ New tests are placed at the same relative path as the code under test.
   directly against hand-built cloud DB files (a foreign schema, a `feeds` table missing its
   `UNIQUE(url)`/`NOT NULL` constraints so it can hold data that violates the real schema, a byte-
   flipped corrupt file, a `PRAGMA user_version` newer than local), and assert the thrown exception
-  type; `SyncRepositoryTest.kt` covers the same classification end-to-end through `sync()`.
+  type; `SyncRepositoryTest.kt` covers the same classification end-to-end through `sync()`. The decision
+  itself is a pure function tested in commonTest (`MergeFailureClassifierTest`: the category verdicts and
+  `mainRuledOut`'s V0 / deferred re-run / V1 cases), and each platform's `actual` — the in-transaction
+  foreign-key check, the deferred re-run from the failed statement, the liveness checks, the cloud-file
+  `quick_check` — is exercised against its own SQLite by `DatabaseMergerTest` (desktop), `AppleDatabaseTest`
+  (Apple) and `MergeFailureClassificationDeviceTest` (Android, `androidDeviceTest`).
 - `androidx.lifecycle.ViewModel` tests (depending on `viewModelScope` using `Dispatchers.Main.immediate`) must call `Dispatchers.setMain(StandardTestDispatcher())` in `@BeforeTest` and `Dispatchers.resetMain()` in `@AfterTest` (`HomeViewModelTest.kt` is the first example). If the `StateFlow` uses `SharingStarted.WhileSubscribed(...)`, the test must explicitly `collect` to start subscription, or values will not update.
 - A Compose UI test that needs a real `HomeViewModel` must go through `ui/home/ComposeHomeViewModelTestSupport.kt`'s `ComposeUiTest.useHomeViewModel(driver, db) { fixture -> … }`, never a hand-rolled `try`/`finally`. `HomeViewModel`'s DB collectors use `SharingStarted.Eagerly`, and closing the driver without first `cancelAndJoin`-ing `viewModelScope` lets an already-queued continuation on the EDT resume against the closed connection — an *uncaught* exception that surfaces flakily, on whichever *other* test runs next, as `kotlinx.coroutines.test.UncaughtExceptionsBeforeTest`. `ComposeUiTest.waitForIdle()` does not help here: it only advances Compose's own test clock, it never pumps the AWT event queue.
 - Classes that directly use `CloudStorage` like `SyncRepository` are verified by swapping `CloudStorage` with a hand-rolled fake (in-memory Map + rev management) instead of mocking the HTTP layer (`SyncRepositoryTest.kt`). `DropboxStorage`/`DropboxAuthManager` tests themselves mock the HTTP layer via Ktor `MockEngine` as usual.
