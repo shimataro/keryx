@@ -22,6 +22,7 @@ import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.core.SyncConflictException
 import works.merc.keryx.app.data.cloud.AppPasswordCredentials
 import works.merc.keryx.app.data.cloud.CloudCredentials
+import works.merc.keryx.app.data.cloud.CloudFileEntry
 import works.merc.keryx.app.data.cloud.CloudFileMeta
 import works.merc.keryx.app.data.cloud.OAuthTokens
 import works.merc.keryx.app.data.cloud.bytesAt
@@ -440,5 +441,209 @@ class NextcloudStorageTest {
         s.upload(CLOUD_DB_GZ_PATH, uploadSourceOf(byteArrayOf(1, 2)), expectedRev = "\"x\"")
         assertIs<OutgoingContent.WriteChannelContent>(history.single().body)
         verify()
+    }
+
+    private val folderHref = "/nc/remote.php/dav/files/alice%20smith/Keryx/"
+
+    private fun listResponse(href: String, props: String, prefix: String = "d") = """
+          <$prefix:response>
+            <$prefix:href>$href</$prefix:href>
+            <$prefix:propstat><$prefix:prop>$props</$prefix:prop><$prefix:status>HTTP/1.1 200 OK</$prefix:status></$prefix:propstat>
+          </$prefix:response>
+    """
+
+    private fun fileProps(etag: String, size: Long, prefix: String = "d") =
+        "<$prefix:getetag>&quot;$etag&quot;</$prefix:getetag><$prefix:getcontentlength>$size</$prefix:getcontentlength><$prefix:resourcetype/>"
+
+    private fun listMultistatus(vararg responses: String, prefix: String = "d") =
+        """<?xml version="1.0"?><$prefix:multistatus xmlns:$prefix="DAV:">${responses.joinToString("")}</$prefix:multistatus>"""
+
+    @Test
+    fun listPropfindsTheFolderAtDepthOneAndKeepsMatchingFiles() = runTest {
+        for (prefix in listOf("d", "D")) {
+            val body = listMultistatus(
+                listResponse(
+                    folderHref,
+                    "<$prefix:getetag>&quot;folder&quot;</$prefix:getetag><$prefix:resourcetype><$prefix:collection/></$prefix:resourcetype>",
+                    prefix,
+                ),
+                listResponse("${folderHref}ks-g1-d-a-1-aaaaaaaaaaaa.db.gz", fileProps("e1", 10, prefix), prefix),
+                listResponse("${folderHref}keryx.db.gz", fileProps("e2", 20, prefix), prefix),
+                listResponse(
+                    "${folderHref}ks-sub/",
+                    "<$prefix:getetag>&quot;sub&quot;</$prefix:getetag><$prefix:resourcetype><$prefix:collection/></$prefix:resourcetype>",
+                    prefix,
+                ),
+                // A user's own file in /Keryx: ignored even without the properties a sync file has.
+                listResponse("${folderHref}my%20notes.txt", "<$prefix:resourcetype/>", prefix),
+                listResponse("${folderHref}ks-name%20with%20space", fileProps("e3", 0, prefix), prefix),
+                prefix = prefix,
+            )
+            val (s, history, verify) = storage(credentials, { respond(body, multiStatus) })
+            val r = s.list("ks-")
+            assertIs<Result.Ok<List<CloudFileEntry>>>(r)
+            assertEquals(
+                listOf(
+                    CloudFileEntry("ks-g1-d-a-1-aaaaaaaaaaaa.db.gz", "\"e1\"", 10),
+                    CloudFileEntry("ks-name with space", "\"e3\"", 0),
+                ),
+                r.value,
+                "prefix $prefix",
+            )
+            val request = history.single()
+            assertEquals("PROPFIND", request.method.value)
+            assertEquals("$base/Keryx/", request.url.toString())
+            assertEquals("1", request.header("Depth"))
+            verify()
+        }
+    }
+
+    @Test
+    fun listOfAMissingFolderIsEmpty() = runTest {
+        val (s, _, verify) = storage(credentials, { respond("", HttpStatusCode.NotFound) })
+        val r = s.list("")
+        assertIs<Result.Ok<List<CloudFileEntry>>>(r)
+        assertEquals(emptyList(), r.value)
+        verify()
+    }
+
+    @Test
+    fun listMatchingFileWithoutAnEtagIsStorageError() = runTest {
+        val body = listMultistatus(
+            listResponse("${folderHref}ks-a", "<d:getcontentlength>1</d:getcontentlength><d:resourcetype/>"),
+        )
+        val (s, _, verify) = storage(credentials, { respond(body, multiStatus) })
+        val r = s.list("ks-")
+        assertIs<Result.Err>(r)
+        assertIs<CloudStorageException>(r.exception)
+        verify()
+    }
+
+    /** A `response` that carries a status of its own instead of properties (RFC 4918 §14.24). */
+    private fun failedResponse(href: String, status: String) =
+        "<d:response><d:href>$href</d:href><d:status>$status</d:status></d:response>"
+
+    private suspend fun listing(body: String, prefix: String = "ks-"): Result<List<CloudFileEntry>> {
+        val (s, _, verify) = storage(credentials, { respond(body, multiStatus) })
+        val r = s.list(prefix)
+        verify()
+        return r
+    }
+
+    @Test
+    fun listFailedStatusForTheFolderItselfIsStorageError() = runTest {
+        // Without a status check this folder response would pass as a non-matching file "Keryx",
+        // and the listing would come back empty.
+        val alone = listing(listMultistatus(failedResponse(folderHref, "HTTP/1.1 403 Forbidden")))
+        assertIs<Result.Err>(alone)
+        assertIs<CloudStorageException>(alone.exception)
+
+        val withMembers = listing(
+            listMultistatus(
+                failedResponse(folderHref, "HTTP/1.1 403 Forbidden"),
+                listResponse("${folderHref}ks-a", fileProps("e1", 1)),
+            ),
+        )
+        assertIs<Result.Err>(withMembers)
+        assertIs<CloudStorageException>(withMembers.exception)
+    }
+
+    @Test
+    fun listFolderNamedByAnAbsoluteUrlHrefIsRecognized() = runTest {
+        val r = listing(listMultistatus(failedResponse("https://cloud.example.com$folderHref", "HTTP/1.1 500 Internal Server Error")))
+        assertIs<Result.Err>(r)
+        assertIs<CloudStorageException>(r.exception)
+    }
+
+    @Test
+    fun listUnreadableStatusForTheFolderIsStorageError() = runTest {
+        val r = listing(listMultistatus(failedResponse(folderHref, "garbage")))
+        assertIs<Result.Err>(r)
+        assertIs<CloudStorageException>(r.exception)
+    }
+
+    @Test
+    fun listFailedStatusForAMatchingFileIsStorageError() = runTest {
+        val r = listing(listMultistatus(failedResponse("${folderHref}ks-a", "HTTP/1.1 404 Not Found")))
+        assertIs<Result.Err>(r)
+        assertIs<CloudStorageException>(r.exception)
+    }
+
+    @Test
+    fun listFailedStatusForANonMatchingFileIsIgnored() = runTest {
+        val r = listing(
+            listMultistatus(
+                listResponse(folderHref, "<d:resourcetype><d:collection/></d:resourcetype>"),
+                failedResponse("${folderHref}my%20notes.txt", "HTTP/1.1 403 Forbidden"),
+                listResponse("${folderHref}ks-a", fileProps("e1", 1)),
+            ),
+        )
+        assertIs<Result.Ok<List<CloudFileEntry>>>(r)
+        assertEquals(listOf(CloudFileEntry("ks-a", "\"e1\"", 1)), r.value)
+    }
+
+    @Test
+    fun listReadsPropertiesOnlyFromSuccessfulPropstats() = runTest {
+        // The ETag sits only in a failed propstat, so the file has none.
+        val response = """
+          <d:response>
+            <d:href>${folderHref}ks-a</d:href>
+            <d:propstat><d:prop><d:getcontentlength>1</d:getcontentlength><d:resourcetype/></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat>
+            <d:propstat><d:prop><d:getetag>&quot;stale&quot;</d:getetag></d:prop><d:status>HTTP/1.1 404 Not Found</d:status></d:propstat>
+          </d:response>
+        """
+        val r = listing(listMultistatus(response))
+        assertIs<Result.Err>(r)
+        assertIs<CloudStorageException>(r.exception)
+    }
+
+    @Test
+    fun list401IsAuthError() = runTest {
+        val (s, _, verify) = storage(credentials, { respond("", HttpStatusCode.Unauthorized) })
+        val r = s.list("ks-")
+        assertIs<Result.Err>(r)
+        assertIs<CloudAuthException>(r.exception)
+        verify()
+    }
+
+    @Test
+    fun listRedirectIsAStorageErrorAndIsNotFollowed() = runTest {
+        val (s, history, verify) = storage(
+            credentials,
+            { respond("", HttpStatusCode.MovedPermanently, headersOf(HttpHeaders.Location, "https://elsewhere.example/")) },
+        )
+        val r = s.list("ks-")
+        assertIs<Result.Err>(r)
+        assertIs<CloudStorageException>(r.exception)
+        assertEquals(1, history.size)
+        verify()
+    }
+
+    @Test
+    fun listOnANonHttpsServerIsAnAuthErrorWithoutARequest() = runTest {
+        val (s, history, _) = storage(credentials.copy(serverUrl = "http://cloud.example.com"))
+        val r = s.list("ks-")
+        assertIs<Result.Err>(r)
+        assertIs<CloudAuthException>(r.exception)
+        assertTrue(history.isEmpty())
+    }
+
+    @Test
+    fun listCancellationPropagates() = runTest {
+        val started = CompletableDeferred<Unit>()
+        val never = CompletableDeferred<Unit>()
+        val (s, _, _) = storage(credentials, {
+            started.complete(Unit)
+            never.await()
+            respond("", multiStatus)
+        })
+        var result: Result<List<CloudFileEntry>>? = null
+        val job = launch { result = s.list("ks-") }
+        runCurrent()
+        started.await()
+        job.cancel()
+        job.join()
+        assertTrue(job.isCancelled)
+        assertNull(result)
     }
 }

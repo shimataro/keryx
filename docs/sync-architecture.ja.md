@@ -64,7 +64,8 @@ Nextcloud では、これらのファイルはアプリフォルダーではな�
 `list(prefix)` は、名前が `prefix` で始まるすべてのファイル（名前・リビジョン・サイズ）を、全ページをたどって返す:
 Dropbox は `list_folder` / `list_folder/continue`、Google Drive は `appDataFolder` での `files.list` と
 `nextPageToken`、OneDrive はアプリフォルダーの `/children` と `@odata.nextLink`、Nextcloud は `/Keryx` への
-Depth 1 の `PROPFIND`。Drive と OneDrive の一覧は結果整合で、書いた直後のファイルがしばらく見えないことがあるが、
+Depth 1 の `PROPFIND`。既にたどったページ指定（カーソル、ページトークン、`nextLink`）が再び返った場合は、ループせず
+ストレージエラーとする。Drive と OneDrive の一覧は結果整合で、書いた直後のファイルがしばらく見えないことがあるが、
 受信の規則はこれを許容する（欠番はカーソルを止めるだけで、何も飛ばさない）。Drive は同名のファイルを 2 つ返す
 こともあるが、同期ファイルでは同じ内容のコピーが 2 つあるという意味にしかならない。
 
@@ -876,7 +877,10 @@ Nextcloud には OAuth を使わず、アプリ専用フォルダーもない。
   Basic の認証情報として付け、保存済みのサーバー URL が HTTPS でなければ送らない。リダイレクトは追わない。
   `metadata` は `getetag` を求める Depth 0 の `PROPFIND`（名前空間の接頭辞に関係なくローカル名で照合する。404 →
   存在しない）、`download` は `ETag` をリビジョンとする `GET`、`upload` は期待するリビジョンをそのまま `If-Match` に
-  入れた `PUT`、`list` は `getetag` と `getcontentlength` を求める Depth 1 の `PROPFIND`。
+  入れた `PUT`、`list` は `getetag` と `getcontentlength` を求める Depth 1 の `PROPFIND`。一覧ではマルチステータス中の
+  リソースごとのステータスを読む: `/Keryx` 自体、または接頭辞に一致するファイルの失敗ステータスはストレージエラー
+  とし（空の一覧にはしない）、それ以外のメンバーの失敗ステータスは無視する（ユーザー自身のファイルであるため）。
+  プロパティは成功した `propstat` からのみ読む。
 - **リビジョン。** リビジョンはファイルの ETag で、Nextcloud は引用符も含めて完全一致で比較する。`If-Match` が一致
   しない（またはファイルがない）と 412（期待するリビジョンがなければ `If-Match` を送らず無条件に `PUT` する）、ファイルのロックを持つ同時上書きがあると 423 になり、どちらも
   `SyncConflictException`。書き込んだリビジョンは書き込み自身の応答の `OC-ETag` / `ETag` ヘッダーから読み

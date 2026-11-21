@@ -313,4 +313,148 @@ class OneDriveStorageTest {
         assertIs<CloudStorageException>(r.exception)
         verify()
     }
+
+    private fun itemEntry(name: String, eTag: String, size: Long) =
+        """{"name":"$name","eTag":"$eTag","size":$size,"file":{"mimeType":"application/octet-stream"}}"""
+
+    @Test
+    fun listFollowsNextLinkVerbatimFiltersByPrefixAndSkipsFolders() = runTest {
+        val nextLink = "https://graph.microsoft.com/v1.0/me/drive/special/approot/children?\$skiptoken=abc&\$top=999"
+        val (s, history, verify) = storage(
+            "tok",
+            {
+                respond(
+                    """{"@odata.nextLink":"$nextLink","value":[""" +
+                        itemEntry("ks-g1-d-a-1-aaaaaaaaaaaa.db.gz", "\\\"{E1},1\\\"", 10) + "," +
+                        itemEntry("keryx.db.gz", "e2", 20) + "," +
+                        """{"name":"ks-dir","eTag":"e3","size":0,"folder":{"childCount":0}}""" +
+                        "]}",
+                    HttpStatusCode.OK,
+                    jsonHeaders,
+                )
+            },
+            {
+                respond(
+                    """{"value":[""" + itemEntry("ks-g1-d-a-2-bbbbbbbbbbbb.db.gz", "e4", 30) + "]}",
+                    HttpStatusCode.OK,
+                    jsonHeaders,
+                )
+            },
+        )
+        val r = s.list("ks-")
+        assertIs<Result.Ok<List<CloudFileEntry>>>(r)
+        assertEquals(
+            listOf(
+                CloudFileEntry("ks-g1-d-a-1-aaaaaaaaaaaa.db.gz", "\"{E1},1\"", 10),
+                CloudFileEntry("ks-g1-d-a-2-bbbbbbbbbbbb.db.gz", "e4", 30),
+            ),
+            r.value,
+        )
+        val first = history[0].url
+        assertEquals("/v1.0/me/drive/special/approot/children", first.encodedPath)
+        assertEquals("name,eTag,size,file,folder", first.parameters["\$select"])
+        assertEquals("999", first.parameters["\$top"])
+        assertEquals(nextLink, history[1].url.toString())
+        verify()
+    }
+
+    @Test
+    fun listOfAnUnprovisionedAppFolderIsEmpty() = runTest {
+        val (s, _, verify) = storage("tok", { respond("", HttpStatusCode.NotFound) })
+        val r = s.list("")
+        assertIs<Result.Ok<List<CloudFileEntry>>>(r)
+        assertEquals(emptyList(), r.value)
+        verify()
+    }
+
+    @Test
+    fun listRefusesANextLinkOffGraph() = runTest {
+        val (s, history, verify) = storage(
+            "tok",
+            { respond("""{"@odata.nextLink":"https://evil.example/children","value":[]}""", HttpStatusCode.OK, jsonHeaders) },
+        )
+        val r = s.list("ks-")
+        assertIs<Result.Err>(r)
+        assertIs<CloudStorageException>(r.exception)
+        assertEquals(1, history.size)
+        verify()
+    }
+
+    @Test
+    fun listRefusesANextLinkAlreadyFollowed() = runTest {
+        val nextLink = "https://graph.microsoft.com/v1.0/me/drive/special/approot/children?\$skiptoken=abc"
+        val page = """{"@odata.nextLink":"$nextLink","value":[""" + itemEntry("ks-a", "e1", 1) + "]}"
+        val (s, history, verify) = storage(
+            "tok",
+            { respond(page, HttpStatusCode.OK, jsonHeaders) },
+            { respond(page, HttpStatusCode.OK, jsonHeaders) },
+        )
+        val r = s.list("ks-")
+        assertIs<Result.Err>(r)
+        assertIs<CloudStorageException>(r.exception)
+        // The repeated link is refused before it is requested a second time.
+        assertEquals(2, history.size)
+        verify()
+    }
+
+    @Test
+    fun listFollowsDistinctNextLinksPastAnEmptyPage() = runTest {
+        val link2 = "https://graph.microsoft.com/v1.0/me/drive/special/approot/children?\$skiptoken=p2"
+        val link3 = "https://graph.microsoft.com/v1.0/me/drive/special/approot/children?\$skiptoken=p3"
+        val (s, history, verify) = storage(
+            "tok",
+            { respond("""{"@odata.nextLink":"$link2","value":[]}""", HttpStatusCode.OK, jsonHeaders) },
+            { respond("""{"@odata.nextLink":"$link3","value":[]}""", HttpStatusCode.OK, jsonHeaders) },
+            { respond("""{"value":[""" + itemEntry("ks-a", "e1", 1) + "]}", HttpStatusCode.OK, jsonHeaders) },
+        )
+        val r = s.list("ks-")
+        assertIs<Result.Ok<List<CloudFileEntry>>>(r)
+        assertEquals(listOf(CloudFileEntry("ks-a", "e1", 1)), r.value)
+        assertEquals(3, history.size)
+        verify()
+    }
+
+    @Test
+    fun list404OnALaterPageIsStorageError() = runTest {
+        val nextLink = "https://graph.microsoft.com/v1.0/me/drive/special/approot/children?\$skiptoken=abc"
+        val (s, _, verify) = storage(
+            "tok",
+            { respond("""{"@odata.nextLink":"$nextLink","value":[]}""", HttpStatusCode.OK, jsonHeaders) },
+            { respond("", HttpStatusCode.NotFound) },
+        )
+        val r = s.list("ks-")
+        assertIs<Result.Err>(r)
+        assertIs<CloudStorageException>(r.exception)
+        verify()
+    }
+
+    @Test
+    fun listUnauthorizedIsAuthError() = runTest {
+        val (s, _, verify) = storage("tok", { respondError(HttpStatusCode.Unauthorized) })
+        val r = s.list("ks-")
+        assertIs<Result.Err>(r)
+        assertIs<CloudAuthException>(r.exception)
+        verify()
+    }
+
+    @Test
+    fun listCancellationPropagates() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val started = CompletableDeferred<Unit>()
+        val (s, _, _) = storage(
+            "tok",
+            {
+                started.complete(Unit)
+                gate.await()
+                respond("""{"value":[]}""", HttpStatusCode.OK, jsonHeaders)
+            },
+        )
+        var result: Result<List<CloudFileEntry>>? = null
+        val job = launch { result = s.list("ks-") }
+        runCurrent()
+        started.await()
+        job.cancel()
+        job.join()
+        assertNull(result)
+    }
 }
