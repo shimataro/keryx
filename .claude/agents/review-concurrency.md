@@ -96,7 +96,7 @@ timing) is itself a finding.
 - Is every `CoroutineScope`, `Job`, listener, `HttpClient`, D-Bus connection, WebView, watcher, and
   file handle cancelled or closed on the path that created it — including the error path?
 - Does a retry/timeout path leak the resource it was retrying on?
-- Are temp files (sync snapshots) removed even when the operation fails?
+- Are temp files (transport files, the full send's `VACUUM INTO` copy) removed even when the operation fails?
 
 ## Investigation
 

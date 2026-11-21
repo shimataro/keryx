@@ -70,8 +70,8 @@ contact with a tempting optimization.
 
 - **Never trade durability for speed.** No `synchronous=OFF|NORMAL`, no
   `journal_mode=MEMORY|OFF`. A crash-corrupted local DB is not a local problem:
-  it rides the `VACUUM INTO` snapshot up to the cloud and propagates to every
-  device.
+  its rows ride the next delta or full send up to the cloud and propagate to
+  every device.
 - Do not turn off `PRAGMA foreign_keys=ON`, and do not lower `busy_timeout=5000`
   (both set in `DatabaseDriverFactory.desktop.kt`). A lower busy timeout turns a
   concurrent search into `SQLITE_BUSY` — which the repository absorbs as *zero
@@ -189,14 +189,17 @@ only act on what you actually measured.
    `is_read = 0 AND deleted_at IS NULL GROUP BY feed_id` shape used by
    `watchUnreadCountsByFeed` and friends is a composite-index candidate — **Red**,
    with the schema-compatibility cost above.
-7. **Memory.** `SyncRepository` materializes the whole DB as a `ByteArray` on both
-   the download and the snapshot-read side — a spike proportional to DB size.
+7. **Memory.** Cloud transfers stream between files (`CloudStorage.download` /
+   `upload` take paths, not bytes) — keep it that way: reading a delta, a base or
+   a full send into a `ByteArray` is a spike proportional to DB size.
 8. **PRAGMA / connection settings.** WAL is unused; `cache_size` / `mmap_size` are
    untuned — **Red**. WAL introduces `-wal` / `-shm` side files, so it must not be
-   adopted without verifying the interaction with the `VACUUM INTO` snapshot and
-   with `DatabaseMerger`'s separate connection.
-9. **Sync payload.** The whole DB is uploaded every time, tombstones included.
-   Physical tombstone GC is documented as future work — do not implement it on
+   adopted without verifying the interaction with the full send's `VACUUM INTO`
+   copy (`DeltaExporter.copyForFullSend`) and with `DatabaseMerger`'s and
+   `DeltaExporter`'s separate connections.
+9. **Sync payload.** A delta carries only the rows changed locally, and a full
+   send leaves out rows identical to the base just merged; tombstones are carried
+   forever. Physical tombstone GC is documented as future work — do not implement it on
    your own judgment (#5).
 
 ### Axis 2 — perceived speed
