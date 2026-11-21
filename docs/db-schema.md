@@ -34,7 +34,9 @@ through it rather than composing `AppDirs.appDataDir()` with the filename themse
   `feeds.custom_title_updated_at` / `folder_updated_at` / `sort_order_updated_at` (`updateCustomTitle`,
   `updateFolder`, `updateSortOrder`, `updateFolderAndSortOrder`), `articles.read_at` / `starred_at`
   (`updateReadStatus`, `updateReadStatusByIds`, `updateStarStatus`, the `markAllRead*` queries) and
-  `deleted_updated_at` (`softDeleteExpired`), `tags.name_updated_at` / `color_updated_at` / `sort_order_updated_at`
+  `deleted_updated_at` (`softDeleteExpired`) — `starred_at` and `deleted_updated_at` rank one merge group together, so
+  a star or a cleanup stamps above *both* of them —, `articles.body_updated_at` (the article upsert, moved only when a
+  body column changes), `tags.name_updated_at` / `color_updated_at` / `sort_order_updated_at`
   and `folders.name_updated_at` / `sort_order_updated_at` (each moved only when its own field changes — `upsert`,
   `updateSortOrder`, `upsertByName`), and `feed_tags.updated_at` / `global_settings.updated_at` (`upsert`).
   Without it, a write stamped at the value the row already holds — two writes within one millisecond, or one made
@@ -47,7 +49,8 @@ through it rather than composing `AppDirs.appDataDir()` with the filename themse
   Version 3 (`2.sqm`) adds the sync bookkeeping (`sync_outbox`, `sync_capture`, `sync_merging`, `sync_applied`,
   `sync_cursor`, `ks_search_pending`, and the capture triggers), moves `feeds`' `etag` / `last_modified` /
   `error_count` / `last_error` into `feed_fetch_state` (`ALTER TABLE … DROP COLUMN`, SQLite 3.35+), adds the
-  per-field stamps of `tags` / `folders` (initialized from `updated_at`), and registers in `ks_search_pending` every
+  per-field stamps of `tags` / `folders` and `articles.body_updated_at` (all initialized from `updated_at`), and
+  registers in `ks_search_pending` every
   article whose `search_text` still equals its raw `content` / `summary` (written before HTML stripping).
   (SQLDelight derives the version from the highest migration file + 1.) When the schema changes, add a `.sqm` file
   (`<from-version>.sqm`) and the version bumps automatically; `domain/MergeSchema.EXPECTED_SCHEMAS` (which
@@ -97,21 +100,34 @@ the sync bookkeeping tables / `articles_fts` (virtual).
 
 `id`(PK), `feed_id`(FK→feeds), `guid`, `url`, `title`, `summary`, `content`, `author`,
 `published_at`, `thumbnail_url`, `is_read`, `read_at`, `is_starred`, `starred_at`, `cached_at`,
-`search_text`, `updated_at`, `created_at`, `deleted_at`, `deleted_updated_at`. `UNIQUE(feed_id, guid)`.
+`search_text`, `updated_at`, `created_at`, `deleted_at`, `deleted_updated_at`, `body_updated_at`(nullable).
+`UNIQUE(feed_id, guid)`.
 Indexes: `feed_id`, `is_read`, `is_starred`, and a composite `(published_at DESC, created_at DESC, id DESC)` for list ordering.
 
 - `id` is deterministically generated from `(feed_id, guid)` as **UUIDv5** (`IdGenerator.articleId`). The same article gets the same ID on all devices, so sync merge (articles matched by `id`) can propagate read/star states via last-write-wins. Existing rows keep their id via `upsert`'s `ON CONFLICT(feed_id, guid)` — deterministic generation only applies to new rows.
-- Read/star conflict resolution is last-write-wins via `read_at` / `starred_at`. They are stamped only when the state actually changes (`updateReadStatus` / `updateStarStatus` are guarded on it), so re-opening an already-read article does not move them.
+- Read conflict resolution is last-write-wins via `read_at`; the star is part of the retention group (below), ranked with `starred_at`. Both are stamped only when the state actually changes (`updateReadStatus` / `updateStarStatus` are guarded on it), so re-opening an already-read article does not move them.
+- `body_updated_at` is the body's own last-write-wins stamp — for `content`, `summary`, `title`, `url`, `author`,
+  `published_at` and `thumbnail_url`, which the merge takes together from one version. The article upsert
+  (`insert`, `insertIfAbsent`) sets it to the write's time on a new row, and on an existing row moves it forward
+  (`MAX(now, previous + 1)`) only when a body column actually changes; read, star and deletion writes never touch it.
+  So a device that merely opened an article cannot make its older body beat another device's newer one. `updated_at`
+  stays the row's generic stamp (moved by every write) and is no merge group's key. The column is nullable only
+  because `2.sqm` adds it (initialized from `updated_at`); every write sets it.
 - `content` is displayed in preference to `summary`. If both are NULL, the reader shows a localized "no content" placeholder in place (with a link/button to open the article in the external browser); nothing opens automatically.
 - `search_text` = the HTML-stripped plain text of `content` (falling back to `summary`), or `""` if both are NULL. Computed at insert/update time (`ArticleRepository`, `HtmlText.toPlainText`). It is **device-local**: never synced, since it is derived. An article whose body a sync merge filled in or changed is listed in `ks_search_pending`, and its `search_text` is recomputed right after the merge (a newly inserted one starts as `""`); `FtsManager.indexMissing()` skips listed rows until then.
 - Logical deletion via `deleted_at` (NULL = alive). Cache cleanup (`softDeleteExpired`) is the only **local**
   originator of a deletion; starred articles are never deleted. (Sync merge also writes `deleted_at`, propagating a
   deletion made on another device — see below.) `deleted_updated_at` is a field-specific last-wins
   timestamp for the delete/undelete event (like `read_at` / `starred_at`, and like `feeds.deleted_updated_at`), kept
-  separate from `updated_at` so a content refresh / read / star change can't clobber a deletion during the sync merge.
-  In the merge, deletion propagates by last-write-wins on `deleted_updated_at`, but a star newer than the deletion
-  **revives** the article (`deleted_at` → NULL), since cleanup only ever deletes non-starred articles. This makes the
-  deletion propagate across devices instead of the article being resurrected from the cloud on the next sync. Rows are
+  separate from `updated_at` so a content refresh / read change can't clobber a deletion during the sync merge.
+  In the merge the star and the deletion are **one group** (the *retention* group: `is_starred`, `starred_at`,
+  `deleted_at`, `deleted_updated_at`), ranked by `MAX(starred_at, deleted_updated_at)` (NULL as 0): the newer operation
+  wins and the whole group comes from it. A star clears `deleted_at` (`updateStarStatus`) — starring keeps the
+  article, so a star on an article a merge has just deleted revives it, here and on every device — while an unstar
+  leaves the deletion alone; both a star and a cleanup stamp above both stamps of their row, so each wins the group
+  it changed. A row is therefore never both starred and deleted. An article revived by a star elsewhere and then
+  unstarred stays visible until the next cache cleanup deletes it again. This makes the deletion propagate across
+  devices instead of the article being resurrected from the cloud on the next sync. Rows are
   never physically removed here (physical GC of old tombstones is future work); the row is kept so its deletion — and
   starred-article references — survive. All UI/list/search queries filter `deleted_at IS NULL`; `upsert` (feed refresh)
   never touches `deleted_at`, so a refresh cannot revive a deleted article.

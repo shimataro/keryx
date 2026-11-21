@@ -135,7 +135,7 @@ actual object DatabaseMerger {
     }
 
     /** Same mapping as the desktop actual, on the primary result code (an extended code's low byte). */
-    private fun failureCategory(resultCode: Int): SqliteFailureCategory =
+    internal fun failureCategory(resultCode: Int): SqliteFailureCategory =
         when (resultCode and 0xFF) {
             SQLITE_CONSTRAINT -> SqliteFailureCategory.CONSTRAINT
             SQLITE_NOTADB, SQLITE_CORRUPT, SQLITE_FORMAT, SQLITE_EMPTY -> SqliteFailureCategory.CORRUPT
