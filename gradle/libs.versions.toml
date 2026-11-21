@@ -54,7 +54,7 @@ androidx-browser = "1.10.0"
 # device" check in CloudStorageAvailability.android.kt — lives.
 play-services-auth = "22.0.0"
 # Test-only, used by composeApp's androidDeviceTest source set (instrumented tests for
-# DatabaseMerger/DatabaseSnapshot's Android actuals, which need a real device/emulator to load
+# DatabaseMerger's Android actual, which needs a real device/emulator to load
 # the bundled SQLite native library).
 androidx-test-runner-device-test = "1.7.0"
 androidx-test-junit-device-test = "1.3.0"

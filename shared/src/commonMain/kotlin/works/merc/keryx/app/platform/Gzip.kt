@@ -1,9 +1,9 @@
 package works.merc.keryx.app.platform
 
 /**
- * Gzip compression for the sync upload payload.
+ * Gzip compression for the sync transport files.
  *
- * `SyncRepository` compresses the upload snapshot before sending it, and decompresses a downloaded
+ * The sync compresses each delta or base before uploading it, and decompresses a downloaded
  * cloud file before handing it to the merger. Both directions stream file-to-file, matching the
  * "never hold the sync DB in memory" discipline the rest of the transfer path follows (see
  * `data/cloud/CloudFileTransfer.kt`).

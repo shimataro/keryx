@@ -75,6 +75,8 @@ class DeltaExportSqlTest {
     @Test
     fun pathsAreQuotedAndTablesChecked() {
         assertEquals("ATTACH DATABASE '/tmp/it''s.db' AS src", DeltaExportSql.attach("/tmp/it's.db", DeltaExportSql.SOURCE))
+        assertEquals("VACUUM INTO '/tmp/it''s.db'", DeltaExportSql.vacuumInto("/tmp/it's.db"))
+        assertEquals("VACUUM INTO '/tmp/copy.db'", DeltaExportSql.vacuumInto("/tmp/copy.db"))
         assertFailsWith<IllegalArgumentException> { DeltaExportSql.countQuery("sync_outbox") }
         assertFailsWith<IllegalArgumentException> { DeltaExportSql.deltaStatements(-1) }
     }

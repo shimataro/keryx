@@ -7,7 +7,7 @@
 `domain/TransportCoverage.kt`（ベースが何を覆うか、ベースのキャッシュ、記録した送信）、`domain/LegacyCloudFile.kt`
 （差分同期以前の形式からの移行と旧ビルドの監視）、`domain/MergeSql.kt`、
 `domain/ReduceSql.kt`、`domain/TransportSchema.kt`、`domain/MergeFailureClassifier.kt`、`domain/MergeSchema.kt`、
-`domain/SnapshotSql.kt`、`platform/DatabaseMerger`、`platform/DeltaExporter`、`platform/TransportFiles`。
+`domain/DeltaExportSql.kt`、`platform/DatabaseMerger`、`platform/DeltaExporter`、`platform/TransportFiles`。
 
 ## 設計方針
 

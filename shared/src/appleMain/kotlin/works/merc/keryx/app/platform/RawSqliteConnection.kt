@@ -53,7 +53,7 @@ internal fun sqliteResultCodeName(code: Int): String = sqlite3_errstr(code)?.toK
 
 /**
  * One dedicated connection to a database file through the system sqlite3 C API — what
- * [DatabaseMerger] and [DatabaseSnapshot] need: an `ATTACH`, a transaction and a `VACUUM INTO` that
+ * [DatabaseMerger] and [DeltaExporter] need: an `ATTACH`, a transaction and a `VACUUM INTO` that
  * must all run on the same connection, outside the SQLDelight driver's own pool (the Apple
  * counterpart of desktop's raw JDBC connection and Android's requery `SQLiteDatabase`).
  */

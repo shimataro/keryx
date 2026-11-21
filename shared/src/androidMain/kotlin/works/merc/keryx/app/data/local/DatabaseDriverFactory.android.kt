@@ -18,7 +18,7 @@ import works.merc.keryx.app.platform.AndroidAppContext
  * rationale and the (currently unmet) exit criteria for dropping this dependency. Confining the
  * [RequerySQLiteOpenHelperFactory] choice to this single call site is what that rule requires: the
  * eventual switch to `androidx.sqlite:sqlite-framework`'s `FrameworkSQLiteOpenHelperFactory` is a
- * one-line change here, with no other file (`DatabaseMerger`, `DatabaseSnapshot`, `FtsManager`)
+ * one-line change here, with no other file (`DatabaseMerger`, `DeltaExporter`, `FtsManager`)
  * caring which factory produced the [SqlDriver].
  *
  * Unlike the desktop actual, this does not drive `KeryxDatabase.Schema.create`/`migrate` manually

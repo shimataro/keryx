@@ -10,7 +10,7 @@
 `Context.getDatabasePath("keryx.db")` — `<dataDir>/databases/keryx.db` に置く。これは
 `AppDirs.appDataDir()`（`Context.filesDir`、すなわち `<dataDir>/files`）とは別のディレクトリである。
 `platform/DatabaseFile.kt` の `databaseFilePath()` がプラットフォームごとの実値を解決する唯一の
-`expect` 関数であり、`DatabaseMerger`/`DatabaseSnapshot`（どちらもドライバ経由ではなくパスで動作する）
+`expect` 関数であり、`DatabaseMerger`/`DeltaExporter`（どちらもドライバ経由ではなくパスで動作する）
 は自前で `AppDirs.appDataDir()` とファイル名を組み立てるのではなく、常にこれを経由しなければならない。
 
 ## 設計方針

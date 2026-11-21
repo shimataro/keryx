@@ -15,7 +15,7 @@ internal fun testContext(): Context = InstrumentationRegistry.getInstrumentation
  * Creates a fresh, schema-installed SQLite file at a unique path under the same directory
  * production's `AndroidSqliteDriver`-backed local DB lives in (`Context.getDatabasePath`,
  * per-name), then closes the driver so the returned [File] has no open connection — exactly the
- * state `DatabaseMerger`/`DatabaseSnapshot` expect to find a "local" or "cloud" DB file in, since
+ * state `DatabaseMerger`/`DeltaExporter` expect to find a "local" or "cloud" DB file in, since
  * both always open their own dedicated connection by path (see their own KDoc for why).
  *
  * Schema installation goes through the *real* `AndroidSqliteDriver` (bundled `requery` SQLite,

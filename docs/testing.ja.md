@@ -18,7 +18,7 @@
   ネイティブでも実行される（どちらも Xcode のある Mac では `./gradlew build` に含まれ、Linux/Windows ではスキップされる）。
   そのため共通テストで JVM の API を使ってはならない——一時ファイルは `:testing` の `tempFilePath()`/`tempFileWith()`
   （kotlinx-io）を使い、本当に JVM が必要なテストは `desktopTest` に置く。`appleTest/` には Apple の actual でしか確かめられないもの
-  を置く——`AppleDatabaseTest`（システム SQLite 上の NativeSqliteDriver、FTS5 trigram 検索、スナップショット、実際のマージ）、
+  を置く——`AppleDatabaseTest`（システム SQLite 上の NativeSqliteDriver、FTS5 trigram 検索、実際のマージ）、
   `ApplePlatformTest`（gzip、ダイジェスト、ファイル）、`KeryxSdkTest`。`macosTest/` には `KeychainTokenStorageTest` を置く：
   Kotlin/Native は iOS のテストをアプリバンドル外の裸の実行ファイルとして動かすのでキーチェーンが存在しない
   （`errSecNotAvailable`）が、macOS ではログインキーチェーンに届く（ランダムで後片付けするサービス名を使い、
@@ -35,9 +35,9 @@
   - `shared/src/androidDeviceTest/` — DB の計装テスト。新しい DB の計装テストはここに置く。ヘルパーは
     `AndroidDbTestSupport.kt`（`createSchemaDbFile()`。`DbTestSupport.kt` の `fileDb()` に相当するが、
     本番と同じスキーマ導入経路である実際の `AndroidSqliteDriver` 経由で作成する）。
-    - `DatabaseMergerDeviceTest.kt` / `DatabaseSnapshotDeviceTest.kt` — スキーマバージョンガード、
-      マイグレーション経路、バンドルされた `requery` SQLite（ネイティブライブラリ）に対するマージ/
-      スナップショット動作。`desktopTest` のスイート全体を移植するものではない——マージ SQL 自体
+    - `DatabaseMergerDeviceTest.kt` — スキーマバージョンガード、
+      マイグレーション経路、バンドルされた `requery` SQLite（ネイティブライブラリ）に対するマージ
+      動作。`desktopTest` のスイート全体を移植するものではない——マージ SQL 自体
       （`MergeSql`）は純粋ロジックであり、既に `desktopTest` 側でカバーされているため。
     - `MergeFailureClassificationDeviceTest.kt` — 例外**クラス**ベースの失敗分類（Android の
       `SQLiteException` は数値エラーコードを持たない。デスクトップの `DatabaseMerger` は JDBC ドライバの
@@ -200,7 +200,7 @@ Android には計装テストスイートが 3 つある。CI に組み込まれ
 
 | スイート | タスク | 対象 | CI |
 | --- | --- | --- | --- |
-| `shared/src/androidDeviceTest/` | `:shared:connectedAndroidDeviceTest` | 実際のバンドル SQLite に対する `DatabaseMerger`/`DatabaseSnapshot` | ✓ ブランチへの push ごと（`android-instrumented-test` ジョブ。下の行と同じエミュレータ上） |
+| `shared/src/androidDeviceTest/` | `:shared:connectedAndroidDeviceTest` | 実際のバンドル SQLite に対する `DatabaseMerger` | ✓ ブランチへの push ごと（`android-instrumented-test` ジョブ。下の行と同じエミュレータ上） |
 | `composeApp/src/androidDeviceTest/` | `:composeApp:connectedAndroidDeviceTest` | 他に置き場のない `androidMain` 専用ロジック（SAF の書き込み、Keystore のトークン保存、同意画面リクエストのスロット） | ✗ ローカルのみ |
 | `androidApp/src/androidTest/` | `:androidApp:connectedGithubDebugAndroidTest` | Compose UI（長押しジェスチャ、検索バー） | ✓ ブランチへの push ごと |
 
@@ -275,7 +275,7 @@ AGP の `build` ライフサイクルは `androidTest` ソースセットに対�
 - AppFont（Linux の UI フォント用 Pango フォント記述のパース）
 - カスタム URI スキーム登録（`UriSchemeRegistration` の OS 別ディスパッチとパッケージ版ランチャー判定、`LinuxUriSchemeRegistrar` の `.desktop` 生成——`%u` フィールドコードを含む——、`mimeapps.list` の非破壊マージ、冪等性）
 - `.opml` ファイル関連付け（`LaunchArg` による OAuth URI と `.opml` パスの分類、`registerWindowsOpmlAssociation` の ProgID レジストリ書き込み、`LinuxOpmlAssociationRegistrar` の `.desktop` 生成——`%f` フィールドコードを含む——、その shared-mime-info パッケージ XML、冪等性、および `OpmlImporter` の追加/失敗件数カウントとフォルダー/タグの照合）
-- FTS（FtsManager/FtsSearch、`indexMissing` の増分投入・非破壊、`rebuildIndex` がテーブル存在を前提とすること、同期アップロードが`VACUUM INTO` スナップショットで `articles_fts` を除外し `user_version` を保全することを含む）
+- FTS（FtsManager/FtsSearch、`indexMissing` の増分投入・非破壊、`rebuildIndex` がテーブル存在を前提とすることを含む）
 - Linux の SNI トレイ（`TrayPixmapTest`＝ビッグエンディアン ARGB32 / RGBA エンコーダーとアルファ保全、`TrayMenuModelTest`＝dbusmenu レイアウト、`TrayMenuRevisionTest`＝revision / `AboutToShow` / イベントディスパッチ、`DBusSignatureTest`＝export した D-Bus シグネチャ）
 - Windows のトレイメニュー（`WindowsTrayMenuTest`＝構築される Swing ウィジェット・ラベル・コールバック・heavyweight ポップアップの強制。置き換え対象の AWT ウィジェットは HiDPI の Windows デスクトップで自身のラベルを重ねて描画してしまう）
 - KDE Global Menu / AppMenu（`AppMenuTreeTest`＝共有メニューツリーモデルの形状／`isMacOs` による省略／有効・チェック状態のミラーリング／任意の「メニューバーを表示」項目、`AppMenuLayoutBuilderTest`＝再帰的な `com.canonical.dbusmenu` レイアウト／プロパティフィルタリング／チェックボックスマッピング／行きがけ順 id の安定性、`AppMenuRevisionTest`＝revision の増分／`AboutToShow`／クリックディスパッチ／重複排除なし、`AppMenuSignatureTest`＝`com.canonical.AppMenu.Registrar` のワイヤーシグネチャ、`MenuBarVisibilityTest`＝AWT キーコードマップ／ショートカット→ノードのマッチャ／表示状態の永続化）

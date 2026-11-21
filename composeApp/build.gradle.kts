@@ -107,7 +107,7 @@ kotlin {
             }
         }
 
-        // Instrumented ("device") tests for DatabaseMerger/DatabaseSnapshot's Android actuals —
+        // Instrumented ("device") tests for DatabaseMerger's Android actual —
         // requery's bundled SQLite is a native library that only loads on a real device/emulator,
         // so these can't run as a plain JVM unit test the way desktopTest does. Opt-in only
         // (disabled by default in AGP 9's KMP library plugin): see docs/testing.md for how to run

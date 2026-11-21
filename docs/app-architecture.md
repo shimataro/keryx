@@ -21,7 +21,7 @@ and the same source-set names, so the tree below is their combined `src/` tree:
 
 | Module | Contents |
 | --- | --- |
-| `:shared` | Everything UI-framework-free: `core/`, `data/`, `domain/`, `presentation/` (the screen state holders every UI shares, e.g. `HomeViewModel`), `LaunchArg.kt`, the SQLDelight schema (`commonMain/sqldelight/`), `di/SharedModule.kt` (`sharedModule`, the optional `updateModule`, and `presentationModule` — the shared screen state holders, included by both `:composeApp`'s `appModule` and the Apple app's `KeryxSdk`) and `di/HttpClientFactory.kt`, the non-Compose `platform/` expects (AppDirs, BrowserOpener, ContentDigest, DatabaseFile, DatabaseMerger, DatabaseSnapshot, FileSystemExtras, Gzip, InstallLocation, NetworkConditionMonitor, PlatformOs, SecureRandom, SelfUpdateCheck, Sha1, Sha256, ZipExtractor) with their desktop/Android/Apple actuals, plus `FileIO` (kotlinx-io, no expect), all of `jvmCommonMain`, and the generated `BuildConfig`/`DesktopBuildConfig`. Must never reference Compose, Compose Resources, AWT/Swing or an Android UI API — a native Apple app consumes it too (see "Apple Native Apps (SwiftUI)"). |
+| `:shared` | Everything UI-framework-free: `core/`, `data/`, `domain/`, `presentation/` (the screen state holders every UI shares, e.g. `HomeViewModel`), `LaunchArg.kt`, the SQLDelight schema (`commonMain/sqldelight/`), `di/SharedModule.kt` (`sharedModule`, the optional `updateModule`, and `presentationModule` — the shared screen state holders, included by both `:composeApp`'s `appModule` and the Apple app's `KeryxSdk`) and `di/HttpClientFactory.kt`, the non-Compose `platform/` expects (AppDirs, BrowserOpener, ContentDigest, DatabaseFile, DatabaseMerger, FileSystemExtras, Gzip, InstallLocation, NetworkConditionMonitor, PlatformOs, SecureRandom, SelfUpdateCheck, Sha1, Sha256, TransportConnections, ZipExtractor) with their desktop/Android/Apple actuals, plus `FileIO` (kotlinx-io, no expect), all of `jvmCommonMain`, and the generated `BuildConfig`/`DesktopBuildConfig`. Must never reference Compose, Compose Resources, AWT/Swing or an Android UI API — a native Apple app consumes it too (see "Apple Native Apps (SwiftUI)"). |
 | `:composeApp` | The Compose UI for desktop and Android: `ui/`, `App.kt`, `di/AppModule.kt` (`appModule` — includes `:shared`'s modules — and `expect val platformModule`), the Compose-typed `platform/` expects, `composeResources/`, and the desktop app shell (`main.kt`, tray, app menu, token storages, in-app update installer, Linux D-Bus). Depends on `:shared` via `api`. |
 | `:androidApp` | The Android application (manifest, `MainActivity`, `KeryxApplication`) — see below. |
 | `:androidGms` | Everything that needs Google Play services: Google Drive on Android (`PlayServicesGoogleDriveAuth.kt`). Its own module so the `fdroid` flavor can omit it — only `:androidApp`'s `github`/`play` flavors depend on it (see below). |
@@ -96,7 +96,7 @@ actuals — see "Apple targets in `:shared`" below.
                   implemented by `settings/CloudSyncController`), DerivedStateFlow (a read-only StateFlow computed from
                   other state flows on every read, so a derived value can never be observed out of step with its
                   inputs — used by HomeViewModel, CloudSyncController and OpmlTransferController). Pane layout/focus/widths stay per UI (`ui/home/HomeLayoutViewModel`)
-    platform/     AppDirs, FileIO (kotlinx-io, no expect), BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, InstallLocation, FileSystemExtras, ZipExtractor,
+    platform/     AppDirs, FileIO (kotlinx-io, no expect), BrowserOpener, FilePicker, DatabaseMerger, TransportConnections, DatabaseFile, InstallLocation, FileSystemExtras, ZipExtractor,
                   BackHandler, ClipboardEntries, ContentDigest, CursorIcons, FileSelector, Gzip, NativeMenu, NativeWebViewAccessibility,
                   NativeWebViewScroll, NativeWebViewScrollbar, NativeWebViewSupport, NativeWebViewVisibility, NetworkConditionMonitor, NotificationPermission, PlatformOs, PlatformScrollbar,
                   ReaderWebViewFactory, SelfUpdateCheck, Sha1, WindowChrome, WindowDragArea (mostly `expect` declarations, though InstallLocation.kt already mixes its
@@ -123,7 +123,7 @@ actuals — see "Apple targets in `:shared`" below.
     AppInfo (just reads the shared generated BuildConfig), FileSystemExtras, ZipExtractor (in-app
     update — see "In-App Update" below), di/CloudPlatformModule.kt (the shared cloud-provider DI
     wiring both platformModules call — cloudSessionSingles, dropboxProvider, oneDriveProvider)
-  desktopMain/kotlin/…/  main.kt (with its startup steps in DesktopStartup, LaunchArgDispatcher, ActivationRequests and MainWindowSupport) + StartupTasks.kt (runStartupTasks/handleOpenedOpmlFile — the desktop-only orchestration; the actual maintenance work, and the periodic loop, both live in commonMain's StartupMaintenanceTasks/BackgroundRefreshLoop) + actual implementations of the `platform/` expects not covered by jvmCommonMain (e.g. AppDirs, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, PlatformModule, InstallLocation, PlatformScrollbar, BackHandler, ClipboardEntries, CursorIcons, NotificationPermission, NativeMenu, SelfUpdateCheck, WindowChrome, and the WebView-hosting set NativeWebViewSupport/NativeWebViewScrollbar/NativeWebViewAccessibility/NativeWebViewVisibility/NativeWebViewScroll/ReaderWebViewFactory — the last two no-ops / the library's default factory there, see "Article Reader" below) + LoopbackRedirectTransport, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage implementation (KeyringTokenStorage/SecurityCliTokenStorage/LibSecretTokenStorage — all three take their outcome-composition logic from commonMain's SecretStoreTokenStorage; SecurityCliTokenStorage does so through its SecurityKeychainStore backend, wrapped in an in-memory cache), DesktopOs (isMacOs/isWindows/isLinux/isSnap/isTouchPrimary=false/hasNativeAppMenu=true/hasSystemTray=true), DesktopLookAndFeel (Swing L&F: FlatLaf on Linux, plus text-antialiasing hint normalization — missing hint, VALUE_TEXT_ANTIALIAS_DEFAULT, and VALUE_TEXT_ANTIALIAS_OFF are resolved to greyscale antialiasing so Swing surfaces do not look jagged next to the Compose-rendered UI), plus package-root, non-`expect`-backed desktop-only classes: IconBadge (Dock/taskbar/window-icon unread digit badge — see external-spec.md §7), MacActivationPolicy (raw `objc_msgSend` calls — see "What a real fix would need" under "macOS: clicking a notification banner does not restore a tray-hidden window" in known-issues.md), WindowStatePersistence, UpdateMenuActions (onUpdateMenuItemClicked — the click handler behind the tray's and the menu bar's update entry), DesktopShell (window raise/focus, Dock icon, and `java.awt.Desktop` handler helpers for main.kt)
+  desktopMain/kotlin/…/  main.kt (with its startup steps in DesktopStartup, LaunchArgDispatcher, ActivationRequests and MainWindowSupport) + StartupTasks.kt (runStartupTasks/handleOpenedOpmlFile — the desktop-only orchestration; the actual maintenance work, and the periodic loop, both live in commonMain's StartupMaintenanceTasks/BackgroundRefreshLoop) + actual implementations of the `platform/` expects not covered by jvmCommonMain (e.g. AppDirs, FilePicker, DatabaseMerger, TransportConnections, DatabaseFile, PlatformModule, InstallLocation, PlatformScrollbar, BackHandler, ClipboardEntries, CursorIcons, NotificationPermission, NativeMenu, SelfUpdateCheck, WindowChrome, and the WebView-hosting set NativeWebViewSupport/NativeWebViewScrollbar/NativeWebViewAccessibility/NativeWebViewVisibility/NativeWebViewScroll/ReaderWebViewFactory — the last two no-ops / the library's default factory there, see "Article Reader" below) + LoopbackRedirectTransport, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage implementation (KeyringTokenStorage/SecurityCliTokenStorage/LibSecretTokenStorage — all three take their outcome-composition logic from commonMain's SecretStoreTokenStorage; SecurityCliTokenStorage does so through its SecurityKeychainStore backend, wrapped in an in-memory cache), DesktopOs (isMacOs/isWindows/isLinux/isSnap/isTouchPrimary=false/hasNativeAppMenu=true/hasSystemTray=true), DesktopLookAndFeel (Swing L&F: FlatLaf on Linux, plus text-antialiasing hint normalization — missing hint, VALUE_TEXT_ANTIALIAS_DEFAULT, and VALUE_TEXT_ANTIALIAS_OFF are resolved to greyscale antialiasing so Swing surfaces do not look jagged next to the Compose-rendered UI), plus package-root, non-`expect`-backed desktop-only classes: IconBadge (Dock/taskbar/window-icon unread digit badge — see external-spec.md §7), MacActivationPolicy (raw `objc_msgSend` calls — see "What a real fix would need" under "macOS: clicking a notification banner does not restore a tray-hidden window" in known-issues.md), WindowStatePersistence, UpdateMenuActions (onUpdateMenuItemClicked — the click handler behind the tray's and the menu bar's update entry), DesktopShell (window raise/focus, Dock icon, and `java.awt.Desktop` handler helpers for main.kt)
     tray/      KeryxTray (platform branch), MacTray, LinuxTray, WindowsTray + the
                StatusNotifierItem/dbusmenu D-Bus objects; TrayActionPolicy (what a tray icon/menu
                click and the update entry do — pure), TrayMenuModel (the tray menu's pure,
@@ -209,7 +209,7 @@ actuals — see "Apple targets in `:shared`" below.
     panel and `TagColorPickerPopup`; necessary, not just idiomatic, since a bare `Popup` there
     would composite behind the article reader's `WebView` the same way a bare Compose overlay does
     on desktop, see "Article Reader" below), KeryxPaneTopBar (a real M3 `TopAppBar` — backs each of
-    the 3 panes' own header row, not a shared app-wide bar), DatabaseMerger/DatabaseSnapshot
+    the 3 panes' own header row, not a shared app-wide bar), DatabaseMerger/TransportConnections
     (real implementations against a dedicated `io.requery.android.database.sqlite.SQLiteDatabase`
     connection — the Android equivalent of the desktop actual's dedicated JDBC connection; see
     "DatabaseMerger" below), AndroidSqliteSupport.kt (`NoOpDatabaseErrorHandler` — the bundled
@@ -248,7 +248,7 @@ actuals — see "Apple targets in `:shared`" below.
     here instead — currently just `drawable/ic_stat_keryx.xml`, the status-bar/notification-dot
     icon `AndroidNotificationSink.kt` posts with (see background-update.md)
   commonTest/ + desktopTest/ + androidDeviceTest/ (instrumented tests for the Android actuals that
-    need a real device/emulator — not just DatabaseMerger/DatabaseSnapshot's bundled-SQLite native
+    need a real device/emulator — not just DatabaseMerger's bundled-SQLite native
     library, but also the Android Keystore (`KeystoreTokenStorageDeviceTest`), the consent-screen
     host (`AndroidAuthorizationHostDeviceTest`), and the Storage
     Access Framework (`FilePickerDeviceTest`); see testing.md)
@@ -367,9 +367,9 @@ than the device's own SQLite: AOSP's SQLite build omits FTS5 entirely, so `artic
 ### FtsManager / FtsSearch
 
 Manages `articles_fts` (FTS5 trigram, `content='articles'`) via raw SQL. Not included in the SQLDelight schema. `FtsSearch.search()` splits terms by length: 3+-character terms run through `articles_fts MATCH` (rank-ordered), while the trigram tokenizer can't index anything shorter, so a 2-character term is applied as a `LIKE` filter instead — an extra AND clause on the MATCH-narrowed rows when at least one long term is present, or (when every term is that short) a standalone `LIKE` scan over `articles` ordered by `published_at DESC` and capped at `SEARCH_FALLBACK_RESULT_LIMIT` (no FTS rank exists to sort by). Highlight markup for both paths is produced in Kotlin (`markTerms`), not via FTS5's `highlight()`, so short LIKE-matched terms get marked consistently with FTS-matched ones. See the `articles_fts` section in [db-schema.md](db-schema.md) for the exact term-length thresholds.
-- **Never DROP the live DB's `articles_fts`** — excluded from upload via `VACUUM INTO` snapshot copy
-  (`DatabaseSnapshot`), dropping it on the copy side, so concurrent searches never hit
-  `no such table`.
+- **Never DROP the live DB's `articles_fts`** — it never leaves the device: transport files are built
+  from the synced tables only (`DeltaExporter`), and the full send's `VACUUM INTO` copy is only read
+  from, so nothing needs dropping and concurrent searches never hit `no such table`.
 - **Hot paths** (feed refresh, sync merge) incrementally index new rows via
   `FtsManager.indexMissing()` — never a full `'rebuild'`, which is O(all indexed text) and would
   block/zero-out concurrent searches.
@@ -440,12 +440,13 @@ connection, opened with `NoOpDatabaseErrorHandler` rather than the library's def
 a database file it judges corrupt — confirmed by disassembling the bundled AAR; see
 `platform/AndroidSqliteSupport.kt`).
 
-The same "policy in commonMain, connection in the actual" split applies to `DatabaseSnapshot`:
-`domain/SnapshotSql` (plain data, like `MergeSql`) is the shared list of cleanup statements run
-against the snapshot copy after `VACUUM INTO`, so both actuals drop the same tables/indexes in the
-same order without re-deriving (and risking drifting) the list independently. Only the connection
-each actual opens the copy through differs (JDBC vs. requery's bundled SQLite), and Android's own
-`android_metadata` table is passed in as an extra drop table rather than hardcoded into the shared list.
+The same "policy in commonMain, connection in the actual" split applies to `DeltaExporter`, which
+builds the transport files this device sends: `domain/DeltaExportSql` (plain data, like `MergeSql`)
+holds every statement a delta or a full send runs — including the full send's `VACUUM INTO` copy —
+so every platform runs the same statements in the same order. Only the connection differs, supplied
+by the `TransportConnections` `expect` (JDBC, requery's bundled SQLite, `RawSqliteConnection`).
+Android's `android_metadata` table, which requery creates on any writable connection, is dropped from
+every transport file by `DeltaExportSql.platformCleanupStatements` rather than special-cased per platform.
 
 ### CloudSession / SyncRepository
 
@@ -461,10 +462,12 @@ access token on disconnect. `PlatformOwned` asks the platform for a fresh access
 and refreshes nothing. `Static` (Nextcloud) hands out never-expiring credentials (an app password) as stored and
 calls the provider's own revoke on disconnect. `CloudSession.serverUrlOf` reads the server an
 app-password provider is connected to, which a Nextcloud reconnect offers again. See "Credential lifecycles" in
-sync-architecture.md. `SyncRepository` implements the download → merge (`DatabaseMerger`)
-→ incremental index of new articles (`indexMissing`) → `VACUUM INTO` snapshot generation
-(`DatabaseSnapshot`, excludes `articles_fts` on the copy side) → upload (rev check) flow, along
-with debouncing (`SyncScheduler`). The live DB's FTS is untouched. `SyncRepository`'s `localDbPath`
+sync-architecture.md. `SyncRepository` owns scheduling, the gates and the
+user-facing state, along with debouncing (`SyncScheduler`), and runs the flow itself through `DeltaSync`:
+read the pointer → list → receive (merge each delta and base with `DatabaseMerger`, then recompute pending
+`search_text` and index new articles with `indexMissing`) → send (`DeltaExporter` writes a delta from the
+outbox, or a full send from a `VACUUM INTO` copy) → fold and collect garbage — see "Sync Flow" in
+sync-architecture.md. Transport files carry the synced tables only, so the live DB's FTS is untouched. `SyncRepository`'s `localDbPath`
 defaults to `platform/DatabaseFile.kt`'s `databaseFilePath()`, the single `expect` function that
 resolves the live DB's real path per platform (see `db-schema.md`).
 
@@ -1714,7 +1717,7 @@ The Apple actuals use system libraries only: CommonCrypto (SHA-1/SHA-256), Secur
 bytes, Keychain), zlib (gzip), Foundation/POSIX (files), AppKit/UIKit (open a URL), and the system
 sqlite3 — through SQLDelight's `NativeSqliteDriver` for the app database, and
 `platform/RawSqliteConnection.kt` (SQLiter's sqlite3 bindings) for the ATTACH merge and the
-`VACUUM INTO` snapshot, which need one dedicated connection. **No bundled SQLite**: FTS5 with the
+transport files (including the full send's `VACUUM INTO` copy), which need one dedicated connection. **No bundled SQLite**: FTS5 with the
 trigram tokenizer and `VACUUM INTO` are present in the system SQLite from macOS 14 / iOS 17
 (3.43), verified by `appleTest` on macOS and the iOS simulator. Tokens go to the Data
 Protection Keychain (`data/cloud/KeychainTokenStorage.kt`; readable after first unlock, no

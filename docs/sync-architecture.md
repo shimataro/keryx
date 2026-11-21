@@ -7,7 +7,7 @@ Target: cloud sync (Dropbox / OneDrive / Google Drive / Nextcloud). Implementati
 `domain/TransportCoverage.kt` (what a base covers, the base cache, the recorded send), `domain/LegacyCloudFile.kt` (the
 pre-delta migration and the legacy watch), `domain/MergeSql.kt`,
 `domain/ReduceSql.kt`, `domain/TransportSchema.kt`, `domain/MergeFailureClassifier.kt`, `domain/MergeSchema.kt`,
-`domain/SnapshotSql.kt`, `platform/DatabaseMerger`, `platform/DeltaExporter`, `platform/TransportFiles`.
+`domain/DeltaExportSql.kt`, `platform/DatabaseMerger`, `platform/DeltaExporter`, `platform/TransportFiles`.
 
 ## Design Philosophy
 

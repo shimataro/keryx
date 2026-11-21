@@ -11,19 +11,17 @@ import works.merc.keryx.app.data.local.FtsManager
 import works.merc.keryx.app.data.local.FtsSearch
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.domain.MergeSql
-import works.merc.keryx.app.domain.SnapshotSql
 import works.merc.keryx.app.tempFilePath
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
-import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
  * The Apple database stack against the real system sqlite3: the NativeSqliteDriver setup, FTS5 with
- * the trigram tokenizer, the VACUUM INTO snapshot and the ATTACH-DATABASE merge — the pieces the
+ * the trigram tokenizer and the ATTACH-DATABASE merge — the pieces the
  * JVM tests cover through JDBC. Everything lives in a throwaway directory; nothing here touches
  * [AppDirs.appDataDir].
  */
@@ -112,28 +110,6 @@ class AppleDatabaseTest {
     }
 
     @Test
-    fun theUploadSnapshotLeavesOutTheLocalOnlyTables() = runTest {
-        val driver = open("local.db")
-        FtsManager(driver).ensureIndexed()
-        driver.close()
-        drivers -= driver
-
-        DatabaseSnapshot.exportForUpload(path("local.db"), path("snapshot.db"))
-
-        val tables = RawSqliteConnection.open(path("snapshot.db")).use {
-            it.queryColumn("SELECT name FROM sqlite_master WHERE type = 'table'", "name")
-        }
-        assertTrue("feeds" in tables)
-        assertFalse("articles_fts" in tables)
-        assertFalse("sync_state" in tables)
-        for (deviceLocal in SnapshotSql.DEVICE_LOCAL_TABLES) assertFalse(deviceLocal in tables, deviceLocal)
-        val triggers = RawSqliteConnection.open(path("snapshot.db")).use {
-            it.queryColumn("SELECT name FROM sqlite_master WHERE type = 'trigger'", "name")
-        }
-        assertTrue(triggers.isEmpty(), "capture triggers must not reach the upload: $triggers")
-    }
-
-    @Test
     fun theMergeBringsInCloudOnlyRows() {
         val local = open("main.db")
         val cloud = open("cloud.db")
@@ -173,8 +149,8 @@ class AppleDatabaseTest {
         cloud.close()
         drivers -= cloud
         RawSqliteConnection.open(path(name)).use { db ->
-            SnapshotSql.CAPTURE_TRIGGERS.forEach { db.exec("DROP TRIGGER $it") }
-            SnapshotSql.DEVICE_LOCAL_TABLES.filter { it != "sync_state" }.forEach { db.exec("DROP TABLE $it") }
+            VERSION_3_TRIGGERS.forEach { db.exec("DROP TRIGGER $it") }
+            VERSION_3_TABLES.forEach { db.exec("DROP TABLE $it") }
             db.exec("ALTER TABLE feeds ADD COLUMN etag TEXT")
             db.exec("ALTER TABLE feeds ADD COLUMN last_modified TEXT")
             db.exec("ALTER TABLE feeds ADD COLUMN error_count INTEGER NOT NULL DEFAULT 0")
@@ -505,6 +481,16 @@ class AppleDatabaseTest {
     }
 
     private companion object {
+        /** The tables `2.sqm` creates (schema version 3), dropped to roll a file back to version 1. */
+        val VERSION_3_TABLES = listOf(
+            "feed_fetch_state", "sync_outbox", "sync_capture", "sync_merging", "sync_applied", "sync_cursor", "ks_search_pending",
+            "ks_feed_folder_raw",
+        )
+
+        /** The capture triggers `2.sqm` creates, dropped before the tables they write to. */
+        val VERSION_3_TRIGGERS = listOf("feeds", "articles", "tags", "folders", "feed_tags", "global_settings")
+            .flatMap { listOf("ks_capture_${it}_insert", "ks_capture_${it}_update") }
+
         /** Copies every cloud folder without MergeSql's guards, so a shared id hits the PRIMARY KEY. */
         const val UNGUARDED_FOLDER_INSERT =
             "INSERT INTO main.folders (id, name, sort_order, deleted_at, updated_at, created_at) " +

@@ -2,7 +2,7 @@ package works.merc.keryx.app.platform
 
 /**
  * Resolves the absolute path of the live `keryx.db` file — the file [DatabaseMerger] and
- * [DatabaseSnapshot] operate on directly (both work by path, not through the SQLDelight driver;
+ * [DeltaExporter] operate on directly (both work by path, not through the SQLDelight driver;
  * see their own KDoc for why).
  *
  * This is deliberately not [AppDirs.appDataDir] plus [works.merc.keryx.app.core.DB_FILE_NAME]:
@@ -12,6 +12,6 @@ package works.merc.keryx.app.platform
  * directory than `AppDirs.appDataDir()` (`Context.filesDir`, i.e. `<dataDir>/files`). Composing
  * the two paths independently is exactly the bug this `expect` exists to prevent: before it
  * existed, `SyncRepository`'s default `localDbPath` silently pointed at a file the driver had
- * never created, so a merge/snapshot would have operated on a nonexistent path.
+ * never created, so a merge or export would have operated on a nonexistent path.
  */
 expect fun databaseFilePath(): String

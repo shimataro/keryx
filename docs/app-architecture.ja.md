@@ -19,7 +19,7 @@
 
 | モジュール | 内容 |
 | --- | --- |
-| `:shared` | UI フレームワークに依存しないものすべて：`core/`・`data/`・`domain/`・`presentation/`（すべての UI が共有する画面の state holder。例：`HomeViewModel`）・`LaunchArg.kt`、SQLDelight スキーマ（`commonMain/sqldelight/`）、`di/SharedModule.kt`（`sharedModule`、任意の `updateModule`、および `presentationModule`——共有の画面 state holder。`:composeApp` の `appModule` と Apple アプリの `KeryxSdk` の両方が組み込む）と `di/HttpClientFactory.kt`、Compose に依存しない `platform/` の expect（AppDirs, BrowserOpener, ContentDigest, DatabaseFile, DatabaseMerger, DatabaseSnapshot, FileSystemExtras, Gzip, InstallLocation, NetworkConditionMonitor, PlatformOs, SecureRandom, SelfUpdateCheck, Sha1, Sha256, ZipExtractor）とその desktop/Android/Apple の actual、および `FileIO`（kotlinx-io 実装。expect なし）、`jvmCommonMain` のすべて、生成される `BuildConfig`/`DesktopBuildConfig`。Compose・Compose Resources・AWT/Swing・Android の UI API を参照してはならない——ネイティブ Apple アプリもこれを利用する（「Apple ネイティブアプリ（SwiftUI）」参照）。 |
+| `:shared` | UI フレームワークに依存しないものすべて：`core/`・`data/`・`domain/`・`presentation/`（すべての UI が共有する画面の state holder。例：`HomeViewModel`）・`LaunchArg.kt`、SQLDelight スキーマ（`commonMain/sqldelight/`）、`di/SharedModule.kt`（`sharedModule`、任意の `updateModule`、および `presentationModule`——共有の画面 state holder。`:composeApp` の `appModule` と Apple アプリの `KeryxSdk` の両方が組み込む）と `di/HttpClientFactory.kt`、Compose に依存しない `platform/` の expect（AppDirs, BrowserOpener, ContentDigest, DatabaseFile, DatabaseMerger, FileSystemExtras, Gzip, InstallLocation, NetworkConditionMonitor, PlatformOs, SecureRandom, SelfUpdateCheck, Sha1, Sha256, TransportConnections, ZipExtractor）とその desktop/Android/Apple の actual、および `FileIO`（kotlinx-io 実装。expect なし）、`jvmCommonMain` のすべて、生成される `BuildConfig`/`DesktopBuildConfig`。Compose・Compose Resources・AWT/Swing・Android の UI API を参照してはならない——ネイティブ Apple アプリもこれを利用する（「Apple ネイティブアプリ（SwiftUI）」参照）。 |
 | `:composeApp` | desktop と Android 向けの Compose UI：`ui/`、`App.kt`、`di/AppModule.kt`（`:shared` のモジュールを取り込む `appModule` と `expect val platformModule`）、Compose の型を使う `platform/` の expect、`composeResources/`、desktop アプリの外殻（`main.kt`、トレイ、アプリメニュー、トークンストレージ、アプリ内アップデートのインストーラ、Linux D-Bus）。`:shared` に `api` で依存する。 |
 | `:androidApp` | Android アプリケーション（マニフェスト、`MainActivity`、`KeryxApplication`）——下記参照。 |
 | `:androidGms` | Google Play 開発者サービスに依存するものすべて —— Android の Google Drive（`PlayServicesGoogleDriveAuth.kt`、`PlayServicesGoogleDriveBackend`）。`fdroid` flavor がこれを外せるよう独立したモジュールにしてある。依存するのは `:androidApp` の `github` と `play` flavor だけ —— 下記参照。 |
@@ -85,7 +85,7 @@
                   StateFlow。入力とずれた値が観測されることがない。HomeViewModel・CloudSyncController・OpmlTransferController が使う）。
                   ペイン構成・フォーカス・幅は UI ごと
                   （`ui/home/HomeLayoutViewModel`）
-    platform/     AppDirs, FileIO（kotlinx-io 実装。expect なし）, BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, InstallLocation, FileSystemExtras, ZipExtractor,
+    platform/     AppDirs, FileIO（kotlinx-io 実装。expect なし）, BrowserOpener, FilePicker, DatabaseMerger, TransportConnections, DatabaseFile, InstallLocation, FileSystemExtras, ZipExtractor,
                   BackHandler, ClipboardEntries, ContentDigest, CursorIcons, FileSelector, Gzip, NativeMenu, NativeWebViewAccessibility,
                   NativeWebViewScroll, NativeWebViewScrollbar, NativeWebViewSupport, NativeWebViewVisibility, NetworkConditionMonitor, NotificationPermission, PlatformOs, PlatformScrollbar,
                   ReaderWebViewFactory, SelfUpdateCheck, Sha1, WindowChrome, WindowDragArea（大半が expect 宣言。InstallLocation.kt は既に唯一の `expect fun` をプレーンなデータ型と同居させている——下記「Android」の `ScrollIndicatorOverlay.kt`／`ScrollIndicatorGeometry.kt` も参照。こちらは同じディレクトリに置かれているだけの、自身の expect を持たないプラットフォーム非依存の共有 Compose コード）
@@ -111,7 +111,7 @@
     ZipExtractor（アプリ内アップデート——下記「アプリ内アップデート」参照）,
     di/CloudPlatformModule.kt（両プラットフォームの platformModule が呼ぶ共有クラウドプロバイダー DI 配線
     ——cloudSessionSingles, dropboxProvider, oneDriveProvider）
-  desktopMain/kotlin/…/  main.kt（起動処理の各段階は DesktopStartup・LaunchArgDispatcher・ActivationRequests・MainWindowSupport に分けてある）+ StartupTasks.kt（runStartupTasks/handleOpenedOpmlFile というデスクトップ固有のオーケストレーションのみ。実際のメンテナンス処理と定期ループはどちらも commonMain の StartupMaintenanceTasks/BackgroundRefreshLoop にある）+ jvmCommonMain がカバーしない `platform/` expect の actual（例: AppDirs, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, PlatformModule, InstallLocation, PlatformScrollbar, BackHandler, ClipboardEntries, CursorIcons, NotificationPermission, NativeMenu, SelfUpdateCheck, WindowChrome、および WebView をホストする一群 NativeWebViewSupport/NativeWebViewScrollbar/NativeWebViewAccessibility/NativeWebViewVisibility/NativeWebViewScroll/ReaderWebViewFactory。最後の 2 つはデスクトップでは何もしない／ライブラリ既定の factory を使う。下記「Article Reader」を参照）+ LoopbackRedirectTransport, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage 実装（KeyringTokenStorage/SecurityCliTokenStorage/LibSecretTokenStorage——3つとも commonMain の SecretStoreTokenStorage の outcome 合成ロジックを使う。SecurityCliTokenStorage は、そのバックエンド SecurityKeychainStore をメモリ内キャッシュで包む形で使う）, DesktopOs（isMacOs/isWindows/isLinux/isSnap/isTouchPrimary=false/hasNativeAppMenu=true/hasSystemTray=true）, DesktopLookAndFeel（Swing L&F: Linux は FlatLaf。テキストアンチエイリアスヒントの正規化も担う——hint が存在しない場合、DEFAULT、OFF のいずれでもグレースケールアンチエイリアスに解決され、Swing 面のテキストが Compose 描画部と並んだ際にジャギーにならない）。さらに、`expect` を持たないパッケージルート直下のデスクトップ専用クラスとして: IconBadge（Dock/タスクバー/ウインドウアイコンの未読件数バッジ——external-spec.ja.md §7 参照）、MacActivationPolicy（生の `objc_msgSend` 呼び出し——known-issues.ja.md の「macOS: 通知バナーをクリックしてもトレイに収納中のウインドウが復元されない」内「本当の修正に必要なこと」参照）、WindowStatePersistence、UpdateMenuActions（onUpdateMenuItemClicked——トレイとメニューバーの更新項目に共通のクリックハンドラ）、DesktopShell（main.kt が使うウインドウの前面化・フォーカス、Dock アイコン、`java.awt.Desktop` ハンドラの補助関数）
+  desktopMain/kotlin/…/  main.kt（起動処理の各段階は DesktopStartup・LaunchArgDispatcher・ActivationRequests・MainWindowSupport に分けてある）+ StartupTasks.kt（runStartupTasks/handleOpenedOpmlFile というデスクトップ固有のオーケストレーションのみ。実際のメンテナンス処理と定期ループはどちらも commonMain の StartupMaintenanceTasks/BackgroundRefreshLoop にある）+ jvmCommonMain がカバーしない `platform/` expect の actual（例: AppDirs, FilePicker, DatabaseMerger, TransportConnections, DatabaseFile, PlatformModule, InstallLocation, PlatformScrollbar, BackHandler, ClipboardEntries, CursorIcons, NotificationPermission, NativeMenu, SelfUpdateCheck, WindowChrome、および WebView をホストする一群 NativeWebViewSupport/NativeWebViewScrollbar/NativeWebViewAccessibility/NativeWebViewVisibility/NativeWebViewScroll/ReaderWebViewFactory。最後の 2 つはデスクトップでは何もしない／ライブラリ既定の factory を使う。下記「Article Reader」を参照）+ LoopbackRedirectTransport, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage 実装（KeyringTokenStorage/SecurityCliTokenStorage/LibSecretTokenStorage——3つとも commonMain の SecretStoreTokenStorage の outcome 合成ロジックを使う。SecurityCliTokenStorage は、そのバックエンド SecurityKeychainStore をメモリ内キャッシュで包む形で使う）, DesktopOs（isMacOs/isWindows/isLinux/isSnap/isTouchPrimary=false/hasNativeAppMenu=true/hasSystemTray=true）, DesktopLookAndFeel（Swing L&F: Linux は FlatLaf。テキストアンチエイリアスヒントの正規化も担う——hint が存在しない場合、DEFAULT、OFF のいずれでもグレースケールアンチエイリアスに解決され、Swing 面のテキストが Compose 描画部と並んだ際にジャギーにならない）。さらに、`expect` を持たないパッケージルート直下のデスクトップ専用クラスとして: IconBadge（Dock/タスクバー/ウインドウアイコンの未読件数バッジ——external-spec.ja.md §7 参照）、MacActivationPolicy（生の `objc_msgSend` 呼び出し——known-issues.ja.md の「macOS: 通知バナーをクリックしてもトレイに収納中のウインドウが復元されない」内「本当の修正に必要なこと」参照）、WindowStatePersistence、UpdateMenuActions（onUpdateMenuItemClicked——トレイとメニューバーの更新項目に共通のクリックハンドラ）、DesktopShell（main.kt が使うウインドウの前面化・フォーカス、Dock アイコン、`java.awt.Desktop` ハンドラの補助関数）
     tray/      KeryxTray（プラットフォーム分岐）, MacTray, LinuxTray, WindowsTray +
                StatusNotifierItem/dbusmenu の D-Bus オブジェクト、TrayActionPolicy（トレイのアイコン/
                メニューのクリックと更新項目が何をするかの純粋な判定）、TrayMenuModel（トレイメニューの
@@ -197,7 +197,7 @@
     `WebView` の背後に隠れてしまう。下記「Article Reader」参照）, KeryxPaneTopBar（本物の M3
     `TopAppBar` — 3ペインそれぞれ自身のヘッダー行を支え、アプリ全体で共有される単一のバーでは
     ない）,
-    DatabaseMerger/DatabaseSnapshot（専用の `io.requery.android.database.sqlite.SQLiteDatabase`
+    DatabaseMerger/TransportConnections（専用の `io.requery.android.database.sqlite.SQLiteDatabase`
     接続に対する実装 — デスクトップ実装の専用 JDBC 接続に相当。下記「DatabaseMerger」参照）,
     AndroidSqliteSupport.kt（`NoOpDatabaseErrorHandler` — バンドル SQLite の既定ハンドラは破損と
     判定した DB ファイルを削除する。AAR の逆アセンブルで確認済み。加えて両者が共有する
@@ -234,7 +234,7 @@
     — 現状は `drawable/ic_stat_keryx.xml`（`AndroidNotificationSink.kt` が投稿するステータスバー/
     通知ドットのアイコン。background-update.ja.md 参照）のみ
   commonTest/ + desktopTest/ + androidDeviceTest/（実機/エミュレータが必要な Android 実装向け計装テスト
-    — DatabaseMerger/DatabaseSnapshot のバンドル SQLite ネイティブライブラリだけでなく、Android Keystore
+    — DatabaseMerger のバンドル SQLite ネイティブライブラリだけでなく、Android Keystore
     （`KeystoreTokenStorageDeviceTest`）、同意画面のホスト（`AndroidAuthorizationHostDeviceTest`）、
     Storage Access Framework（`FilePickerDeviceTest`）も含む。
     testing.ja.md 参照）
@@ -350,9 +350,9 @@ Android の `actual` は `AndroidSqliteDriver` を生成する。こちらは `o
 ### FtsManager / FtsSearch
 
 `articles_fts`（FTS5 trigram, `content='articles'`）を生 SQL で管理する。SQLDelight のスキーマには含めない。
-- **ライブ DB の `articles_fts` は決して DROP しない** — アップロードからの除外はスナップショットの
-  コピー側（`DatabaseSnapshot`）で `VACUUM INTO` により行うため、実行中の検索が `no such table` に
-  当たることはない。
+- **ライブ DB の `articles_fts` は決して DROP しない** — 索引は端末から出ない：転送ファイルは同期対象の
+  テーブルだけから作り（`DeltaExporter`）、全量送信の `VACUUM INTO` コピーは読み取りにしか使わないので、
+  どこでも DROP する必要がなく、実行中の検索が `no such table` に当たることはない。
 - **Hot path**（フィード更新・同期マージ後）は `FtsManager.indexMissing()` で新規行のみを増分投入する
   — 全体を索引し直す `'rebuild'` は `O(索引済みテキスト全体)` で重く、実行中の検索をブロック/0件化
   しうるため決して使わない。
@@ -429,12 +429,12 @@ ATTACH DATABASE マージは**専用の JDBC コネクション 1 本**で行う
 判定した DB ファイルを削除する — バンドル AAR の逆アセンブルで確認済み。`platform/AndroidSqliteSupport.kt`
 参照）。
 
-`DatabaseSnapshot` にも同じ「ロジックは commonMain、コネクションは actual」という分割が当てはまる:
-`domain/SnapshotSql`（`MergeSql` と同様、純粋なデータ）が、`VACUUM INTO` 後にスナップショットのコピー側へ
-実行するクリーンアップ文の共有リストであり、両 actual が同じテーブル/インデックスを同じ順序で DROP する
-ため、個別に再導出して乖離するリスクがない。異なるのはコピーを開くコネクション（JDBC か requery のバンドル
-SQLite か）だけで、Android 固有の `android_metadata` テーブルは共有リストにハードコードせず、追加の
-drop テーブルとして渡している。
+この端末が送る転送ファイルを作る `DeltaExporter` にも同じ「ロジックは commonMain、コネクションは actual」
+という分割が当てはまる: `domain/DeltaExportSql`（`MergeSql` と同様、純粋なデータ）が、差分と全量送信が実行する
+すべての文（全量送信の `VACUUM INTO` コピーを含む）を持つので、どのプラットフォームも同じ文を同じ順序で実行する。
+異なるのはコネクションだけで、`TransportConnections` の `expect` が供給する（JDBC、requery のバンドル SQLite、
+`RawSqliteConnection`）。requery が書き込み可能なコネクションで作る Android の `android_metadata` テーブルは、
+プラットフォームごとに特別扱いせず、`DeltaExportSql.platformCleanupStatements` がすべての転送ファイルから DROP する。
 
 ### CloudSession / SyncRepository
 
@@ -449,9 +449,12 @@ drop テーブルとして渡している。
 （アプリパスワード）を保存したまま渡し、切断時にプロバイダー自身の失効処理を呼ぶ。`CloudSession.serverUrlOf` はアプリパスワード
 方式のプロバイダーの接続先サーバーを読み、Nextcloud の再接続はそれを初期値として示す。
 sync-architecture.ja.md の「認証情報のライフサイクル」参照。
-`SyncRepository` はダウンロード → マージ（`DatabaseMerger`）→ 新記事の増分索引（`indexMissing`）→
-`VACUUM INTO` スナップショット生成（`DatabaseSnapshot`、コピー側で `articles_fts` を除外）→ アップロード
-（rev チェック）、のフローとデバウンス（`SyncScheduler`）を実装する。ライブ DB の FTS は触らない。
+`SyncRepository` はスケジュール、ゲート、ユーザーに見せる状態とデバウンス（`SyncScheduler`）を受け持ち、
+フロー自体は `DeltaSync` で実行する：ポインタの読み取り → 一覧 → 受信（各差分とベースを `DatabaseMerger` で
+マージし、保留中の `search_text` を再計算してから新記事を `indexMissing` で索引）→ 送信（`DeltaExporter` が
+outbox から差分を、または `VACUUM INTO` コピーから全量送信を書き出す）→ 畳み込みとガベージコレクション
+——sync-architecture.ja.md の「同期フロー」参照。転送ファイルは同期対象のテーブルだけを運ぶので、ライブ DB の
+FTS は触らない。
 `SyncRepository` の `localDbPath` の既定値は `platform/DatabaseFile.kt` の `databaseFilePath()`
 — プラットフォームごとにライブ DB の実パスを解決する唯一の `expect` 関数（db-schema.ja.md 参照）。
 
@@ -1647,7 +1650,7 @@ Kotlin のデフォルト階層テンプレートを無効にするため）：`
 
 Apple の actual はシステムライブラリだけを使う：CommonCrypto（SHA-1/SHA-256）、Security（乱数、Keychain）、zlib（gzip）、
 Foundation/POSIX（ファイル）、AppKit/UIKit（URL を開く）、そしてシステムの sqlite3——アプリの DB には SQLDelight の
-`NativeSqliteDriver`、専用コネクションが必要な ATTACH マージと `VACUUM INTO` スナップショットには
+`NativeSqliteDriver`、専用コネクションが必要な ATTACH マージと転送ファイル（全量送信の `VACUUM INTO` コピーを含む）には
 `platform/RawSqliteConnection.kt`（SQLiter の sqlite3 バインディング）を使う。**SQLite は同梱しない**：trigram トークナイザ付きの
 FTS5 と `VACUUM INTO` は macOS 14 / iOS 17（3.43）以降のシステム SQLite に含まれ、macOS と iOS シミュレータ上の `appleTest` で
 確認している。トークンは Data Protection Keychain に保存する（`data/cloud/KeychainTokenStorage.kt`。初回ロック解除後に

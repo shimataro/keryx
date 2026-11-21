@@ -607,9 +607,8 @@ jobs:
           # the REQUEST_INSTALL_PACKAGES manifest permission). There's no "play" debug variant to
           # fall back to either way: build.gradle.kts disables playDebug entirely, so
           # connectedAndroidTest (no flavor) now runs only githubDebug, same as this explicit task.
-          # :shared:connectedAndroidDeviceTest runs on the same emulator: DatabaseMerger/
-          # DatabaseSnapshot against the real bundled SQLite (see docs/testing.md's instrumented-
-          # suite table). It was previously "local only". :composeApp's own androidDeviceTest
+          # :shared:connectedAndroidDeviceTest runs on the same emulator: DatabaseMerger against
+          # the real bundled SQLite (see docs/testing.md's instrumented-suite table). It was previously "local only". :composeApp's own androidDeviceTest
           # suite (SAF writes, Keystore token storage, Play services token-scope checks) is left
           # out of this change — bringing it into CI too is a separate follow-up.
           script: ./gradlew :androidApp:connectedGithubDebugAndroidTest :shared:connectedAndroidDeviceTest --no-configuration-cache
