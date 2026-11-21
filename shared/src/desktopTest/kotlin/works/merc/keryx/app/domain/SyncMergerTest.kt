@@ -217,7 +217,7 @@ class SyncMergerTest {
     }
 
     @Test
-    fun articleContentOrMergesOnConflictAndRecomputesSearchText() {
+    fun articleContentOrMergesOnConflictAndRegistersItsSearchText() {
         val (cloudFile, cloudDriver, cloudDb) = fileDb()
         cloudDb.insertFeed("f1", now = 100)
         insertArticle(cloudDb, "a1", "f1", "g1", isRead = 0, readAt = null, updatedAt = 100, content = "cloud body")
@@ -233,7 +233,10 @@ class SyncMergerTest {
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         val merged = verifyDb.articlesQueries.getById("a1").executeAsOne()
         assertEquals("cloud body", merged.content)
-        assertEquals("cloud body", merged.search_text)
+        // search_text is never merged: the body changed, so the article is registered for
+        // recomputation and keeps its old text until then.
+        assertEquals("local summary", merged.search_text)
+        assertEquals(setOf("a1"), searchPendingIds(localFile))
         verifyDriver.close()
     }
 
@@ -498,9 +501,10 @@ class SyncMergerTest {
     }
 
     @Test
-    fun feedSortOrderUntouchedWhenNoReorderEvent() {
-        // Cloud's sort_order differs but has no reorder event (sort_order_updated_at NULL, e.g. only
-        // ever refreshed): the local order must not be disturbed.
+    fun feedSortOrderWithNoReorderEventOnEitherSideIsDecidedByValue() {
+        // Neither side has a reorder event (sort_order_updated_at NULL on both, e.g. a legacy row):
+        // the stamps tie, so the values decide (5 > 1) — whichever side holds which, every device
+        // ends with the same order.
         val (cloudFile, cloudDriver, cloudDb) = fileDb()
         cloudDb.insertFeed("f1", now = 300, sortOrder = 5L) // no updateSortOrder -> sort_order_updated_at NULL
         cloudDriver.close()
@@ -512,7 +516,7 @@ class SyncMergerTest {
         DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
-        assertEquals(1L, verifyDb.feedsQueries.getById("f1").executeAsOne().sort_order)
+        assertEquals(5L, verifyDb.feedsQueries.getById("f1").executeAsOne().sort_order)
         verifyDriver.close()
     }
 
@@ -878,10 +882,11 @@ class SyncMergerTest {
     }
 
     @Test
-    fun mergeThrowsCloudDataIncompatibleForDuplicateUniqueKeys() {
-        // Two cloud feeds rows share a url — only possible because this fixture's feeds table
-        // (unlike main's real schema) has no UNIQUE(url). MergeSql's NOT EXISTS guards only rule
-        // out collisions against *main*'s rows, so this reaches SQLite's UNIQUE check unguarded.
+    fun duplicateUniqueKeysInsideCloudMergeOnlyTheirWinner() {
+        // Two cloud feeds rows share a url — possible because this fixture's feeds table (unlike
+        // main's real schema) has no UNIQUE(url), as in a folded transport file. MergeSql considers
+        // only the winner among them (greatest updated_at, then greatest id: f-dup-2 at a tie), so
+        // the merge never reaches SQLite's UNIQUE check.
         val cloudFile = java.io.File.createTempFile("dup-url", ".db")
         java.sql.DriverManager.getConnection("jdbc:sqlite:${cloudFile.absolutePath}").use { conn ->
             conn.createStatement().use { st ->
@@ -923,10 +928,13 @@ class SyncMergerTest {
         val (localFile, localDriver, _) = fileDb()
         localDriver.close()
 
-        assertFailsWith<CloudDataIncompatibleException> {
-            DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, KeryxDatabase.Schema.version, MergeSql.all)
-        }
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, KeryxDatabase.Schema.version, MergeSql.all)
         cloudFile.delete()
+
+        val (_, verifyDriver, verifyDb) = reopen(localFile)
+        assertNotNull(verifyDb.feedsQueries.getById("f-dup-2").executeAsOneOrNull())
+        assertNull(verifyDb.feedsQueries.getById("f-dup-1").executeAsOneOrNull())
+        verifyDriver.close()
     }
 
     @Test
@@ -936,6 +944,9 @@ class SyncMergerTest {
         // DB produces a genuine SQLITE_CORRUPT once SQLite reads the damaged page.
         val (cloudFile, cloudDriver, cloudDb) = fileDb()
         cloudDb.insertFeed("f1", now = 0)
+        // A row on the corrupted page (the articles table's root): an empty table whose index is
+        // intact is never read, so its corruption would go unnoticed.
+        insertArticle(cloudDb, "a1", "f1", "g1", isRead = 0, readAt = null, updatedAt = 0)
         cloudDriver.close()
         val bytes = cloudFile.readBytes().copyOf()
         for (i in 4096 until minOf(bytes.size, 8192)) {
@@ -1223,10 +1234,10 @@ class SyncMergerTest {
     }
 
     @Test
-    fun searchTextPropagatesPlainTextForImportedCloudArticle() {
-        // Production stores search_text as HTML-stripped plain text while content keeps raw HTML.
-        // The merge must propagate that plain-text search_text, NOT re-derive it from raw content
-        // (which would reintroduce searchable tag names/attributes).
+    fun importedCloudArticleStartsWithoutSearchTextAndIsRegistered() {
+        // search_text is not synced (a transport file has no such column): a new article starts with
+        // '' and is registered in ks_search_pending, so the receiver computes its plain text itself
+        // rather than taking (or re-deriving from raw HTML) anything from the cloud.
         val (cloudFile, cloudDriver, cloudDb) = fileDb()
         cloudDb.insertFeed("f1", now = 100)
         insertArticle(
@@ -1242,15 +1253,15 @@ class SyncMergerTest {
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         val merged = verifyDb.articlesQueries.getById("a1").executeAsOne()
-        assertEquals("Kotlin rocks", merged.search_text)
-        assertFalse(merged.search_text.contains("div"))
+        assertEquals("", merged.search_text)
+        assertEquals(setOf("a1"), searchPendingIds(localFile))
         verifyDriver.close()
     }
 
     @Test
-    fun searchTextStaysPlainTextOnConflictUpdateFromCloud() {
-        // Cloud wins the OR-merge for content; merged search_text must be cloud's plain text,
-        // not a re-derivation from the raw HTML content.
+    fun bodyChangedByTheMergeIsRegisteredForItsSearchText() {
+        // Cloud wins the body; search_text is not merged, so the old plain text stays until the
+        // receiver recomputes it — never a re-derivation from the raw HTML content in the merge.
         val (cloudFile, cloudDriver, cloudDb) = fileDb()
         cloudDb.insertFeed("f1", now = 100)
         insertArticle(
@@ -1271,16 +1282,17 @@ class SyncMergerTest {
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         val merged = verifyDb.articlesQueries.getById("a1").executeAsOne()
-        assertEquals("new body", merged.search_text)
-        assertFalse(merged.search_text.contains("<p>"))
+        assertEquals("<p>new body</p>", merged.content)
+        assertEquals("old body", merged.search_text)
+        assertEquals(setOf("a1"), searchPendingIds(localFile))
         verifyDriver.close()
     }
 
     @Test
-    fun searchTextTracksWinningBodySourceOnMixedSources() {
-        // Mixed sources: cloud has only a summary, local has full content. The OR-merge keeps the
-        // local content as the displayed body, so search_text must follow that same source (local),
-        // NOT the cloud summary — otherwise FTS would index text the user never sees.
+    fun contentIsKeptOverANewerSummaryAndItsSearchTextStays() {
+        // Mixed sources: cloud has only a (newer) summary, local has full content. The OR-merge keeps
+        // the local content — a version with content outranks one without — so nothing changes and
+        // nothing needs its search_text recomputed.
         val (cloudFile, cloudDriver, cloudDb) = fileDb()
         cloudDb.insertFeed("f1", now = 100)
         insertArticle(
@@ -1303,12 +1315,14 @@ class SyncMergerTest {
         val merged = verifyDb.articlesQueries.getById("a1").executeAsOne()
         assertEquals("<p>local body</p>", merged.content)
         assertEquals("local body", merged.search_text)
+        assertEquals(emptySet(), searchPendingIds(localFile))
         verifyDriver.close()
     }
 
-    // ---- Ties: equal timestamps, different values. The cloud side wins every tie in every
-    // last-write-wins statement, so two devices that stamped different values in the same
-    // millisecond converge instead of each keeping (and re-uploading) its own. ----
+    // ---- Ties: equal timestamps, different values. Every last-write-wins statement decides a tie
+    // by the values (the greater normalized value wins, SyncLww), never by the side, so devices that
+    // merge the same files in different orders converge. Each fixture puts the greater value on a
+    // known side; "Local name" > "Cloud name", "https://local/…" > "https://cloud/…". ----
 
     /** Builds a local and a cloud file via the given setups, merges cloud into local, then runs [verify]. */
     private fun mergeThenVerify(
@@ -1335,18 +1349,18 @@ class SyncMergerTest {
     }
 
     @Test
-    fun tieOnFolderByIdGoesToCloud() = mergeThenVerify(
+    fun tieOnFolderByIdIsDecidedByValue() = mergeThenVerify(
         local = { it.insertFolder("d1", "Local name", now = 100, sortOrder = 1L) },
         cloud = { it.insertFolder("d1", "Cloud name", now = 100, sortOrder = 5L) },
         verify = {
             val folder = it.foldersQueries.getById("d1").executeAsOne()
-            assertEquals("Cloud name", folder.name)
-            assertEquals(5L, folder.sort_order)
+            assertEquals("Local name", folder.name) // the local value is the greater one
+            assertEquals(5L, folder.sort_order) // the cloud value is the greater one
         },
     )
 
     @Test
-    fun tieOnFolderByNameGoesToCloud() = mergeThenVerify(
+    fun tieOnFolderByNameIsDecidedByValue() = mergeThenVerify(
         local = { it.insertFolder("d-local", "IT", now = 100, sortOrder = 1L) },
         cloud = { it.insertFolder("d-cloud", "IT", now = 100, sortOrder = 5L) },
         verify = {
@@ -1355,27 +1369,27 @@ class SyncMergerTest {
     )
 
     @Test
-    fun tieOnFeedContentRowGoesToCloud() = mergeThenVerify(
+    fun tieOnFeedContentRowIsDecidedByValue() = mergeThenVerify(
         local = { it.insertFeed("f1", now = 100, url = "https://local/feed") },
         cloud = { it.insertFeed("f1", now = 100, url = "https://cloud/feed") },
         verify = {
-            assertEquals("https://cloud/feed", it.feedsQueries.getById("f1").executeAsOne().url)
+            assertEquals("https://local/feed", it.feedsQueries.getById("f1").executeAsOne().url)
         },
     )
 
     @Test
-    fun tieOnTagByIdGoesToCloud() = mergeThenVerify(
+    fun tieOnTagByIdIsDecidedByValue() = mergeThenVerify(
         local = { it.insertTag("t1", "Local name", now = 100, sortOrder = 1L) },
         cloud = { it.insertTag("t1", "Cloud name", now = 100, sortOrder = 5L) },
         verify = {
             val tag = it.tagsQueries.getById("t1").executeAsOne()
-            assertEquals("Cloud name", tag.name)
+            assertEquals("Local name", tag.name)
             assertEquals(5L, tag.sort_order)
         },
     )
 
     @Test
-    fun tieOnTagByNameGoesToCloud() = mergeThenVerify(
+    fun tieOnTagByNameIsDecidedByValue() = mergeThenVerify(
         local = { it.insertTag("t-local", "News", now = 100, sortOrder = 1L) },
         cloud = { it.insertTag("t-cloud", "News", now = 100, sortOrder = 5L) },
         verify = {
@@ -1384,7 +1398,7 @@ class SyncMergerTest {
     )
 
     @Test
-    fun tieOnFeedTagGoesToCloud() = mergeThenVerify(
+    fun tieOnFeedTagIsDecidedByValue() = mergeThenVerify(
         local = {
             it.insertFeed("f1", now = 100)
             it.insertTag("t1", "tag", now = 100)
@@ -1396,23 +1410,23 @@ class SyncMergerTest {
             it.insertFeedTag("f1", "t1", now = 100, deletedAt = 100) // detached at the same stamp
         },
         verify = {
-            // The detached link is soft-deleted, so it is no longer listed for the feed.
+            // A detach (non-NULL deleted_at) ranks above an attach: the link is no longer listed.
             assertEquals(emptyList(), it.feed_tagsQueries.watchTagIdsForFeed("f1").executeAsList())
         },
     )
 
     @Test
-    fun tieOnGlobalSettingGoesToCloud() = mergeThenVerify(
+    fun tieOnGlobalSettingIsDecidedByValue() = mergeThenVerify(
         local = { it.insertGlobalSetting("k1", "local-value", now = 100) },
         cloud = { it.insertGlobalSetting("k1", "cloud-value", now = 100) },
-        verify = { assertEquals("cloud-value", it.global_settingsQueries.get("k1").executeAsOne()) },
+        verify = { assertEquals("local-value", it.global_settingsQueries.get("k1").executeAsOne()) },
     )
 
     // Per-field ties. The local row's content stamp is newer (500) than the cloud's (400) so only
     // the per-field statement can bring the cloud value in.
 
     @Test
-    fun tieOnFeedFolderIdGoesToCloud() = mergeThenVerify(
+    fun tieOnFeedFolderIdIsDecidedByValue() = mergeThenVerify(
         local = {
             it.insertFolder("d1", "One", now = 100)
             it.insertFolder("d2", "Two", now = 100)
@@ -1429,7 +1443,7 @@ class SyncMergerTest {
     )
 
     @Test
-    fun tieOnFeedSortOrderGoesToCloud() = mergeThenVerify(
+    fun tieOnFeedSortOrderIsDecidedByValue() = mergeThenVerify(
         local = {
             it.insertFeed("f1", now = 500)
             it.feedsQueries.updateSortOrder(1L, 500L, 100L, "f1")
@@ -1442,7 +1456,7 @@ class SyncMergerTest {
     )
 
     @Test
-    fun tieOnFeedCustomTitleGoesToCloud() = mergeThenVerify(
+    fun tieOnFeedCustomTitleIsDecidedByValue() = mergeThenVerify(
         local = {
             it.insertFeed("f1", now = 500)
             it.feedsQueries.updateCustomTitle("Local name", 500L, 100L, "f1")
@@ -1451,11 +1465,11 @@ class SyncMergerTest {
             it.insertFeed("f1", now = 400)
             it.feedsQueries.updateCustomTitle("Cloud name", 400L, 100L, "f1")
         },
-        verify = { assertEquals("Cloud name", it.feedsQueries.getById("f1").executeAsOne().custom_title) },
+        verify = { assertEquals("Local name", it.feedsQueries.getById("f1").executeAsOne().custom_title) },
     )
 
     @Test
-    fun tieOnFeedDeletedAtGoesToCloud() = mergeThenVerify(
+    fun tieOnFeedDeletedAtIsDecidedByValue() = mergeThenVerify(
         local = {
             it.insertFeed("f1", now = 500)
             it.feedsQueries.stampResubscribed(100L, "f1") // alive, subscription state stamped at 100
@@ -1509,7 +1523,7 @@ class SyncMergerTest {
             db.feedsQueries.updateCustomTitle("Title B", 500L, 100L, "f1")
         }
 
-        // Step 1: the cloud holds B's database; A merges it and must adopt B's values.
+        // Step 1: the cloud holds B's database; A merges it and adopts B's values, the greater ones.
         val (cloudFile, cloudDriver, cloudDb) = fileDb()
         deviceB(cloudDb)
         cloudDriver.close()
@@ -1923,6 +1937,16 @@ class SyncMergerTest {
             assertEquals(501L, scalarLong(driver, "SELECT updated_at FROM global_settings WHERE key = 'read_timeout_seconds'"))
         },
     )
+
+    /** The ids of the articles registered in `ks_search_pending` of the database [file]. */
+    private fun searchPendingIds(file: java.io.File): Set<String> =
+        java.sql.DriverManager.getConnection("jdbc:sqlite:${file.absolutePath}").use { conn ->
+            conn.createStatement().use { st ->
+                st.executeQuery("SELECT a.id FROM ks_search_pending p JOIN articles a ON a.rowid = p.rowid").use { rs ->
+                    buildSet { while (rs.next()) add(rs.getString(1)) }
+                }
+            }
+        }
 
     private fun reopen(file: java.io.File): Triple<java.io.File, app.cash.sqldelight.db.SqlDriver, KeryxDatabase> {
         val driver = app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver("jdbc:sqlite:${file.absolutePath}")

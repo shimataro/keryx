@@ -227,7 +227,7 @@ actual object DatabaseMerger {
     }
 
     /** Reduces this JDBC exception's SQLite *primary* result code to a platform-independent category. */
-    private fun SQLiteException.failureCategory(): SqliteFailureCategory =
+    internal fun SQLiteException.failureCategory(): SqliteFailureCategory =
         when (resultCode.code and 0xFF) {
             SQLITE_CONSTRAINT -> SqliteFailureCategory.CONSTRAINT
             SQLITE_NOTADB, SQLITE_CORRUPT, SQLITE_FORMAT, SQLITE_EMPTY -> SqliteFailureCategory.CORRUPT
