@@ -231,8 +231,9 @@ The package root is `works.merc.keryx.app` (reverse-DNS of `keryx.merc.works`).
 
 1. **`articles_fts` is runtime-only (`FtsManager`, raw SQL) — never in a `.sq`
    file, and the live table is never DROPped.** Hot paths index incrementally
-   (`indexMissing()`), never a full `'rebuild'`; the upload excludes it via a
-   `VACUUM INTO` snapshot copy so concurrent searches never hit `no such table`.
+   (`indexMissing()`), never a full `'rebuild'`; the index never leaves the
+   device — transport files are built from the synced tables only — so nothing
+   drops it and concurrent searches never hit `no such table`.
    Full mechanism (daily rebuild heal, `ensureIndexed`, `busy_timeout`) →
    `.claude/rules/fts-index.md` (auto-loads when you *read* a file matching its
    `paths:` — FTS / sync / driver code. Editing without reading first does not
@@ -258,7 +259,7 @@ The package root is `works.merc.keryx.app` (reverse-DNS of `keryx.merc.works`).
    it emits `NotificationText`/`ErrorKind` data that each UI localizes.
 4. **Platform-specific code stays behind `commonMain` `expect` declarations** —
    e.g. `AppDirs`, `BrowserOpener`, `FilePicker`, `DatabaseDriverFactory`,
-   `DatabaseMerger`, `DatabaseSnapshot`, `Gzip`, `Sha256`, `CloudStorageAvailability`,
+   `DatabaseMerger`, `TransportConnections`, `Gzip`, `Sha256`, `CloudStorageAvailability`,
    `platformModule`. That list is illustrative, not exhaustive: the real set is
    whatever `commonMain` declares `expect` (mostly under `platform/`, but also spanning
    `core/`, `data/cloud/`, and `di/`) — `grep -rn "expect " shared/src/commonMain composeApp/src/commonMain` for
@@ -272,7 +273,8 @@ The package root is `works.merc.keryx.app` (reverse-DNS of `keryx.merc.works`).
    semantics, error taxonomy, or feature scope on your own judgment. If
    something in the docs seems wrong, ask before deviating. `docs/sync-architecture.md`
    is not imported into the session — **Read it before touching sync, merge SQL,
-   `DatabaseMerger`, `DatabaseSnapshot`, or any `data/cloud/` storage class.**
+   `DatabaseMerger`, `DeltaSync`, `DeltaExporter`, `TransportFiles`, or any `data/cloud/`
+   storage class.**
 6. **Riverpod does not exist here** — state management is androidx.lifecycle
    ViewModels resolved via Koin.
 7. **New features and bug fixes must come with tests.** Except for UI-only

@@ -60,7 +60,7 @@ Paths follow `.coderabbit.yaml`'s `path_instructions` conventions.
 | `shared/src/**/core/**`, `{shared,composeApp}/src/**/di/**` | architecture, docs |
 | `shared/src/appleMain/**/sdk/**` | architecture, concurrency, docs |
 | `composeApp/src/{desktopMain,androidMain}/kotlin/**`, `androidApp/src/*/kotlin/**` | architecture, concurrency, security |
-| `**/domain/MergeSql.kt`, `**/domain/ReduceSql.kt`, `**/domain/SyncLww.kt`, `**/domain/SyncRepository.kt`, `**/domain/DeltaSync.kt`, `**/domain/LegacyCloudFile.kt`, `**/domain/TransportSchema.kt`, `**/platform/DatabaseMerger*.kt`, `**/platform/TransportFiles*.kt`, `**/platform/DeltaExporter*.kt`, `**/platform/DatabaseSnapshot*.kt`, `{shared,composeApp,androidGms}/src/**/data/cloud/**`, `**/Fts*.kt`, `**/CloudFileTransfer*.kt`, `**/Gzip*.kt` | sync-merge |
+| `**/domain/MergeSql.kt`, `**/domain/ReduceSql.kt`, `**/domain/SyncLww.kt`, `**/domain/SyncRepository.kt`, `**/domain/DeltaSync.kt`, `**/domain/LegacyCloudFile.kt`, `**/domain/TransportSchema.kt`, `**/platform/DatabaseMerger*.kt`, `**/platform/TransportFiles*.kt`, `**/platform/DeltaExporter*.kt`, `**/domain/DeltaExportSql.kt`, `{shared,composeApp,androidGms}/src/**/data/cloud/**`, `**/Fts*.kt`, `**/CloudFileTransfer*.kt`, `**/Gzip*.kt` | sync-merge |
 | `shared/src/**/sqldelight/**/*.sq`, `**/*.sqm`, `**/domain/MergeSchema.kt`, `**/DatabaseDriverFactory*.kt` | data-integrity, sync-merge, verification, docs |
 | `composeApp/src/**/ui/**`, `composeApp/src/**/tray/**`, `composeApp/src/**/appmenu/**`, `**/platform/NativeMenu*.kt`, `**/composeResources/values*/strings.xml`, `androidApp/src/**/res/values*/strings.xml` | ui, docs |
 | `shared/src/**/presentation/**` (user-facing behavior is decided here — least surprise) | ui |

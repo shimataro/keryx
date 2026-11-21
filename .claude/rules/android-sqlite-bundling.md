@@ -2,8 +2,8 @@
 paths:
   - "**/DatabaseDriverFactory.android.kt"  # picks the SupportSQLiteOpenHelper.Factory
   - "**/DatabaseMerger.android.kt"
-  - "**/DatabaseSnapshot.android.kt"
-  - "**/AndroidSqliteSupport.kt"           # NoOpDatabaseErrorHandler + busy_timeout/user_version helpers shared by both
+  - "**/TransportConnections.android.kt"   # DeltaExporter's/TransportFiles' connection, incl. the full send's VACUUM INTO
+  - "**/AndroidSqliteSupport.kt"           # NoOpDatabaseErrorHandler + busy_timeout/user_version helpers
   - "**/libs.versions.toml"                # bundled-SQLite dependency declaration
 ---
 
@@ -12,9 +12,9 @@ paths:
 Android's `DatabaseDriverFactory` uses a **bundled SQLite** `SupportSQLiteOpenHelper.Factory`
 instead of the device's own `android.database.sqlite.SQLiteOpenHelper`, because two pieces of
 this app's SQL need a newer SQLite than most Android devices ship: `articles_fts`'s
-`tokenize='trigram'` needs SQLite ≥3.34, and `DatabaseSnapshot`'s `VACUUM INTO` needs ≥3.27.
+`tokenize='trigram'` needs SQLite ≥3.34, and `DeltaExporter.copyForFullSend`'s `VACUUM INTO` needs ≥3.27.
 Android's own SQLite only guarantees ≥3.34 starting at **API 34 (Android 14)** — below that,
-relying on the device's SQLite would silently degrade search or break the snapshot export on
+relying on the device's SQLite would silently degrade search or break the full send's copy on
 older devices.
 
 **SQLite version alone does not guarantee FTS5.** AOSP's own SQLite build (`external/sqlite`'s
@@ -26,19 +26,19 @@ for this reason.
 
 **This is not meant to be a permanent dependency.** Keep the `SupportSQLiteOpenHelper.Factory`
 selection confined to a single seam (DI, or inside `DatabaseDriverFactory.android.kt`) so it can
-be swapped without touching `DatabaseMerger`, `DatabaseSnapshot`, `FtsManager`, or any SQL —
+be swapped without touching `DatabaseMerger`, `DeltaExporter`, `FtsManager`, or any SQL —
 none of them care which factory produced the `SqlDriver`.
 
-`DatabaseMerger.android.kt`/`DatabaseSnapshot.android.kt` are now real implementations (Dropbox /
-OneDrive, plus Google Drive in the github and play flavors), not stubs — both open their own dedicated
+`DatabaseMerger.android.kt`/`TransportConnections.android.kt` are now real implementations (Dropbox /
+OneDrive / Nextcloud, plus Google Drive in the github and play flavors), not stubs — both open their own dedicated
 `io.requery.android.database.sqlite.SQLiteDatabase` connection directly (mirroring the desktop
 actual's dedicated JDBC connection), so the exit-criteria swap in step 3 below only has to change
 `DatabaseDriverFactory.android.kt`'s factory choice and the low-level open/error-handler calls in
-`platform/AndroidSqliteSupport.kt` — the merge/snapshot control flow itself doesn't reference the
+`platform/AndroidSqliteSupport.kt` — the merge/export control flow itself doesn't reference the
 factory at all. `NoOpDatabaseErrorHandler` (in that same file) is required on every connection
 either class opens: passing `null` gets the library's default handler, which deletes a database
 file it judges corrupt — confirmed by disassembling the AAR — an unacceptable side effect for a
-merge running against the local DB or a downloaded cloud file.
+merge or an export running against the local DB, a downloaded cloud file or a transport file.
 
 ## Exit criteria
 

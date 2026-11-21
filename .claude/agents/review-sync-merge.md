@@ -63,7 +63,7 @@ See CLAUDE.md constraints #1–#2.
   cloud schema must abort with `SchemaVersionException` rather than merge against
   unknown columns. (`domain/SyncRepository.kt`, `platform/DatabaseMerger`)
 - Are the sync-time FTS invariants respected — live `articles_fts` never
-  dropped (excluded only on the upload snapshot copy), new rows incrementally
+  dropped (transport files carry the synced tables only), new rows incrementally
   indexed after merge, and the merge's writes surfaced to the UI (the merge
   bypasses the SQLDelight driver, so listeners must be notified)? See CLAUDE.md
   constraint #1.
