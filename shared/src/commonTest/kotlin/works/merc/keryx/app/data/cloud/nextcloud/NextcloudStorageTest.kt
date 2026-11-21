@@ -519,6 +519,84 @@ class NextcloudStorageTest {
         verify()
     }
 
+    /** A `response` that carries a status of its own instead of properties (RFC 4918 §14.24). */
+    private fun failedResponse(href: String, status: String) =
+        "<d:response><d:href>$href</d:href><d:status>$status</d:status></d:response>"
+
+    private suspend fun listing(body: String, prefix: String = "ks-"): Result<List<CloudFileEntry>> {
+        val (s, _, verify) = storage(credentials, { respond(body, multiStatus) })
+        val r = s.list(prefix)
+        verify()
+        return r
+    }
+
+    @Test
+    fun listFailedStatusForTheFolderItselfIsStorageError() = runTest {
+        // Without a status check this folder response would pass as a non-matching file "Keryx",
+        // and the listing would come back empty.
+        val alone = listing(listMultistatus(failedResponse(folderHref, "HTTP/1.1 403 Forbidden")))
+        assertIs<Result.Err>(alone)
+        assertIs<CloudStorageException>(alone.exception)
+
+        val withMembers = listing(
+            listMultistatus(
+                failedResponse(folderHref, "HTTP/1.1 403 Forbidden"),
+                listResponse("${folderHref}ks-a", fileProps("e1", 1)),
+            ),
+        )
+        assertIs<Result.Err>(withMembers)
+        assertIs<CloudStorageException>(withMembers.exception)
+    }
+
+    @Test
+    fun listFolderNamedByAnAbsoluteUrlHrefIsRecognized() = runTest {
+        val r = listing(listMultistatus(failedResponse("https://cloud.example.com$folderHref", "HTTP/1.1 500 Internal Server Error")))
+        assertIs<Result.Err>(r)
+        assertIs<CloudStorageException>(r.exception)
+    }
+
+    @Test
+    fun listUnreadableStatusForTheFolderIsStorageError() = runTest {
+        val r = listing(listMultistatus(failedResponse(folderHref, "garbage")))
+        assertIs<Result.Err>(r)
+        assertIs<CloudStorageException>(r.exception)
+    }
+
+    @Test
+    fun listFailedStatusForAMatchingFileIsStorageError() = runTest {
+        val r = listing(listMultistatus(failedResponse("${folderHref}ks-a", "HTTP/1.1 404 Not Found")))
+        assertIs<Result.Err>(r)
+        assertIs<CloudStorageException>(r.exception)
+    }
+
+    @Test
+    fun listFailedStatusForANonMatchingFileIsIgnored() = runTest {
+        val r = listing(
+            listMultistatus(
+                listResponse(folderHref, "<d:resourcetype><d:collection/></d:resourcetype>"),
+                failedResponse("${folderHref}my%20notes.txt", "HTTP/1.1 403 Forbidden"),
+                listResponse("${folderHref}ks-a", fileProps("e1", 1)),
+            ),
+        )
+        assertIs<Result.Ok<List<CloudFileEntry>>>(r)
+        assertEquals(listOf(CloudFileEntry("ks-a", "\"e1\"", 1)), r.value)
+    }
+
+    @Test
+    fun listReadsPropertiesOnlyFromSuccessfulPropstats() = runTest {
+        // The ETag sits only in a failed propstat, so the file has none.
+        val response = """
+          <d:response>
+            <d:href>${folderHref}ks-a</d:href>
+            <d:propstat><d:prop><d:getcontentlength>1</d:getcontentlength><d:resourcetype/></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat>
+            <d:propstat><d:prop><d:getetag>&quot;stale&quot;</d:getetag></d:prop><d:status>HTTP/1.1 404 Not Found</d:status></d:propstat>
+          </d:response>
+        """
+        val r = listing(listMultistatus(response))
+        assertIs<Result.Err>(r)
+        assertIs<CloudStorageException>(r.exception)
+    }
+
     @Test
     fun list401IsAuthError() = runTest {
         val (s, _, verify) = storage(credentials, { respond("", HttpStatusCode.Unauthorized) })

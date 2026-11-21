@@ -787,7 +787,10 @@ Nextcloud is not reached through OAuth and has no app-only folder; everything ab
   are not followed. `metadata` is a Depth-0 `PROPFIND` for `getetag` (matched by local name, whatever
   the namespace prefix; 404 → absent), `download` a `GET` whose `ETag` is the revision, `upload` a
   `PUT` with the expected revision passed through verbatim as `If-Match`, and `list` a Depth-1 `PROPFIND` for
-  `getetag` and `getcontentlength`.
+  `getetag` and `getcontentlength`. The listing reads each resource's own status in the multistatus: a failed status
+  for `/Keryx` itself or for a file matching the prefix is a storage error (rather than an empty listing), a failed
+  status for any other member is ignored (it is one of the user's own files), and properties are taken only from a
+  successful `propstat`.
 - **Revisions.** The revision is the file's ETag, which Nextcloud compares byte for byte, quotes
   included. An `If-Match` that does not match (or names a file that is not there) answers 412 — with no expected
   revision the `PUT` sends no `If-Match` at all and writes unconditionally — and a concurrent overwrite holding the

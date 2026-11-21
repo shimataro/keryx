@@ -15,6 +15,7 @@ import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
+import io.ktor.http.Url
 import io.ktor.http.content.TextContent
 import io.ktor.http.decodeURLPart
 import io.ktor.http.encodeURLParameter
@@ -214,7 +215,8 @@ class NextcloudStorage(
     /**
      * Lists `/Keryx`'s files whose name starts with [prefix] with a Depth-1 PROPFIND, which answers
      * every member in one multistatus (WebDAV has no pagination). The folder itself and any
-     * sub-folder are skipped; a missing `/Keryx` (404) is an empty listing.
+     * sub-folder are skipped; a missing `/Keryx` (404) is an empty listing, and a failed status the
+     * multistatus reports for `/Keryx` or a matching file is a storage error (see [propfindListing]).
      */
     override suspend fun list(prefix: String): Result<List<CloudFileEntry>> = withCredentials { credentials ->
         val response = client.request(folderUrl(credentials) + "/") {
@@ -224,7 +226,7 @@ class NextcloudStorage(
             setBody(TextContent(PROPFIND_LIST_BODY, ContentType.Application.Xml))
         }
         when (response.status.value) {
-            207 -> propfindListing(response.bodyAsText(), prefix)
+            207 -> propfindListing(response.bodyAsText(), prefix, folderUrl(credentials))
             404 -> Result.Ok(emptyList())
             else -> mapError(response)
         }
@@ -303,24 +305,52 @@ internal fun propfindEtag(body: String): String? =
 /**
  * The files in a Depth-1 PROPFIND multistatus [body] whose basename starts with [prefix].
  *
- * Elements are matched by local name, as in [propfindEtag]. A `response` whose `resourcetype` holds
- * a `collection` (the listed folder itself, or a sub-folder) is skipped. The basename is the last
- * segment of the member's `href`, percent-decoded. A matching file without an ETag or a size is a
- * storage error; a non-matching one is ignored whatever it holds, since `/Keryx` may also contain
- * the user's own files.
+ * Elements are matched by local name, as in [propfindEtag]. A multistatus reports each resource's
+ * own outcome (RFC 4918 §14.24): a `response` may carry a `status` of its own instead of
+ * properties, and each `propstat` has a `status` for the properties it holds. So:
+ *
+ * - A `response` whose own `status` is not 2xx (or cannot be read) fails the listing when it is the
+ *   listed folder itself — its `href` names [folderPath] — or a member matching [prefix] (a member
+ *   removed while the listing ran, a 404, included); a non-matching member is ignored, since
+ *   `/Keryx` may also contain the user's own files.
+ * - Properties are read only from a `propstat` whose `status` is 2xx (or absent).
+ * - A `response` whose `resourcetype` holds a `collection` (the listed folder itself, or a
+ *   sub-folder) is skipped. The basename is the last segment of the member's `href`,
+ *   percent-decoded. A matching file without an ETag or a size is a storage error; a non-matching
+ *   one is ignored whatever it holds.
+ *
+ * @param folderPath The listed folder's URL path (`/remote.php/dav/files/{userId}/Keryx`, under any
+ *   path the server is installed at), percent-encoded or not.
  */
-internal fun propfindListing(body: String, prefix: String): Result<List<CloudFileEntry>> {
+internal fun propfindListing(body: String, prefix: String, folderPath: String): Result<List<CloudFileEntry>> {
     val document = Ksoup.parse(html = body, parser = Parser.xmlParser())
+    val listedFolder = normalizedHrefPath(folderPath)
     val entries = mutableListOf<CloudFileEntry>()
     for (response in document.getAllElements().filter { it.hasLocalName("response") }) {
-        val descendants = response.getAllElements()
-        if (descendants.any { it.hasLocalName("collection") }) continue
-        val href = descendants.firstOrNull { it.hasLocalName("href") }?.text()?.trim() ?: continue
-        val name = href.trimEnd('/').substringAfterLast('/').decodeURLPart()
-        if (name.isEmpty() || !name.startsWith(prefix)) continue
-        val etag = descendants.firstOrNull { it.hasLocalName("getetag") && it.text().isNotBlank() }?.text()?.trim()
+        val children = response.children()
+        val href = children.firstOrNull { it.hasLocalName("href") }?.text()?.trim() ?: continue
+        val isListedFolder = normalizedHrefPath(href) == listedFolder
+        val name = href.substringBefore('?').trimEnd('/').substringAfterLast('/').decodeURLPart()
+        val matches = !isListedFolder && name.isNotEmpty() && name.startsWith(prefix)
+        val status = children.firstOrNull { it.hasLocalName("status") }
+        if (status != null && !status.isSuccessStatus()) {
+            if (isListedFolder) {
+                return Result.Err(CloudStorageException("Listing reported ${status.text().trim()} for the folder"))
+            }
+            if (matches) return Result.Err(CloudStorageException("Listing reported ${status.text().trim()} for a file"))
+            continue
+        }
+        val properties = children
+            .filter { propstat ->
+                propstat.hasLocalName("propstat") &&
+                    propstat.children().firstOrNull { it.hasLocalName("status") }?.isSuccessStatus() != false
+            }
+            .flatMap { it.getAllElements() }
+        if (isListedFolder || properties.any { it.hasLocalName("collection") }) continue
+        if (!matches) continue
+        val etag = properties.firstOrNull { it.hasLocalName("getetag") && it.text().isNotBlank() }?.text()?.trim()
             ?: return Result.Err(CloudStorageException("Missing ETag in listing"))
-        val size = descendants.firstNotNullOfOrNull { element ->
+        val size = properties.firstNotNullOfOrNull { element ->
             element.takeIf { it.hasLocalName("getcontentlength") }?.text()?.trim()?.toLongOrNull()
         }
             ?: return Result.Err(CloudStorageException("Missing size in listing"))
@@ -328,6 +358,20 @@ internal fun propfindListing(body: String, prefix: String): Result<List<CloudFil
     }
     return Result.Ok(entries)
 }
+
+/** An `href` (an absolute URL or an absolute path) reduced to its percent-decoded path without a trailing `/`. */
+private fun normalizedHrefPath(href: String): String {
+    val path = if ("://" in href) Url(href).encodedPath else href.substringBefore('?')
+    return path.decodeURLPart().trimEnd('/')
+}
+
+/** Whether this WebDAV `status` element (`HTTP/1.1 200 OK`) names a 2xx code; an unreadable one is not. */
+private fun Element.isSuccessStatus(): Boolean {
+    val code = STATUS_LINE.find(text().trim())?.groupValues?.get(1)?.toIntOrNull()
+    return code != null && code in 200..299
+}
+
+private val STATUS_LINE = Regex("""^HTTP/\S+\s+(\d{3})""")
 
 /** Whether this element's tag name, with any namespace prefix removed, is [localName]. */
 private fun Element.hasLocalName(localName: String): Boolean =
