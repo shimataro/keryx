@@ -38,6 +38,7 @@ import works.merc.keryx.app.domain.PendingLocalWrites
 import works.merc.keryx.app.domain.RefreshCycleRunner
 import works.merc.keryx.app.domain.SettingsFaviconMissStore
 import works.merc.keryx.app.domain.SettingsRepository
+import works.merc.keryx.app.domain.SearchTextBackfill
 import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.SyncScheduler
 import works.merc.keryx.app.domain.TagRepository
@@ -73,6 +74,7 @@ fun sharedModule(): Module = module {
     single<SqlDriver> { DatabaseDriverFactory().create() }
     single { KeryxDatabase(get()) }
     single { FtsManager(get<SqlDriver>()) }
+    single { SearchTextBackfill(get(), get()) }
     single { FtsSearch(get<SqlDriver>()) }
     single { LocalSettingsStore() }
     single<Clock> { SystemClock }
@@ -108,6 +110,7 @@ fun sharedModule(): Module = module {
             driver = get(),
             db = get(),
             ftsManager = get(),
+            searchTextBackfill = get(),
             cloudProvider = { get<CloudSession>().current() },
             clock = get(),
             scope = get(),

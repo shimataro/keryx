@@ -37,9 +37,10 @@ suspend fun runMaintenanceStep(name: String, step: suspend () -> Unit) {
 
 /**
  * The maintenance sequence desktop's `StartupTasks.kt` and Android's `AndroidStartupTasks.kt` both
- * run at startup, sharing this one implementation rather than each hand-writing the same five
- * [runMaintenanceStep] calls: cache cleanup, initial cloud sync, feed refresh (the two run as one
- * [RefreshCycleRunner] cycle), update check, FTS heal. Each caller wraps this with whatever else its own platform needs before/after it (desktop's
+ * run at startup, sharing this one implementation rather than each hand-writing the same
+ * [runMaintenanceStep] calls: the pending `search_text` backfill ([SearchTextBackfill]), cache
+ * cleanup, initial cloud sync, feed refresh (the two run as one [RefreshCycleRunner] cycle), update
+ * check, FTS heal. Each caller wraps this with whatever else its own platform needs before/after it (desktop's
  * macOS translocation warning and stale-self-replace-artifact cleanup run before this; Android's
  * `startupMaintenanceMutex`/once-per-process guard wraps around the call instead).
  *
@@ -54,6 +55,9 @@ suspend fun runMaintenanceStep(name: String, step: suspend () -> Unit) {
  */
 suspend fun runStartupMaintenance(koin: Koin) {
     if (!koin.get<SettingsRepository>().isSetupComplete()) return
+    // First, so articles a merge or the schema-3 migration left without search_text are indexed
+    // early; ensureIndexed() at launch skips them until then (see SearchTextBackfill).
+    runMaintenanceStep("searchTextBackfill") { koin.get<SearchTextBackfill>().recomputePendingAndIndex() }
     runMaintenanceStep("cacheCleanup") { cleanUpArticleCacheIfDue(koin) }
     // Sync-then-refresh here (the reverse of the other callers), but still one cycle for
     // ActivityCenter's busy checks. Each stage keeps its own failure isolation through `step`; the
@@ -115,6 +119,10 @@ suspend fun maybeRebuildFtsIndex(koin: Koin) {
     val now = SystemClock.nowMillis()
     val last = settingsRepository.getLocalSettings().lastFtsRebuiltAt
     if (last != null && now - last < MILLIS_PER_DAY) return
+    // 'rebuild' indexes every row from its current search_text, pending ones included, and
+    // indexMissing() never revisits an indexed row — so a row still waiting in ks_search_pending
+    // would be indexed with '' (or its stale text) until the next day's rebuild. Recompute first.
+    koin.get<SearchTextBackfill>().recomputePending()
     koin.get<FtsManager>().rebuildIndex()
     settingsRepository.mutateLocalSettings { it.copy(lastFtsRebuiltAt = now) }
 }

@@ -37,7 +37,10 @@ import works.merc.keryx.app.core.SyncConflictException
 import works.merc.keryx.app.data.cloud.CloudFileEntry
 import works.merc.keryx.app.data.cloud.CloudFileMeta
 import works.merc.keryx.app.data.cloud.CloudStorage
+import app.cash.sqldelight.db.QueryResult
+import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.data.local.FtsManager
+import works.merc.keryx.app.data.local.FtsSearch
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.platform.ExternalAppLaunch
 import works.merc.keryx.app.platform.FakeNetworkConditionMonitor
@@ -883,6 +886,31 @@ class SyncRepositoryTest {
         assertIs<Result.Ok<Unit>>(result)
         assertTrue(foldersNotified, "merge must notify folder query listeners so the sidebar refreshes")
         localDriver.removeListener("folders", listener = listener)
+    }
+
+    @Test
+    fun aMergedArticleGetsItsSearchTextAndIsIndexedWithIt() = runTest {
+        val (file, driver, db) = fileDb()
+        db.insertFeed("f1", now = 0)
+        db.articlesQueries.insert(
+            id = "merged", feed_id = "f1", guid = "merged", url = "https://article/merged", title = "Merged",
+            summary = null, content = "<p>multiplatform <b>body</b></p>", author = null, published_at = null,
+            thumbnail_url = null, is_read = 0, read_at = null, is_starred = 0, starred_at = null,
+            cached_at = 0L, search_text = "", updated_at = 0L, created_at = 0L,
+        )
+        driver.close()
+        val bytes = file.readBytes().also { file.delete() }
+        val cloud = FakeCloudStorage()
+        cloud.put(CLOUD_DB_GZ_PATH, gzipOf(bytes), "r1")
+
+        assertIs<Result.Ok<Unit>>(newRepo(cloud).sync())
+
+        // The merge inserted it with '' and registered it in ks_search_pending; the post-merge
+        // backfill computed its text before indexMissing() indexed it.
+        val text = localDb.articlesQueries.getById("merged").executeAsOne().search_text
+        assertEquals("multiplatform body", text)
+        assertEquals(0L, localDriver.executeQuery(null, "SELECT COUNT(*) FROM ks_search_pending", { c -> c.next(); QueryResult.Value(c.getLong(0)!!) }, 0).value)
+        assertEquals(listOf("merged"), FtsSearch(localDriver).search("multiplatform", ArticleFilter.All).map { it.id })
     }
 
     @Test

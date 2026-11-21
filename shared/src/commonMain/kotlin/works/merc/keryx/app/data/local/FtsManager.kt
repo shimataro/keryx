@@ -76,6 +76,10 @@ class FtsManager(private val driver: SqlDriver) {
      * filling in content) are not re-indexed here — that row keeps its old tokens until the next full
      * [rebuildIndex] (the daily healing pass). This is the accepted "temporarily stale"
      * trade-off; the row still matches its previous tokens, so search never regresses to zero hits.
+     *
+     * Rows listed in `ks_search_pending` are skipped: their `search_text` is still to be recomputed
+     * (a merge inserted them with `''`, or changed their body), and indexing them now would index
+     * the wrong text for good. `SearchTextBackfill` recomputes them and then calls this again.
      */
     suspend fun indexMissing(): Unit = indexWriteMutex.withLock {
         driver.execute(
@@ -83,7 +87,8 @@ class FtsManager(private val driver: SqlDriver) {
             """
                 INSERT INTO articles_fts(rowid, title, search_text)
                 SELECT a.rowid, a.title, a.search_text FROM articles a
-                WHERE a.rowid NOT IN (SELECT id FROM articles_fts_docsize);
+                WHERE a.rowid NOT IN (SELECT id FROM articles_fts_docsize)
+                  AND a.rowid NOT IN (SELECT rowid FROM ks_search_pending);
             """.trimIndent(),
             0,
         )
