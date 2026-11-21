@@ -24,6 +24,17 @@ import works.merc.keryx.app.core.SyncConflictException
 class CloudFileMeta(val rev: String)
 
 /**
+ * One file in the app's sync folder, as [CloudStorage.list] reports it.
+ *
+ * @property name The file's basename, with no leading slash (`keryx-sync.json`, …).
+ * @property rev The file's revision, in the same format [CloudStorage.metadata] and
+ *   [CloudStorage.upload] report for it (Dropbox `rev`; Google Drive `<id>:<version>`; OneDrive
+ *   DriveItem `eTag`; Nextcloud WebDAV `ETag`, quotes included).
+ * @property size The file's size in bytes.
+ */
+data class CloudFileEntry(val name: String, val rev: String, val size: Long)
+
+/**
  * Executes [block] with an access token and maps authentication or storage failures to [Result.Err].
  *
  * @param providerName The cloud provider name used in authentication and storage error messages.
@@ -240,4 +251,16 @@ interface CloudStorage {
      * downloaded at all.
      */
     suspend fun metadata(path: String): Result<CloudFileMeta?>
+
+    /**
+     * Lists every file in the app's sync folder whose basename starts with [prefix] (an empty
+     * [prefix] lists them all), following every page of the provider's listing. Folders are
+     * excluded, and an app folder that does not exist yet (never provisioned, or nothing written
+     * to it) yields an empty list rather than an error.
+     *
+     * The listing may be eventually consistent (Google Drive, OneDrive): a file written moments
+     * ago can still be missing from it. Google Drive is name-addressed and permits duplicates, so
+     * the same name can appear twice with different revisions. Callers must tolerate both.
+     */
+    suspend fun list(prefix: String): Result<List<CloudFileEntry>>
 }

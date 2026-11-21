@@ -14,9 +14,11 @@ import io.ktor.http.ContentType
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import works.merc.keryx.app.core.CloudStorageException
 import works.merc.keryx.app.core.MAX_SYNC_DB_SIZE_BYTES
@@ -201,6 +203,61 @@ class OneDriveStorage(
     }
 
     /**
+     * Lists the app folder's files whose name starts with [prefix] through its `/children`,
+     * following `@odata.nextLink` verbatim until the last page.
+     *
+     * A 404 (the app folder has not been provisioned yet) is an empty listing. A `nextLink` that
+     * does not point back at Microsoft Graph over HTTPS is refused rather than followed, since the
+     * bearer token goes with it.
+     *
+     * @param prefix The basename prefix to keep.
+     * @return The matching files, or a mapped storage error.
+     */
+    override suspend fun list(prefix: String): Result<List<CloudFileEntry>> = withToken { token ->
+        val entries = mutableListOf<CloudFileEntry>()
+        var pageUrl: String? = "$appRootUrl/children"
+        var first = true
+        while (pageUrl != null) {
+            val response = client.get(pageUrl) {
+                bearerAuth(token)
+                // The first page names the fields and page size; a nextLink already carries both.
+                if (first) {
+                    url {
+                        encodedParameters.append("\$select", "name,eTag,size,file,folder")
+                        encodedParameters.append("\$top", LIST_PAGE_SIZE.toString())
+                    }
+                }
+            }
+            if (first && response.status.value == 404) return@withToken Result.Ok(emptyList())
+            if (!response.status.isSuccess()) {
+                return@withToken mapError(response.status.value, response.bodyAsText())
+            }
+            first = false
+            val page = json.parseToJsonElement(response.bodyAsText()) as? JsonObject
+                ?: return@withToken Result.Err(CloudStorageException("Malformed children response"))
+            val items = page["value"] as? JsonArray
+                ?: return@withToken Result.Err(CloudStorageException("Missing value in children response"))
+            for (item in items) {
+                val obj = item as? JsonObject ?: continue
+                // A DriveItem is a file only when it carries the `file` facet.
+                if (obj["file"] == null || obj["folder"] != null) continue
+                val name = obj["name"]?.jsonPrimitive?.content ?: continue
+                if (!name.startsWith(prefix)) continue
+                val eTag = obj["eTag"]?.jsonPrimitive?.content
+                    ?: return@withToken Result.Err(CloudStorageException("Missing eTag in children entry"))
+                val size = obj["size"]?.jsonPrimitive?.longOrNull
+                    ?: return@withToken Result.Err(CloudStorageException("Missing size in children entry"))
+                entries += CloudFileEntry(name, eTag, size)
+            }
+            pageUrl = page["@odata.nextLink"]?.jsonPrimitive?.content
+            if (pageUrl != null && !pageUrl.startsWith("$ONEDRIVE_GRAPH_BASE/")) {
+                return@withToken Result.Err(CloudStorageException("Unexpected nextLink host in children response"))
+            }
+        }
+        Result.Ok(entries)
+    }
+
+    /**
      * Executes an operation with an available OneDrive access token.
      *
      * @param block The operation to execute with the access token.
@@ -222,4 +279,9 @@ class OneDriveStorage(
     private fun itemUrl(path: String): String = "$appRootUrl:/${cloudFileName(path)}"
 
     private val appRootUrl: String get() = "$ONEDRIVE_GRAPH_BASE/me/drive/special/approot"
+
+    private companion object {
+        /** The largest `$top` Graph accepts for `/children`, so a listing takes as few round trips as possible. */
+        const val LIST_PAGE_SIZE = 999
+    }
 }

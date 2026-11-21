@@ -727,4 +727,103 @@ class GoogleDriveStorageTest {
         assertEquals("GET", history[0].method.value)
         verify()
     }
+
+    private fun driveEntry(id: String, name: String, version: String, size: Long) =
+        """{"id":"$id","name":"$name","version":"$version","size":"$size","mimeType":"application/octet-stream"}"""
+
+    @Test
+    fun listFollowsEveryPageFiltersByPrefixAndSkipsFolders() = runTest {
+        val (s, history, verify) = storage(
+            "tok",
+            {
+                respond(
+                    """{"nextPageToken":"p2","files":[""" +
+                        driveEntry("F1", "ks-g1-d-a-1-aaaaaaaaaaaa.db.gz", "3", 10) + "," +
+                        driveEntry("F2", "keryx.db.gz", "4", 20) + "," +
+                        """{"id":"D1","name":"ks-dir","version":"1","mimeType":"application/vnd.google-apps.folder"}""" +
+                        "]}",
+                    HttpStatusCode.OK,
+                )
+            },
+            {
+                respond(
+                    """{"files":[""" +
+                        driveEntry("F3", "ks-g1-d-a-1-aaaaaaaaaaaa.db.gz", "1", 10) + "," +
+                        driveEntry("F4", "ks-g1-d-a-2-bbbbbbbbbbbb.db.gz", "7", 30) +
+                        "]}",
+                    HttpStatusCode.OK,
+                )
+            },
+        )
+        val r = s.list("ks-")
+        assertIs<Result.Ok<List<CloudFileEntry>>>(r)
+        // A duplicate name is reported as Drive lists it, each with its own `<id>:<version>` rev.
+        assertEquals(
+            listOf(
+                CloudFileEntry("ks-g1-d-a-1-aaaaaaaaaaaa.db.gz", "F1:3", 10),
+                CloudFileEntry("ks-g1-d-a-1-aaaaaaaaaaaa.db.gz", "F3:1", 10),
+                CloudFileEntry("ks-g1-d-a-2-bbbbbbbbbbbb.db.gz", "F4:7", 30),
+            ),
+            r.value,
+        )
+        val first = history[0].url.parameters
+        assertEquals("appDataFolder", first["spaces"])
+        assertEquals("trashed = false", first["q"])
+        assertEquals("1000", first["pageSize"])
+        assertNull(first["pageToken"])
+        assertEquals("p2", history[1].url.parameters["pageToken"])
+        verify()
+    }
+
+    @Test
+    fun listOfAnEmptyAppFolderIsEmpty() = runTest {
+        val (s, history, verify) = storage("tok", { respond(notFound, HttpStatusCode.OK) })
+        val r = s.list("")
+        assertIs<Result.Ok<List<CloudFileEntry>>>(r)
+        assertEquals(emptyList(), r.value)
+        assertEquals(1, history.size)
+        verify()
+    }
+
+    @Test
+    fun listUnauthorizedIsAuthError() = runTest {
+        val (s, _, verify) = storage("tok", { respondError(HttpStatusCode.Unauthorized) })
+        val r = s.list("ks-")
+        assertIs<Result.Err>(r)
+        assertIs<CloudAuthException>(r.exception)
+        verify()
+    }
+
+    @Test
+    fun listMatchingFileWithoutASizeIsStorageError() = runTest {
+        val (s, _, verify) = storage(
+            "tok",
+            { respond("""{"files":[{"id":"F1","name":"ks-a","version":"1"}]}""", HttpStatusCode.OK) },
+        )
+        val r = s.list("ks-")
+        assertIs<Result.Err>(r)
+        assertIs<CloudStorageException>(r.exception)
+        verify()
+    }
+
+    @Test
+    fun listCancellationPropagates() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val started = CompletableDeferred<Unit>()
+        val (s, _, _) = storage(
+            "tok",
+            {
+                started.complete(Unit)
+                gate.await()
+                respond(notFound, HttpStatusCode.OK)
+            },
+        )
+        var result: Result<List<CloudFileEntry>>? = null
+        val job = launch { result = s.list("ks-") }
+        runCurrent()
+        started.await()
+        job.cancel()
+        job.join()
+        assertNull(result)
+    }
 }

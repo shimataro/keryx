@@ -249,4 +249,99 @@ class DropboxStorageTest {
         assertIs<Result.Err>(r)
         assertIs<CloudStorageException>(r.exception)
     }
+
+    private fun listPage(entries: String, hasMore: Boolean, cursor: String = "c1") =
+        """{"entries":[$entries],"cursor":"$cursor","has_more":$hasMore}"""
+
+    private fun fileEntry(name: String, rev: String, size: Long) =
+        """{".tag":"file","name":"$name","path_display":"/$name","rev":"$rev","size":$size}"""
+
+    @Test
+    fun listFollowsEveryPageFiltersByPrefixAndSkipsFolders() = runTest {
+        val paths = mutableListOf<String>()
+        val bodies = mutableListOf<String>()
+        val pages = ArrayDeque(
+            listOf(
+                listPage(
+                    fileEntry("ks-g1-d-a-1-aaaaaaaaaaaa.db.gz", "r1", 10) + "," +
+                        """{".tag":"folder","name":"ks-folder","path_display":"/ks-folder"}""" + "," +
+                        fileEntry("keryx.db.gz", "r2", 20),
+                    hasMore = true,
+                    cursor = "cur-1",
+                ),
+                listPage(fileEntry("ks-g1-d-a-2-bbbbbbbbbbbb.db.gz", "r3", 30), hasMore = false),
+            ),
+        )
+        val s = storage { request ->
+            paths += request.url.encodedPath
+            bodies += (request.body as OutgoingContent.ByteArrayContent).bytes().decodeToString()
+            respond(pages.removeFirst(), HttpStatusCode.OK)
+        }
+        val r = s.list("ks-")
+        assertIs<Result.Ok<List<CloudFileEntry>>>(r)
+        assertEquals(
+            listOf(
+                CloudFileEntry("ks-g1-d-a-1-aaaaaaaaaaaa.db.gz", "r1", 10),
+                CloudFileEntry("ks-g1-d-a-2-bbbbbbbbbbbb.db.gz", "r3", 30),
+            ),
+            r.value,
+        )
+        assertEquals(listOf("/2/files/list_folder", "/2/files/list_folder/continue"), paths)
+        assertEquals(listOf("""{"path":""}""", """{"cursor":"cur-1"}"""), bodies)
+    }
+
+    @Test
+    fun listOfANeverWrittenAppFolderIsEmpty() = runTest {
+        val s = storage { respond("""{"error_summary":"path/not_found/.."}""", HttpStatusCode.Conflict) }
+        val r = s.list("")
+        assertIs<Result.Ok<List<CloudFileEntry>>>(r)
+        assertEquals(emptyList(), r.value)
+    }
+
+    @Test
+    fun listConflictWithAnotherErrorIsStorageError() = runTest {
+        val s = storage { respond("""{"error_summary":"path/malformed_path/.."}""", HttpStatusCode.Conflict) }
+        val r = s.list("")
+        assertIs<Result.Err>(r)
+        assertIs<CloudStorageException>(r.exception)
+    }
+
+    @Test
+    fun listUnauthorizedIsAuthError() = runTest {
+        val s = storage { respondError(HttpStatusCode.Unauthorized) }
+        val r = s.list("ks-")
+        assertIs<Result.Err>(r)
+        assertIs<CloudAuthException>(r.exception)
+    }
+
+    @Test
+    fun listFailureOnALaterPageIsAnError() = runTest {
+        var calls = 0
+        val s = storage {
+            calls++
+            if (calls == 1) respond(listPage(fileEntry("ks-a", "r1", 1), hasMore = true), HttpStatusCode.OK)
+            else respondError(HttpStatusCode.InternalServerError)
+        }
+        val r = s.list("ks-")
+        assertIs<Result.Err>(r)
+        assertIs<CloudStorageException>(r.exception)
+    }
+
+    @Test
+    fun listCancellationPropagates() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val started = CompletableDeferred<Unit>()
+        val s = storage {
+            started.complete(Unit)
+            gate.await()
+            respond(listPage("", hasMore = false), HttpStatusCode.OK)
+        }
+        var result: Result<List<CloudFileEntry>>? = null
+        val job = launch { result = s.list("ks-") }
+        runCurrent()
+        started.await()
+        job.cancel()
+        job.join()
+        assertNull(result)
+    }
 }
