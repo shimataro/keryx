@@ -34,6 +34,7 @@ import works.merc.keryx.app.core.SYNC_STATE_CLOUD_FILE_REV
 import works.merc.keryx.app.core.SYNC_STATE_LAST_SYNCED_AT
 import works.merc.keryx.app.core.SchemaVersionException
 import works.merc.keryx.app.core.SyncConflictException
+import works.merc.keryx.app.data.cloud.CloudFileEntry
 import works.merc.keryx.app.data.cloud.CloudFileMeta
 import works.merc.keryx.app.data.cloud.CloudStorage
 import works.merc.keryx.app.data.local.FtsManager
@@ -192,6 +193,12 @@ private class FakeCloudStorage : CloudStorage {
         files[to] = f
         return Result.Ok(Unit)
     }
+
+    override suspend fun list(prefix: String): Result<List<CloudFileEntry>> = Result.Ok(
+        files.entries
+            .map { (path, file) -> CloudFileEntry(path.substringAfterLast('/'), file.second, file.first.size.toLong()) }
+            .filter { it.name.startsWith(prefix) },
+    )
 }
 
 @OptIn(ExperimentalCoroutinesApi::class)

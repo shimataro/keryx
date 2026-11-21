@@ -13,12 +13,14 @@ import io.ktor.http.contentType
 import io.ktor.http.isSuccess
 import kotlinx.coroutines.delay
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlin.random.Random
@@ -275,6 +277,53 @@ class GoogleDriveStorage(
         findFile(token, cloudFileName(path)).map { file -> file?.let { CloudFileMeta(it.rev) } }
     }
 
+    /**
+     * Lists the app-data files whose name starts with [prefix] through `files.list`, following
+     * `nextPageToken` until the last page.
+     *
+     * The prefix is applied here rather than in the query: Drive's `contains` operator matches
+     * word prefixes, not string prefixes, so it would both miss and over-match sync file names.
+     * `appDataFolder` holds no folders this app creates, but a folder is skipped all the same.
+     *
+     * @param prefix The basename prefix to keep.
+     * @return The matching files (possibly with a name listed twice — see [CloudStorage.list]), or a mapped storage error.
+     */
+    override suspend fun list(prefix: String): Result<List<CloudFileEntry>> = withToken { token ->
+        val entries = mutableListOf<CloudFileEntry>()
+        var pageToken: String? = null
+        do {
+            val response = client.get("$apiBase/files") {
+                bearerAuth(token)
+                url {
+                    parameters.append("spaces", APP_DATA_FOLDER)
+                    parameters.append("q", "trashed = false")
+                    parameters.append("fields", "nextPageToken,files(id,name,version,size,mimeType)")
+                    parameters.append("pageSize", LIST_PAGE_SIZE.toString())
+                    pageToken?.let { parameters.append("pageToken", it) }
+                }
+            }
+            if (!response.status.isSuccess()) {
+                return@withToken mapError(response.status.value, response.bodyAsText())
+            }
+            val page = json.parseToJsonElement(response.bodyAsText()) as? JsonObject
+                ?: return@withToken Result.Err(CloudStorageException("Malformed files.list response"))
+            val files = page["files"] as? JsonArray
+                ?: return@withToken Result.Err(CloudStorageException("Missing files array in response"))
+            for (element in files) {
+                val obj = element as? JsonObject ?: continue
+                if (obj["mimeType"]?.jsonPrimitive?.content == FOLDER_MIME_TYPE) continue
+                val name = obj["name"]?.jsonPrimitive?.content ?: continue
+                if (!name.startsWith(prefix)) continue
+                val file = parseDriveFile(obj).valueOrElse { return@withToken it }
+                val size = obj["size"]?.jsonPrimitive?.longOrNull
+                    ?: return@withToken Result.Err(CloudStorageException("File metadata missing size"))
+                entries += CloudFileEntry(name, file.rev, size)
+            }
+            pageToken = page["nextPageToken"]?.jsonPrimitive?.content?.takeIf { it.isNotEmpty() }
+        } while (pageToken != null)
+        Result.Ok(entries)
+    }
+
     /** Lists all app-data files matching [name] (there should be at most one). */
     private suspend fun listFilesByName(token: String, name: String): Result<List<DriveFile>> {
         val response = client.get("$apiBase/files") {
@@ -405,6 +454,11 @@ class GoogleDriveStorage(
 
     private companion object {
         const val APP_DATA_FOLDER = "appDataFolder"
+
+        /** `files.list`'s largest page size, so a listing takes as few round trips as possible. */
+        const val LIST_PAGE_SIZE = 1000
+
+        const val FOLDER_MIME_TYPE = "application/vnd.google-apps.folder"
 
         /** Grace period before trusting a post-create listing that shows no duplicates — Drive's
          *  list index is not guaranteed to already reflect a just-completed create from a

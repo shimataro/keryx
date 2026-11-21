@@ -1,6 +1,7 @@
 package works.merc.keryx.app.data.cloud.nextcloud
 
 import com.fleeksoft.ksoup.Ksoup
+import com.fleeksoft.ksoup.nodes.Element
 import com.fleeksoft.ksoup.parser.Parser
 import io.ktor.client.HttpClient
 import io.ktor.client.request.HttpRequestBuilder
@@ -15,6 +16,7 @@ import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.http.content.TextContent
+import io.ktor.http.decodeURLPart
 import io.ktor.http.encodeURLParameter
 import io.ktor.http.isSuccess
 import kotlinx.coroutines.CancellationException
@@ -30,6 +32,7 @@ import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.core.SyncConflictException
 import works.merc.keryx.app.data.cloud.AppPasswordCredentials
 import works.merc.keryx.app.data.cloud.CloudCredentials
+import works.merc.keryx.app.data.cloud.CloudFileEntry
 import works.merc.keryx.app.data.cloud.CloudFileMeta
 import works.merc.keryx.app.data.cloud.CloudStorage
 import works.merc.keryx.app.data.cloud.FileUploadContent
@@ -53,6 +56,11 @@ private val MOVE = HttpMethod("MOVE")
 /** Asks a PROPFIND for the resource's ETag only. */
 private const val PROPFIND_ETAG_BODY =
     """<?xml version="1.0" encoding="utf-8"?><d:propfind xmlns:d="DAV:"><d:prop><d:getetag/></d:prop></d:propfind>"""
+
+/** Asks a Depth-1 PROPFIND for what a listing needs of each member: its ETag, size and whether it is a folder. */
+private const val PROPFIND_LIST_BODY =
+    """<?xml version="1.0" encoding="utf-8"?><d:propfind xmlns:d="DAV:"><d:prop>""" +
+        """<d:getetag/><d:getcontentlength/><d:resourcetype/></d:prop></d:propfind>"""
 
 /** Response headers carrying a written file's ETag, in the order they are read. */
 private val WRITE_REV_HEADERS = listOf("OC-ETag", HttpHeaders.ETag)
@@ -126,8 +134,8 @@ class NextcloudStorage(
     /**
      * Creates [path] without ever overwriting it: makes sure `/Keryx` exists, uploads to a temporary
      * name in it, then moves that onto [path] with `Overwrite: F`. The temporary file is deleted again
-     * (best effort) whenever the move does not happen; one whose delete also fails stays in `/Keryx`,
-     * since [CloudStorage] has no listing to find it by later. A 423 from any step is a
+     * (best effort) whenever the move does not happen; one whose delete also fails stays in `/Keryx`
+     * (its `.upload-` name matches no sync file's, so [list] callers ignore it). A 423 from any step is a
      * [SyncConflictException] (see [createStepError]).
      */
     override suspend fun create(path: String, sourcePath: String): Result<CloudFileMeta> = withCredentials { credentials ->
@@ -203,6 +211,25 @@ class NextcloudStorage(
         }
     }
 
+    /**
+     * Lists `/Keryx`'s files whose name starts with [prefix] with a Depth-1 PROPFIND, which answers
+     * every member in one multistatus (WebDAV has no pagination). The folder itself and any
+     * sub-folder are skipped; a missing `/Keryx` (404) is an empty listing.
+     */
+    override suspend fun list(prefix: String): Result<List<CloudFileEntry>> = withCredentials { credentials ->
+        val response = client.request(folderUrl(credentials) + "/") {
+            method = PROPFIND
+            authorize(credentials)
+            header("Depth", "1")
+            setBody(TextContent(PROPFIND_LIST_BODY, ContentType.Application.Xml))
+        }
+        when (response.status.value) {
+            207 -> propfindListing(response.bodyAsText(), prefix)
+            404 -> Result.Ok(emptyList())
+            else -> mapError(response)
+        }
+    }
+
     /** Deletes the temporary upload at [url], ignoring any failure — a leftover is accepted. */
     private suspend fun deleteQuietly(credentials: AppPasswordCredentials, url: String) {
         try {
@@ -272,3 +299,36 @@ internal fun propfindEtag(body: String): String? =
         .firstOrNull { it.tagName().substringAfterLast(':').equals("getetag", ignoreCase = true) && it.text().isNotBlank() }
         ?.text()
         ?.trim()
+
+/**
+ * The files in a Depth-1 PROPFIND multistatus [body] whose basename starts with [prefix].
+ *
+ * Elements are matched by local name, as in [propfindEtag]. A `response` whose `resourcetype` holds
+ * a `collection` (the listed folder itself, or a sub-folder) is skipped. The basename is the last
+ * segment of the member's `href`, percent-decoded. A matching file without an ETag or a size is a
+ * storage error; a non-matching one is ignored whatever it holds, since `/Keryx` may also contain
+ * the user's own files.
+ */
+internal fun propfindListing(body: String, prefix: String): Result<List<CloudFileEntry>> {
+    val document = Ksoup.parse(html = body, parser = Parser.xmlParser())
+    val entries = mutableListOf<CloudFileEntry>()
+    for (response in document.getAllElements().filter { it.hasLocalName("response") }) {
+        val descendants = response.getAllElements()
+        if (descendants.any { it.hasLocalName("collection") }) continue
+        val href = descendants.firstOrNull { it.hasLocalName("href") }?.text()?.trim() ?: continue
+        val name = href.trimEnd('/').substringAfterLast('/').decodeURLPart()
+        if (name.isEmpty() || !name.startsWith(prefix)) continue
+        val etag = descendants.firstOrNull { it.hasLocalName("getetag") && it.text().isNotBlank() }?.text()?.trim()
+            ?: return Result.Err(CloudStorageException("Missing ETag in listing"))
+        val size = descendants.firstNotNullOfOrNull { element ->
+            element.takeIf { it.hasLocalName("getcontentlength") }?.text()?.trim()?.toLongOrNull()
+        }
+            ?: return Result.Err(CloudStorageException("Missing size in listing"))
+        entries += CloudFileEntry(name, etag, size)
+    }
+    return Result.Ok(entries)
+}
+
+/** Whether this element's tag name, with any namespace prefix removed, is [localName]. */
+private fun Element.hasLocalName(localName: String): Boolean =
+    tagName().substringAfterLast(':').equals(localName, ignoreCase = true)
