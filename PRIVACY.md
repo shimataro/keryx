@@ -100,11 +100,12 @@ Nextcloud, see "Nextcloud" below):
 - **What syncs:** your feed subscriptions, folders, tags, cached articles
   (read/starred status included), and global app settings.
 - **What never syncs:** device-local settings (`local_settings.json`), your OAuth
-  credentials, and the local full-text search index. These stay on each device
-  independently.
-- **What gets uploaded:** a snapshot copy of your local database (with the search
-  index removed) is uploaded to a file in your own Dropbox, OneDrive, or
-  Google Drive. For Google Drive, this is written to the `drive.appdata` scope — a
+  credentials, each feed's fetch state on the device (errors, cache validators), and the
+  local full-text search index. These stay on each device independently.
+- **What gets uploaded:** the changes you make — and, from time to time and when a device
+  first connects, a full copy of the synced data — are uploaded as small files to your own
+  Dropbox, OneDrive, or Google Drive. They contain only the synced data listed above; the
+  search index and internal bookkeeping never leave the device. For Google Drive, this is written to the `drive.appdata` scope — a
   hidden, app-only folder that does not appear in your regular Google Drive and
   that no other app can see. For Dropbox, standard file-content scopes are used.
   For OneDrive, the standard Microsoft Graph file storage scope is used and the
@@ -128,10 +129,10 @@ Nextcloud, see "Nextcloud" below):
   sync you requested.
 - Once your data is in your Dropbox, OneDrive, or Google Drive account, it is
   subject to that provider's own privacy policy and terms — Keryx has no further
-  access to or control over it beyond the sync file it wrote.
+  access to or control over it beyond the sync files it wrote.
 - Disconnecting cloud sync in Settings stops future syncing immediately. It does
-  not retroactively delete the sync file already sitting in your Dropbox, OneDrive,
-  or Google Drive — you can remove that yourself from your cloud storage
+  not retroactively delete the sync files already sitting in your Dropbox, OneDrive,
+  or Google Drive — you can remove them yourself from your cloud storage
   account if you wish.
 
 ### Nextcloud
@@ -151,8 +152,8 @@ It works differently from the three providers above, so here is what that means:
   `Keryx (Android)`). Everything happens directly between your device and your server.
 - **What that app password can reach:** unlike the other providers' app-only folders, a Nextcloud app
   password can access **your whole Nextcloud account**. Keryx itself only ever reads and writes the
-  `Keryx` folder in your files — the sync file, a temporary upload file it may leave there if an upload
-  is interrupted, and the archive a reset of the sync data leaves (see "Data retention & deletion"). You
+  `Keryx` folder in your files — the sync files, a temporary upload file it may leave there if an upload
+  is interrupted, and the archives a reset of the sync data leaves (see "Data retention & deletion"). You
   can see and revoke the app password at any time in your server's Settings ▸ Security ▸ Devices &
   sessions; on Nextcloud 36 or later you can also limit it to file access there.
 - **What syncs, and what never syncs,** is the same as for the providers above.
@@ -161,15 +162,15 @@ It works differently from the three providers above, so here is what that means:
   the server that issued it — the one Nextcloud's login flow names when it hands the app password over,
   normally the address you entered, and always over HTTPS.
 - **On your server:** every sync upload is a normal file change there, so your server may keep earlier
-  versions of the sync file (the Versions app) and list each upload in its Activity stream. If a
+  versions of the sync files (the Versions app) and list each upload in its Activity stream. If a
   Nextcloud desktop client on one of your computers syncs your files, it downloads the `Keryx` folder
   too unless you exclude it in that client's selective sync settings.
 - **Local network on iOS, iPadOS and macOS:** if your server is on your local network, iOS (and macOS 15
   or later) asks once for permission to find and connect to devices on your local network; Keryx uses it
   only to reach the server you named.
 - **Disconnecting** asks your server to delete the app password, then removes it from your device even
-  if the server could not be reached. As with the other providers, the sync file itself stays in your
-  `Keryx` folder until you delete it.
+  if the server could not be reached. As with the other providers, the sync files themselves stay in your
+  `Keryx` folder until you delete them.
 
 ## Network requests this app makes
 

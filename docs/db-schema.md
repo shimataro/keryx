@@ -16,32 +16,43 @@ through it rather than composing `AppDirs.appDataDir()` with the filename themse
 ## Design Philosophy
 
 - All tables are managed by SQLDelight (`.sq`). `articles_fts` is created/maintained separately via raw SQL (`FtsManager`).
+- The **synced tables** are `feeds`, `articles`, `tags`, `feed_tags`, `folders` and `global_settings`, minus the
+  columns noted as device-local below (`articles.search_text`; a feed's fetch state lives in its own table). Every
+  local change to a synced row is recorded in `sync_outbox` by a trigger, and sent as a delta — see
+  [sync-architecture.md](sync-architecture.md).
 - Logical deletion uses `deleted_at` (NULL = alive). Sync timestamp is `updated_at`.
 - A delete and the event that undoes it never share a stamp on the same row. `tags` / `folders` stamp
   `updated_at`, and `feeds` stamps `deleted_updated_at`, as `MAX(now, previous + 1)` on a soft delete and on a
   recreation / reactivation (`upsertByName`) or resubscribe (`stampResubscribed`), so the stamps strictly increase
   even within one millisecond. The sync merge's last-write-wins can only order events whose stamps differ: on an
-  equal stamp it falls back to its tie rule (the cloud side wins — see [sync-architecture.md](sync-architecture.md)),
+  equal stamp it falls back to its tie rule (decided by value — see [sync-architecture.md](sync-architecture.md)),
   which knows nothing of which event came later, so an equal stamp could let the earlier event win — and would
   leave a recreated row indistinguishable from the one before the delete.
   Because those stamps can run a few milliseconds ahead of the clock, every other local write to such a row moves
-  its stamp forward the same way, so an edit made right after them is still the newest: for `folders`, a rename
-  (`upsert`) and a reorder (`updateSortOrder`); for `tags`, a rename or color change (`upsert`).
+  its stamp forward the same way, so an edit made right after them is still the newest.
 - **Every other last-write-wins stamp moves only forward on its row the same way**, `MAX(now, previous + 1)`:
   `feeds.custom_title_updated_at` / `folder_updated_at` / `sort_order_updated_at` (`updateCustomTitle`,
   `updateFolder`, `updateSortOrder`, `updateFolderAndSortOrder`), `articles.read_at` / `starred_at`
   (`updateReadStatus`, `updateReadStatusByIds`, `updateStarStatus`, the `markAllRead*` queries) and
-  `deleted_updated_at` (`softDeleteExpired`), and `feed_tags.updated_at` / `global_settings.updated_at` (`upsert`).
+  `deleted_updated_at` (`softDeleteExpired`), `tags.name_updated_at` / `color_updated_at` / `sort_order_updated_at`
+  and `folders.name_updated_at` / `sort_order_updated_at` (each moved only when its own field changes — `upsert`,
+  `updateSortOrder`, `upsertByName`), and `feed_tags.updated_at` / `global_settings.updated_at` (`upsert`).
   Without it, a write stamped at the value the row already holds — two writes within one millisecond, or one made
-  right after a merge brought that very stamp in — would lose to the older value on the next merge, since the tie
-  goes to the cloud side. A tie is thereby left only to two devices' independent writes.
+  right after a merge brought that very stamp in — could lose to the older value on the next merge, whose tie rule
+  knows nothing of which write came later. A tie is thereby left only to two devices' independent writes.
 - Booleans and timestamps are **INTEGER (`Long`)**. Booleans are 0/1; times are Unix milliseconds.
-- Schema version is managed by `PRAGMA user_version` (currently 2). On desktop, `DatabaseDriverFactory`
+- Schema version is managed by `PRAGMA user_version` (currently 3). On desktop, `DatabaseDriverFactory`
   drives create/migrate manually off this pragma; on Android, `AndroidSqliteDriver` drives it internally via its own
-  `onCreate`/`onUpgrade` callbacks. Version 2 adds `articles.deleted_at` / `deleted_updated_at` via `1.sqm`
-  (SQLDelight derives the version from the highest migration file + 1). When the schema changes, add a `.sqm` file
+  `onCreate`/`onUpgrade` callbacks. Version 2 adds `articles.deleted_at` / `deleted_updated_at` via `1.sqm`.
+  Version 3 (`2.sqm`) adds the sync bookkeeping (`sync_outbox`, `sync_capture`, `sync_merging`, `sync_applied`,
+  `sync_cursor`, `ks_search_pending`, and the capture triggers), moves `feeds`' `etag` / `last_modified` /
+  `error_count` / `last_error` into `feed_fetch_state` (`ALTER TABLE … DROP COLUMN`, SQLite 3.35+), adds the
+  per-field stamps of `tags` / `folders` (initialized from `updated_at`), and registers in `ks_search_pending` every
+  article whose `search_text` still equals its raw `content` / `summary` (written before HTML stripping).
+  (SQLDelight derives the version from the highest migration file + 1.) When the schema changes, add a `.sqm` file
   (`<from-version>.sqm`) and the version bumps automatically; `domain/MergeSchema.EXPECTED_SCHEMAS` (which
-  `DatabaseMerger.validateSchema` checks against) must be updated to the new version in lockstep.
+  `DatabaseMerger.validateSchema` checks against), `domain/TransportSchema` (the delta file schema and its
+  migrations) and the capture triggers' column lists must be updated in lockstep.
   A file whose `user_version` is newer than the running build's schema is never opened: desktop throws
   `DatabaseTooNewException` (`data/local/DatabaseSchemaGuard.kt`) before writing anything; Apple does the same through
   the same guard — `DatabaseDriverFactory.apple.kt`'s `createDriver` calls `requireSupportedSchemaVersion` on the
@@ -51,24 +62,36 @@ through it rather than composing `AppDirs.appDataDir()` with the filename themse
 
 ## Table List
 
-`feeds` / `articles` / `tags` / `feed_tags` / `folders` / `global_settings` / `sync_state` / `articles_fts` (virtual).
+`feeds` / `feed_fetch_state` / `articles` / `tags` / `feed_tags` / `folders` / `global_settings` / `sync_state` /
+the sync bookkeeping tables / `articles_fts` (virtual).
 
 ### feeds
 
-`id`(PK, UUID), `url`(UNIQUE), `site_url`, `title`, `description`, `favicon_url`, `etag`,
-`last_modified`, `error_count`, `last_error`, `custom_title`, `folder_id`(FK→folders, nullable),
+`id`(PK, UUID), `url`(UNIQUE), `site_url`, `title`, `description`, `favicon_url`,
+`custom_title`, `folder_id`(FK→folders, nullable),
 `deleted_at`, `updated_at`, `created_at`, `sort_order`, `folder_updated_at`(nullable),
 `sort_order_updated_at`(nullable), `custom_title_updated_at`(nullable), `deleted_updated_at`(nullable).
 
 - `url` is the unique key for a subscription but not the primary key (so the same feed can be treated as the same entity even if the URL changes).
 - `id` is deterministically generated from (redirect-resolved) `url` as **UUIDv5** at subscription time (`IdGenerator.feedId`). The same feed gets the same id on all devices, so sync merge (`feeds` matched by `id`) can converge independently subscribed feeds, and article ids (derived from `feed_id`) also match. Re-subscribing to an existing URL reuses the existing id, so the existing row is left in place (deterministic generation only applies to new rows).
 - Logical deletion via `deleted_at`. Re-subscribing resets it to NULL.
-- The feed list flags a feed as erroring whenever `error_count > 0` (or the feed is gone, see below). `FEED_TIMEOUT_RETRY_COUNT` is a separate, unrelated constant — the fetch-attempt retry budget `FeedFetcher` spends before giving up on a single fetch (`core/Constants.kt`).
-- `last_error` has two uses: the raw error text of the last failed fetch, and — for a 410 Gone feed — the fixed internal marker `FEED_ERROR_REASON_GONE` (`"gone"`, written by `feeds.markGone`). A 410 deliberately does not bump `error_count` (it is permanent, not a retry candidate), so this marker is the only signal the feed is gone, and it is what makes the feed list flag it (with its own localized tooltip — the column value itself is never shown to the user). Cleared by `resetErrorCount` on the next successful fetch.
 - `folder_id` is the folder a feed belongs to (1 feed = max 1 folder). This is an independent classification axis from tags (`feed_tags`, many-to-many). `feeds.upsert` (for subscription/refresh) does not touch this column at all; folder assignment changes are only made via `feeds.updateFolder` / `updateFolderAndSortOrder` (so they are not overwritten by subscription/refresh).
 - `folder_updated_at` / `sort_order_updated_at` / `custom_title_updated_at` / `deleted_updated_at` are
   **per-field timestamps for user-edited fields (folder assignment, sort order, manual rename, subscription state)**
-  (same concept as `read_at` / `starred_at` for articles). Separated from the row-level `updated_at` (updated by content refresh) so that a refresh on another device cannot overwrite these manual operations in sync merge. Each field-updating query only updates its corresponding column, and `upsert` (refresh) touches none of them. In sync merge, each field is independently last-write-wins using these columns (see [sync-architecture.md](sync-architecture.md)). NULL means "no such event" (distinct from "happened at time 0"). Unsubscription is `softDelete`; re-subscription uses `stampResubscribed` inside `subscribeFeed` to stamp `deleted_updated_at`.
+  (same concept as `read_at` / `starred_at` for articles). Separated from the row-level `updated_at` (updated by content refresh) so that a refresh on another device cannot overwrite these manual operations in sync merge. Each field-updating query only updates its corresponding column, and `upsert` (refresh) touches none of them — except that a re-subscribe, which moves the feed to the end of its group, stamps `sort_order_updated_at` along with the new `sort_order`, so the new position reaches other devices. In sync merge, each field is independently last-write-wins using these columns (see [sync-architecture.md](sync-architecture.md)). NULL means "no such event" (distinct from "happened at time 0"). Unsubscription is `softDelete`; re-subscription uses `stampResubscribed` inside `subscribeFeed` to stamp `deleted_updated_at`.
+
+### feed_fetch_state (device-local, non-sync)
+
+`feed_id`(PK, FK→feeds), `etag`, `last_modified`, `error_count`(default 0), `last_error`.
+
+- What this device learned the last time it fetched the feed. It is never synced: another device's validators
+  (`etag` / `last_modified`) would make this device send a conditional request for content it never fetched, and an
+  error belongs to the device that saw it. A row is created on the first fetch; a feed without one is treated as
+  "never fetched, no errors".
+- The feed list flags a feed as erroring whenever `error_count > 0` (or the feed is gone, see below) — that is,
+  when fetching it failed **on this device**. `FEED_TIMEOUT_RETRY_COUNT` is a separate, unrelated constant — the
+  fetch-attempt retry budget `FeedFetcher` spends before giving up on a single fetch (`core/Constants.kt`).
+- `last_error` has two uses: the raw error text of the last failed fetch, and — for a 410 Gone feed — the fixed internal marker `FEED_ERROR_REASON_GONE` (`"gone"`, written by `markGone`). A 410 deliberately does not bump `error_count` (it is permanent, not a retry candidate), so this marker is the only signal the feed is gone, and it is what makes the feed list flag it (with its own localized tooltip — the column value itself is never shown to the user). Cleared by `resetErrorCount` on the next successful fetch.
 
 ### articles
 
@@ -80,7 +103,7 @@ Indexes: `feed_id`, `is_read`, `is_starred`, and a composite `(published_at DESC
 - `id` is deterministically generated from `(feed_id, guid)` as **UUIDv5** (`IdGenerator.articleId`). The same article gets the same ID on all devices, so sync merge (articles matched by `id`) can propagate read/star states via last-write-wins. Existing rows keep their id via `upsert`'s `ON CONFLICT(feed_id, guid)` — deterministic generation only applies to new rows.
 - Read/star conflict resolution is last-write-wins via `read_at` / `starred_at`. They are stamped only when the state actually changes (`updateReadStatus` / `updateStarStatus` are guarded on it), so re-opening an already-read article does not move them.
 - `content` is displayed in preference to `summary`. If both are NULL, the reader shows a localized "no content" placeholder in place (with a link/button to open the article in the external browser); nothing opens automatically.
-- `search_text` = the HTML-stripped plain text of `content` (falling back to `summary`), or `""` if both are NULL. Computed at insert/update time (`ArticleRepository`, `HtmlText.toPlainText`).
+- `search_text` = the HTML-stripped plain text of `content` (falling back to `summary`), or `""` if both are NULL. Computed at insert/update time (`ArticleRepository`, `HtmlText.toPlainText`). It is **device-local**: never synced, since it is derived. An article whose body a sync merge filled in or changed is listed in `ks_search_pending`, and its `search_text` is recomputed right after the merge (a newly inserted one starts as `""`); `FtsManager.indexMissing()` skips listed rows until then.
 - Logical deletion via `deleted_at` (NULL = alive). Cache cleanup (`softDeleteExpired`) is the only **local**
   originator of a deletion; starred articles are never deleted. (Sync merge also writes `deleted_at`, propagating a
   deletion made on another device — see below.) `deleted_updated_at` is a field-specific last-wins
@@ -95,13 +118,21 @@ Indexes: `feed_id`, `is_read`, `is_starred`, and a composite `(published_at DESC
 
 ### tags / feed_tags
 
-`tags`: `id`(PK), `name`(UNIQUE), `color`, `sort_order`, `deleted_at`, `updated_at`, `created_at`.
+`tags`: `id`(PK), `name`(UNIQUE), `color`, `sort_order`, `deleted_at`, `updated_at`, `created_at`,
+`name_updated_at`, `color_updated_at`, `sort_order_updated_at`.
+
+- Name, color and sort order are each last-write-wins by their own stamp (like the user-edited fields of `feeds`),
+  so two devices changing different fields of the same tag both keep their change. `updated_at` stamps creation,
+  deletion and reactivation.
 `feed_tags`: `feed_id` + `tag_id`(composite PK), `deleted_at`, `updated_at`. Tag attach/detach is represented via `deleted_at`.
 
 ### folders
 
-`id`(PK), `name`(UNIQUE), `sort_order`, `deleted_at`, `updated_at`, `created_at`.
+`id`(PK), `name`(UNIQUE), `sort_order`, `deleted_at`, `updated_at`, `created_at`, `name_updated_at`,
+`sort_order_updated_at`.
 
+- Name and sort order are each last-write-wins by their own stamp; `updated_at` stamps creation, deletion and
+  reactivation, as for `tags`.
 - Independent classification axis from tags. Since 1 feed = max 1 folder (`feeds.folder_id`, not many-to-many), there is no junction table like `feed_tags`.
 - When deleting a folder, `FolderRepository.deleteFolder` resets the linked `feeds.folder_id` to NULL in the same transaction, then logically deletes the folder itself. However, this only affects the local DB, so after sync, feeds on other devices may point to a logically deleted / non-existent folder. The UI (`groupFeedsByFolder`) defensively treats this as "no folder".
 
@@ -117,21 +148,24 @@ Indexes: `feed_id`, `is_read`, `is_starred`, and a composite `(published_at DESC
 
 ### sync_state (KVS, non-sync)
 
-`key`(PK), `value`. Known keys: `last_synced_at` (Unix millis), `cloud_file_rev` (revision of the cloud
-file this device has already merged — Dropbox uses `rev`, Google Drive the file resource's `id` and `version` as `<id>:<version>`,
-OneDrive the DriveItem `eTag`, Nextcloud the WebDAV `ETag`, quotes included), `last_uploaded_snapshot_digest` (hex SHA-256 of the snapshot this device
-last uploaded).
+`key`(PK), `value`. Known keys: `last_synced_at` (Unix millis), `ks_device_id` (this device's sync identity in the
+current generation), `ks_generation`, `ks_last_seq` (the last delta this device committed), `ks_attempt` (the delta
+being sent: number, name, outbox high-water mark), `ks_pointer_rev`, `ks_legacy_stub_rev`. Device-local; cleared
+(all but `last_synced_at`) when the cloud connection is disconnected or switched.
 
-The last two exist so a sync that has nothing to do transfers nothing: an unchanged `cloud_file_rev`
-skips the download, and an unchanged snapshot digest skips the upload (see "Skipping Unchanged
-Transfers" in [sync-architecture.md](sync-architecture.md)).
+### Sync bookkeeping (device-local, non-sync)
 
-This table is **excluded from the uploaded snapshot**, alongside `articles_fts` and the four `idx_articles_*`
-indexes — `DatabaseSnapshot.exportForUpload` drops all of them on the `VACUUM INTO` copy (never on the live DB),
-then runs a trailing `VACUUM` (`domain/SnapshotSql.kt`). `sync_state` itself is device-local bookkeeping that no
-receiving device ever reads — it appears in neither `MergeSql` nor `DatabaseMerger`'s expected schema — and
-dropping it is also what keeps the snapshot a pure function of the synced data, since `last_synced_at` would
-otherwise change its bytes on every successful sync and defeat the digest comparison above.
+| Table | Content |
+| --- | --- |
+| `sync_outbox` | `seq`(PK, AUTOINCREMENT), `tbl`, `pk`, `heavy` — one row per local change to a synced row, appended by triggers |
+| `sync_capture` | a single row: `enabled` (recording on while connected), `full_pending` (a full send is due) |
+| `sync_merging` | a marker row present only inside a merge transaction, which suppresses recording |
+| `sync_applied` | `name`(PK) — cloud files already merged |
+| `sync_cursor` | `device`(PK), `seq` — per device, the highest delta number up to which everything is merged |
+| `ks_search_pending` | `rowid`(PK) — articles whose `search_text` must be recomputed |
+
+None of these, nor `sync_state`, `feed_fetch_state` or `articles_fts`, ever leaves the device: delta and base files
+are built from the synced tables only (see [sync-architecture.md](sync-architecture.md)).
 
 ### articles_fts (FTS5 virtual table, outside SQLDelight management)
 
@@ -146,8 +180,8 @@ INSERT INTO articles_fts(articles_fts) VALUES('rebuild');
 
 External content mode keeps only the index, referencing `articles.search_text` for body text.
 
-- **Never DROP `articles_fts` on the live DB.** Exclusion from upload is done by dropping it on the `VACUUM INTO`
-  snapshot copy side instead — see "FTS5 Handling" in [sync-architecture.md](sync-architecture.md).
+- **Never DROP `articles_fts` on the live DB.** It never leaves the device: transport files are built from the
+  synced tables only — see "FTS5 Handling" in [sync-architecture.md](sync-architecture.md).
 - After feed refresh or sync merge, `FtsManager.indexMissing()` **incrementally indexes only unindexed new
   articles**. Never use a full `'rebuild'` on a hot path — it is `O(total indexed text)` and too heavy to run there.
 - Full rebuild (`rebuildIndex()` = `'rebuild'`) runs only in the daily idle pass (`local_settings.lastFtsRebuiltAt`
@@ -230,6 +264,11 @@ Setup completion = file exists.
 ## Cache Cleanup
 
 Based on `cache_retention_days`, runs in the background at startup if 24+ hours have passed since the last cleanup. Starred articles and the latest 10 articles per feed are preserved regardless of retention period. If `null` (unlimited), cleanup is skipped. Cleanup **soft-deletes** (stamps `articles.deleted_at` / `deleted_updated_at`) rather than physically removing rows, so the deletion propagates via the sync merge instead of being resurrected from the cloud. Physical reclamation of old tombstones is future work.
+
+Cleanup decides by `cached_at` (the last time the article was seen in its feed). Sync carries a `cached_at` change
+only when its day changes, so a device that does not refresh a feed itself can see another device's `cached_at` up to
+about a day late, and may clean up an unstarred article at the edge of the retention period up to a day earlier than
+when every sync carried the exact value. The starred and latest-10 protections are unaffected.
 
 ## Favicon / Thumbnail
 

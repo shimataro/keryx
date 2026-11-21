@@ -46,11 +46,14 @@ RSS 2.0 / Atom 1.0 (RSS 1.0/RDF parsed loosely). JSON Feed will come after α.
   asks the server to revoke the app password, on a best-effort basis: if the server cannot be reached
   the app password stays valid there, and the user revokes it under the server's Devices & sessions. Nextcloud is offered on every platform and in every build,
   the F-Droid build included. See "Nextcloud (Login Flow v2)" in [sync-architecture.md](sync-architecture.md).
-- The sync file format, `VACUUM INTO` snapshot, excluded local-only tables/indexes, OAuth details,
-  token storage, and merge behavior are described in [sync-architecture.md](sync-architecture.md).
+- Each device uploads only the changes it made, as small delta files that the other devices merge; the
+  deltas are periodically folded into a full copy, which a newly connected device starts from. A sync with
+  nothing to send or receive transfers no data. The file layout, OAuth details, token storage, and merge behavior
+  are described in [sync-architecture.md](sync-architecture.md).
 - Sync targets: subscription list, folders, read state, stars, tag structure, article body, global
   settings.
-- Non-sync targets: device-local settings, cloud authentication info.
+- Non-sync targets: device-local settings, cloud authentication info, each feed's fetch state (errors, the 410
+  mark, cache validators), the search index.
 - Import / export is OPML.
 - Read/unread and star changes reach other devices in batches rather than one sync per article — once
   reading pauses for a few minutes, when the app leaves the foreground, or with the next refresh or
@@ -58,8 +61,8 @@ RSS 2.0 / Atom 1.0 (RSS 1.0/RDF parsed loosely). JSON Feed will come after α.
   [sync-architecture.md](sync-architecture.md).
 - While a sync is running, the connected provider's row in the Cloud Sync settings tab shows its
   current progress instead of just a plain spinner, so a long first sync doesn't look stalled.
-- **On Android and iOS, automatic sync waits for Wi-Fi by default.** Each sync uploads the whole
-  database, so an automatic sync is held back on a metered network (mobile data, tethering, a Wi-Fi
+- **On Android and iOS, automatic sync waits for Wi-Fi by default.** A sync can still move large
+  files (a newly connected device's full upload, catching up from a full copy), so an automatic sync is held back on a metered network (mobile data, tethering, a Wi-Fi
   marked as metered) and under the OS's Data Saver / Low Data Mode, and runs as soon as the network
   allows. The Cloud Sync settings tab offers "Sync automatically over mobile data" (off by default,
   device-local) to allow metered networks; Data Saver / Low Data Mode always defers. "Sync now"
@@ -100,7 +103,7 @@ initial sync.
   navigation drawer holding the feed list's own "+" button can auto-open here as well (§9's
   "Narrower widths" has the exact condition), so the button is reachable without the user having to
   find the drawer themselves
-- Feed health management: 301/308 auto-updates the subscription URL (notification), 410 Gone shows a warning in the notification center, consecutive errors show an indicator in the feed list
+- Feed health management: 301/308 auto-updates the subscription URL (notification), 410 Gone shows a warning in the notification center, consecutive errors show an indicator in the feed list. Errors and the 410 mark are per device: they show that fetching the feed failed on this device, and are not synced
 - In-app update on Windows, Linux, and Android (download and install, not just a link to the release
   page), and through Sparkle in the macOS build from GitHub Releases; the Mac App Store build has no
   update controls, since the App Store updates it. Updates are surfaced via the notification center, desktop
