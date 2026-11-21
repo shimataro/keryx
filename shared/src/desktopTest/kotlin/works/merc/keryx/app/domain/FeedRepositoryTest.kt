@@ -2577,6 +2577,8 @@ class FeedRepositoryTest {
             // would have placed it.
             db.insertFeed("other", now = 0L, folderId = "d1", sortOrder = 0L)
 
+            val stampBefore = db.feedsQueries.getByUrl("https://ex.com/feed").executeAsOne().sort_order_updated_at
+
             repo.subscribeFeed("https://ex.com/feed")
 
             val resubscribed = db.feedsQueries.getByUrl("https://ex.com/feed").executeAsOne()
@@ -2584,6 +2586,10 @@ class FeedRepositoryTest {
             assertEquals("d1", resubscribed.folder_id)
             val ordered = db.feedsQueries.getByFolder("d1").executeAsList()
             assertEquals(listOf("other", feed.id), ordered.map { it.id })
+            // The new position is a sort-order event of its own, so it must move the field's
+            // last-write-wins stamp — otherwise the merge never carries it to another device.
+            val stampAfter = assertNotNull(resubscribed.sort_order_updated_at)
+            assertTrue(stampBefore == null || stampAfter > stampBefore)
         } finally {
             driver.close()
         }

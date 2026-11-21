@@ -543,7 +543,13 @@ class FeedRepository(
             if (current == null && folderId != null) feeds.updateFolder(folderId, now, now, feedId)
             // Re-subscribing (feed was soft-deleted) is a subscription-state change: stamp its
             // last-wins timestamp so it propagates over another device's refresh on the next sync.
-            if (current?.deleted_at != null) feeds.stampResubscribed(now, feedId)
+            if (current?.deleted_at != null) {
+                feeds.stampResubscribed(now, feedId)
+                // upsert moved it to the end of its old group; stamp that sort order too, or the merge's
+                // per-field last-write-wins (mergeFeedSortOrder) would never carry the new position to
+                // another device.
+                feeds.updateSortOrder(sortOrder, now, now, feedId)
+            }
 
             // The articles follow the feed values, in this same transaction: one that kept another
             // writer's newer content and validators (a refresh that landed after the prefetch) only
