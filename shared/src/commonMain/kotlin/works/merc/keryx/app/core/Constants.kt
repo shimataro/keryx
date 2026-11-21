@@ -191,6 +191,13 @@ const val TRIGRAM_MIN_TERM_LENGTH = 3
 const val SEARCH_FALLBACK_RESULT_LIMIT = 200
 
 /**
+ * How many `ks_search_pending` rows `SearchTextBackfill` recomputes per batch — one read, then one
+ * write transaction. Bounds how long a batch holds the write lock (the HTML is converted between the
+ * two, outside any transaction) and how often the article listeners are re-triggered on a backlog.
+ */
+const val SEARCH_TEXT_BACKFILL_BATCH_SIZE = 500L
+
+/**
  * How many article bodies the reader's pager keeps hydrated at once (`HomeViewModel`'s
  * `articleContents`).
  *

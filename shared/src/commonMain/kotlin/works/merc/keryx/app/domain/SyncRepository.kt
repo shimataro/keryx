@@ -99,6 +99,11 @@ class SyncRepository(
     private val driver: SqlDriver,
     private val db: KeryxDatabase,
     private val ftsManager: FtsManager,
+    /**
+     * Recomputes the `search_text` of the articles a merge registered in `ks_search_pending`, before
+     * [ftsManager] indexes them. Shared with startup maintenance in production.
+     */
+    private val searchTextBackfill: SearchTextBackfill = SearchTextBackfill(db, ftsManager),
     private val cloudProvider: () -> CloudStorage?,
     private val clock: Clock,
     private val scope: CoroutineScope,
@@ -788,6 +793,9 @@ class SyncRepository(
                 mergeStatements = MergeSql.all,
             )
             _syncPhase.value = SyncPhase.INDEXING
+            // Recompute search_text for the articles the merge registered in ks_search_pending, so
+            // indexMissing() below (which skips pending rows) indexes them with their real text.
+            searchTextBackfill.recomputePending()
             // Index the articles the merge brought in (incremental — the live index is never wiped),
             // before notifying listeners so the reactive search re-run sees the new rows.
             ftsManager.indexMissing()

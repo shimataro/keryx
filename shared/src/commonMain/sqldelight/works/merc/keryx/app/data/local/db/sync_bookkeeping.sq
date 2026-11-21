@@ -215,3 +215,32 @@ DELETE FROM sync_merging;
 
 searchPendingAll:
 SELECT rowid FROM ks_search_pending ORDER BY rowid;
+
+-- search_text recomputation (domain/SearchTextBackfill): one batch of pending rows after
+-- :afterRowid, with the body the text is computed from. article_id is NULL for a pending rowid
+-- whose article no longer exists (never expected: articles are never physically deleted).
+searchPendingBatch:
+SELECT p.rowid AS pending_rowid, a.id AS article_id, a.content, a.summary
+FROM ks_search_pending p
+LEFT JOIN articles a ON a.rowid = p.rowid
+WHERE p.rowid > :afterRowid
+ORDER BY p.rowid
+LIMIT :batchSize;
+
+-- Removes a pending row only while the article's body is still the one its text was computed
+-- from; a body changed in between (a concurrent refresh) leaves it pending for the next pass.
+removeSearchPendingIfBodyUnchanged:
+DELETE FROM ks_search_pending
+WHERE rowid = :rowid
+  AND EXISTS (
+    SELECT 1 FROM articles
+    WHERE articles.rowid = :rowid AND articles.content IS :content AND articles.summary IS :summary
+  );
+
+setSearchTextIfBodyUnchanged:
+UPDATE articles SET search_text = :searchText
+WHERE rowid = :rowid AND content IS :content AND summary IS :summary;
+
+removeSearchPendingOrphan:
+DELETE FROM ks_search_pending
+WHERE rowid = :rowid AND NOT EXISTS (SELECT 1 FROM articles WHERE articles.rowid = :rowid);
