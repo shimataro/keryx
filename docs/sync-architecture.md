@@ -67,7 +67,8 @@ folder of the user's own files rather than an app folder.
 
 `list(prefix)` returns every file whose name starts with `prefix` (name, revision, size), following every page:
 Dropbox `list_folder` / `list_folder/continue`, Google Drive `files.list` in `appDataFolder` with `nextPageToken`,
-OneDrive the app folder's `/children` with `@odata.nextLink`, Nextcloud a Depth-1 `PROPFIND` on `/Keryx`. Drive's and
+OneDrive the app folder's `/children` with `@odata.nextLink`, Nextcloud a Depth-1 `PROPFIND` on `/Keryx`. A page
+link (cursor, page token, `nextLink`) that repeats one already followed is a storage error rather than a loop. Drive's and
 OneDrive's listings are eventually consistent — a file just written may be missing for a while — which the receiving
 rules tolerate (a gap stops the cursor; it never skips anything). Drive may also list two files of the same name;
 for sync files that only ever means two copies of the same content.

@@ -279,7 +279,7 @@ class GoogleDriveStorage(
 
     /**
      * Lists the app-data files whose name starts with [prefix] through `files.list`, following
-     * `nextPageToken` until the last page.
+     * `nextPageToken` until the last page; a token already used is a storage error rather than a loop.
      *
      * The prefix is applied here rather than in the query: Drive's `contains` operator matches
      * word prefixes, not string prefixes, so it would both miss and over-match sync file names.
@@ -291,6 +291,8 @@ class GoogleDriveStorage(
     override suspend fun list(prefix: String): Result<List<CloudFileEntry>> = withToken { token ->
         val entries = mutableListOf<CloudFileEntry>()
         var pageToken: String? = null
+        // A token already used would answer the same page again, and the loop would never end.
+        val seenTokens = mutableSetOf<String>()
         do {
             val response = client.get("$apiBase/files") {
                 bearerAuth(token)
@@ -320,6 +322,9 @@ class GoogleDriveStorage(
                 entries += CloudFileEntry(name, file.rev, size)
             }
             pageToken = page["nextPageToken"]?.jsonPrimitive?.content?.takeIf { it.isNotEmpty() }
+            if (pageToken != null && !seenTokens.add(pageToken)) {
+                return@withToken Result.Err(CloudStorageException("Repeated nextPageToken in files.list response"))
+            }
         } while (pageToken != null)
         Result.Ok(entries)
     }

@@ -213,7 +213,8 @@ class DropboxStorage(
 
     /**
      * Lists the app folder's files whose name starts with [prefix] through `files/list_folder`,
-     * then `files/list_folder/continue` for as long as Dropbox reports `has_more`.
+     * then `files/list_folder/continue` for as long as Dropbox reports `has_more`; a cursor already
+     * used is a storage error rather than a loop.
      *
      * Sync paths are flat (`/keryx.db.gz`), so the app folder's root (`""`) holds every one of them.
      * A 409 `path/not_found` (nothing ever written to the app folder) is an empty listing.
@@ -224,6 +225,8 @@ class DropboxStorage(
     override suspend fun list(prefix: String): Result<List<CloudFileEntry>> = withToken { token ->
         val entries = mutableListOf<CloudFileEntry>()
         var response = postJson(token, "$apiBase/2/files/list_folder", buildJsonObject { put("path", "") })
+        // A cursor already used would answer the same page again, and the loop would never end.
+        val seenCursors = mutableSetOf<String>()
         while (true) {
             if (!response.status.isSuccess()) {
                 if (response.status.value == 409) {
@@ -249,6 +252,9 @@ class DropboxStorage(
             if (page["has_more"]?.jsonPrimitive?.booleanOrNull != true) break
             val cursor = page["cursor"]?.jsonPrimitive?.content
                 ?: return@withToken Result.Err(CloudStorageException("Missing cursor in list_folder response"))
+            if (!seenCursors.add(cursor)) {
+                return@withToken Result.Err(CloudStorageException("Repeated cursor in list_folder response"))
+            }
             response = postJson(token, "$apiBase/2/files/list_folder/continue", buildJsonObject { put("cursor", cursor) })
         }
         Result.Ok(entries)

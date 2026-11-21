@@ -776,6 +776,21 @@ class GoogleDriveStorageTest {
     }
 
     @Test
+    fun listRefusesAPageTokenAlreadyUsed() = runTest {
+        val (s, history, verify) = storage(
+            "tok",
+            { respond("""{"nextPageToken":"p2","files":[]}""", HttpStatusCode.OK) },
+            { respond("""{"nextPageToken":"p2","files":[]}""", HttpStatusCode.OK) },
+        )
+        val r = s.list("ks-")
+        assertIs<Result.Err>(r)
+        assertIs<CloudStorageException>(r.exception)
+        // The repeated token is refused before it is sent a second time.
+        assertEquals(2, history.size)
+        verify()
+    }
+
+    @Test
     fun listOfAnEmptyAppFolderIsEmpty() = runTest {
         val (s, history, verify) = storage("tok", { respond(notFound, HttpStatusCode.OK) })
         val r = s.list("")

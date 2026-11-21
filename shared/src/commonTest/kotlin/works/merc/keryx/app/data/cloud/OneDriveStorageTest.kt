@@ -381,6 +381,40 @@ class OneDriveStorageTest {
     }
 
     @Test
+    fun listRefusesANextLinkAlreadyFollowed() = runTest {
+        val nextLink = "https://graph.microsoft.com/v1.0/me/drive/special/approot/children?\$skiptoken=abc"
+        val page = """{"@odata.nextLink":"$nextLink","value":[""" + itemEntry("ks-a", "e1", 1) + "]}"
+        val (s, history, verify) = storage(
+            "tok",
+            { respond(page, HttpStatusCode.OK, jsonHeaders) },
+            { respond(page, HttpStatusCode.OK, jsonHeaders) },
+        )
+        val r = s.list("ks-")
+        assertIs<Result.Err>(r)
+        assertIs<CloudStorageException>(r.exception)
+        // The repeated link is refused before it is requested a second time.
+        assertEquals(2, history.size)
+        verify()
+    }
+
+    @Test
+    fun listFollowsDistinctNextLinksPastAnEmptyPage() = runTest {
+        val link2 = "https://graph.microsoft.com/v1.0/me/drive/special/approot/children?\$skiptoken=p2"
+        val link3 = "https://graph.microsoft.com/v1.0/me/drive/special/approot/children?\$skiptoken=p3"
+        val (s, history, verify) = storage(
+            "tok",
+            { respond("""{"@odata.nextLink":"$link2","value":[]}""", HttpStatusCode.OK, jsonHeaders) },
+            { respond("""{"@odata.nextLink":"$link3","value":[]}""", HttpStatusCode.OK, jsonHeaders) },
+            { respond("""{"value":[""" + itemEntry("ks-a", "e1", 1) + "]}", HttpStatusCode.OK, jsonHeaders) },
+        )
+        val r = s.list("ks-")
+        assertIs<Result.Ok<List<CloudFileEntry>>>(r)
+        assertEquals(listOf(CloudFileEntry("ks-a", "e1", 1)), r.value)
+        assertEquals(3, history.size)
+        verify()
+    }
+
+    @Test
     fun list404OnALaterPageIsStorageError() = runTest {
         val nextLink = "https://graph.microsoft.com/v1.0/me/drive/special/approot/children?\$skiptoken=abc"
         val (s, _, verify) = storage(

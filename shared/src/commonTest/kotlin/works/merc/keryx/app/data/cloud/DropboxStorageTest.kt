@@ -291,6 +291,20 @@ class DropboxStorageTest {
     }
 
     @Test
+    fun listRefusesACursorAlreadyUsed() = runTest {
+        var calls = 0
+        val s = storage {
+            calls++
+            respond(listPage(fileEntry("ks-a", "r1", 1), hasMore = true, cursor = "cur-1"), HttpStatusCode.OK)
+        }
+        val r = s.list("ks-")
+        assertIs<Result.Err>(r)
+        assertIs<CloudStorageException>(r.exception)
+        // The repeated cursor is refused before it is sent a second time.
+        assertEquals(2, calls)
+    }
+
+    @Test
     fun listOfANeverWrittenAppFolderIsEmpty() = runTest {
         val s = storage { respond("""{"error_summary":"path/not_found/.."}""", HttpStatusCode.Conflict) }
         val r = s.list("")

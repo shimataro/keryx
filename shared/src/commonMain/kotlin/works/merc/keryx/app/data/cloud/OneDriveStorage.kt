@@ -208,7 +208,7 @@ class OneDriveStorage(
      *
      * A 404 (the app folder has not been provisioned yet) is an empty listing. A `nextLink` that
      * does not point back at Microsoft Graph over HTTPS is refused rather than followed, since the
-     * bearer token goes with it.
+     * bearer token goes with it, and one already followed is a storage error rather than a loop.
      *
      * @param prefix The basename prefix to keep.
      * @return The matching files, or a mapped storage error.
@@ -217,7 +217,12 @@ class OneDriveStorage(
         val entries = mutableListOf<CloudFileEntry>()
         var pageUrl: String? = "$appRootUrl/children"
         var first = true
+        // A link already followed would answer the same page again, and the loop would never end.
+        val requestedUrls = mutableSetOf<String>()
         while (pageUrl != null) {
+            if (!requestedUrls.add(pageUrl)) {
+                return@withToken Result.Err(CloudStorageException("Repeated nextLink in children response"))
+            }
             val response = client.get(pageUrl) {
                 bearerAuth(token)
                 // The first page names the fields and page size; a nextLink already carries both.
