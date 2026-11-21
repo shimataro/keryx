@@ -5,6 +5,7 @@ import cnames.structs.sqlite3_stmt
 import co.touchlab.sqliter.sqlite3.SQLITE_DONE
 import co.touchlab.sqliter.sqlite3.SQLITE_OK
 import co.touchlab.sqliter.sqlite3.SQLITE_OPEN_CREATE
+import co.touchlab.sqliter.sqlite3.SQLITE_OPEN_READONLY
 import co.touchlab.sqliter.sqlite3.SQLITE_OPEN_READWRITE
 import co.touchlab.sqliter.sqlite3.SQLITE_ROW
 import co.touchlab.sqliter.sqlite3.sqlite3_busy_timeout
@@ -143,10 +144,11 @@ internal class RawSqliteConnection private constructor(private val db: CPointer<
     }
 
     companion object {
-        /** Opens [path] read-write, creating it when [create] is set. */
-        fun open(path: String, create: Boolean = false): RawSqliteConnection = memScoped {
+        /** Opens [path] read-write (read-only when [readOnly] is set), creating it when [create] is set. */
+        fun open(path: String, create: Boolean = false, readOnly: Boolean = false): RawSqliteConnection = memScoped {
+            require(!(create && readOnly)) { "A read-only open cannot create the file" }
             val out = alloc<CPointerVar<sqlite3>>()
-            val flags = SQLITE_OPEN_READWRITE or (if (create) SQLITE_OPEN_CREATE else 0)
+            val flags = if (readOnly) SQLITE_OPEN_READONLY else SQLITE_OPEN_READWRITE or (if (create) SQLITE_OPEN_CREATE else 0)
             val rc = sqlite3_open_v2(path, out.ptr, flags, null)
             val handle = out.value
             if (rc != SQLITE_OK || handle == null) {
