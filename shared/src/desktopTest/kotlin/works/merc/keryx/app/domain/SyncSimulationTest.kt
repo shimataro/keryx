@@ -114,13 +114,36 @@ class SyncSimulationTest {
         for (seed in listOf(11, 23, 37)) runSimulation(seed, operations = 400)
     }
 
-    private fun runSimulation(seed: Int, operations: Int) = runBlocking {
+    /**
+     * The same, starting from a pre-delta cloud (only `keryx.db.gz`), which the first device migrates,
+     * and with an older build now and then writing a full database over the stub (Google Drive's
+     * non-atomic revision check), which the legacy watch absorbs — under the same interruptions,
+     * including at every migration and legacy-watch step.
+     */
+    @Test
+    fun devicesConvergeFromAPreDeltaCloudWithAnOlderBuildStillWriting() {
+        runSimulation(53, operations = 300, legacyStart = true)
+    }
+
+    private fun runSimulation(seed: Int, operations: Int, legacyStart: Boolean = false) = runBlocking {
         val sim = Sim(seed)
         val devices = (0 until 3).map { Device(sim, "d$it-s$seed") }
         try {
+            var oldBuildWrites = 0
+            if (legacyStart) {
+                sim.cloud.put("keryx.db.gz", legacyDatabase(sim, readAt = null))
+                val first = devices[0].sync.repo.sync()
+                if (first is Result.Err) fail("seed $seed: the migration failed: ${first.exception}")
+                devices.forEach { record(sim, it) }
+            }
             val resetAt = operations / 2
             for (step in 0 until operations) {
                 sim.tick()
+                if (legacyStart && sim.random.nextInt(100) < 3) {
+                    // An older build syncs and replaces the stub with its full database.
+                    oldBuildWrites++
+                    sim.cloud.put("keryx.db.gz", legacyDatabase(sim, readAt = sim.now, extraFeed = "old-${sim.nameCounter++}"))
+                }
                 sim.cloud.listingDelay = { sim.random.nextLong(3) }
                 sim.cloud.ghostListings = { sim.random.nextLong(2) }
                 sim.cloud.duplicateNames = sim.random.nextInt(10) == 0
@@ -144,12 +167,20 @@ class SyncSimulationTest {
             assertTrue(sim.crashes > 0 && sim.interleavings > 0, "seed $seed: $stats")
             assertTrue(written.count { it.kind == TransportFileKind.BASE } > 3 && sim.cloud.deleteCount > 0, "seed $seed: $stats")
             assertEquals(2, written.map { it.generation }.distinct().size, "seed $seed: $stats")
+            if (legacyStart) assertTrue(oldBuildWrites > 0, "seed $seed: no older build wrote")
             quiesce(sim, devices, seed)
             devices.forEach { record(sim, it) }
 
             val dumps = devices.map { dump(it) }
             for (i in 1 until dumps.size) {
                 assertEquals(dumps[0], dumps[i], "seed $seed: ${devices[0].sync.label} and ${devices[i].sync.label} differ")
+            }
+            if (legacyStart) {
+                assertTrue(PreDeltaFiles.isStub(sim.cloud.bytesOf("keryx.db.gz")), "seed $seed: the stub is back in place")
+                for (device in devices) {
+                    assertTrue(device.db.feedsQueries.getById("lf1").executeAsOneOrNull() != null, "seed $seed: ${device.sync.label} lacks the pre-delta feed")
+                    assertEquals(sim.cloud.files.getValue("keryx.db.gz").rev, device.sync.state(works.merc.keryx.app.core.SYNC_STATE_KS_LEGACY_STUB_REV))
+                }
             }
             for (device in devices) {
                 checkOracle(sim, device, seed)
@@ -164,6 +195,19 @@ class SyncSimulationTest {
             sim.failingClient.close()
         }
     }
+
+    /**
+     * The pre-delta database an older build holds: a feed with two articles, with the first article
+     * read at [readAt], plus [extraFeed] when given.
+     */
+    private fun legacyDatabase(sim: Sim, readAt: Long?, extraFeed: String? = null): ByteArray = PreDeltaFiles.database(
+        *listOfNotNull(
+            PreDeltaFiles.feed("lf1"),
+            PreDeltaFiles.article("la1", "lf1", read = readAt != null, readAt = readAt),
+            PreDeltaFiles.article("la2", "lf1"),
+            extraFeed?.let { PreDeltaFiles.feed(it, updatedAt = sim.now) },
+        ).toTypedArray(),
+    )
 
     /** One sync of [device], possibly interrupted, failing transiently, or interleaved with another device's. */
     private suspend fun syncWithChaos(sim: Sim, device: Device, devices: List<Device>, where: String) {

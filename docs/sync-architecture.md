@@ -4,7 +4,8 @@
 
 Target: cloud sync (Dropbox / OneDrive / Google Drive / Nextcloud). Implementation is in `domain/SyncRepository.kt`
 (scheduling, gates, user-facing state), `domain/DeltaSync.kt` (the flow below), `domain/SyncPointer.kt`,
-`domain/TransportCoverage.kt` (what a base covers, the base cache, the recorded send), `domain/MergeSql.kt`,
+`domain/TransportCoverage.kt` (what a base covers, the base cache, the recorded send), `domain/LegacyCloudFile.kt` (the
+pre-delta migration and the legacy watch), `domain/MergeSql.kt`,
 `domain/ReduceSql.kt`, `domain/TransportSchema.kt`, `domain/MergeFailureClassifier.kt`, `domain/MergeSchema.kt`,
 `domain/SnapshotSql.kt`, `platform/DatabaseMerger`, `platform/DeltaExporter`, `platform/TransportFiles`.
 
@@ -148,10 +149,10 @@ Everything below runs under `SyncRepository`'s `mutex`.
    crash between a commit and its deletion (only ever the last committed one) is deleted.
 1. **Read the pointer.** `metadata(keryx-sync.json)`; the file is downloaded only when its revision differs from
    `ks_pointer_rev`.
-   - Neither the pointer nor `keryx.db.gz` exists → this is the first device ("Joining") — unless this device has
+   - Neither the pointer nor a full `keryx.db.gz` exists (no file, or the stub) → this is the first device ("Joining") — unless this device has
      already sent into its own generation (`ks_last_seq ≥ 1`: a first device interrupted before creating the
      pointer), which then creates the pointer for that generation.
-   - No pointer, but `keryx.db.gz` exists → migrate from the pre-delta format ("Migration").
+   - No pointer, but `keryx.db.gz` holds a full database → migrate from the pre-delta format ("Migration").
    - Its generation differs from `ks_generation` → rejoin ("Joining") — another device reset the cloud data.
    - It cannot be parsed or lacks a field → `CloudDataIncompatibleException` (a reset rewrites it).
    - Its `format` is newer than this build knows → `SchemaVersionException` ("update the app").
@@ -171,8 +172,8 @@ Everything below runs under `SyncRepository`'s `mutex`.
 5. **Fold and collect garbage**, when the thresholds are met (see "Bases and Garbage Collection").
 6. Record `last_synced_at`.
 
-A sync with nothing to do costs three requests (two `metadata` calls and one listing page) and no payload — two until
-the legacy watch of step 1 is in place (the migration step). The `keryx.db.gz` watch goes away with the rest of the
+A sync with nothing to do costs three requests (two `metadata` calls and one listing page) and no payload. The
+`keryx.db.gz` watch goes away with the rest of the
 pre-delta compatibility at v1.0.0. `SYNC_MAX_RETRY` now bounds
 only the retries of a revision-checked write (the pointer, the stub); delta and base names never collide.
 
@@ -301,8 +302,8 @@ temporary file.
 | --- | --- | --- |
 | 1 | Name matches the pattern | Not ours — ignored |
 | 2 | Download completes | Transient; retried next sync |
-| 3 | gzip decompresses (capped at `MAX_SYNC_DB_SIZE_BYTES`), the SQLite header, the hash in the name | Any of these failing → downloaded once more in the same sync; failing again → corrupt |
-| 4 | `user_version` | Newer than this build → `SchemaVersionException` |
+| 3 | gzip decompresses (capped at `MAX_SYNC_DB_SIZE_BYTES`), the SQLite header, the hash in the name (a pre-delta database has no hash in its name) | Any of these failing → downloaded once more in the same sync; failing again → corrupt |
+| 4 | `user_version` | Newer than this build → `SchemaVersionException` (at `keryx.db.gz`, an empty file of `user_version` 1000 is the stub, recognized before this check; any other newer version, 1000 with tables included, is this failure) |
 | 5 | Expected tables and columns for that version (`TransportSchema`; `MergeSchema` for a pre-delta database) | Missing → corrupt. No expectation registered for the version → undetermined, treated as transient (never answered with a reset) |
 | 6 | An older version is migrated up (`TransportSchema` migrations; `KeryxDatabase.Schema.migrate` for a pre-delta database) | An SQLite error while migrating → corrupt |
 | 7 | Types and value ranges, by a query generated from the expected schema: ids are non-empty text, stamps are integer or NULL, booleans are 0 or 1, NOT NULL columns hold no NULL | Any violating row → corrupt |
@@ -353,7 +354,7 @@ The phases map onto the steps above: `CHECKING` for the pointer/stub `metadata()
 `DatabaseMerger.merge()`, `INDEXING` for the `search_text` recomputation and `ftsManager.indexMissing()`,
 `PREPARING` for building a delta or base (`DeltaExporter`, `ReduceSql`, compression), and `UPLOADING` for the
 `create` calls and the pointer/stub replacement. `resetCloudData()` goes through `PREPARING`/`UPLOADING` for its new
-generation's base; `ARCHIVING` is used while the migration archives the pre-delta file.
+generation's base; `ARCHIVING` is used while the pre-delta file is archived and the stub put in its place.
 
 An `AUTOMATIC` sync skipped by `autoSyncSuspended` never enters `trackSync` at all (see "Automatic-Sync
 Suspension" below), so `syncPhase` stays `IDLE` for its entire (instant) duration — consistent with that skip
@@ -1024,11 +1025,14 @@ The pre-delta format is a single full database at `/keryx.db.gz` (and, before co
 running this version that finds no pointer but a `keryx.db.gz`:
 
 1. Merges `keryx.db.gz` as before (validated, migrated to the current schema, `MergeSql`) and remembers its
-   revision.
+   revision. The merge runs with capture as it stands (no `sync_merging`): on a device that has not joined yet nothing
+   is recorded, and the full send of step 2 carries the rows; on a device that already sent into its own generation
+   (an earlier attempt interrupted before creating the pointer) the rows it changes enter the outbox and follow as a
+   delta.
 2. Joins: its full send becomes the first base, and it creates the pointer. If a pointer already exists (another
    device migrated first), this is an ordinary join.
-3. Uploads the downloaded file as `keryx-YYYYMMDD-HHMMSS.db.gz.bak` (`create`; a name collision is ignored) — a
-   one-time manual way back.
+3. Uploads the downloaded file as `keryx-YYYYMMDD-HHMMSS.db.gz.bak` (`create`; a name collision is ignored; any other
+   failure ends the sync before step 4, and the next one tries again) — a one-time manual way back.
 4. Replaces `keryx.db.gz`, **with a revision check against step 1's revision**, by an empty SQLite file whose
    `user_version` is 1000. It is not renamed away first: between checking it and renaming it, an older build could
    write data that would then be archived without ever being merged.
@@ -1037,7 +1041,24 @@ running this version that finds no pointer but a `keryx.db.gz`:
      it actually changes enters the outbox and reaches every device as a delta; then retry step 4.
    - Success → record the revision as `ks_legacy_stub_rev`.
 5. An older build that reads the stub raises `SchemaVersionException` ("update the app") before writing anything:
-   it fails visibly instead of silently diverging.
+   it fails visibly instead of silently diverging. (Its `DatabaseMerger.merge` reads the downloaded file's
+   `user_version` before it opens the local database — `migrateCloudIfOlder` on every platform.)
+
+The stub is recognized by content, not by name or size: `user_version` 1000 and no tables. A file of any other newer
+version — 1000 with tables in it included — is a `SchemaVersionException` like any too-new cloud file. A stub found
+with no pointer (the pointer removed by hand, say) means there is no pre-delta data: its revision is recorded and the
+device starts as the first one.
+
+**Interruptions.** Every step is decided again from the cloud, so a crash anywhere converges on a later sync: before
+the pointer exists, the next sync finds no pointer and a full `keryx.db.gz` and starts over (the merge is idempotent; a
+send already recorded is resumed and its pointer created, step 0 and step 1 of "Sync Flow"); once the pointer exists,
+the legacy watch finds a full `keryx.db.gz` whose revision is not `ks_legacy_stub_rev` and finishes steps 3–4; after
+the stub's upload but before its revision is recorded, the watch downloads the stub and records it. The archive of
+step 3 is made by whichever runs it — the migration or the legacy watch — **while this device has no stub revision
+recorded**: until then the full database is the original pre-delta data (an interrupted migration's, or one another
+device left half done). A full database found after a stub was known is an older build's later write; it is merged
+but not archived. A stub replacement that loses its revision check `SYNC_MAX_RETRY` times in a row (the file kept
+changing) is a transient failure; the next sync continues.
 
 **An older build writing after the migration.** On Dropbox, OneDrive and Nextcloud its revision-checked upload
 fails, and on retry it reads the stub. On Google Drive the revision check is not atomic, so it can overwrite the
@@ -1051,7 +1072,8 @@ state into `feed_fetch_state` inside the temporary file only (never into the loc
 per-field stamps and `articles.body_updated_at` from `updated_at`, and its articles' `search_text` is recomputed as for any merge.
 
 Builds older than compression (reading only `/keryx.db`) are unaffected by the stub and keep the one-way divergence
-documented for them; that fallback, the legacy watch and this migration are all removed at v1.0.0.
+documented for them: this version neither reads nor writes `/keryx.db`. The legacy watch and this migration are
+removed at v1.0.0.
 
 ## Resetting (Archiving) Cloud Data
 

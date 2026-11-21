@@ -17,7 +17,6 @@ import kotlinx.coroutines.test.runTest
 import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.ArticleFilter
-import works.merc.keryx.app.core.CLOUD_DB_GZ_PATH
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.CloudAuthException
 import works.merc.keryx.app.core.CloudDataIncompatibleException
@@ -196,7 +195,7 @@ class SyncRepositoryTest {
 
         a.syncOk()
 
-        assertEquals(1, cloud.metadataCount - metadataBefore, "only the pointer's metadata")
+        assertEquals(2, cloud.metadataCount - metadataBefore, "only the pointer's and keryx.db.gz's metadata")
         assertEquals(down, cloud.downloadCount)
         assertEquals(up, cloud.createCount + cloud.uploadCount)
     }
@@ -317,17 +316,6 @@ class SyncRepositoryTest {
         assertIs<Result.Err>(result)
         assertIs<SchemaVersionException>(result.exception)
         assertEquals(0, cloud.createCount + cloud.uploadCount)
-    }
-
-    @Test
-    fun preDeltaDataWithoutAPointerIsLeftForTheMigration() = runTest {
-        val cloud = FakeCloudStorage()
-        cloud.put(CLOUD_DB_GZ_PATH, byteArrayOf(1, 2, 3))
-        val result = newRepo(cloud).sync()
-        assertIs<Result.Err>(result)
-        assertIs<CloudStorageException>(result.exception)
-        assertEquals(setOf("keryx.db.gz"), cloud.names())
-        assertEquals(0L, localDb.sync_bookkeepingQueries.captureState().executeAsOne().enabled)
     }
 
     // ---- Receiving: validation and failures ----

@@ -265,14 +265,13 @@ Project-wide, this is on top of the three Android instrumented suites above:
   and `SyncDevice`, one file database and repository per device; see "Sync Flow" in
   [sync-architecture.md](sync-architecture.md)):
   - The steps: the first device uploading its base before creating the pointer, a sync with nothing to do moving no
-    payload (one `metadata`), a local change sent as the next delta and its outbox entries deleted, a write made while
+    payload (two `metadata` — the pointer and `keryx.db.gz`), a local change sent as the next delta and its outbox entries deleted, a write made while
     a delta is being sent going into the next one, a joining device merging the cloud and sending only the rows the
     cloud lacks (nothing at all when it has nothing new), a generation change making a device rejoin.
   - Classification: a malformed pointer and a corrupt, hash-mismatched or wrongly typed delta as
     `CloudDataIncompatibleException` with nothing from that sync merged (a corrupt file downloaded twice first); a
     pointer or delta of a newer format as `SchemaVersionException` advancing no cursor; a transient download failure
-    retried by the next sync; pre-delta data without a pointer left untouched as a transient failure (the migration's);
-    a failure after the merge committed never blamed on the cloud.
+    retried by the next sync; a failure after the merge committed never blamed on the cloud.
   - Receiving: a delta merged and recorded once (never downloaded again), a gap in the listing stopping the cursor
     while later deltas still merge, duplicate names fetched once, a listed file gone by its download treated as not
     listed yet, someone else's files ignored, the merged articles' `search_text` and index and the listeners' poke.
@@ -291,6 +290,24 @@ Project-wide, this is on top of the three Android instrumented suites above:
     joins that generation; recovering from unusable data resumes automatic sync) and disconnect (recording off, the
     connection's bookkeeping and saved send gone, `ks_search_pending` kept, not undone by a sync in flight — succeeding
     or failing — and a reconnect joining afresh with what was written while local-only).
+- the pre-delta migration and the legacy watch (`LegacyMigrationTest.kt`, against the same `FakeCloudStorage` and
+  `SyncDevice`, with `SyncTestSupport.kt`'s `PreDeltaFiles` building version-2 databases and the stub; see "Migration
+  from the Pre-Delta Format" in [sync-architecture.md](sync-architecture.md)): a device migrating a cloud that holds only
+  `keryx.db.gz` (every row merged with its `search_text`; the first base carrying the pre-delta and the device's own
+  rows; base, pointer, `.bak` holding the downloaded bytes, then the stub, in that order; the stub's revision recorded;
+  the next sync two `metadata` calls and nothing more; a second device joining and only recording the stub); a pointer
+  created by another device's whole migration while the first is between its merge and its pointer (an ordinary join,
+  one archive); a stub placed by another device first (recorded, left in place); an older build writing a full database
+  just before the stub replaces it (merged with capture on, so its rows leave in the next delta and reach a second
+  device, and not archived); the stub replacement losing every revision check (a transient failure after
+  `SYNC_MAX_RETRY` attempts, finished by the next sync); a crash at each step — after the merge, around the base's
+  upload and commit, after the pointer, before the archive, before and after the stub — converging on the next sync
+  in one generation with a quiet sync after it; the legacy watch absorbing a full database written over the stub
+  (Google Drive's case), putting the stub back and the rows reaching the other device; a stub with no pointer treated
+  as a first device's cloud; a corrupt, wrongly typed or dangling pre-delta file as `CloudDataIncompatibleException` (a
+  corrupt one downloaded twice), and one of a newer `user_version` — including 1000 with tables in it — as
+  `SchemaVersionException`, each with nothing merged or written; and the pre-delta `DatabaseMerger.merge` an older build
+  runs refusing the stub with `SchemaVersionException` before its local database changes by a byte.
 - the multi-device simulation (`SyncSimulationTest`): three devices with their own databases share one
   `FakeCloudStorage` whose listing lags, repeats names and shows deleted files; seeded random operations (subscribing
   and unsubscribing through `FeedRepository` over a `MockEngine` feed, renaming, folders, tags, read/unread, star/unstar,
@@ -299,7 +316,10 @@ Project-wide, this is on top of the three Android instrumented suites above:
   deletion, multi-day clock jumps, and one reset. Once everyone has synced until a round changes nothing, every device
   must show the same observable state, every field group anyone wrote must hold its newest write (an oracle built from
   every device's rows after every step — so no change was lost), and nothing may be left to send. The run asserts it
-  exercised crashes, interleavings, folds, deletions and both generations, so it cannot pass vacuously.
+  exercised crashes, interleavings, folds, deletions and both generations, so it cannot pass vacuously. A second run
+  starts from a pre-delta cloud that the first device migrates, while an older build now and then writes a full
+  database over the stub (Google Drive's case); at the end the stub must be back, every device must hold the pre-delta
+  rows and have recorded the stub's revision.
 - the pure rules (`TransportCoverageTest`, commonTest): what a base covers by vector or by name (a clone's duplicate
   not implied), when a covered delta is old enough to collect, domination as a strict order that a vector alone cannot
   satisfy for listed clone copies, the base cache, the pointer's parsing (`SchemaVersionException` for a newer format,

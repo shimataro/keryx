@@ -7,14 +7,13 @@ import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
 
 /**
- * The cloud path the current sync DB is archived to when the user resets cloud data.
+ * The cloud path the pre-delta `keryx.db.gz` is archived to by the migration ("Migration from the
+ * Pre-Delta Format" in sync-architecture.md) — a one-time manual way back.
  *
  * Deterministic in [epochMillis] and formatted in UTC (not the device zone), so a fixed [Clock] in
- * a test yields a fixed name, and two devices resetting at the same instant agree. Seconds
- * precision is enough: a reset is a deliberate, rate-limited user action (confirm dialog), and a
- * same-second collision is not fatal — `SyncRepository.archiveCloudDb` falls back to a plain
- * delete when the rename itself fails. Old archives are never pruned automatically — that would
- * need a provider listing API and would defeat the point of keeping a way back to the data.
+ * a test yields a fixed name, and two devices archiving at the same instant agree. Seconds
+ * precision is enough: the archive is written with `create`, and a name collision means an archive
+ * of that moment already exists, which is ignored. Archives are never pruned automatically.
  */
 @OptIn(ExperimentalTime::class)
 fun cloudBackupPath(epochMillis: Long): String {
