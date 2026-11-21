@@ -12,8 +12,8 @@ import works.merc.keryx.app.core.runCatchingUnlessCancelled
 /**
  * Manages the `articles_fts` FTS5 virtual table with raw SQL, deliberately
  * *outside* the SQLDelight-managed schema, so it is never part of a `.sq` file.
- * The live table is never dropped: the sync flow excludes it from the uploaded
- * file by dropping it on a throwaway [DatabaseSnapshot] copy, not on the live DB.
+ * The live table is never dropped, and the index never leaves the device: sync's
+ * transport files are built from the synced tables only (`DeltaExporter`).
  *
  * External-content FTS5 (`content='articles'`) keeps only the index; the text is
  * read from `articles.search_text` via rowid. New rows are indexed incrementally
