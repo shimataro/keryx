@@ -81,7 +81,8 @@ A delta or base holds the six synced tables (`feeds`, `articles`, `tags`, `feed_
 a base folds rows from several devices, and two devices can legitimately hold different ids for the same tag name.
 Each file carries `PRAGMA user_version` and:
 
-- `ks_meta(key, value)` — format, generation, writing device, creation time, kind (`delta`/`base`);
+- `ks_meta(key, value)` — `format`, `generation`, `device` (the writing device), `created_at`, `kind` (`delta`/`base`)
+  and `number` (the delta's `seq` or the base's `n`); generation, device, kind and number must match the file name;
 - `ks_vector(device, seq)` (bases only) — per device, the highest `seq` such that every delta `1..seq` is covered;
 - `ks_covered(name)` (bases only) — the delta files this base folded directly.
 
@@ -105,8 +106,8 @@ Each file carries `PRAGMA user_version` and:
 records what it writes. An `UPDATE` is recorded only when a synced column actually changed (`OLD.x IS NOT NEW.x OR
 …`), so a refresh that rewrites an unchanged row records nothing. For articles:
 
-- a change to `content`, `summary`, `title`, `url`, `author`, `published_at` or `thumbnail_url` (or an insert) is
-  recorded with `heavy = 1` — the delta carries the article's body;
+- a change to `content`, `summary`, `title`, `url`, `author`, `published_at`, `thumbnail_url` or the body's stamp
+  `body_updated_at` (or an insert) is recorded with `heavy = 1` — the delta carries the article's body;
 - a change to the read, star or deletion columns alone is recorded with `heavy = 0` — the delta carries a *light*
   row, with `content` and `summary` left NULL;
 - `cached_at` is recorded only when its day (`cached_at / 86400000`) changes — a refresh bumps it on every article
@@ -400,7 +401,16 @@ Merge SQL (`MergeSql`) key points:
 - **Explicitly specify columns**, and only columns present both in the transport schema and in a pre-delta database
   migrated to the current schema, so one statement set serves deltas, bases and the migration.
 - **A tie is decided by value, in every statement.** When both sides carry the same stamp, the group whose
-  normalized values compare greater wins. The pre-delta rule ("a tie goes to the cloud") converged only because the
+  normalized values compare greater wins. Precisely (`SyncLww`), each version of a field group gets the rank row
+  value `(stamp IS NOT NULL, COALESCE(stamp, 0), c1 IS NOT NULL, COALESCE(c1, 0), c2 IS NOT NULL, COALESCE(c2, 0),
+  …)`, where `c1, c2, …` are every column of the group — its stamp column(s), then its values — and the two ranks are
+  compared with SQLite's row-value `>` (BINARY collation). A version replaces the other only when its rank is
+  strictly greater. So a stamped version beats an unstamped one (NULL means "no such event"), the greater stamp wins,
+  and at an equal stamp the values decide in column order: NULL lowest, then SQLite's own ordering (integers
+  numerically and below text, text byte by byte). Every element is non-NULL, so the comparison is never NULL, and
+  identical versions never replace each other. A group with two stamps (an article's retention group, below) ranks
+  by `any stamp IS NOT NULL, MAX(COALESCE(s1, 0), COALESCE(s2, 0))` in place of the first two elements; an article's
+  body group puts two elements in front of all of these (below). The pre-delta rule ("a tie goes to the cloud") converged only because the
   cloud held a single file; with deltas, devices merge files in different orders, and a side-based rule would let
   that order decide. A device's own write always stamps above what its row already holds (see "Design Philosophy"
   in [db-schema.md](db-schema.md)), so a tie only arises between writes made independently on two devices in the
@@ -426,10 +436,28 @@ Merge SQL (`MergeSql`) key points:
   tags), sort order (`sort_order_updated_at`) each by its own stamp; `updated_at` stamps creation, deletion and
   reactivation. Two devices changing different fields of the same tag both keep their change. Rows are matched by
   id, else by name (two devices that created the same name independently, with different ids, converge on one).
-- articles: read (`read_at`) / star (`starred_at`) / deletion (`deleted_updated_at`) are last-write-wins; `content`
-  is OR-merged (`COALESCE(c.content, l.content)`); `summary` is dropped to NULL once either side has `content`;
-  `cached_at` takes the newer value. A star newer than the deletion revives the article. A light row (NULL
-  `content`/`summary`) therefore never erases a body. `search_text` is not merged: an article whose body the merge
+- articles, three groups:
+  - **Body** — `content`, `summary`, `title`, `url`, `author`, `published_at`, `thumbnail_url` (and `feed_id` /
+    `guid`, which the local merge never rewrites on an existing row), stamped by `body_updated_at`. A version with
+    `content` outranks one without, and one with any body (`content` or `summary`) outranks one with none, before the
+    stamp is compared; then `body_updated_at`, then the values. So `content` is effectively OR-merged, a summary
+    never replaces content, a light row (NULL `content`/`summary`) never erases a body, and the title, URL, author
+    and the rest always come from the same version as the body. `summary` is dropped to NULL once the article has
+    `content`. `body_updated_at` moves only when a body column changes (a refresh that rewrites an unchanged article
+    leaves it), never on a read, star or deletion — so a device that merely opened an article cannot make its older
+    body beat another device's newer one.
+  - **Read** — `is_read` by `read_at`.
+  - **Retention** — `is_starred`, `starred_at`, `deleted_at` and `deleted_updated_at` as one group, ranked by
+    `MAX(COALESCE(starred_at, 0), COALESCE(deleted_updated_at, 0))`: **the newer operation wins**, and the whole group
+    comes from the version that holds it. A star clears the deletion locally (`updateStarStatus`), and both a star
+    and a cleanup stamp above both stamps of their row, so the newest event always wins its group. (The earlier rule
+    — separate star and deletion groups, plus "a star newer than the deletion revives the article" — was not
+    commutative: a deletion, a later star and a still later unstar, merged in different orders, gave different
+    results.) As a consequence, an article revived by a star on another device and then unstarred stays visible
+    until the next cache cleanup deletes it again.
+
+  `cached_at` and `updated_at` take the newer value (`updated_at` is the row's generic stamp, no group's key), and
+  `created_at` the earlier. `search_text` is not merged: an article whose body the merge
   filled in or changed is registered in `ks_search_pending`, and a newly inserted article starts with `''` (see
   "FTS5 Handling"). Articles are matched by **`id`** (UUIDv5 of `(feed_id, guid)`, `IdGenerator.articleId`).
 - feed_tags: last-write-wins. Imported only if the feed exists in main. The tag is used as-is if it is alive in
@@ -474,7 +502,7 @@ Two versions are in play:
 
 - **The local schema** (`PRAGMA user_version` of `keryx.db`, currently 3). Version 3 (`2.sqm`) adds the sync
   bookkeeping tables and triggers, moves `feeds`' fetch state into `feed_fetch_state`, adds the tag/folder per-field
-  stamps (initialized from `updated_at`), and registers every article whose `search_text` still equals its raw
+  stamps and `articles.body_updated_at` (all initialized from `updated_at`), and registers every article whose `search_text` still equals its raw
   `content`/`summary` (rows written before HTML stripping) in `ks_search_pending`.
 - **The transport schema** (`user_version` of each delta/base). A file older than this build is migrated up with
   `TransportSchema`'s migrations before use; a newer one raises `SchemaVersionException`, which stops the sync
@@ -930,7 +958,7 @@ Nextcloud is not reached through OAuth and has no app-only folder; everything ab
 
 Startup cache cleanup **soft-deletes** articles past the retention period (stamps `deleted_at` / `deleted_updated_at`)
 rather than physically removing them. The tombstones travel as light rows and propagate via the merge
-(last-write-wins on `deleted_updated_at`), so a device that missed the deletion converges instead of re-adding the
+(the retention group's last-write-wins), so a device that missed the deletion converges instead of re-adding the
 article. Tombstones are not physically reclaimed yet (future work).
 
 Cleanup decides by `cached_at`, the last time an article was seen in its feed. The merge still keeps the newest
@@ -969,7 +997,7 @@ device's upload unnoticed" in [known-issues.md](known-issues.md).
 
 A pre-delta database holds columns the current schema no longer syncs: migrating it to schema 3 moves its fetch
 state into `feed_fetch_state` inside the temporary file only (never into the local database), initializes the
-per-field stamps from `updated_at`, and its articles' `search_text` is recomputed as for any merge.
+per-field stamps and `articles.body_updated_at` from `updated_at`, and its articles' `search_text` is recomputed as for any merge.
 
 Builds older than compression (reading only `/keryx.db`) are unaffected by the stub and keep the one-way divergence
 documented for them; that fallback, the legacy watch and this migration are all removed at v1.0.0.

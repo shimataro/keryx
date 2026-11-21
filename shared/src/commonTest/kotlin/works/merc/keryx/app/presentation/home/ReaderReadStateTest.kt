@@ -29,6 +29,7 @@ class ReaderReadStateTest {
         created_at = 0L,
         deleted_at = null,
         deleted_updated_at = null,
+        body_updated_at = null,
     )
 
     @Test

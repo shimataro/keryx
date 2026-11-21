@@ -7,12 +7,12 @@ package works.merc.keryx.app.domain
  *
  * - every field group is last-write-wins by its own stamp ([SyncLww]); feeds: content (`updated_at`),
  *   folder, sort order, custom title, subscription state; tags / folders: existence (`updated_at`),
- *   name, sort order (and color for tags); articles: body (`updated_at`, a body always beating a light
- *   row), read, star, deletion; feed_tags and global_settings: their one group;
+ *   name, sort order (and color for tags); articles: body (`body_updated_at`, content always beating
+ *   a summary and any body a light row), read, retention (star and deletion as one group: the newer
+ *   operation wins); feed_tags and global_settings: their one group;
  * - **a tie on the stamp is decided by the values, never by the side** ([SyncLww]'s canonical
  *   comparison), so devices merging the same files in different orders converge;
- * - `created_at` takes the earliest value, articles' `cached_at` the latest; a star newer than the
- *   winning deletion revives an article;
+ * - `created_at` takes the earliest value, articles' `cached_at` and `updated_at` the latest;
  * - `search_text` is never merged: an article whose body the merge changes is registered in
  *   `main.ks_search_pending`, and a new article starts with `''` (see "FTS5 Handling").
  *
@@ -57,7 +57,7 @@ object MergeSql {
     private val ARTICLE_COLUMNS = listOf(
         "id", "feed_id", "guid", "url", "title", "summary", "content", "author", "published_at",
         "thumbnail_url", "is_read", "read_at", "is_starred", "starred_at", "cached_at",
-        "updated_at", "created_at", "deleted_at", "deleted_updated_at",
+        "updated_at", "created_at", "deleted_at", "deleted_updated_at", "body_updated_at",
     )
 
     // ---- tags / folders: per-field last-write-wins, matched by id, else by name ----
@@ -247,15 +247,22 @@ object MergeSql {
           AND (c.content IS NOT l.content OR ${SyncLww.normalizedSummary("c")} IS NOT l.summary);
     """.trimIndent()
 
-    private val bodyColumns = listOf("url", "title", "summary", "content", "author", "published_at", "thumbnail_url")
+    private val bodyColumns = listOf("url", "title", "summary", "content", "author", "published_at", "thumbnail_url", "body_updated_at")
+
+    /** Every column the articles statement may rewrite on an existing row. */
+    private val articleUpdatedColumns = bodyColumns + listOf(
+        "is_read", "read_at", "is_starred", "starred_at", "cached_at", "updated_at", "created_at",
+        "deleted_at", "deleted_updated_at",
+    )
 
     // feed_id / guid are only ever set on insert: they make up the article's id, and rewriting them
     // on an existing row could only break UNIQUE(feed_id, guid) or the feed reference.
+    // updated_at is the row's generic stamp and no group's key: it takes the greater of the two.
     private val articles = """
         INSERT INTO main.articles (
             id, feed_id, guid, url, title, summary, content, author, published_at,
             thumbnail_url, is_read, read_at, is_starred, starred_at, cached_at,
-            updated_at, created_at, deleted_at, deleted_updated_at
+            updated_at, created_at, deleted_at, deleted_updated_at, body_updated_at
         )
         SELECT
             c.id, c.feed_id, c.guid,
@@ -268,28 +275,20 @@ object MergeSql {
             ${winner(SyncLww.ARTICLE_BODY, "thumbnail_url")},
             ${winner(SyncLww.ARTICLE_READ, "is_read")},
             ${winner(SyncLww.ARTICLE_READ, "read_at")},
-            ${winner(SyncLww.ARTICLE_STAR, "is_starred")},
-            ${winner(SyncLww.ARTICLE_STAR, "starred_at")},
+            ${winner(SyncLww.ARTICLE_RETENTION, "is_starred")},
+            ${winner(SyncLww.ARTICLE_RETENTION, "starred_at")},
             CASE WHEN l.id IS NULL THEN c.cached_at ELSE MAX(c.cached_at, l.cached_at) END,
-            ${winner(SyncLww.ARTICLE_BODY, "updated_at")},
+            CASE WHEN l.id IS NULL THEN c.updated_at ELSE MAX(c.updated_at, l.updated_at) END,
             CASE WHEN l.id IS NULL THEN c.created_at ELSE MIN(c.created_at, l.created_at) END,
-            -- deleted_at: last-wins by deleted_updated_at, but revived (NULL) when the winning star is
-            -- newer than the winning deletion event (cache cleanup only deletes non-starred articles,
-            -- so a later star means the user wants to keep it).
-            CASE
-                WHEN (${winner(SyncLww.ARTICLE_STAR, "is_starred")}) = 1
-                     AND COALESCE(${winner(SyncLww.ARTICLE_STAR, "starred_at")}, 0)
-                         > COALESCE(${winner(SyncLww.ARTICLE_DELETION, "deleted_updated_at")}, 0)
-                    THEN NULL
-                ELSE ${winner(SyncLww.ARTICLE_DELETION, "deleted_at")}
-            END,
-            ${winner(SyncLww.ARTICLE_DELETION, "deleted_updated_at")}
+            ${winner(SyncLww.ARTICLE_RETENTION, "deleted_at")},
+            ${winner(SyncLww.ARTICLE_RETENTION, "deleted_updated_at")},
+            ${winner(SyncLww.ARTICLE_BODY, "body_updated_at")}
         FROM $cloudArticles
         LEFT JOIN main.articles l ON l.id = c.id
         WHERE $articleEligible
         ON CONFLICT(id) DO UPDATE SET
-            ${(bodyColumns + listOf("is_read", "read_at", "is_starred", "starred_at", "cached_at", "updated_at", "created_at", "deleted_at", "deleted_updated_at")).joinToString(",\n            ") { "$it = excluded.$it" }}
-        WHERE ${(bodyColumns + listOf("is_read", "read_at", "is_starred", "starred_at", "cached_at", "updated_at", "created_at", "deleted_at", "deleted_updated_at")).joinToString("\n           OR ") { "excluded.$it IS NOT $it" }};
+            ${articleUpdatedColumns.joinToString(",\n            ") { "$it = excluded.$it" }}
+        WHERE ${articleUpdatedColumns.joinToString("\n           OR ") { "excluded.$it IS NOT $it" }};
     """.trimIndent()
 
     /**

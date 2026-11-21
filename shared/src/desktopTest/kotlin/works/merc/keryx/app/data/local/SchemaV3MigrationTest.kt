@@ -159,6 +159,25 @@ class SchemaV3MigrationTest {
     }
 
     @Test
+    fun migrationInitializesEachArticlesBodyStampFromItsUpdatedAt() {
+        val file = migratedDb(
+            listOf(
+                "INSERT INTO feeds (id, url, title, updated_at, created_at) VALUES ('f1', 'https://a', 'A', 0, 0)",
+                "INSERT INTO articles (id, feed_id, guid, url, title, content, cached_at, updated_at, created_at) " +
+                    "VALUES ('a1', 'f1', 'g1', 'u', 'T', 'c', 0, 900, 0)",
+                "INSERT INTO articles (id, feed_id, guid, url, title, cached_at, updated_at, created_at) " +
+                    "VALUES ('a2', 'f1', 'g2', 'u', 'T', 0, 300, 0)",
+            ),
+        )
+        withConnection(file) { conn ->
+            assertEquals(
+                listOf(listOf<Any?>("a1", 900), listOf<Any?>("a2", 300)),
+                conn.rows("SELECT id, body_updated_at FROM articles ORDER BY id"),
+            )
+        }
+    }
+
+    @Test
     fun migrationRegistersOnlyArticlesWhoseSearchTextIsStillTheRawBody() {
         fun article(id: String, summary: String?, content: String?, searchText: String) =
             """INSERT INTO articles (id, feed_id, guid, url, title, summary, content, cached_at, search_text, updated_at, created_at)

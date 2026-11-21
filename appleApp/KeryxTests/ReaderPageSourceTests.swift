@@ -18,7 +18,8 @@ struct ReaderPageSourceTests {
             id: id, feed_id: feedId, guid: id, url: "https://example.com/\(id)", title: "Title \(id)",
             summary: nil, content: "<p>\(id)</p>", author: nil, published_at: nil, thumbnail_url: nil,
             is_read: 0, read_at: nil, is_starred: 0, starred_at: nil, cached_at: 0, search_text: "",
-            updated_at: 0, created_at: 0, deleted_at: nil, deleted_updated_at: nil
+            updated_at: 0, created_at: 0, deleted_at: nil, deleted_updated_at: nil,
+            body_updated_at: nil
         )
     }
 
