@@ -169,7 +169,7 @@ const val CACHE_RETENTION_DAYS_DEFAULT = 30
 
 // --- Feed health ---
 /**
- * Internal marker written to `feeds.last_error` when a feed responds 410 Gone. A fixed sentinel (not
+ * Internal marker written to `feed_fetch_state.last_error` when a feed responds 410 Gone. A fixed sentinel (not
  * a user-facing message and not a raw exception text) so the UI can recognize the state and render
  * its own localized wording. 410 deliberately does not bump `error_count` (it is permanent, not a
  * retry candidate), so this column is the only signal a feed is gone.

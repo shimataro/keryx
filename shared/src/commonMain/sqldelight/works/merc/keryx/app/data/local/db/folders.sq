@@ -4,7 +4,9 @@ CREATE TABLE folders (
     sort_order INTEGER NOT NULL DEFAULT 0,
     deleted_at INTEGER,
     updated_at INTEGER NOT NULL,
-    created_at INTEGER NOT NULL
+    created_at INTEGER NOT NULL,
+    name_updated_at       INTEGER,
+    sort_order_updated_at INTEGER
 );
 
 watchAll:
@@ -24,32 +26,50 @@ SELECT * FROM folders WHERE name = ?;
 -- stamped at or below the row's stamp could lose to the older value on another device, and a delete
 -- and a recreation with equal stamps would leave the recreated row indistinguishable from the one
 -- before the delete. See docs/db-schema.md.
+--
+-- name_updated_at / sort_order_updated_at are the per-field last-write-wins stamps of the
+-- user-edited fields. A new row stamps both with its creation time; on an existing row each moves
+-- (forward, MAX(now, previous + 1)) only when its own field actually changes. The SET expressions
+-- read the row's values from before the update.
 upsert:
-INSERT INTO folders (id, name, sort_order, deleted_at, updated_at, created_at)
-VALUES (?, ?, ?, ?, ?, ?)
+INSERT INTO folders (id, name, sort_order, deleted_at, updated_at, created_at, name_updated_at, sort_order_updated_at)
+VALUES (:id, :name, :sort_order, :deleted_at, :updated_at, :created_at, :updated_at, :updated_at)
 ON CONFLICT(id) DO UPDATE SET
     name = excluded.name, sort_order = excluded.sort_order,
-    deleted_at = excluded.deleted_at, updated_at = MAX(excluded.updated_at, updated_at + 1);
+    deleted_at = excluded.deleted_at, updated_at = MAX(excluded.updated_at, updated_at + 1),
+    name_updated_at = CASE WHEN name IS NOT excluded.name
+        THEN MAX(excluded.updated_at, COALESCE(name_updated_at, 0) + 1) ELSE name_updated_at END,
+    sort_order_updated_at = CASE WHEN sort_order IS NOT excluded.sort_order
+        THEN MAX(excluded.updated_at, COALESCE(sort_order_updated_at, 0) + 1) ELSE sort_order_updated_at END;
 
 -- Creates the folder named :name, or reactivates the existing one of that name in place (same id,
 -- created_at kept), appending it to the end of the active folders either way. The name conflict is
 -- resolved by the statement itself rather than by a lookup before it, so a row of the same name
 -- that another writer (a sync merge, a concurrent create) inserted in between is reused instead of
 -- failing UNIQUE(name). :id is used only when no row has the name. A reactivation's updated_at moves
--- forward like every local write (see upsert).
+-- forward like every local write (see upsert). A new row stamps both per-field stamps with :now;
+-- the re-appended sort_order of an existing row moves sort_order_updated_at when it changes.
 upsertByName:
-INSERT INTO folders (id, name, sort_order, deleted_at, updated_at, created_at)
-VALUES (:id, :name, (SELECT COALESCE(MAX(sort_order), -1) + 1 FROM folders WHERE deleted_at IS NULL), NULL, :now, :now)
+INSERT INTO folders (id, name, sort_order, deleted_at, updated_at, created_at, name_updated_at, sort_order_updated_at)
+VALUES (:id, :name, (SELECT COALESCE(MAX(sort_order), -1) + 1 FROM folders WHERE deleted_at IS NULL), NULL, :now, :now, :now, :now)
 ON CONFLICT(name) DO UPDATE SET
-    sort_order = excluded.sort_order, deleted_at = NULL, updated_at = MAX(excluded.updated_at, updated_at + 1);
+    sort_order = excluded.sort_order, deleted_at = NULL, updated_at = MAX(excluded.updated_at, updated_at + 1),
+    sort_order_updated_at = CASE WHEN sort_order IS NOT excluded.sort_order
+        THEN MAX(excluded.updated_at, COALESCE(sort_order_updated_at, 0) + 1) ELSE sort_order_updated_at END;
 
 -- updated_at moves forward like every local write (see upsert).
 softDelete:
 UPDATE folders SET deleted_at = ?, updated_at = MAX(?, updated_at + 1) WHERE id = ?;
 
--- updated_at moves forward like every local write (see upsert).
+-- updated_at moves forward like every local write (see upsert), and so does sort_order_updated_at
+-- when the order actually changes.
 updateSortOrder:
-UPDATE folders SET sort_order = ?, updated_at = MAX(?, updated_at + 1) WHERE id = ?;
+UPDATE folders SET
+    sort_order_updated_at = CASE WHEN sort_order IS NOT :sort_order
+        THEN MAX(:now, COALESCE(sort_order_updated_at, 0) + 1) ELSE sort_order_updated_at END,
+    sort_order = :sort_order,
+    updated_at = MAX(:now, updated_at + 1)
+WHERE id = :id;
 
 nextSortOrder:
 SELECT COALESCE(MAX(sort_order), -1) + 1 FROM folders WHERE deleted_at IS NULL;

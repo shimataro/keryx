@@ -32,8 +32,7 @@ class SelectedFeedForTest {
 
     private fun testFeed(id: String) = Feeds(
         id = id, url = "https://example.com/$id", site_url = null, title = "Feed $id", description = null,
-        favicon_url = null, etag = null, last_modified = null, error_count = 0L, last_error = null,
-        custom_title = null, folder_id = null, deleted_at = null, updated_at = 0L, created_at = 0L,
+        favicon_url = null, custom_title = null, folder_id = null, deleted_at = null, updated_at = 0L, created_at = 0L,
         sort_order = 0L, folder_updated_at = null, sort_order_updated_at = null,
         custom_title_updated_at = null, deleted_updated_at = null,
     )

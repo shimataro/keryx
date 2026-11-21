@@ -5,7 +5,9 @@ import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.data.local.FtsSearch
 import works.merc.keryx.app.fileDb
 import works.merc.keryx.app.ftsManagerIndexed
+import works.merc.keryx.app.domain.SnapshotSql
 import works.merc.keryx.app.insertFeed
+import works.merc.keryx.app.setFeedFetchState
 import java.io.File
 import java.sql.DriverManager
 import kotlin.test.Test
@@ -80,6 +82,55 @@ class DatabaseSnapshotTest {
             } finally {
                 liveDriver.close()
             }
+        } finally {
+            File(destPath).delete()
+            file.delete()
+        }
+    }
+
+    /**
+     * Schema version 3's device-local objects — `feed_fetch_state`, the sync bookkeeping tables and
+     * the capture triggers — never leave the device, so the upload stays a pure function of the
+     * synced data; the copy still passes the receiving side's v3 schema check.
+     */
+    @Test
+    fun exportedCopyExcludesDeviceLocalTablesAndCaptureTriggers() {
+        val (file, driver, db) = fileDb()
+        try {
+            db.insertFeed("f1")
+            driver.setFeedFetchState("f1", etag = "e", errorCount = 2, lastError = "boom")
+            // Capture on, so sync_outbox (AUTOINCREMENT) gets a row and a sqlite_sequence entry.
+            db.sync_bookkeepingQueries.setCaptureEnabled(1)
+            db.insertFeed("f2")
+        } finally {
+            driver.close()
+        }
+
+        val destPath = File.createTempFile("keryx-export-test-", ".db").absolutePath
+        try {
+            DatabaseSnapshot.exportForUpload(file.absolutePath, destPath)
+
+            val objects = DriverManager.getConnection("jdbc:sqlite:$destPath").use { conn ->
+                conn.createStatement().use { st ->
+                    st.executeQuery("SELECT name FROM sqlite_master").use { rs ->
+                        buildSet { while (rs.next()) add(rs.getString(1)) }
+                    }
+                }
+            }
+            for (name in SnapshotSql.DEVICE_LOCAL_TABLES + SnapshotSql.CAPTURE_TRIGGERS) {
+                assertFalse(name in objects, "$name must be excluded from the upload copy")
+            }
+            assertTrue(objects.none { it.startsWith("ks_capture_") }, "no capture trigger may be left: $objects")
+            // sync_outbox's AUTOINCREMENT counter goes with it: sqlite_sequence is left empty or gone.
+            if ("sqlite_sequence" in objects) {
+                val sequenceRows = DriverManager.getConnection("jdbc:sqlite:$destPath").use { conn ->
+                    conn.createStatement().use { st ->
+                        st.executeQuery("SELECT COUNT(*) FROM sqlite_sequence").use { rs -> rs.next(); rs.getLong(1) }
+                    }
+                }
+                assertEquals(0L, sequenceRows, "dropping sync_outbox must clear its sqlite_sequence row")
+            }
+            assertEquals(true, DatabaseMerger.validateSchema(destPath, 3L))
         } finally {
             File(destPath).delete()
             file.delete()

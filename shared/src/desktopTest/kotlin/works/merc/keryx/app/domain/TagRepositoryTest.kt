@@ -525,4 +525,93 @@ class TagRepositoryTest {
             driver.close()
         }
     }
+
+    // --- per-field stamps (name_updated_at / color_updated_at / sort_order_updated_at) ---
+
+    @Test
+    fun aNewTagStampsEveryFieldWithItsCreationTime() {
+        val (driver, db) = inMemoryDb()
+        try {
+            val id = newRepo(db, clock = Clock { 100L }).createTag("Kotlin", "#ff0000")
+
+            val row = db.tagsQueries.getById(id).executeAsOne()
+            assertEquals(listOf<Long?>(100L, 100L, 100L), listOf(row.name_updated_at, row.color_updated_at, row.sort_order_updated_at))
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun anEditMovesOnlyTheStampsOfTheFieldsItChanges() {
+        val (driver, db) = inMemoryDb()
+        try {
+            var now = 100L
+            val repo = newRepo(db, clock = Clock { now })
+            val id = repo.createTag("Kotlin", "#ff0000")
+
+            now = 200L
+            repo.updateTag(id, "Kotlin 2", "#ff0000") // name only
+            var row = db.tagsQueries.getById(id).executeAsOne()
+            assertEquals(listOf<Long?>(200L, 100L, 100L), listOf(row.name_updated_at, row.color_updated_at, row.sort_order_updated_at))
+
+            now = 300L
+            repo.updateTag(id, "Kotlin 2", null) // color only
+            row = db.tagsQueries.getById(id).executeAsOne()
+            assertEquals(listOf<Long?>(200L, 300L, 100L), listOf(row.name_updated_at, row.color_updated_at, row.sort_order_updated_at))
+
+            now = 400L
+            repo.updateTag(id, "Kotlin 2", null) // nothing changes: no field stamp moves
+            row = db.tagsQueries.getById(id).executeAsOne()
+            assertEquals(listOf<Long?>(200L, 300L, 100L), listOf(row.name_updated_at, row.color_updated_at, row.sort_order_updated_at))
+            assertTrue(row.updated_at >= 400L)
+        } finally {
+            driver.close()
+        }
+    }
+
+    /** A field stamp moves forward even when the clock is behind it (MAX(now, previous + 1)). */
+    @Test
+    fun aFieldStampNeverMovesBackwards() {
+        val (driver, db) = inMemoryDb()
+        try {
+            var now = 500L
+            val repo = newRepo(db, clock = Clock { now })
+            val id = repo.createTag("Kotlin", null)
+
+            now = 100L
+            repo.updateTag(id, "Renamed", null)
+
+            assertEquals(501L, db.tagsQueries.getById(id).executeAsOne().name_updated_at)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun reactivatingATagMovesTheColorStampOnlyWhenItChangesTheColor() {
+        val (driver, db) = inMemoryDb()
+        try {
+            var now = 100L
+            val repo = newRepo(db, clock = Clock { now })
+            val id = repo.createTag("Kotlin", "#ff0000")
+            now = 200L
+            repo.deleteTag(id)
+
+            now = 300L
+            repo.createTag("Kotlin", null) // keeps the color
+            var row = db.tagsQueries.getById(id).executeAsOne()
+            assertEquals(100L, row.color_updated_at)
+            assertEquals(100L, row.name_updated_at)
+
+            now = 400L
+            repo.deleteTag(id)
+            now = 500L
+            repo.createTag("Kotlin", "#00ff00")
+            row = db.tagsQueries.getById(id).executeAsOne()
+            assertEquals(500L, row.color_updated_at)
+            assertEquals(100L, row.name_updated_at)
+        } finally {
+            driver.close()
+        }
+    }
 }

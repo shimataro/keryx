@@ -1,5 +1,6 @@
 package works.merc.keryx.app.data.local
 
+import app.cash.sqldelight.TransacterImpl
 import app.cash.sqldelight.db.SqlDriver
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import works.merc.keryx.app.core.DB_FILE_NAME
@@ -54,21 +55,23 @@ actual class DatabaseDriverFactory {
     /**
      * SQLDelight's JVM driver does not track the schema version automatically,
      * so we drive create/migrate manually off `PRAGMA user_version`.
+     *
+     * The create or migration and the `user_version` stamp run in one transaction (one connection,
+     * since this driver otherwise opens one per statement), as Android's open helper and SQLiter do
+     * on the other platforms: a migration interrupted halfway (a crash, a full disk) rolls back to the
+     * old version instead of leaving a half-migrated file whose `user_version` would make the next
+     * launch re-run statements that already took effect (`ALTER TABLE ... DROP COLUMN` of a column
+     * that is gone, `CREATE TABLE` of one that exists).
      */
     private fun migrateIfNeeded(driver: SqlDriver) {
         val schema = KeryxDatabase.Schema
         val current = currentVersion(driver)
         val target = schema.version
         requireSupportedSchemaVersion(current, target)
-        when {
-            current == 0L -> {
-                schema.create(driver)
-                setVersion(driver, target)
-            }
-            current < target -> {
-                schema.migrate(driver, current, target)
-                setVersion(driver, target)
-            }
+        if (current >= target) return
+        object : TransacterImpl(driver) {}.transaction {
+            if (current == 0L) schema.create(driver) else schema.migrate(driver, current, target)
+            setVersion(driver, target)
         }
     }
 

@@ -558,8 +558,7 @@ class DatabaseMergerTest {
         /** The app's feeds table without its UNIQUE(url), so a cloud file can hold a duplicate url. */
         const val LAX_FEEDS_TABLE =
             "CREATE TABLE feeds (id TEXT NOT NULL PRIMARY KEY, url TEXT NOT NULL, site_url TEXT, " +
-                "title TEXT NOT NULL, description TEXT, favicon_url TEXT, etag TEXT, last_modified TEXT, " +
-                "error_count INTEGER NOT NULL DEFAULT 0, last_error TEXT, custom_title TEXT, folder_id TEXT, " +
+                "title TEXT NOT NULL, description TEXT, favicon_url TEXT, custom_title TEXT, folder_id TEXT, " +
                 "deleted_at INTEGER, updated_at INTEGER NOT NULL, created_at INTEGER NOT NULL, " +
                 "sort_order INTEGER NOT NULL DEFAULT 0, folder_updated_at INTEGER, " +
                 "sort_order_updated_at INTEGER, custom_title_updated_at INTEGER, deleted_updated_at INTEGER)"
