@@ -383,7 +383,7 @@ class SyncRepositoryTest {
         return bytes
     }
 
-    /** Two cloud `feeds` rows sharing a `url` — invalid only because the cloud DB's own `feeds`
+    /** Two cloud `feeds` rows sharing a `url` — possible only because the cloud DB's own `feeds`
      *  table (unlike this app's) carries no `UNIQUE(url)`, so both rows coexist there. */
     private fun cloudDbWithDuplicateFeedUrls(): ByteArray = cloudDbWithRelaxedFeedsSchema(
         feedsTableSql = """
@@ -1036,24 +1036,21 @@ class SyncRepositoryTest {
     }
 
     @Test
-    fun duplicateUrlsInCloudFeedsIsReportedAsIncompatible() = runTest {
-        // Two cloud feeds rows share a url — only possible because the cloud DB's own feeds table
-        // (unlike main's) has no UNIQUE(url). Merging both into main's UNIQUE(url) column must be
-        // classified as incompatible cloud data, not a transient/app-side failure.
+    fun duplicateUrlsInCloudFeedsMergeOnlyTheirWinner() = runTest {
+        // Two cloud feeds rows share a url — possible because the cloud DB's own feeds table (unlike
+        // main's) has no UNIQUE(url), as in a folded transport file. The merge considers only the
+        // winner among them (greatest updated_at, then greatest id), so it never hits main's
+        // UNIQUE(url) and the sync succeeds.
         val cloud = FakeCloudStorage()
         cloud.put(CLOUD_DB_GZ_PATH, gzipOf(cloudDbWithDuplicateFeedUrls()), "r1")
         val repo = newRepo(cloud)
 
         val result = repo.sync()
 
-        assertIs<Result.Err>(result)
-        assertIs<CloudDataIncompatibleException>(result.exception)
-        assertEquals(0, cloud.uploadCount)
-        assertFalse(tempCloudDbFile().exists())
-        assertFalse(tempSnapshotFile().exists())
-        val notes = notificationCenter.items.value
-        assertEquals(1, notes.size)
-        assertEquals(AppNotificationAction.ResetCloudData, notes.first().action)
+        assertIs<Result.Ok<Unit>>(result)
+        assertNotNull(localDb.feedsQueries.getById("f-dup-2").executeAsOneOrNull())
+        assertNull(localDb.feedsQueries.getById("f-dup-1").executeAsOneOrNull())
+        assertTrue(notificationCenter.items.value.isEmpty())
     }
 
     @Test

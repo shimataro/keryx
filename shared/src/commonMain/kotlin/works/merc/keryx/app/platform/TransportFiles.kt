@@ -1,0 +1,261 @@
+package works.merc.keryx.app.platform
+
+import works.merc.keryx.app.domain.MergeSchema
+import works.merc.keryx.app.domain.ReduceSql
+import works.merc.keryx.app.domain.SqliteFailureCategory
+import works.merc.keryx.app.domain.SyncValidationSql
+import works.merc.keryx.app.domain.TableSpec
+import works.merc.keryx.app.domain.TransportFileKind
+import works.merc.keryx.app.domain.TransportFileName
+import works.merc.keryx.app.domain.TransportMeta
+import works.merc.keryx.app.domain.TransportSchema
+import works.merc.keryx.app.domain.TransportVector
+
+/** How [TransportConnections.open] opens a file. */
+enum class TransportOpenMode {
+    /** Read-only; the file must exist. */
+    READ_ONLY,
+
+    /** Read-write; the file must exist. */
+    READ_WRITE,
+
+    /** Read-write, creating the file when it does not exist. */
+    CREATE,
+}
+
+/**
+ * One dedicated SQLite connection to a transport (or downloaded pre-delta) file — outside the app's
+ * SQLDelight driver, for the same reason as [DatabaseMerger]: an `ATTACH` and a transaction must stay
+ * on one connection.
+ */
+interface TransportConnection : AutoCloseable {
+    /** Runs one statement, discarding any rows. */
+    fun exec(sql: String)
+
+    /** Every row of [sql], each column as text (`null` for SQL NULL). */
+    fun queryRows(sql: String): List<List<String?>>
+
+    /** Runs [block] in a transaction: committed when it returns, rolled back when it throws. */
+    fun <T> transaction(block: () -> T): T
+}
+
+/**
+ * Per-platform connections for [TransportFiles]: JDBC on desktop, requery's `SQLiteDatabase` on
+ * Android, [RawSqliteConnection] on Apple — the same per-platform connection code as
+ * [DatabaseMerger].
+ */
+expect object TransportConnections {
+    /** Opens [path] in [mode]. Throws the platform's SQLite exception on failure. */
+    fun open(path: String, mode: TransportOpenMode): TransportConnection
+
+    /**
+     * The category of the SQLite failure behind [failure] (searching its cause chain), or `null` when
+     * none is found.
+     */
+    fun failureCategory(failure: Throwable): SqliteFailureCategory?
+}
+
+/** What a downloaded file is validated as. */
+sealed interface ValidationTarget {
+    /** A delta or base, named [name] (which already passed [TransportFileName.parse]). */
+    data class Transport(val name: TransportFileName) : ValidationTarget
+
+    /** A pre-delta full database, for a build whose local schema is [localSchemaVersion]. */
+    data class PreDelta(val localSchemaVersion: Long) : ValidationTarget
+}
+
+/**
+ * The verdict of [TransportFiles.validate]. Mapped by the caller: [Corrupt] →
+ * `CloudDataIncompatibleException`, [Undetermined] → a transient failure (never a reset), [TooNew] →
+ * `SchemaVersionException`.
+ */
+sealed interface TransportValidation {
+    data object Valid : TransportValidation
+
+    /** The file is unusable; [reason] is for the log. */
+    data class Corrupt(val reason: String) : TransportValidation
+
+    /** The check could not be completed or this build has no expectation for the file's version. */
+    data class Undetermined(val reason: String) : TransportValidation
+
+    /** The file's `user_version` is newer than this build understands. */
+    data class TooNew(val version: Long) : TransportValidation
+}
+
+/**
+ * Validation, creation and folding of transport files — see "Validating Cloud Files", "Receiving"
+ * and "Bases and Garbage Collection" in `docs/sync-architecture.md`. The SQL lives in
+ * [SyncValidationSql] / [ReduceSql]; only the connection is per platform ([TransportConnections]).
+ */
+object TransportFiles {
+
+    /**
+     * Runs "Validating Cloud Files" checks 4–9 on the file at [path] (checks 1–3, the name, the
+     * download and the gzip/header/hash, are the caller's). Read-only, except that an older
+     * transport file is migrated up in place (check 6) — a pre-delta database is checked against its
+     * own version's expectation and migrated later, by [DatabaseMerger.merge].
+     *
+     * Never throws for a SQL failure: a corrupt or not-a-database file is [TransportValidation.Corrupt],
+     * any other failure (the file cannot be opened, I/O) is [TransportValidation.Undetermined].
+     */
+    fun validate(path: String, target: ValidationTarget): TransportValidation =
+        try {
+            validateUnchecked(path, target)
+        } catch (e: Exception) {
+            when (TransportConnections.failureCategory(e)) {
+                SqliteFailureCategory.CORRUPT -> TransportValidation.Corrupt("SQLite reports the file corrupt: ${e.message}")
+                else -> TransportValidation.Undetermined("validation failed: ${e.message}")
+            }
+        }
+
+    private fun validateUnchecked(path: String, target: ValidationTarget): TransportValidation {
+        val version = TransportConnections.open(path, TransportOpenMode.READ_ONLY).use { it.userVersion() }
+        // Check 4.
+        val supported = when (target) {
+            is ValidationTarget.Transport -> TransportSchema.VERSION
+            is ValidationTarget.PreDelta -> target.localSchemaVersion
+        }
+        if (version > supported) return TransportValidation.TooNew(version)
+        val expected = when (target) {
+            is ValidationTarget.Transport -> TransportSchema.EXPECTED_TABLES[version]
+            is ValidationTarget.PreDelta -> MergeSchema.EXPECTED_TABLES[version]
+        } ?: return TransportValidation.Undetermined("no expectation registered for version $version")
+
+        // Check 5.
+        TransportConnections.open(path, TransportOpenMode.READ_ONLY).use { connection ->
+            SyncValidationSql.missingColumnsProblem(expected, connection.columnsOf(expected))
+        }?.let { return TransportValidation.Corrupt(it) }
+
+        // Check 6.
+        val tables = if (target is ValidationTarget.Transport && version < TransportSchema.VERSION) {
+            val migrations = TransportSchema.migrationPath(version)
+                ?: return TransportValidation.Undetermined("no transport migration from version $version")
+            migrate(path, migrations)?.let { return it }
+            TransportSchema.EXPECTED_TABLES.getValue(TransportSchema.VERSION)
+        } else {
+            expected
+        }
+
+        return TransportConnections.open(path, TransportOpenMode.READ_ONLY).use { connection ->
+            checkValues(connection, tables, target)
+        }
+    }
+
+    private fun migrate(path: String, migrations: List<TransportSchema.Migration>): TransportValidation? =
+        try {
+            TransportConnections.open(path, TransportOpenMode.READ_WRITE).use { connection ->
+                connection.transaction {
+                    for (migration in migrations) {
+                        migration.statements.forEach(connection::exec)
+                        connection.exec("PRAGMA user_version = ${migration.to}")
+                    }
+                }
+            }
+            null
+        } catch (e: Exception) {
+            when (TransportConnections.failureCategory(e)) {
+                SqliteFailureCategory.CORRUPT, SqliteFailureCategory.CONSTRAINT, SqliteFailureCategory.STATEMENT_ERROR ->
+                    TransportValidation.Corrupt("migration failed: ${e.message}")
+                else -> TransportValidation.Undetermined("migration failed: ${e.message}")
+            }
+        }
+
+    /** Checks 7–9 on an up-to-date file. */
+    private fun checkValues(connection: TransportConnection, tables: List<TableSpec>, target: ValidationTarget): TransportValidation {
+        // Check 7.
+        for (table in tables) {
+            val column = connection.queryRows(SyncValidationSql.typeViolationQuery(table)).firstOrNull()?.firstOrNull()
+            if (column != null) return TransportValidation.Corrupt("${table.name}.$column holds a value of the wrong type or range")
+        }
+        // Check 8.
+        if (target is ValidationTarget.Transport) {
+            val meta = connection.queryRows("SELECT key, value FROM ks_meta").associate { it[0].orEmpty() to it[1].orEmpty() }
+            SyncValidationSql.metaProblem(meta, target.name)?.let { return TransportValidation.Corrupt(it) }
+            val devices = connection.queryRows("SELECT device FROM ks_vector").map { it[0].orEmpty() }
+            val covered = connection.queryRows("SELECT name FROM ks_covered").map { it[0].orEmpty() }
+            SyncValidationSql.coverageProblem(target.name, devices, covered)?.let { return TransportValidation.Corrupt(it) }
+        }
+        // Check 9.
+        for (check in SyncValidationSql.closureChecks) {
+            if (connection.queryRows(check.query).isNotEmpty()) {
+                return TransportValidation.Corrupt("dangling reference: ${check.description}")
+            }
+        }
+        return TransportValidation.Valid
+    }
+
+    /**
+     * Creates an empty transport file of [TransportSchema.VERSION] at [path] carrying [meta]
+     * (replacing whatever was there), e.g. the accumulator of a fold.
+     */
+    fun createEmpty(path: String, meta: TransportMeta) {
+        FileIO.delete(path)
+        FileIO.delete("$path-journal")
+        TransportConnections.open(path, TransportOpenMode.CREATE).use { connection ->
+            connection.transaction {
+                TransportSchema.ddl.forEach(connection::exec)
+                for ((key, value) in meta.rows) {
+                    // Keys are constants; values are validated ids and decimals (TransportMeta's init).
+                    connection.exec("INSERT INTO ks_meta (key, value) VALUES ('$key', '$value')")
+                }
+                connection.exec("PRAGMA user_version = ${TransportSchema.VERSION}")
+            }
+        }
+    }
+
+    /**
+     * Folds the validated transport file at [inputPath], named [inputName], into the accumulator at
+     * [accumulatorPath] ([ReduceSql]) in one transaction: the synced rows, the coverage (a delta adds
+     * its own name to `ks_covered`; a base contributes its vector and covered names), and the vector
+     * extended over the deltas that continue it ([TransportVector.extend]).
+     *
+     * @throws IllegalStateException when either file is not of [TransportSchema.VERSION] (an input
+     * must have been validated, and so migrated, first).
+     */
+    fun fold(accumulatorPath: String, inputPath: String, inputName: TransportFileName) {
+        TransportConnections.open(accumulatorPath, TransportOpenMode.READ_WRITE).use { connection ->
+            check(connection.userVersion() == TransportSchema.VERSION) { "The accumulator is not a current transport file" }
+            // ATTACH must run outside a transaction.
+            connection.exec("ATTACH DATABASE '${inputPath.replace("'", "''")}' AS src")
+            try {
+                val inputVersion = connection.queryRows("PRAGMA src.user_version").firstOrNull()?.firstOrNull()?.toLongOrNull()
+                check(inputVersion == TransportSchema.VERSION) { "The input is not a current transport file" }
+                connection.transaction {
+                    ReduceSql.all.forEach(connection::exec)
+                    ReduceSql.combineCoverage.forEach(connection::exec)
+                    if (inputName.kind == TransportFileKind.DELTA) {
+                        // A parsed name: lowercase hex, digits, '-' and '.' only.
+                        connection.exec("INSERT OR IGNORE INTO main.ks_covered (name) VALUES ('${inputName.fileName}')")
+                    }
+                    extendVector(connection)
+                }
+            } finally {
+                runCatching { connection.exec("DETACH DATABASE src") }
+            }
+        }
+    }
+
+    private fun extendVector(connection: TransportConnection) {
+        val vector = connection.queryRows("SELECT device, seq FROM main.ks_vector")
+            .associate { it[0].orEmpty() to (it[1]?.toLongOrNull() ?: 0L) }
+        val covered = connection.queryRows("SELECT name FROM main.ks_covered").mapNotNull { it[0]?.let(TransportFileName::parse) }
+        val extended = TransportVector.extend(vector, covered)
+        for ((device, seq) in extended) {
+            if (vector[device] == seq) continue
+            // Devices come from parsed names (lowercase UUIDs).
+            check(TransportFileName.isSyncId(device)) { "Malformed device in ks_vector" }
+            connection.exec(
+                "INSERT INTO main.ks_vector (device, seq) VALUES ('$device', $seq) " +
+                    "ON CONFLICT(device) DO UPDATE SET seq = MAX(seq, excluded.seq)",
+            )
+        }
+    }
+
+    private fun TransportConnection.userVersion(): Long =
+        queryRows("PRAGMA user_version").firstOrNull()?.firstOrNull()?.toLongOrNull() ?: 0L
+
+    private fun TransportConnection.columnsOf(tables: List<TableSpec>): Map<String, Set<String>> =
+        tables.associate { table ->
+            table.name to queryRows(SyncValidationSql.tableInfoQuery(table.name)).mapNotNull { it.getOrNull(1) }.toSet()
+        }
+}
