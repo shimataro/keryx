@@ -37,8 +37,8 @@ final class HomeObservable: ObservableAssignment {
     /// `articleListCatchingUp` compares with the rows this observable has built.
     private(set) var listHasRows = false
     /// The latest `structuralFeeds` emission — what `sidebar`, `feedsById` and the selection target
-    /// are built from. Its `Feeds` may lag behind `feeds` in `etag` / `last_modified` /
-    /// `updated_at` (`feedsStructurallyEqual`). Not observed: views read what is derived from it.
+    /// are built from. Its `Feeds` may lag behind `feeds` in `updated_at`
+    /// (`feedsStructurallyEqual`). Not observed: views read what is derived from it.
     @ObservationIgnored private var structuralFeeds: [Feeds] = []
     /// Built from `structuralFeeds`, so its `Feeds` lag behind `feeds` the same way.
     private(set) var feedsById: [String: Feeds] = [:]
@@ -48,6 +48,8 @@ final class HomeObservable: ObservableAssignment {
     private(set) var tags: [Tags] = []
     private(set) var folders: [Folders] = []
     private(set) var feedTagMap: [String: Set<String>] = [:]
+    /// `HomeViewModel.feedFetchProblems` — why a feed row is flagged, by feed id; part of `sidebar`.
+    @ObservationIgnored private var feedFetchProblems: [String: FeedFetchProblem] = [:]
     private(set) var unreadByFeed: [String: Int64] = [:]
     private(set) var unreadByTag: [String: Int64] = [:]
     private(set) var unreadByFolder: [String: Int64] = [:]
@@ -121,7 +123,7 @@ final class HomeObservable: ObservableAssignment {
     /// from one to the other never mistakes them for the same rows.
     @ObservationIgnored private var rowListGeneration = 0
     /// Each feed's title and favicon as the article rows show them; a `feeds` emission that leaves
-    /// this unchanged (a refresh updating etags and error counts) does not touch the rows.
+    /// this unchanged (a refresh moving only `updated_at`) does not touch the rows.
     private var feedRowInfo: [String: FeedRowInfo] = [:]
     @ObservationIgnored private var sidebarRebuild: CoalescedAction?
     private(set) var newArticleCount: Int = 0
@@ -250,8 +252,8 @@ final class HomeObservable: ObservableAssignment {
     }
 
     /// Refreshes `feed`. Only its id is passed on: `HomeViewModel.refreshFeed` re-reads the row,
-    /// since the `Feeds` the sidebar and `feedsById` hold may carry a stale `etag` /
-    /// `last_modified` (see `structuralFeeds`), which a refresh sends as its conditional request.
+    /// so the refresh always starts from the feed's current row rather than the copy the sidebar
+    /// and `feedsById` hold (see `structuralFeeds`).
     func refreshFeed(_ feed: Feeds) {
         viewModel.refreshFeed(feedId: feed.id)
     }
@@ -356,6 +358,7 @@ final class HomeObservable: ObservableAssignment {
         async let t2: () = observeTags()
         async let t3: () = observeFolders()
         async let t4: () = observeFeedTagMap()
+        async let t4b: () = observeFeedFetchProblems()
         async let t5: () = observeUnreadByFeed()
         async let t6: () = observeUnreadByTag()
         async let t7: () = observeUnreadByFolder()
@@ -399,7 +402,7 @@ final class HomeObservable: ObservableAssignment {
             t1, t1b, t2, t3, t4, t5, t6, t7, t8, t9, t10,
             t11, t12, t13, t14, t15, t16, t17, t18, t19, t20,
             t21, t22, t23, t24, t25, t25b, t25c, t26, t27, t28, t29, t30,
-            t31, t32, t33, t34, t35, t37, t38, t39
+            t31, t32, t33, t34, t35, t37, t38, t39, t4b
         )
         #if os(iOS)
         await t36
@@ -446,6 +449,13 @@ final class HomeObservable: ObservableAssignment {
     private func observeFeedTagMap() async {
         for await v in viewModel.feedTagMap {
             if assignIfChanged(\.feedTagMap, v) { sidebarRebuild?.markDirty() }
+        }
+    }
+
+    private func observeFeedFetchProblems() async {
+        for await v in viewModel.feedFetchProblems where v != feedFetchProblems {
+            feedFetchProblems = v
+            sidebarRebuild?.markDirty()
         }
     }
 
@@ -612,7 +622,8 @@ final class HomeObservable: ObservableAssignment {
             tags: tags,
             feedTagMap: feedTagMap,
             collapsedFolderIds: collapsedFolderIds,
-            expandedTagIds: expandedTagIds
+            expandedTagIds: expandedTagIds,
+            fetchProblems: feedFetchProblems
         )
         sidebar = model
         assignIfChanged(\.sortedFolders, model.sortedFolders)

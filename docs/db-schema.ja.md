@@ -176,7 +176,7 @@
 
 | テーブル | 内容 |
 | --- | --- |
-| `sync_outbox` | `seq`(PK, AUTOINCREMENT), `tbl`, `pk`, `heavy` — 同期対象の行へのローカルの変更 1 件につき 1 行。トリガーが追記する |
+| `sync_outbox` | `seq`(PK, AUTOINCREMENT), `tbl`, `pk`, `pk2`（`feed_tags` のみ: タグ id）, `heavy` — 同期対象の行へのローカルの変更 1 件につき 1 行。トリガーが追記する |
 | `sync_capture` | 1 行だけ: `enabled`（接続中は記録する）, `full_pending`（全量送信が必要） |
 | `sync_merging` | マージのトランザクションの中にだけ存在する印の行。記録を止める |
 | `sync_applied` | `name`(PK) — マージ済みのクラウドファイル |

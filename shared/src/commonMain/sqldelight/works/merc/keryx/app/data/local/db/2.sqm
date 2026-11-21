@@ -1,0 +1,204 @@
+-- Migration 2 -> 3 (schema version 3): local bookkeeping for delta sync.
+-- See docs/db-schema.md and docs/sync-architecture.md "Local Bookkeeping (schema version 3)".
+-- Every object created here must match what the .sq files create on a fresh DB (SchemaTest).
+
+-- 1. A feed's fetch state moves out of `feeds` into the device-local feed_fetch_state, one row per
+--    feed, and the four columns are dropped from `feeds` (ALTER TABLE ... DROP COLUMN, SQLite
+--    3.35+). Dropped before any trigger exists: DROP COLUMN refuses a column a trigger names.
+CREATE TABLE feed_fetch_state (
+    feed_id       TEXT    NOT NULL PRIMARY KEY REFERENCES feeds(id),
+    etag          TEXT,
+    last_modified TEXT,
+    error_count   INTEGER NOT NULL DEFAULT 0,
+    last_error    TEXT
+);
+INSERT INTO feed_fetch_state (feed_id, etag, last_modified, error_count, last_error)
+SELECT id, etag, last_modified, error_count, last_error FROM feeds;
+ALTER TABLE feeds DROP COLUMN etag;
+ALTER TABLE feeds DROP COLUMN last_modified;
+ALTER TABLE feeds DROP COLUMN error_count;
+ALTER TABLE feeds DROP COLUMN last_error;
+
+-- 2. Per-field last-write-wins stamps for tags and folders, initialized from updated_at.
+ALTER TABLE tags ADD COLUMN name_updated_at INTEGER;
+ALTER TABLE tags ADD COLUMN color_updated_at INTEGER;
+ALTER TABLE tags ADD COLUMN sort_order_updated_at INTEGER;
+UPDATE tags SET name_updated_at = updated_at, color_updated_at = updated_at, sort_order_updated_at = updated_at;
+ALTER TABLE folders ADD COLUMN name_updated_at INTEGER;
+ALTER TABLE folders ADD COLUMN sort_order_updated_at INTEGER;
+UPDATE folders SET name_updated_at = updated_at, sort_order_updated_at = updated_at;
+
+-- 3. Sync bookkeeping tables (sync_bookkeeping.sq).
+CREATE TABLE sync_outbox (
+    seq   INTEGER PRIMARY KEY AUTOINCREMENT,
+    tbl   TEXT    NOT NULL,
+    pk    TEXT    NOT NULL,
+    pk2   TEXT,
+    heavy INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE sync_capture (
+    id           INTEGER PRIMARY KEY CHECK (id = 1),
+    enabled      INTEGER NOT NULL DEFAULT 0,
+    full_pending INTEGER NOT NULL DEFAULT 0
+);
+
+INSERT INTO sync_capture (id, enabled, full_pending) VALUES (1, 0, 0);
+
+CREATE TABLE sync_merging (
+    flag INTEGER
+);
+
+CREATE TABLE sync_applied (
+    name TEXT NOT NULL PRIMARY KEY
+);
+
+CREATE TABLE sync_cursor (
+    device TEXT    NOT NULL PRIMARY KEY,
+    seq    INTEGER NOT NULL
+);
+
+CREATE TABLE ks_search_pending (
+    rowid INTEGER NOT NULL PRIMARY KEY
+);
+
+-- 4. Articles whose search_text still equals their raw content / summary (written before HTML
+--    stripping) get it recomputed.
+INSERT INTO ks_search_pending (rowid)
+SELECT rowid FROM articles
+WHERE (content IS NOT NULL AND search_text = content)
+   OR (content IS NULL AND summary IS NOT NULL AND search_text = summary);
+
+-- 5. Capture triggers (sync_bookkeeping.sq). Capture starts disabled (sync_capture.enabled = 0).
+CREATE TRIGGER ks_capture_feeds_insert AFTER INSERT ON feeds
+WHEN (SELECT enabled FROM sync_capture WHERE id = 1) = 1 AND NOT EXISTS (SELECT 1 FROM sync_merging)
+BEGIN
+    INSERT INTO sync_outbox (tbl, pk) VALUES ('feeds', new.id);
+END;
+
+CREATE TRIGGER ks_capture_feeds_update AFTER UPDATE ON feeds
+WHEN (SELECT enabled FROM sync_capture WHERE id = 1) = 1 AND NOT EXISTS (SELECT 1 FROM sync_merging)
+    AND (old.id IS NOT new.id
+        OR old.url IS NOT new.url
+        OR old.site_url IS NOT new.site_url
+        OR old.title IS NOT new.title
+        OR old.description IS NOT new.description
+        OR old.favicon_url IS NOT new.favicon_url
+        OR old.custom_title IS NOT new.custom_title
+        OR old.folder_id IS NOT new.folder_id
+        OR old.deleted_at IS NOT new.deleted_at
+        OR old.sort_order IS NOT new.sort_order
+        OR old.folder_updated_at IS NOT new.folder_updated_at
+        OR old.sort_order_updated_at IS NOT new.sort_order_updated_at
+        OR old.custom_title_updated_at IS NOT new.custom_title_updated_at
+        OR old.deleted_updated_at IS NOT new.deleted_updated_at)
+BEGIN
+    INSERT INTO sync_outbox (tbl, pk) VALUES ('feeds', new.id);
+END;
+
+CREATE TRIGGER ks_capture_articles_insert AFTER INSERT ON articles
+WHEN (SELECT enabled FROM sync_capture WHERE id = 1) = 1 AND NOT EXISTS (SELECT 1 FROM sync_merging)
+BEGIN
+    INSERT INTO sync_outbox (tbl, pk, heavy) VALUES ('articles', new.id, 1);
+END;
+
+CREATE TRIGGER ks_capture_articles_update AFTER UPDATE ON articles
+WHEN (SELECT enabled FROM sync_capture WHERE id = 1) = 1 AND NOT EXISTS (SELECT 1 FROM sync_merging)
+    AND (old.content IS NOT new.content
+        OR old.summary IS NOT new.summary
+        OR old.title IS NOT new.title
+        OR old.url IS NOT new.url
+        OR old.author IS NOT new.author
+        OR old.published_at IS NOT new.published_at
+        OR old.thumbnail_url IS NOT new.thumbnail_url
+        OR old.is_read IS NOT new.is_read
+        OR old.read_at IS NOT new.read_at
+        OR old.is_starred IS NOT new.is_starred
+        OR old.starred_at IS NOT new.starred_at
+        OR old.deleted_at IS NOT new.deleted_at
+        OR old.deleted_updated_at IS NOT new.deleted_updated_at
+        OR old.cached_at / 86400000 IS NOT new.cached_at / 86400000)
+BEGIN
+    INSERT INTO sync_outbox (tbl, pk, heavy) VALUES ('articles', new.id,
+        CASE WHEN old.content IS NOT new.content
+            OR old.summary IS NOT new.summary
+            OR old.title IS NOT new.title
+            OR old.url IS NOT new.url
+            OR old.author IS NOT new.author
+            OR old.published_at IS NOT new.published_at
+            OR old.thumbnail_url IS NOT new.thumbnail_url
+        THEN 1 ELSE 0 END);
+END;
+
+CREATE TRIGGER ks_capture_tags_insert AFTER INSERT ON tags
+WHEN (SELECT enabled FROM sync_capture WHERE id = 1) = 1 AND NOT EXISTS (SELECT 1 FROM sync_merging)
+BEGIN
+    INSERT INTO sync_outbox (tbl, pk) VALUES ('tags', new.id);
+END;
+
+CREATE TRIGGER ks_capture_tags_update AFTER UPDATE ON tags
+WHEN (SELECT enabled FROM sync_capture WHERE id = 1) = 1 AND NOT EXISTS (SELECT 1 FROM sync_merging)
+    AND (old.id IS NOT new.id
+        OR old.name IS NOT new.name
+        OR old.color IS NOT new.color
+        OR old.sort_order IS NOT new.sort_order
+        OR old.deleted_at IS NOT new.deleted_at
+        OR old.updated_at IS NOT new.updated_at
+        OR old.created_at IS NOT new.created_at
+        OR old.name_updated_at IS NOT new.name_updated_at
+        OR old.color_updated_at IS NOT new.color_updated_at
+        OR old.sort_order_updated_at IS NOT new.sort_order_updated_at)
+BEGIN
+    INSERT INTO sync_outbox (tbl, pk) VALUES ('tags', new.id);
+END;
+
+CREATE TRIGGER ks_capture_folders_insert AFTER INSERT ON folders
+WHEN (SELECT enabled FROM sync_capture WHERE id = 1) = 1 AND NOT EXISTS (SELECT 1 FROM sync_merging)
+BEGIN
+    INSERT INTO sync_outbox (tbl, pk) VALUES ('folders', new.id);
+END;
+
+CREATE TRIGGER ks_capture_folders_update AFTER UPDATE ON folders
+WHEN (SELECT enabled FROM sync_capture WHERE id = 1) = 1 AND NOT EXISTS (SELECT 1 FROM sync_merging)
+    AND (old.id IS NOT new.id
+        OR old.name IS NOT new.name
+        OR old.sort_order IS NOT new.sort_order
+        OR old.deleted_at IS NOT new.deleted_at
+        OR old.updated_at IS NOT new.updated_at
+        OR old.created_at IS NOT new.created_at
+        OR old.name_updated_at IS NOT new.name_updated_at
+        OR old.sort_order_updated_at IS NOT new.sort_order_updated_at)
+BEGIN
+    INSERT INTO sync_outbox (tbl, pk) VALUES ('folders', new.id);
+END;
+
+CREATE TRIGGER ks_capture_feed_tags_insert AFTER INSERT ON feed_tags
+WHEN (SELECT enabled FROM sync_capture WHERE id = 1) = 1 AND NOT EXISTS (SELECT 1 FROM sync_merging)
+BEGIN
+    INSERT INTO sync_outbox (tbl, pk, pk2) VALUES ('feed_tags', new.feed_id, new.tag_id);
+END;
+
+CREATE TRIGGER ks_capture_feed_tags_update AFTER UPDATE ON feed_tags
+WHEN (SELECT enabled FROM sync_capture WHERE id = 1) = 1 AND NOT EXISTS (SELECT 1 FROM sync_merging)
+    AND (old.feed_id IS NOT new.feed_id
+        OR old.tag_id IS NOT new.tag_id
+        OR old.deleted_at IS NOT new.deleted_at
+        OR old.updated_at IS NOT new.updated_at)
+BEGIN
+    INSERT INTO sync_outbox (tbl, pk, pk2) VALUES ('feed_tags', new.feed_id, new.tag_id);
+END;
+
+CREATE TRIGGER ks_capture_global_settings_insert AFTER INSERT ON global_settings
+WHEN (SELECT enabled FROM sync_capture WHERE id = 1) = 1 AND NOT EXISTS (SELECT 1 FROM sync_merging)
+BEGIN
+    INSERT INTO sync_outbox (tbl, pk) VALUES ('global_settings', new.key);
+END;
+
+CREATE TRIGGER ks_capture_global_settings_update AFTER UPDATE ON global_settings
+WHEN (SELECT enabled FROM sync_capture WHERE id = 1) = 1 AND NOT EXISTS (SELECT 1 FROM sync_merging)
+    AND (old.key IS NOT new.key
+        OR old.value IS NOT new.value
+        OR old.updated_at IS NOT new.updated_at)
+BEGIN
+    INSERT INTO sync_outbox (tbl, pk) VALUES ('global_settings', new.key);
+END;

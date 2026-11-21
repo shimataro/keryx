@@ -3,12 +3,14 @@ package works.merc.keryx.app.domain
 import works.merc.keryx.app.core.CloudDataIncompatibleException
 import works.merc.keryx.app.core.SchemaVersionException
 import works.merc.keryx.app.data.local.db.KeryxDatabase
+import works.merc.keryx.app.createSchemaV2
 import works.merc.keryx.app.fileDb
 import works.merc.keryx.app.insertFeed
 import works.merc.keryx.app.insertFeedTag
 import works.merc.keryx.app.insertFolder
 import works.merc.keryx.app.insertGlobalSetting
 import works.merc.keryx.app.insertTag
+import works.merc.keryx.app.setFeedFetchState
 import works.merc.keryx.app.stampArticleDeleted
 import works.merc.keryx.app.platform.DatabaseMerger
 import kotlin.test.Test
@@ -886,19 +888,20 @@ class SyncMergerTest {
                 st.execute("PRAGMA user_version = ${KeryxDatabase.Schema.version}")
                 st.execute(
                     "CREATE TABLE feeds (id TEXT NOT NULL PRIMARY KEY, url TEXT NOT NULL, site_url TEXT, " +
-                        "title TEXT NOT NULL, description TEXT, favicon_url TEXT, etag TEXT, last_modified TEXT, " +
-                        "error_count INTEGER NOT NULL DEFAULT 0, last_error TEXT, custom_title TEXT, folder_id TEXT, " +
+                        "title TEXT NOT NULL, description TEXT, favicon_url TEXT, custom_title TEXT, folder_id TEXT, " +
                         "deleted_at INTEGER, updated_at INTEGER NOT NULL, created_at INTEGER NOT NULL, " +
                         "sort_order INTEGER NOT NULL DEFAULT 0, folder_updated_at INTEGER, " +
                         "sort_order_updated_at INTEGER, custom_title_updated_at INTEGER, deleted_updated_at INTEGER)",
                 )
                 st.execute(
                     "CREATE TABLE folders (id TEXT NOT NULL PRIMARY KEY, name TEXT NOT NULL UNIQUE, " +
-                        "sort_order INTEGER NOT NULL DEFAULT 0, deleted_at INTEGER, updated_at INTEGER NOT NULL, created_at INTEGER NOT NULL)",
+                        "sort_order INTEGER NOT NULL DEFAULT 0, deleted_at INTEGER, updated_at INTEGER NOT NULL, created_at INTEGER NOT NULL, " +
+                        "name_updated_at INTEGER, sort_order_updated_at INTEGER)",
                 )
                 st.execute(
                     "CREATE TABLE tags (id TEXT NOT NULL PRIMARY KEY, name TEXT NOT NULL UNIQUE, color TEXT, " +
-                        "sort_order INTEGER NOT NULL DEFAULT 0, deleted_at INTEGER, updated_at INTEGER NOT NULL, created_at INTEGER NOT NULL)",
+                        "sort_order INTEGER NOT NULL DEFAULT 0, deleted_at INTEGER, updated_at INTEGER NOT NULL, created_at INTEGER NOT NULL, " +
+                        "name_updated_at INTEGER, color_updated_at INTEGER, sort_order_updated_at INTEGER)",
                 )
                 st.execute(
                     "CREATE TABLE articles (id TEXT NOT NULL PRIMARY KEY, feed_id TEXT NOT NULL, guid TEXT NOT NULL, " +
@@ -975,6 +978,54 @@ class SyncMergerTest {
 
         assertFailsWith<SchemaVersionException> {
             DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, KeryxDatabase.Schema.version, MergeSql.all)
+        }
+    }
+
+    /**
+     * A version-2 cloud file (written by an older build) is migrated to version 3 by the merge's own
+     * migrateCloudIfOlder and merged: its feeds, tags and folders arrive with their values and the
+     * per-field stamps its migration initialized, while its fetch state stays behind — a feed's
+     * validators and errors are device-local, so the local feed_fetch_state is left as it was.
+     */
+    @Test
+    fun aVersionTwoCloudFileIsMigratedAndMergedWithoutItsFetchState() {
+        val cloudFile = java.io.File.createTempFile("cloud-v2-", ".db").apply { deleteOnExit() }
+        val cloudDriver = app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver("jdbc:sqlite:${cloudFile.absolutePath}")
+        try {
+            cloudDriver.createSchemaV2()
+            listOf(
+                """INSERT INTO feeds (id, url, title, etag, last_modified, error_count, last_error, updated_at, created_at)
+                   VALUES ('f1', 'https://a', 'Cloud title', '"cloud-etag"', 'lm', 4, 'cloud error', 500, 1)""",
+                """INSERT INTO feeds (id, url, title, etag, updated_at, created_at)
+                   VALUES ('f2', 'https://b', 'Only in cloud', '"e2"', 500, 1)""",
+                "INSERT INTO tags (id, name, color, sort_order, updated_at, created_at) VALUES ('t1', 'Tag', '#f00', 0, 600, 1)",
+                "INSERT INTO folders (id, name, sort_order, updated_at, created_at) VALUES ('d1', 'Folder', 0, 700, 1)",
+            ).forEach { cloudDriver.execute(null, it, 0) }
+        } finally {
+            cloudDriver.close()
+        }
+
+        val (localFile, localDriver, localDb) = fileDb()
+        localDb.insertFeed("f1", now = 100, url = "https://a")
+        localDriver.setFeedFetchState("f1", etag = "\"local-etag\"")
+        localDriver.close()
+
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, KeryxDatabase.Schema.version, MergeSql.all)
+
+        val (_, verifyDriver, verifyDb) = reopen(localFile)
+        try {
+            assertEquals("Cloud title", verifyDb.feedsQueries.getById("f1").executeAsOne().title)
+            assertNotNull(verifyDb.feedsQueries.getById("f2").executeAsOneOrNull())
+            val states = verifyDb.feed_fetch_stateQueries.getAll().executeAsList()
+            assertEquals(listOf("f1"), states.map { it.feed_id })
+            assertEquals("\"local-etag\"", states.single().etag)
+            assertEquals(0L, states.single().error_count)
+            val tag = verifyDb.tagsQueries.getById("t1").executeAsOne()
+            assertEquals(listOf<Long?>(600L, 600L, 600L), listOf(tag.name_updated_at, tag.color_updated_at, tag.sort_order_updated_at))
+            val folder = verifyDb.foldersQueries.getById("d1").executeAsOne()
+            assertEquals(listOf<Long?>(700L, 700L), listOf(folder.name_updated_at, folder.sort_order_updated_at))
+        } finally {
+            verifyDriver.close()
         }
     }
 

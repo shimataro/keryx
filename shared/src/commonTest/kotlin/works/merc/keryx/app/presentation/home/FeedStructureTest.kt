@@ -1,6 +1,5 @@
 package works.merc.keryx.app.presentation.home
 
-import works.merc.keryx.app.core.FEED_ERROR_REASON_GONE
 import works.merc.keryx.app.data.local.db.Feeds
 import kotlin.test.Test
 import kotlin.test.assertFalse
@@ -10,10 +9,10 @@ import kotlin.test.assertTrue
 class FeedStructureTest {
 
     @Test
-    fun onlyTheRefreshBookkeepingFieldsDifferingIsStillEqual() {
+    fun onlyUpdatedAtDifferingIsStillEqual() {
         val base = listOf(feed("f1"), feed("f2"))
         val refreshed = listOf(
-            feed("f1").copy(etag = "\"v2\"", last_modified = "Wed, 30 Sep 2026 00:00:00 GMT", updated_at = 1_000L),
+            feed("f1").copy(updated_at = 1_000L),
             feed("f2").copy(updated_at = 2_000L),
         )
 
@@ -28,8 +27,6 @@ class FeedStructureTest {
             base.copy(title = "Renamed"),
             base.copy(custom_title = "Mine"),
             base.copy(favicon_url = "https://example.com/f.ico"),
-            base.copy(error_count = 1L),
-            base.copy(last_error = FEED_ERROR_REASON_GONE),
             base.copy(site_url = "https://example.com"),
             base.copy(url = "https://example.com/moved"),
             base.copy(folder_id = "d1"),
@@ -62,10 +59,6 @@ private fun feed(id: String): Feeds = Feeds(
     title = "Feed $id",
     description = null,
     favicon_url = null,
-    etag = null,
-    last_modified = null,
-    error_count = 0L,
-    last_error = null,
     custom_title = null,
     folder_id = null,
     deleted_at = null,

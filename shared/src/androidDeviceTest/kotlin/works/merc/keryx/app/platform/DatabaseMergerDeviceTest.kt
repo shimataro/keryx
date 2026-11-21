@@ -4,6 +4,7 @@ import io.requery.android.database.sqlite.SQLiteDatabase
 import works.merc.keryx.app.core.SchemaVersionException
 import works.merc.keryx.app.createSchemaDbFile
 import works.merc.keryx.app.deleteDbFiles
+import works.merc.keryx.app.domain.SnapshotSql
 import java.io.File
 import kotlin.test.AfterTest
 import kotlin.test.Test
@@ -108,10 +109,21 @@ class DatabaseMergerDeviceTest {
         val localFile = createSchemaDbFile().also { cleanup += it }
         val cloudFile = createSchemaDbFile().also { cleanup += it }
         seedFolder(cloudFile.absolutePath, "cloud-folder", "From Old Cloud")
-        // Roll the cloud DB back to a genuinely v1-shaped `articles` table (see db/1.sqm) so
-        // migrateCloudIfOlder's real KeryxDatabase.Schema.migrate(driver, 1, 2) call has actual
-        // work to do, rather than re-adding columns that already exist (which would fail).
+        // Roll the cloud DB back to a genuinely v1-shaped schema (undoing db/2.sqm, then db/1.sqm's
+        // `articles` columns) so migrateCloudIfOlder's real KeryxDatabase.Schema.migrate(driver, 1, 3)
+        // call has actual work to do, rather than re-creating objects that already exist (which
+        // would fail).
         SQLiteDatabase.openOrCreateDatabase(cloudFile.absolutePath, null, NoOpDatabaseErrorHandler).use { db ->
+            SnapshotSql.CAPTURE_TRIGGERS.forEach { db.execSQL("DROP TRIGGER $it") }
+            SnapshotSql.DEVICE_LOCAL_TABLES.filter { it != "sync_state" }.forEach { db.execSQL("DROP TABLE $it") }
+            db.execSQL("ALTER TABLE feeds ADD COLUMN etag TEXT")
+            db.execSQL("ALTER TABLE feeds ADD COLUMN last_modified TEXT")
+            db.execSQL("ALTER TABLE feeds ADD COLUMN error_count INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE feeds ADD COLUMN last_error TEXT")
+            listOf("name_updated_at", "color_updated_at", "sort_order_updated_at").forEach {
+                db.execSQL("ALTER TABLE tags DROP COLUMN $it")
+            }
+            listOf("name_updated_at", "sort_order_updated_at").forEach { db.execSQL("ALTER TABLE folders DROP COLUMN $it") }
             db.execSQL("ALTER TABLE articles DROP COLUMN deleted_at")
             db.execSQL("ALTER TABLE articles DROP COLUMN deleted_updated_at")
             db.execSQL("PRAGMA user_version=1")
@@ -132,6 +144,6 @@ class DatabaseMergerDeviceTest {
 
     private companion object {
         /** Must stay a version actually registered in [works.merc.keryx.app.domain.MergeSchema.EXPECTED_SCHEMAS]. */
-        const val SCHEMA_VERSION = 2L
+        val SCHEMA_VERSION = works.merc.keryx.app.data.local.db.KeryxDatabase.Schema.version
     }
 }

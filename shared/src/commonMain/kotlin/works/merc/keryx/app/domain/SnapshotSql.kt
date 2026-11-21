@@ -21,6 +21,11 @@ package works.merc.keryx.app.domain
  * snapshot's bytes on every cycle and defeat [SyncRepository]'s "identical to what we last
  * uploaded" digest check.
  *
+ * Schema version 3's device-local tables ([DEVICE_LOCAL_TABLES]: `feed_fetch_state` and the sync
+ * bookkeeping) go for the same reason, together with the capture triggers ([CAPTURE_TRIGGERS])
+ * that write into the bookkeeping. Dropping `sync_outbox` also removes its `sqlite_sequence` row,
+ * so its AUTOINCREMENT counter never reaches the upload either.
+ *
  * `DROP TABLE`/`DROP INDEX` alone does not shrink the file — the freed pages just join SQLite's
  * internal freelist — so a plain `VACUUM` follows to actually reclaim that space before the bytes
  * are read for upload. `VACUUM` (unlike `VACUUM INTO`) operates in place on this already-created
@@ -42,9 +47,33 @@ internal object SnapshotSql {
      * their position never depends on which platform is running. The trailing `VACUUM` always
      * comes last, regardless of how many extra tables were dropped.
      */
+    /**
+     * The device-local tables (schema version 3 adds all but `sync_state`): the sync bookkeeping
+     * and a feed's fetch state. None of them is synced data, and several change on every sync or
+     * refresh, so leaving any in would also defeat the digest check, as `sync_state` would.
+     */
+    val DEVICE_LOCAL_TABLES: List<String> = listOf(
+        "sync_state",
+        "feed_fetch_state",
+        "sync_outbox",
+        "sync_capture",
+        "sync_merging",
+        "sync_applied",
+        "sync_cursor",
+        "ks_search_pending",
+    )
+
+    /** The capture triggers (`sync_bookkeeping.sq`), which name `sync_capture` / `sync_outbox`. */
+    val CAPTURE_TRIGGERS: List<String> =
+        listOf("feeds", "articles", "tags", "folders", "feed_tags", "global_settings")
+            .flatMap { listOf("ks_capture_${it}_insert", "ks_capture_${it}_update") }
+
     fun cleanupStatements(extraDropTables: List<String> = emptyList()): List<String> = buildList {
         add("DROP TABLE IF EXISTS articles_fts")
-        add("DROP TABLE IF EXISTS sync_state")
+        // The capture triggers go before the tables they write to, so no trigger is ever left
+        // naming a dropped table.
+        CAPTURE_TRIGGERS.forEach { add("DROP TRIGGER IF EXISTS $it") }
+        DEVICE_LOCAL_TABLES.forEach { add("DROP TABLE IF EXISTS $it") }
         extraDropTables.forEach { add("DROP TABLE IF EXISTS $it") }
         add("DROP INDEX IF EXISTS idx_articles_feed_id")
         add("DROP INDEX IF EXISTS idx_articles_is_read")

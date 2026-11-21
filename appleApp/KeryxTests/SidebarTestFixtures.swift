@@ -6,25 +6,28 @@ enum SidebarFixtures {
         _ id: String,
         sortOrder: Int64,
         folderId: String? = nil,
-        customTitle: String? = nil,
-        errorCount: Int64 = 0,
-        lastError: String? = nil
+        customTitle: String? = nil
     ) -> Feeds {
         Feeds(
             id: id, url: "https://example.com/\(id)", site_url: nil, title: id, description: nil,
-            favicon_url: "https://example.com/\(id).ico", etag: nil, last_modified: nil,
-            error_count: errorCount, last_error: lastError, custom_title: customTitle, folder_id: folderId,
+            favicon_url: "https://example.com/\(id).ico", custom_title: customTitle, folder_id: folderId,
             deleted_at: nil, updated_at: 0, created_at: 0, sort_order: sortOrder, folder_updated_at: nil,
             sort_order_updated_at: nil, custom_title_updated_at: nil, deleted_updated_at: nil
         )
     }
 
     static func folder(_ id: String, sortOrder: Int64) -> Folders {
-        Folders(id: id, name: "name-\(id)", sort_order: sortOrder, deleted_at: nil, updated_at: 0, created_at: 0)
+        Folders(
+            id: id, name: "name-\(id)", sort_order: sortOrder, deleted_at: nil, updated_at: 0, created_at: 0,
+            name_updated_at: nil, sort_order_updated_at: nil
+        )
     }
 
     static func tag(_ id: String, sortOrder: Int64, color: String? = nil) -> Tags {
-        Tags(id: id, name: "name-\(id)", color: color, sort_order: sortOrder, deleted_at: nil, updated_at: 0, created_at: 0)
+        Tags(
+            id: id, name: "name-\(id)", color: color, sort_order: sortOrder, deleted_at: nil, updated_at: 0, created_at: 0,
+            name_updated_at: nil, color_updated_at: nil, sort_order_updated_at: nil
+        )
     }
 
     /// Folders d1 (feeds a, b), d2 (feed c), d3 (empty) and d4 (feed e, collapsed); unfoldered
@@ -51,11 +54,13 @@ enum SidebarFixtures {
         tags: [Tags] = tags,
         feedTagMap: [String: Set<String>] = feedTagMap,
         collapsedFolderIds: Set<String> = collapsedFolderIds,
-        expandedTagIds: Set<String> = expandedTagIds
+        expandedTagIds: Set<String> = expandedTagIds,
+        fetchProblems: [String: FeedFetchProblem] = [:]
     ) -> SidebarModel {
         SidebarModel(
             feeds: feeds, folders: folders, tags: tags, feedTagMap: feedTagMap,
-            collapsedFolderIds: collapsedFolderIds, expandedTagIds: expandedTagIds
+            collapsedFolderIds: collapsedFolderIds, expandedTagIds: expandedTagIds,
+            fetchProblems: fetchProblems
         )
     }
 
