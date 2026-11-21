@@ -331,7 +331,8 @@ thresholds; deltas a base covers are not downloaded. That is at most about 1.25�
   full state as its base (as the first device does), then replace the pointer with a revision check. A revision mismatch (another device reset
   first) aborts and re-reads the pointer. The old generation's files are left in place as an archive. Every other
   device sees the new generation and rejoins, sending its own full state — so data only another device held comes
-  back, as it did when other devices merged the re-created file before.
+  back, as it did when other devices merged the re-created file before. Once the pointer is replaced, a pre-delta
+  `keryx.db.gz` that is not the stub is archived and replaced by it (see "Resetting (Archiving) Cloud Data").
 - **Disconnect / switch** (`clearSyncFailureState()`, under the same mutex): `sync_capture.enabled = 0` (nothing is
   recorded while local-only), and the `ks_*` keys, the outbox, `sync_applied`, the cursors, `ks_feed_folder_raw`
   and every saved pending file (the best-effort sweep of step 0) are cleared. `ks_search_pending` stays — it belongs to the local search index.
@@ -1103,7 +1104,8 @@ running this version that finds no pointer but a `keryx.db.gz`:
    delta.
 2. Joins: its full send becomes the first base, and it creates the pointer. If a pointer already exists (another
    device migrated first), this is an ordinary join.
-3. Uploads the downloaded file as `keryx-YYYYMMDD-HHMMSS.db.gz.bak` (`create`; a name collision is ignored; any other
+3. Uploads the downloaded file as `keryx-YYYYMMDD-HHMMSS.db.gz.bak` (`create`; a name already taken in that second —
+   possibly by different bytes — moves to `keryx-YYYYMMDD-HHMMSS-1.db.gz.bak`, `-2`, …; any other
    failure ends the sync before step 4, and the next one tries again) — a one-time manual way back.
 4. Replaces `keryx.db.gz`, **with a revision check against step 1's revision**, by an empty SQLite file whose
    `user_version` is 1000. It is not renamed away first: between checking it and renaming it, an older build could
@@ -1132,6 +1134,11 @@ device left half done). A full database found after a stub was known is an older
 but not archived. A stub replacement that loses its revision check `SYNC_MAX_RETRY` times in a row (the file kept
 changing) is a transient failure; the next sync continues.
 
+**An unusable `keryx.db.gz`.** A `keryx.db.gz` that fails validation (corrupt, or a full database that cannot be
+merged) fails the migration and the legacy watch alike with `CloudDataIncompatibleException`, on every sync. The
+notification center's reset is the way out: it archives the file and puts the stub in its place (see "Resetting
+(Archiving) Cloud Data").
+
 **An older build writing after the migration.** On Dropbox, OneDrive and Nextcloud its revision-checked upload
 fails, and on retry it reads the stub. On Google Drive the revision check is not atomic, so it can overwrite the
 stub; the legacy watch (step 1 of "Sync Flow") notices the changed revision and absorbs it exactly as in step 4,
@@ -1153,5 +1160,22 @@ removed at v1.0.0.
 device joins a **new generation**, uploads its local full state as that generation's base, and replaces the pointer
 with a revision check (a mismatch — another device reset first — aborts and re-reads the pointer). The previous
 generation's files stay in place, unread, as the archive. Every other device sees the new generation on its next
-sync and rejoins with its own full send, so data that only another device held comes back. The pre-delta
-`keryx-YYYYMMDD-HHMMSS.db.gz.bak` archives and the stub are never touched by a reset.
+sync and rejoins with its own full send, so data that only another device held comes back.
+
+Once the pointer is replaced, the reset turns to the pre-delta `keryx.db.gz`, so that one the legacy watch cannot
+use (corrupt, a full database failing validation, one that cannot be read) stops failing every sync:
+
+1. Absent → nothing to do. Its revision equals `ks_legacy_stub_rev` → nothing to do.
+2. Otherwise download it. A download failure (other than the file having gone) fails the reset as a transient
+   failure — the file is never replaced without having been archived.
+3. The stub → record its revision as `ks_legacy_stub_rev`; done.
+4. Anything else → upload its raw, still-compressed bytes as `keryx-YYYYMMDD-HHMMSS.db.gz.bak` (`create`; a name
+   already taken moves to the next `-N` suffix, any other failure fails the reset), then replace `keryx.db.gz` by the stub **with a revision
+   check against the revision just downloaded**. Success → record the stub's revision. A mismatch (the file changed
+   in between) → back to step 1, at most `SYNC_MAX_RETRY` times, after which the reset fails transiently.
+
+Nothing in it is merged: a reset replaces the cloud data by this device's state, and the archive keeps the file
+recoverable by hand. Existing `.bak` archives and a valid stub are left alone. Each step is decided again from the
+cloud, so a crash anywhere converges: before the stub's upload, the legacy watch still fails the next sync and the
+next reset finishes the job (archiving again under its own name); after the upload but before its revision is
+recorded, the next sync's legacy watch downloads the stub and records it.

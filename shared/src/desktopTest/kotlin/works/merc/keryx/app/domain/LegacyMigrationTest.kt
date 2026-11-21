@@ -369,6 +369,240 @@ class LegacyMigrationTest {
         assertRejectedBeforeAnyChange(PreDeltaFiles.database(PreDeltaFiles.feed("lf1"), userVersion = 1000), SchemaVersionException::class)
     }
 
+    // ---- Reset ----
+
+    private suspend fun SyncDevice.resetOk() {
+        val result = repo.resetCloudData()
+        assertIs<Result.Ok<Unit>>(result, "$label: $result")
+    }
+
+    /** A migrated cloud whose `keryx.db.gz` was then overwritten by [unusable]; [a] and [b] synced before that. */
+    private suspend fun TestScope.migratedThenOverwritten(unusable: ByteArray): Triple<FakeCloudStorage, SyncDevice, SyncDevice> {
+        val (cloud, _) = legacyCloud()
+        val a = device("a", cloud)
+        a.db.insertFeed("fa", now = 1)
+        a.syncOk()
+        val b = device("b", cloud)
+        b.syncOk()
+        cloud.put(CLOUD_DB_GZ_PATH, unusable, rev = "unusable")
+        now += 60_000 // the reset's archive gets a name of its own, not the migration's
+        return Triple(cloud, a, b)
+    }
+
+    private fun assertArchivedAndStubbed(cloud: FakeCloudStorage, unusable: ByteArray, vararg devices: SyncDevice) {
+        assertTrue(PreDeltaFiles.isStub(cloud.bytesOf(CLOUD_DB_GZ_PATH)), "keryx.db.gz is the stub again")
+        assertTrue(
+            PreDeltaFiles.backups(cloud).any { cloud.bytesOf(it)!!.contentEquals(unusable) },
+            "a .bak holds the unusable file's raw bytes",
+        )
+        for (d in devices) {
+            assertEquals(cloud.files.getValue("keryx.db.gz").rev, d.state(SYNC_STATE_KS_LEGACY_STUB_REV), "${d.label} recorded the stub")
+        }
+    }
+
+    @Test
+    fun aResetUnblocksSyncingFromACorruptPreDeltaFile() = runTest {
+        val corrupt = byteArrayOf(1, 2, 3)
+        val (cloud, a, b) = migratedThenOverwritten(corrupt)
+        val blocked = a.repo.sync()
+        assertIs<Result.Err>(blocked)
+        assertIs<CloudDataIncompatibleException>(blocked.exception)
+
+        a.resetOk()
+
+        assertArchivedAndStubbed(cloud, corrupt, a)
+        assertEquals(2, PreDeltaFiles.backups(cloud).size, "the migration's archive and the reset's")
+        assertEquals(cloudBackupPath(now).removePrefix("/"), PreDeltaFiles.backups(cloud).max())
+        a.syncOk()
+        b.syncOk()
+        assertArchivedAndStubbed(cloud, corrupt, a, b)
+        assertTrue(b.db.hasFeed("fa") && b.db.hasFeed("lf1"))
+    }
+
+    @Test
+    fun aResetArchivesAnUnusableFullDatabaseWithoutMergingIt() = runTest {
+        // A dangling reference fails validation (check 9), so the legacy watch cannot absorb it.
+        val unusable = PreDeltaFiles.database(PreDeltaFiles.feed("never"), PreDeltaFiles.article("orphan", "nofeed"))
+        val (cloud, a, b) = migratedThenOverwritten(unusable)
+        assertIs<Result.Err>(a.repo.sync())
+
+        a.resetOk()
+
+        assertArchivedAndStubbed(cloud, unusable, a)
+        assertFalse(a.db.hasFeed("never"), "a reset merges nothing")
+        a.syncOk()
+        b.syncOk()
+        assertFalse(b.db.hasFeed("never"))
+    }
+
+    @Test
+    fun aResetLeavesAValidStubInPlaceAndRecordsIt() = runTest {
+        val (cloud, original) = legacyCloud()
+        val a = device("a", cloud)
+        a.syncOk()
+        val stubRev = cloud.files.getValue("keryx.db.gz").rev
+        now += 60_000
+        // A device that has never seen the stub resets: it records it and writes nothing to it.
+        val b = device("b", cloud)
+        val stubWritesBefore = cloud.written.count { it == "keryx.db.gz" }
+
+        b.resetOk()
+        a.resetOk()
+
+        assertEquals(stubRev, cloud.files.getValue("keryx.db.gz").rev, "the stub is left in place")
+        assertEquals(stubWritesBefore, cloud.written.count { it == "keryx.db.gz" })
+        assertEquals(stubRev, a.state(SYNC_STATE_KS_LEGACY_STUB_REV))
+        assertEquals(stubRev, b.state(SYNC_STATE_KS_LEGACY_STUB_REV))
+        assertMigrated(cloud, original, a, b)
+        assertEquals(1, PreDeltaFiles.backups(cloud).size, "nothing more is archived")
+    }
+
+    @Test
+    fun aResetWithNoPreDeltaFileWritesNone() = runTest {
+        val cloud = FakeCloudStorage()
+        val a = device("a", cloud)
+        a.db.insertFeed("fa", now = 1)
+        a.syncOk()
+
+        a.resetOk()
+
+        assertNull(cloud.bytesOf(CLOUD_DB_GZ_PATH))
+        assertTrue(PreDeltaFiles.backups(cloud).isEmpty())
+        assertNull(a.state(SYNC_STATE_KS_LEGACY_STUB_REV))
+        a.syncOk()
+    }
+
+    @Test
+    fun aPreDeltaFileChangingBeforeTheResetsStubIsArchivedAgain() = runTest {
+        val corrupt = byteArrayOf(1, 2, 3)
+        val rewritten = byteArrayOf(4, 5, 6, 7)
+        val (cloud, a, _) = migratedThenOverwritten(corrupt)
+        var planted = false
+        a.repo.testHook = { point, _ ->
+            if (point == SyncHookPoint.BEFORE_STUB_UPLOAD && !planted) {
+                planted = true
+                cloud.put(CLOUD_DB_GZ_PATH, rewritten, rev = "rewritten")
+                now += 1_000
+            }
+        }
+
+        a.resetOk()
+        a.repo.testHook = null
+
+        assertTrue(planted)
+        assertArchivedAndStubbed(cloud, corrupt, a)
+        assertArchivedAndStubbed(cloud, rewritten, a)
+        a.syncOk()
+    }
+
+    @Test
+    fun aPreDeltaFileChangingWithinTheSameSecondIsStillArchivedUnderTheNextFreeName() = runTest {
+        val corrupt = byteArrayOf(1, 2, 3)
+        val rewritten = byteArrayOf(4, 5, 6, 7)
+        val (cloud, a, _) = migratedThenOverwritten(corrupt)
+        var planted = false
+        a.repo.testHook = { point, _ ->
+            if (point == SyncHookPoint.BEFORE_STUB_UPLOAD && !planted) {
+                planted = true
+                // Same wall-clock second: the second archive's name collides with the first's.
+                cloud.put(CLOUD_DB_GZ_PATH, rewritten, rev = "rewritten")
+            }
+        }
+
+        a.resetOk()
+        a.repo.testHook = null
+
+        assertTrue(planted)
+        assertArchivedAndStubbed(cloud, corrupt, a)
+        assertArchivedAndStubbed(cloud, rewritten, a)
+    }
+
+    @Test
+    fun aPreDeltaFileThatKeepsChangingFailsTheResetTransientlyAndTheNextResetFinishes() = runTest {
+        val corrupt = byteArrayOf(1, 2, 3)
+        val (cloud, a, _) = migratedThenOverwritten(corrupt)
+        val stubRevBefore = a.state(SYNC_STATE_KS_LEGACY_STUB_REV)
+        var round = 0
+        a.repo.testHook = { point, _ ->
+            if (point == SyncHookPoint.BEFORE_STUB_UPLOAD) {
+                cloud.put(CLOUD_DB_GZ_PATH, byteArrayOf(9, round++.toByte()))
+                now += 1_000
+            }
+        }
+
+        val result = a.repo.resetCloudData()
+        a.repo.testHook = null
+
+        assertIs<Result.Err>(result)
+        assertIs<works.merc.keryx.app.core.CloudStorageException>(result.exception)
+        assertEquals(works.merc.keryx.app.core.SYNC_MAX_RETRY, round)
+        assertContentEquals(byteArrayOf(9, (round - 1).toByte()), cloud.bytesOf(CLOUD_DB_GZ_PATH), "the last write is not replaced")
+        assertEquals(stubRevBefore, a.state(SYNC_STATE_KS_LEGACY_STUB_REV))
+        val last = cloud.bytesOf(CLOUD_DB_GZ_PATH)!!
+        now += 60_000
+
+        a.resetOk()
+
+        assertArchivedAndStubbed(cloud, last, a)
+        a.syncOk()
+    }
+
+    @Test
+    fun aResetThatCannotDownloadThePreDeltaFileFailsWithoutReplacingIt() = runTest {
+        val corrupt = byteArrayOf(1, 2, 3)
+        val (cloud, a, _) = migratedThenOverwritten(corrupt)
+        cloud.downloadHook = { name ->
+            if (name == "keryx.db.gz") cloud.queueDownload(Result.Err(works.merc.keryx.app.core.CloudStorageException("HTTP 503")))
+        }
+
+        val result = a.repo.resetCloudData()
+
+        assertIs<Result.Err>(result)
+        assertIs<works.merc.keryx.app.core.CloudStorageException>(result.exception)
+        assertContentEquals(corrupt, cloud.bytesOf(CLOUD_DB_GZ_PATH), "never replaced unarchived")
+        assertEquals(1, PreDeltaFiles.backups(cloud).size)
+        cloud.downloadHook = null
+
+        a.resetOk()
+
+        assertArchivedAndStubbed(cloud, corrupt, a)
+    }
+
+    @Test
+    fun aCrashDuringTheResetsPreDeltaStepConvergesOnTheNextResetOrSync() = runTest {
+        val points = listOf(SyncHookPoint.BEFORE_LEGACY_BACKUP, SyncHookPoint.BEFORE_STUB_UPLOAD, SyncHookPoint.AFTER_STUB_UPLOAD)
+        for (point in points) {
+            val corrupt = byteArrayOf(1, 2, 3)
+            val (cloud, a, b) = migratedThenOverwritten(corrupt)
+            var crashed = false
+            a.repo.testHook = { p, _ ->
+                if (p == point && !crashed) {
+                    crashed = true
+                    throw LegacyCrash()
+                }
+            }
+            assertFailsWith<LegacyCrash> { a.repo.resetCloudData() }
+            assertTrue(crashed, "$point was reached")
+            a.restart()
+
+            if (point == SyncHookPoint.AFTER_STUB_UPLOAD) {
+                // The stub is in place: the legacy watch records it.
+                a.syncOk()
+            } else {
+                assertIs<Result.Err>(a.repo.sync(), "$point: still blocked until the reset is repeated")
+                now += 1_000
+                a.resetOk()
+                a.syncOk()
+            }
+
+            assertArchivedAndStubbed(cloud, corrupt, a)
+            b.syncOk()
+            assertArchivedAndStubbed(cloud, corrupt, a, b)
+            devices.forEach { it.close() }
+            devices.clear()
+        }
+    }
+
     // ---- An older build reading the stub ----
 
     @Test

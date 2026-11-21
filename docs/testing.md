@@ -307,7 +307,15 @@ Project-wide, this is on top of the three Android instrumented suites above:
   as a first device's cloud; a corrupt, wrongly typed or dangling pre-delta file as `CloudDataIncompatibleException` (a
   corrupt one downloaded twice), and one of a newer `user_version` — including 1000 with tables in it — as
   `SchemaVersionException`, each with nothing merged or written; and the pre-delta `DatabaseMerger.merge` an older build
-  runs refusing the stub with `SchemaVersionException` before its local database changes by a byte.
+  runs refusing the stub with `SchemaVersionException` before its local database changes by a byte. The reset's
+  pre-delta step (see "Resetting (Archiving) Cloud Data"): a corrupt `keryx.db.gz` written over the stub blocking
+  every sync until a reset, after which syncing works on every device, a `.bak` holds the corrupt file's raw bytes and
+  the stub is back with its revision recorded; a full database failing validation archived the same way and never
+  merged; a valid stub left in place (recorded by a device that had not seen it, nothing written or archived); no
+  `keryx.db.gz` left absent; the file changing before the stub's revision-checked upload (archived again, then
+  replaced), and changing every time (a transient failure after `SYNC_MAX_RETRY` attempts, the file left as written,
+  finished by the next reset); a failed download failing the reset without replacing the file; and a crash before
+  the archive or before or after the stub's upload converging on the next reset or sync.
 - the multi-device simulation (`SyncSimulationTest`): three devices with their own databases share one
   `FakeCloudStorage` whose listing lags, repeats names and shows deleted files; seeded random operations (subscribing
   and unsubscribing through `FeedRepository` over a `MockEngine` feed, renaming, folders, tags, read/unread, star/unstar,
@@ -514,6 +522,9 @@ Cloud-data corruption recovery and the migration need a real cloud connection en
 
 - Replace one `ks-<gen>-d-…` file with an arbitrary non-gzip file (keeping its name), then sync on another device: the notification center's entry offers "Reset sync data" (`ResetCloudData`), and nothing from that sync is merged. Running the reset writes a new `keryx-sync.json` generation and a new base; the old generation's files stay in the folder, untouched. Every other device rejoins on its next sync and nothing it held is lost.
 - Download a delta, decompress it, set one article's `read_at` to a text value with the `sqlite3` CLI, re-compress it and re-upload it under a name whose hash matches the new content: the same `ResetCloudData` notification appears and the app does not crash — confirms the type check.
+- **Unusable pre-delta file**: after the migration, replace `keryx.db.gz` with an arbitrary non-gzip file: every
+  sync fails with the `ResetCloudData` entry. Running the reset leaves a new `keryx-YYYYMMDD-HHMMSS.db.gz.bak` holding
+  that file and puts the stub back, and syncing works again on every device.
 - **Migration**: with a cloud last written by a build older than delta sync (`keryx.db.gz` present, no `keryx-sync.json`), sync with this build: a `keryx-sync.json`, a first base and a `keryx-YYYYMMDD-HHMMSS.db.gz.bak` appear, and `keryx.db.gz` becomes a small stub. The older build, synced afterwards, reports that the app must be updated and writes nothing.
 - With the cloud data still unusable, trigger several automatic syncs (toggle read/star repeatedly, or wait for the background interval) and confirm no further download happens (no network activity, no repeated/duplicate notification) until the data is reset — then confirm a manual "sync now" *does* still attempt a real sync (and fails again) even while automatic syncs are suppressed.
 - After a successful reset, confirm automatic syncing resumes (a read/star toggle triggers a real sync again).
@@ -1643,7 +1654,8 @@ release and the oldest maintained one.
   server dialog appears only after the switch is confirmed, and cancelling it keeps the old connection) and
   reconnecting (the dialog starts from the stored server) both work.
 - **Two devices** editing and syncing at the same time converge through the conflict retry.
-- **Reset sync data** leaves a `keryx-<date-time>.db.gz.bak` in the `Keryx` folder.
+- **Reset sync data** writes a new `keryx-sync.json` generation and base in the `Keryx` folder, leaving the old
+  generation's files in place.
 - **Disconnect** removes the app password from the server's Settings ▸ Security ▸ Devices & sessions.
 - **Only on real devices / servers:**
   - iOS / macOS: an `ASWebAuthenticationSession` opened with no callback scheme is closed by `cancel()` once the
