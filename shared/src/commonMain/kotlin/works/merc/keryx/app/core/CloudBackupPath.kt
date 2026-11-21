@@ -11,9 +11,9 @@ import kotlin.time.Instant
  * Pre-Delta Format" in sync-architecture.md) — a one-time manual way back.
  *
  * Deterministic in [epochMillis] and formatted in UTC (not the device zone), so a fixed [Clock] in
- * a test yields a fixed name, and two devices archiving at the same instant agree. Seconds
- * precision is enough: the archive is written with `create`, and a name collision means an archive
- * of that moment already exists, which is ignored. Archives are never pruned automatically.
+ * a test yields a fixed name. The archive is written with `create`; a name already taken that second
+ * (possibly by different bytes) makes the caller try `-1`, `-2`, … before the suffix
+ * (`LegacyCloudFile.backup`). Archives are never pruned automatically.
  */
 @OptIn(ExperimentalTime::class)
 fun cloudBackupPath(epochMillis: Long): String {

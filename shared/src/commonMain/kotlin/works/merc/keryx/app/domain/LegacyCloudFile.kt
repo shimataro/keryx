@@ -1,6 +1,7 @@
 package works.merc.keryx.app.domain
 
 import kotlinx.coroutines.CancellationException
+import works.merc.keryx.app.core.CLOUD_DB_BACKUP_SUFFIX
 import works.merc.keryx.app.core.CLOUD_DB_GZ_PATH
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.CloudDataIncompatibleException
@@ -189,7 +190,7 @@ internal class LegacyCloudFile(
                     is Found.Full -> found.file
                 }
             }
-            if (stubRev() == null) backup(cloud, current).valueOrElse { return it }
+            if (stubRev() == null) backup(cloud, current.gzPath).valueOrElse { return it }
             TransportFiles.createLegacyStub(stub)
             Gzip.compressFile(stub, stubGz)
             repeat(SYNC_MAX_RETRY) {
@@ -227,20 +228,115 @@ internal class LegacyCloudFile(
         }
     }
 
-    private suspend fun backup(cloud: CloudStorage, file: Absorbed): Result<Unit> {
+    /**
+     * The reset's step for `keryx.db.gz` ("Resetting (Archiving) Cloud Data"), run once the new
+     * generation's pointer is in place: nothing when the file is absent; a stub has its revision
+     * recorded; anything else — a corrupt file, a full database, one that cannot be read — is archived
+     * as it is (its raw, still-compressed bytes) as `keryx-YYYYMMDD-HHMMSS.db.gz.bak` and replaced by
+     * the stub. Nothing is merged: a reset replaces the cloud by this device's state, and the archive
+     * keeps the file recoverable.
+     *
+     * The stub replaces the file only with a revision check against the version just downloaded and
+     * archived, so a version written in between is never discarded unarchived: a mismatch reads the
+     * file again and starts over, at most [SYNC_MAX_RETRY] times, after which the reset fails
+     * transiently. A download that fails (other than the file being gone) fails the reset the same way
+     * rather than replacing a file it could not archive. Each step is decided again from the cloud, so
+     * a crash anywhere converges on the next reset (or, after the stub's upload, on the next sync's
+     * legacy watch, which downloads the stub and records it).
+     */
+    suspend fun replaceOnReset(cloud: CloudStorage): Result<Unit> {
+        val n = downloads++
+        val gz = FileIO.join(tempDir, "ks-legacy-$n.db.gz")
+        val plain = FileIO.join(tempDir, "ks-legacy-$n.db")
+        val stub = FileIO.join(tempDir, "ks-legacy-stub.db")
+        val stubGz = "$stub.gz"
+        var stubReady = false
+        try {
+            repeat(SYNC_MAX_RETRY) {
+                setPhase(SyncPhase.ARCHIVING)
+                val meta = cloud.metadata(CLOUD_DB_GZ_PATH).valueOrElse {
+                    Log.error(TAG, "Reset: metadata of the pre-delta file failed: ${it.exception.message}")
+                    return it
+                } ?: return Result.Ok(Unit)
+                if (meta.rev == stubRev()) return Result.Ok(Unit)
+                val downloaded = cloud.download(CLOUD_DB_GZ_PATH, gz).valueOrElse { failure ->
+                    val gone = cloud.metadata(CLOUD_DB_GZ_PATH).let { it is Result.Ok && it.value == null }
+                    if (gone) return Result.Ok(Unit)
+                    Log.error(TAG, "Reset: download of the pre-delta file failed: ${failure.exception.message}")
+                    return failure
+                }
+                if (isStubFile(gz, plain)) {
+                    db.sync_stateQueries.upsert(SYNC_STATE_KS_LEGACY_STUB_REV, downloaded.rev)
+                    return Result.Ok(Unit)
+                }
+                backup(cloud, gz).valueOrElse { return it }
+                if (!stubReady) {
+                    TransportFiles.createLegacyStub(stub)
+                    Gzip.compressFile(stub, stubGz)
+                    stubReady = true
+                }
+                setPhase(SyncPhase.ARCHIVING)
+                testHook()?.invoke(SyncHookPoint.BEFORE_STUB_UPLOAD, CLOUD_DB_GZ_PATH)
+                when (val written = cloud.upload(CLOUD_DB_GZ_PATH, stubGz, expectedRev = downloaded.rev)) {
+                    is Result.Ok -> {
+                        testHook()?.invoke(SyncHookPoint.AFTER_STUB_UPLOAD, CLOUD_DB_GZ_PATH)
+                        db.sync_stateQueries.upsert(SYNC_STATE_KS_LEGACY_STUB_REV, written.value.rev)
+                        Log.info(TAG, "Reset: archived the unusable pre-delta file and placed the stub (rev ${written.value.rev})")
+                        return Result.Ok(Unit)
+                    }
+                    is Result.Err -> if (written.exception !is SyncConflictException) {
+                        Log.error(TAG, "Reset: placing the pre-delta stub failed: ${written.exception.message}")
+                        return written
+                    } else {
+                        Log.info(TAG, "Reset: the pre-delta file changed before the stub replaced it; reading it again")
+                    }
+                }
+                FileIO.delete(gz)
+            }
+            Log.warn(TAG, "Reset: placing the pre-delta stub failed after $SYNC_MAX_RETRY attempts (the file kept changing)")
+            return Result.Err(CloudStorageException("Placing the pre-delta stub failed after $SYNC_MAX_RETRY retries"))
+        } finally {
+            FileIO.delete(gz)
+            deleteDb(plain)
+            deleteDb(stub)
+            FileIO.delete(stubGz)
+        }
+    }
+
+    /**
+     * Whether the downloaded [gz] holds the stub, decompressing it to [plain] (deleted again). Any
+     * failure to decompress or read it — a corrupt file — is "not the stub".
+     */
+    private fun isStubFile(gz: String, plain: String): Boolean = try {
+        Gzip.decompressFile(gz, plain, MAX_SYNC_DB_SIZE_BYTES)
+        looksLikeSqliteFile(plain) && TransportFiles.isLegacyStub(plain)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        false
+    } finally {
+        deleteDb(plain)
+    }
+
+    /** Archives the compressed pre-delta file at [gzPath] as `keryx-YYYYMMDD-HHMMSS.db.gz.bak`. */
+    private suspend fun backup(cloud: CloudStorage, gzPath: String): Result<Unit> {
         setPhase(SyncPhase.ARCHIVING)
-        val path = cloudBackupPath(clock.nowMillis())
-        testHook()?.invoke(SyncHookPoint.BEFORE_LEGACY_BACKUP, path)
-        return when (val created = cloud.create(path, file.gzPath)) {
-            is Result.Ok -> Result.Ok(Unit)
-            // An archive of the same second exists already.
-            is Result.Err -> if (created.exception is SyncConflictException) {
-                Result.Ok(Unit)
-            } else {
-                Log.error(TAG, "Sync: archiving the pre-delta file failed: ${created.exception.message}")
-                created
+        val base = cloudBackupPath(clock.nowMillis())
+        // An existing archive of the same second may hold *different* bytes (a retry after the file
+        // changed under a revision conflict), so a collision never counts as done: the next free
+        // name is taken instead, and a duplicate of identical bytes is merely harmless.
+        for (attempt in 0 until BACKUP_NAME_ATTEMPTS) {
+            val path = if (attempt == 0) base else base.removeSuffix(CLOUD_DB_BACKUP_SUFFIX) + "-$attempt$CLOUD_DB_BACKUP_SUFFIX"
+            testHook()?.invoke(SyncHookPoint.BEFORE_LEGACY_BACKUP, path)
+            when (val created = cloud.create(path, gzPath)) {
+                is Result.Ok -> return Result.Ok(Unit)
+                is Result.Err -> if (created.exception !is SyncConflictException) {
+                    Log.error(TAG, "Sync: archiving the pre-delta file failed: ${created.exception.message}")
+                    return created
+                }
             }
         }
+        return Result.Err(CloudStorageException("No free archive name for the pre-delta file"))
     }
 
     /** Deletes [file]'s local copy. */
@@ -248,6 +344,9 @@ internal class LegacyCloudFile(
 
     private companion object {
         const val TAG = "Sync"
+
+        /** Archive names tried per second before giving up (transiently) — far beyond any real retry count. */
+        const val BACKUP_NAME_ATTEMPTS = 100
 
         fun deleteDb(path: String) {
             FileIO.delete(path)

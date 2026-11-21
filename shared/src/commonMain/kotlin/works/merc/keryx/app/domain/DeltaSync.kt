@@ -68,10 +68,10 @@ internal enum class SyncHookPoint {
     /** A full pre-delta database was merged; what follows it (joining, archiving, the stub) is next. */
     AFTER_LEGACY_MERGE,
 
-    /** The pre-delta database's archive (the named `.bak`) is to be uploaded next. */
+    /** The pre-delta file's archive (the named `.bak`) is to be uploaded next — by a sync or a reset. */
     BEFORE_LEGACY_BACKUP,
 
-    /** The stub is to replace the pre-delta database next. */
+    /** The stub is to replace the pre-delta file next — by a sync or a reset. */
     BEFORE_STUB_UPLOAD,
 
     /** The stub is in place; recording its revision is next. */
@@ -259,7 +259,9 @@ internal class DeltaSync(
     /**
      * `resetCloudData()`: a new generation whose base is this device's full state, then the pointer
      * replaced with a revision check. Losing that check to another device's reset aborts and syncs
-     * into the generation it created instead.
+     * into the generation it created instead. Once the pointer is in place, an unusable pre-delta
+     * `keryx.db.gz` is archived and replaced by the stub ([LegacyCloudFile.replaceOnReset]), so the
+     * legacy watch stops failing every sync on it.
      */
     suspend fun reset(cloud: CloudStorage): Result<Unit> {
         setPhase(SyncPhase.CHECKING)
@@ -272,6 +274,7 @@ internal class DeltaSync(
         return when (written) {
             is Result.Ok -> {
                 setState(SYNC_STATE_KS_POINTER_REV, written.value)
+                legacy.replaceOnReset(cloud).valueOrElse { return it }
                 setState(SYNC_STATE_LAST_SYNCED_AT, clock.nowMillis().toString())
                 Result.Ok(Unit)
             }
