@@ -6,7 +6,6 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.io.files.Path
 import kotlinx.io.files.SystemFileSystem
-import works.merc.keryx.app.core.CLOUD_DB_GZ_PATH
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.CloudDataIncompatibleException
 import works.merc.keryx.app.core.CloudStorageException
@@ -62,6 +61,21 @@ internal enum class SyncHookPoint {
 
     /** A garbage-collection deletion of the named file is next. */
     BEFORE_GC_DELETE,
+
+    /** This device created the pointer; the rest of the sync is next. */
+    AFTER_POINTER_CREATE,
+
+    /** A full pre-delta database was merged; what follows it (joining, archiving, the stub) is next. */
+    AFTER_LEGACY_MERGE,
+
+    /** The pre-delta file's archive (the named `.bak`) is to be uploaded next — by a sync or a reset. */
+    BEFORE_LEGACY_BACKUP,
+
+    /** The stub is to replace the pre-delta file next — by a sync or a reset. */
+    BEFORE_STUB_UPLOAD,
+
+    /** The stub is in place; recording its revision is next. */
+    AFTER_STUB_UPLOAD,
 }
 
 /**
@@ -94,6 +108,17 @@ internal class DeltaSync(
     /** Called at each [SyncHookPoint] with the file name concerned; for tests only. */
     var testHook: (suspend (SyncHookPoint, String) -> Unit)? = null
 
+    /** The pre-delta `keryx.db.gz`: the migration from it and the legacy watch. */
+    private val legacy = LegacyCloudFile(
+        db = db,
+        clock = clock,
+        localDbPath = localDbPath,
+        tempDir = tempDir,
+        setPhase = setPhase,
+        mergeAndRefresh = { merge -> mergeAndRefresh(merge) },
+        testHook = { testHook },
+    )
+
     private sealed interface Pointer {
         data object Absent : Pointer
         data class Present(val generation: String, val rev: String) : Pointer
@@ -102,6 +127,11 @@ internal class DeltaSync(
     /** The current generation's files, deduplicated by name (Drive can list a name twice). */
     private class Listing(val deltas: Map<TransportFileName, CloudFileEntry>, val bases: MutableMap<TransportFileName, CloudFileEntry>) {
         val deltaNames: MutableSet<TransportFileName> = deltas.keys.toMutableSet()
+    }
+
+    /** A full pre-delta database a sync attempt merged, until [LegacyCloudFile.finish] takes it over. */
+    private class LegacyHandoff {
+        var absorbed: LegacyCloudFile.Absorbed? = null
     }
 
     /** Validated files downloaded during one sync, by name, so a fold does not download them twice. */
@@ -128,89 +158,110 @@ internal class DeltaSync(
     /** One sync of [cloud] — steps 0–6 of "Sync Flow". */
     suspend fun sync(cloud: CloudStorage): Result<Unit> {
         repeat(SYNC_MAX_RETRY) {
-            setPhase(SyncPhase.CHECKING)
-            val generation: String
-            var joining = false
-            when (val pointer = readPointer(cloud).valueOrElse { return it }) {
-                Pointer.Absent -> {
-                    // Step 8 (the pre-delta migration) handles a cloud that still holds only the old format.
-                    val legacy = cloud.metadata(CLOUD_DB_GZ_PATH).valueOrElse { return it }
-                    if (legacy != null) {
-                        Log.warn(TAG, "Sync: the cloud holds pre-delta data only")
-                        return Result.Err(CloudStorageException("pre-delta cloud data needs migration"))
-                    }
-                    val own = ownGeneration()
-                    if (own != null && SendAttempt.decode(state(SYNC_STATE_KS_ATTEMPT))?.name?.generation == own) {
-                        resumeAttempt(cloud, own).valueOrElse { return it }
-                    }
-                    if (own != null && lastSeq() >= 1) {
-                        // This device already sent into its generation (as its first device, perhaps
-                        // interrupted before creating the pointer): point at it.
-                        when (val created = createPointer(cloud, own)) {
-                            is Result.Err -> if (created.exception is SyncConflictException) return@repeat else return created
-                            is Result.Ok -> Unit
-                        }
-                        generation = own
-                    } else {
-                        val fresh = newId()
-                        join(fresh, pointerRev = null)
-                        sendFull(cloud, fresh, exceptPath = null, asBase = true).valueOrElse { return it }
-                        when (val created = createPointer(cloud, fresh)) {
-                            // Another device created the pointer first: the next read sees its generation
-                            // and this device rejoins there. The base just sent is never pointed at.
-                            is Result.Err -> if (created.exception is SyncConflictException) return@repeat else return created
-                            is Result.Ok -> Unit
-                        }
-                        generation = fresh
-                    }
-                }
-                is Pointer.Present -> {
-                    generation = pointer.generation
-                    if (pointer.generation != ownGeneration()) {
-                        join(pointer.generation, pointer.rev)
-                        joining = true
-                    } else {
-                        resumeAttempt(cloud, generation).valueOrElse { return it }
-                    }
-                }
-            }
-
-            val listing = list(cloud, generation).valueOrElse { return it }
-            if (!joining && cloneDetectedInListing(listing)) {
-                Log.warn(TAG, "Sync: another copy of this database writes as this device; rejoining")
-                join(generation, state(SYNC_STATE_KS_POINTER_REV))
-                joining = true
-            }
-            val downloads = Downloads(tempDir)
-            var exceptPath: String? = null
+            val handoff = LegacyHandoff()
             try {
-                exceptPath = receive(cloud, listing, joining, downloads).valueOrElse { return it }
-                if (!joining && cloneDetectedInBases(listing)) {
-                    Log.warn(TAG, "Sync: a base covers deltas this device never wrote; rejoining")
-                    exceptPath?.let(::deleteDb)
-                    join(generation, state(SYNC_STATE_KS_POINTER_REV))
-                    exceptPath = receive(cloud, listing, joining = true, downloads).valueOrElse { return it }
-                }
-                val sent = send(cloud, generation, exceptPath).valueOrElse { return it }
-                exceptPath?.let(::deleteDb)
-                exceptPath = null
-                if (sent != null) listing.deltaNames += sent
-                compact(cloud, generation, listing, downloads).valueOrElse { return it }
+                return syncAttempt(cloud, handoff) ?: return@repeat
             } finally {
-                exceptPath?.let(::deleteDb)
-                downloads.deleteAll()
+                // Left over only when the attempt ended before legacy.finish took the file over.
+                handoff.absorbed?.let(legacy::discard)
             }
-            setState(SYNC_STATE_LAST_SYNCED_AT, clock.nowMillis().toString())
-            return Result.Ok(Unit)
         }
         Log.warn(TAG, "Sync failed after $SYNC_MAX_RETRY attempts (the pointer kept changing)")
         return Result.Err(CloudStorageException("Sync failed after $SYNC_MAX_RETRY retries"))
     }
 
     /**
+     * One attempt of [sync]: its result, or `null` when the pointer changed under it (another device
+     * created it first) and the attempt must start over.
+     */
+    private suspend fun syncAttempt(cloud: CloudStorage, handoff: LegacyHandoff): Result<Unit>? {
+        setPhase(SyncPhase.CHECKING)
+        val generation: String
+        var joining = false
+        when (val pointer = readPointer(cloud).valueOrElse { return it }) {
+            Pointer.Absent -> {
+                // No pointer but a pre-delta database ("Migration"): merge it first, so the full
+                // send below — the first base, or an ordinary join's — carries its rows.
+                if (legacy.changed(cloud).valueOrElse { return it }) {
+                    val found = legacy.absorb(cloud).valueOrElse { return it }
+                    if (found is LegacyCloudFile.Found.Full) handoff.absorbed = found.file
+                }
+                val own = ownGeneration()
+                if (own != null && SendAttempt.decode(state(SYNC_STATE_KS_ATTEMPT))?.name?.generation == own) {
+                    resumeAttempt(cloud, own).valueOrElse { return it }
+                }
+                if (own != null && lastSeq() >= 1) {
+                    // This device already sent into its generation (as its first device, perhaps
+                    // interrupted before creating the pointer): point at it.
+                    when (val created = createPointer(cloud, own)) {
+                        is Result.Err -> if (created.exception is SyncConflictException) return null else return created
+                        is Result.Ok -> Unit
+                    }
+                    generation = own
+                } else {
+                    val fresh = newId()
+                    join(fresh, pointerRev = null)
+                    sendFull(cloud, fresh, exceptPath = null, asBase = true).valueOrElse { return it }
+                    when (val created = createPointer(cloud, fresh)) {
+                        // Another device created the pointer first: the next read sees its generation
+                        // and this device rejoins there. The base just sent is never pointed at.
+                        is Result.Err -> if (created.exception is SyncConflictException) return null else return created
+                        is Result.Ok -> Unit
+                    }
+                    generation = fresh
+                }
+            }
+            is Pointer.Present -> {
+                generation = pointer.generation
+                if (pointer.generation != ownGeneration()) {
+                    join(pointer.generation, pointer.rev)
+                    joining = true
+                } else {
+                    resumeAttempt(cloud, generation).valueOrElse { return it }
+                }
+            }
+        }
+
+        // The migration's archive and stub, or — every sync — the legacy watch ("Migration").
+        val merged = handoff.absorbed
+        handoff.absorbed = null
+        legacy.finish(cloud, merged).valueOrElse { return it }
+
+        val listing = list(cloud, generation).valueOrElse { return it }
+        if (!joining && cloneDetectedInListing(listing)) {
+            Log.warn(TAG, "Sync: another copy of this database writes as this device; rejoining")
+            join(generation, state(SYNC_STATE_KS_POINTER_REV))
+            joining = true
+        }
+        val downloads = Downloads(tempDir)
+        var exceptPath: String? = null
+        try {
+            exceptPath = receive(cloud, listing, joining, downloads).valueOrElse { return it }
+            if (!joining && cloneDetectedInBases(listing)) {
+                Log.warn(TAG, "Sync: a base covers deltas this device never wrote; rejoining")
+                exceptPath?.let(::deleteDb)
+                join(generation, state(SYNC_STATE_KS_POINTER_REV))
+                exceptPath = receive(cloud, listing, joining = true, downloads).valueOrElse { return it }
+            }
+            val sent = send(cloud, generation, exceptPath).valueOrElse { return it }
+            exceptPath?.let(::deleteDb)
+            exceptPath = null
+            if (sent != null) listing.deltaNames += sent
+            compact(cloud, generation, listing, downloads).valueOrElse { return it }
+        } finally {
+            exceptPath?.let(::deleteDb)
+            downloads.deleteAll()
+        }
+        setState(SYNC_STATE_LAST_SYNCED_AT, clock.nowMillis().toString())
+        return Result.Ok(Unit)
+    }
+
+    /**
      * `resetCloudData()`: a new generation whose base is this device's full state, then the pointer
      * replaced with a revision check. Losing that check to another device's reset aborts and syncs
-     * into the generation it created instead.
+     * into the generation it created instead. Once the pointer is in place, an unusable pre-delta
+     * `keryx.db.gz` is archived and replaced by the stub ([LegacyCloudFile.replaceOnReset]), so the
+     * legacy watch stops failing every sync on it.
      */
     suspend fun reset(cloud: CloudStorage): Result<Unit> {
         setPhase(SyncPhase.CHECKING)
@@ -223,6 +274,7 @@ internal class DeltaSync(
         return when (written) {
             is Result.Ok -> {
                 setState(SYNC_STATE_KS_POINTER_REV, written.value)
+                legacy.replaceOnReset(cloud).valueOrElse { return it }
                 setState(SYNC_STATE_LAST_SYNCED_AT, clock.nowMillis().toString())
                 Result.Ok(Unit)
             }
@@ -288,6 +340,7 @@ internal class DeltaSync(
         setPhase(SyncPhase.UPLOADING)
         val rev = writePointer(cloud, generation, expectedRev = null, createOnly = true).valueOrElse { return it }
         setState(SYNC_STATE_KS_POINTER_REV, rev)
+        testHook?.invoke(SyncHookPoint.AFTER_POINTER_CREATE, SYNC_POINTER_PATH)
         return Result.Ok(Unit)
     }
 
@@ -662,9 +715,22 @@ internal class DeltaSync(
             }
             add("DELETE FROM main.sync_merging")
         }
+        return mergeAndRefresh {
+            DatabaseMerger.mergeTransport(localDbPath = localDbPath, transportPath = accumulator, mergeStatements = statements)
+        }
+    }
+
+    /**
+     * Runs [merge] (a [DatabaseMerger] call, which writes through its own connection) and the steps
+     * after its commit — `search_text` for the rows it registered, the search index, SQLDelight's
+     * listeners. A [KeryxException] (an unusable or too-new cloud file, classified by the merger) is
+     * returned as is; anything else, including a post-commit failure, is never the cloud's fault and
+     * is a transient [CloudStorageException].
+     */
+    private suspend fun mergeAndRefresh(merge: () -> Unit): Result<Unit> {
         setPhase(SyncPhase.MERGING)
         try {
-            DatabaseMerger.mergeTransport(localDbPath = localDbPath, transportPath = accumulator, mergeStatements = statements)
+            merge()
             setPhase(SyncPhase.INDEXING)
             // search_text first, so indexMissing() (which skips pending rows) indexes the real text.
             searchTextBackfill.recomputePending()

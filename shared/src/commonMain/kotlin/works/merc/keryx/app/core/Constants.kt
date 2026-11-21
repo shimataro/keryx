@@ -50,27 +50,30 @@ const val MILLIS_PER_MINUTE = 60_000L
 const val MILLIS_PER_SECOND = 1_000L
 
 /**
- * Legacy (pre-compression) cloud file path/name for the synced DB. No longer written — every
- * upload/create goes to [CLOUD_DB_GZ_PATH] — but still read as a one-time fallback when the
- * compressed file does not exist yet remotely (a cloud this device has not synced to since
- * compression was added). See "Compressed Upload / Legacy Fallback" in sync-architecture.md.
- *
- * This fallback is a deliberately temporary bridge for the 0.x pre-release period. It is planned
- * for removal once the app reaches its v1.0.0 release, at which point every device still running
- * an older, [CLOUD_DB_GZ_PATH]-unaware build is expected to have upgraded; see the same doc
- * section for the removal note.
+ * The pre-compression cloud file of the pre-delta format. This version neither reads nor writes it:
+ * builds that old keep the one-way divergence documented for them in "Migration from the
+ * Pre-Delta Format" (sync-architecture.md). Kept for the provider tests that address a plain path.
  */
 const val CLOUD_DB_PATH = "/keryx.db"
 
 /**
- * Primary cloud file path/name for the synced DB. Always gzip-compressed (`platform/Gzip`) — the
- * only path this app ever writes to. [CLOUD_DB_PATH] is read-only fallback for a cloud that has
- * not been written to since compression was added.
+ * The pre-delta format's single full database (gzip-compressed). Read only to migrate from it and
+ * by the legacy watch; after the migration it holds a stub whose `user_version` is
+ * [LEGACY_STUB_USER_VERSION], replaced only with a revision check — see "Migration from the
+ * Pre-Delta Format" in sync-architecture.md.
  */
 const val CLOUD_DB_GZ_PATH = "/keryx.db.gz"
 
 /**
- * Prefix/suffix of the archive a cloud-data reset creates, e.g.
+ * The `user_version` of the stub that replaces [CLOUD_DB_GZ_PATH] after the migration: an empty
+ * SQLite file an older build rejects with `SchemaVersionException` before writing anything. A file
+ * at that path with this version and no tables is a stub; any other newer version is a database
+ * this build cannot read.
+ */
+const val LEGACY_STUB_USER_VERSION = 1000L
+
+/**
+ * Prefix/suffix of the archive the pre-delta migration makes of [CLOUD_DB_GZ_PATH], e.g.
  * `/keryx-20260811-103000.db.gz.bak` (see `cloudBackupPath`). Deliberately *not* derived from
  * [CLOUD_DB_GZ_PATH]: the archive name must not match Google Drive's `name = 'keryx.db.gz'`
  * lookup or OneDrive's basename addressing, or `CloudStorage.metadata(CLOUD_DB_GZ_PATH)` would end
@@ -266,6 +269,12 @@ const val SYNC_STATE_KS_RECEIVED_AT = "ks_received_at"
 
 /** What this device knows of the bases of its generation (JSON; see `domain/SyncBaseCache`). */
 const val SYNC_STATE_KS_BASES = "ks_bases"
+
+/**
+ * The revision of the stub at [CLOUD_DB_GZ_PATH] this device placed or last saw; any other revision
+ * there means an older build wrote a full database, which the legacy watch absorbs.
+ */
+const val SYNC_STATE_KS_LEGACY_STUB_REV = "ks_legacy_stub_rev"
 
 // --- Window / pane sizing (desktop) ---
 const val WINDOW_DEFAULT_WIDTH = 1280

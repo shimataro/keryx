@@ -56,8 +56,9 @@ cannot establish the cost, use confidence `Low` and say what measurement would s
 
 - Feed fetch: are `If-None-Match` / `If-Modified-Since` sent, and is a 304 handled without
   discarding the stored validators? Dropping them defeats conditional requests on every other poll.
-- Sync: is the compressed upload path used, and are the "skip unchanged transfer" gates intact
-  (`cloud_file_rev` skips the download, the snapshot digest skips the upload)?
+- Sync: are transport files gzip-compressed, and does a sync with nothing to do still cost no payload
+  (the pointer downloaded only when its rev differs from `ks_pointer_rev`, `sync_applied` skipping
+  merged files, an empty outbox sending nothing)?
 
 ## Checklist — Compose
 
