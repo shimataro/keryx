@@ -141,10 +141,12 @@ class SyncAlgebraTest {
                     assertEquals(0L, rs.getLong(3)) // read 250 > 200
                     assertEquals(250L, rs.getLong(4))
                     assertEquals(1L, rs.getLong(5))
-                    assertEquals(null, rs.getObject(6)) // the star (260) is newer than the deletion (180): revived
-                    assertEquals(180L, rs.getLong(7))
+                    // Retention group: the star (260) is newer than the deletion (180), so the whole
+                    // group comes from fileB's version — which was never deleted.
+                    assertEquals(null, rs.getObject(6))
+                    assertEquals(null, rs.getObject(7))
                     assertEquals(400L, rs.getLong(8)) // the latest cached_at
-                    assertEquals(150L, rs.getLong(9)) // the body winner's updated_at
+                    assertEquals(300L, rs.getLong(9)) // updated_at is no group's key: the latest
                 }
                 st.executeQuery("SELECT is_read FROM articles WHERE id = 'a2'").use { rs ->
                     rs.next()
@@ -199,18 +201,125 @@ class SyncAlgebraTest {
     }
 
     @Test
-    fun foldKeepsTheRawDeletionWinnerAndLeavesTheReviveToTheMerge() {
+    fun foldTakesTheWholeRetentionGroupFromItsNewestOperation() {
         val folded = fold(fileB() to nameB, fileC() to nameC)
         TransportFixtures.connect(folded).use { conn ->
             conn.createStatement().use { st ->
-                st.executeQuery("SELECT deleted_at, is_starred, starred_at FROM articles WHERE id = 'a1'").use { rs ->
+                st.executeQuery("SELECT deleted_at, deleted_updated_at, is_starred, starred_at FROM articles WHERE id = 'a1'").use { rs ->
                     rs.next()
-                    assertEquals(180L, rs.getLong(1))
-                    assertEquals(1L, rs.getLong(2))
-                    assertEquals(260L, rs.getLong(3))
+                    assertEquals(null, rs.getObject(1))
+                    assertEquals(null, rs.getObject(2))
+                    assertEquals(1L, rs.getLong(3))
+                    assertEquals(260L, rs.getLong(4))
                 }
             }
         }
+    }
+
+    // ---- The retention group: delete @D, star @S > D, unstar @U > S on three devices ----
+
+    private val deleteName = deltaName(DEV_A, 7)
+    private val starName = deltaName(DEV_B, 7)
+    private val unstarName = deltaName(DEV_C, 7)
+
+    private fun retentionFiles(): List<Pair<File, TransportFileName>> = listOf(
+        // Device A's cache cleanup deleted the article.
+        transportFile(deleteName, feed("f1"), article("a1", "f1", deletedAt = 100, deletedUpdatedAt = 100)) to deleteName,
+        // Device B, after merging that deletion, starred it (which revives it).
+        transportFile(starName, feed("f1"), article("a1", "f1", isStarred = 1, starredAt = 200, deletedUpdatedAt = 100)) to starName,
+        // Device C, after merging the star, unstarred it.
+        transportFile(unstarName, feed("f1"), article("a1", "f1", isStarred = 0, starredAt = 300, deletedUpdatedAt = 100)) to unstarName,
+    )
+
+    private fun retention(file: File): String = TransportFixtures.connect(file).use { conn ->
+        conn.createStatement().use { st ->
+            st.executeQuery("SELECT is_starred, starred_at, deleted_at, deleted_updated_at FROM articles WHERE id = 'a1'").use { rs ->
+                rs.next()
+                (1..4).joinToString("|") { "${rs.getObject(it)}" }
+            }
+        }
+    }
+
+    @Test
+    fun theRetentionGroupConvergesOnTheNewestOperationInEveryMergeAndFoldOrder() {
+        // The unstar (300) is the newest operation: not starred, not deleted (it stays visible
+        // until the next cache cleanup deletes it again).
+        val expected = "0|300|null|100"
+        val inputs = retentionFiles()
+        for (local in listOf(emptyArray(), arrayOf(feed("f1"), article("a1", "f1")))) {
+            for (order in permutations(listOf(0, 1, 2))) {
+                val sequential = localDb(*local).also { db -> order.forEach { merge(db, inputs[it].first) } }
+                assertEquals(expected, retention(sequential), "merge order $order")
+                val folded = fold(*order.map { inputs[it] }.toTypedArray())
+                assertEquals(expected, retention(folded), "fold order $order")
+                assertEquals(expected, retention(localDb(*local).also { merge(it, folded) }), "merged fold, order $order")
+            }
+            // Folds of folds, both groupings.
+            val (d, s, u) = inputs
+            val left = fold(fold(d, s) to TransportFixtures.baseName(DEV_A, 1), u)
+            val right = fold(d, fold(s, u) to TransportFixtures.baseName(DEV_A, 1))
+            assertEquals(dump(left), dump(right))
+            assertEquals(expected, retention(localDb(*local).also { merge(it, left) }))
+        }
+    }
+
+    @Test
+    fun aDeletionNewerThanTheStarWinsTheRetentionGroup() {
+        // The pre-v3 revive rule would have kept a star newer than any deletion alive; the group
+        // simply takes its newest operation, here a deletion after an unstar.
+        val unstar = transportFile(nameA, feed("f1"), article("a1", "f1", isStarred = 0, starredAt = 200))
+        val delete = transportFile(nameB, feed("f1"), article("a1", "f1", isStarred = 0, starredAt = 200, deletedAt = 250, deletedUpdatedAt = 250))
+        for (order in listOf(listOf(unstar, delete), listOf(delete, unstar))) {
+            val db = localDb(feed("f1"), article("a1", "f1", isStarred = 1, starredAt = 150))
+            order.forEach { merge(db, it) }
+            assertEquals("0|200|250|250", retention(db))
+        }
+    }
+
+    @Test
+    fun theRetentionGroupIsIdempotentAndCommutativeForEveryPair() {
+        val inputs = retentionFiles().map { it.first }
+        for (file in inputs) {
+            val once = localDb().also { merge(it, file) }
+            val twice = localDb().also { merge(it, file); merge(it, file) }
+            assertEquals(dump(once), dump(twice))
+        }
+        for ((x, y) in listOf(0 to 1, 0 to 2, 1 to 2)) {
+            val xy = localDb().also { merge(it, inputs[x]); merge(it, inputs[y]) }
+            val yx = localDb().also { merge(it, inputs[y]); merge(it, inputs[x]) }
+            assertEquals(dump(xy), dump(yx), "files $x, $y")
+        }
+    }
+
+    // ---- The body group's own stamp ----
+
+    @Test
+    fun aNewerBodyWinsWhateverReadsOrStarsTheOtherSideMade() {
+        // Device A refreshed a newer body (body stamp 500); device B, holding the older body
+        // (body stamp 100), later read and starred the article — bumping its updated_at well past
+        // A's. B's reading must not make its older body win.
+        val newer = transportFile(nameA, feed("f1"), article("a1", "f1", updatedAt = 500, bodyAt = 500, content = "new body"))
+        val readElsewhere = transportFile(
+            nameB, feed("f1"),
+            article("a1", "f1", updatedAt = 900, bodyAt = 100, content = "old body", isRead = 1, readAt = 900, isStarred = 1, starredAt = 900),
+        )
+        fun body(file: File): String = TransportFixtures.connect(file).use { conn ->
+            conn.createStatement().use { st ->
+                st.executeQuery("SELECT content, body_updated_at, is_read, is_starred, updated_at FROM articles WHERE id = 'a1'").use { rs ->
+                    rs.next()
+                    (1..5).joinToString("|") { "${rs.getObject(it)}" }
+                }
+            }
+        }
+        val expected = "new body|500|1|1|900"
+        assertEquals(expected, body(localDb().also { merge(it, newer); merge(it, readElsewhere) }))
+        assertEquals(expected, body(localDb().also { merge(it, readElsewhere); merge(it, newer) }))
+        assertEquals(expected, body(fold(newer to nameA, readElsewhere to nameB)))
+        assertEquals(expected, body(fold(readElsewhere to nameB, newer to nameA)))
+        // A local article holding the old body, read locally after the fact, still takes the newer body.
+        val local = localDb(feed("f1"), article("a1", "f1", updatedAt = 950, bodyAt = 100, content = "old body", isRead = 1, readAt = 950))
+        merge(local, newer)
+        assertEquals("new body|500|1|0|950", body(local))
     }
 
     @Test
@@ -225,11 +334,12 @@ class SyncAlgebraTest {
         merge(local, light)
         TransportFixtures.connect(local).use { conn ->
             conn.createStatement().use { st ->
-                st.executeQuery("SELECT content, is_read, updated_at FROM articles WHERE id = 'a1'").use { rs ->
+                st.executeQuery("SELECT content, is_read, body_updated_at, updated_at FROM articles WHERE id = 'a1'").use { rs ->
                     rs.next()
                     assertEquals("<p>kept</p>", rs.getString(1))
                     assertEquals(1L, rs.getLong(2))
-                    assertEquals(100L, rs.getLong(3))
+                    assertEquals(100L, rs.getLong(3)) // the body (and its stamp) stay
+                    assertEquals(900L, rs.getLong(4)) // updated_at is no group's key: the latest
                 }
             }
         }

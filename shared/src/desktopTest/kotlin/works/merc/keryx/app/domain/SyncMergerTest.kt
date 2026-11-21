@@ -914,7 +914,7 @@ class SyncMergerTest {
                         "published_at INTEGER, thumbnail_url TEXT, is_read INTEGER NOT NULL DEFAULT 0, read_at INTEGER, " +
                         "is_starred INTEGER NOT NULL DEFAULT 0, starred_at INTEGER, cached_at INTEGER NOT NULL, " +
                         "search_text TEXT NOT NULL DEFAULT '', updated_at INTEGER NOT NULL, created_at INTEGER NOT NULL, " +
-                        "deleted_at INTEGER, deleted_updated_at INTEGER, UNIQUE (feed_id, guid))",
+                        "deleted_at INTEGER, deleted_updated_at INTEGER, body_updated_at INTEGER, UNIQUE (feed_id, guid))",
                 )
                 st.execute(
                     "CREATE TABLE feed_tags (feed_id TEXT NOT NULL, tag_id TEXT NOT NULL, deleted_at INTEGER, " +
@@ -1125,9 +1125,9 @@ class SyncMergerTest {
     }
 
     @Test
-    fun starNewerThanDeletionRevivesArticle() {
-        // Device A deleted the article (t=100); device B starred it later (t=200). A later star means
-        // the user wants to keep it, so the merge revives (deleted_at -> NULL).
+    fun starNewerThanDeletionWinsTheRetentionGroup() {
+        // Device A deleted the article (t=100); device B starred it later (t=200). Star and deletion
+        // are one group: the newer operation (the star) wins it whole, so the article is alive.
         val (cloudFile, cloudDriver, cloudDb) = fileDb()
         cloudDb.insertFeed("f1", now = 100)
         insertArticle(cloudDb, "a1", "f1", "g1", isRead = 0, readAt = null, updatedAt = 200, isStarred = 1, starredAt = 200)
@@ -1171,7 +1171,7 @@ class SyncMergerTest {
 
     @Test
     fun readNewerThanDeletionDoesNotRevive() {
-        // Only a newer star revives; a newer read/unread change does not.
+        // The read state is a group of its own: a newer read/unread change leaves the deletion alone.
         val (cloudFile, cloudDriver, cloudDb) = fileDb()
         cloudDb.insertFeed("f1", now = 100)
         insertArticle(cloudDb, "a1", "f1", "g1", isRead = 1, readAt = 200, updatedAt = 200)
@@ -1878,6 +1878,160 @@ class SyncMergerTest {
             val article = db.articlesQueries.getById("a1").executeAsOne()
             assertEquals(1L, article.is_starred)
             assertEquals(501L, article.starred_at)
+        },
+    )
+
+    @Test
+    fun aLocalStarAfterAMergedDeletionWinsTheRetentionGroup() = localWriteThenMerge(
+        // Both sides hold the article deleted at 600 (the local side merged it), a stamp ahead of the
+        // local clock (500). The star must still be the group's newest event, and revive the article.
+        setup = {
+            it.insertFeed("f1", now = 100)
+            insertArticle(it, "a1", "f1", "g1", isRead = 0, readAt = null, updatedAt = 100)
+        },
+        setupRaw = { it.stampArticleDeleted("a1", deletedAt = 600) },
+        write = { it.articlesQueries.updateStarStatus(1L, 500L, 500L, "a1") },
+        afterWrite = { db, _ ->
+            val article = db.articlesQueries.getById("a1").executeAsOne()
+            assertEquals(601L, article.starred_at)
+            assertNull(article.deleted_at)
+        },
+        verify = { db, _ ->
+            val article = db.articlesQueries.getById("a1").executeAsOne()
+            assertEquals(1L, article.is_starred)
+            assertEquals(601L, article.starred_at)
+            assertNull(article.deleted_at)
+        },
+    )
+
+    @Test
+    fun anUnstarLeavesTheDeletionAlone() {
+        // Only a star revives locally; an unstar of a deleted (pre-v3, starred-and-deleted) row keeps
+        // it deleted, and still stamps above the deletion.
+        val (_, driver, db) = fileDb()
+        db.insertFeed("f1", now = 100)
+        insertArticle(db, "a1", "f1", "g1", isRead = 0, readAt = null, updatedAt = 100, isStarred = 1, starredAt = 100)
+        driver.stampArticleDeleted("a1", deletedAt = 600)
+        db.articlesQueries.updateStarStatus(0L, 500L, 500L, "a1")
+        val article = db.articlesQueries.getById("a1").executeAsOne()
+        assertEquals(0L, article.is_starred)
+        assertEquals(601L, article.starred_at)
+        assertEquals(600L, article.deleted_at)
+        driver.close()
+    }
+
+    @Test
+    fun aLocalCleanupAfterAMergedUnstarWinsTheRetentionGroup() = localWriteThenMerge(
+        // 11 articles in one feed: cleanup expires a00. Both sides hold a00 unstarred at 600 (the
+        // local side merged that unstar), ahead of the cleanup's clock (500).
+        setup = { db ->
+            db.insertFeed("f1", now = 100)
+            for (i in 0..10) {
+                insertArticle(db, "a%02d".format(i), "f1", "g$i", isRead = 0, readAt = null, updatedAt = 100)
+            }
+            db.articlesQueries.updateStarStatus(1L, 300L, 300L, "a00")
+            db.articlesQueries.updateStarStatus(0L, 600L, 600L, "a00")
+        },
+        write = { db -> db.articlesQueries.softDeleteExpired(500L, 500L, 500L, 1000L) },
+        afterWrite = { db, _ -> assertEquals(601L, db.articlesQueries.getById("a00").executeAsOne().deleted_updated_at) },
+        verify = { db, _ ->
+            val article = db.articlesQueries.getById("a00").executeAsOne()
+            assertEquals(500L, article.deleted_at)
+            assertEquals(601L, article.deleted_updated_at)
+            assertEquals(600L, article.starred_at)
+        },
+    )
+
+    // ---- body_updated_at: the body group's own stamp ----
+
+    @Test
+    fun theBodyStampMovesOnlyWhenABodyColumnChanges() {
+        val (_, driver, db) = fileDb()
+        db.insertFeed("f1", now = 100)
+        insertArticle(db, "a1", "f1", "g1", isRead = 0, readAt = null, updatedAt = 100, content = "v1")
+        fun stamp() = db.articlesQueries.getById("a1").executeAsOne().body_updated_at
+        assertEquals(100L, stamp()) // stamped on insert
+
+        // A refresh rewriting the same body moves updated_at but not the body stamp.
+        insertArticle(db, "a1", "f1", "g1", isRead = 0, readAt = null, updatedAt = 200, content = "v1")
+        assertEquals(100L, stamp())
+        assertEquals(200L, db.articlesQueries.getById("a1").executeAsOne().updated_at)
+
+        // Read, star and delete writes never touch it.
+        db.articlesQueries.updateReadStatus(1L, 300L, 300L, "a1")
+        db.articlesQueries.updateStarStatus(1L, 310L, 310L, "a1")
+        db.articlesQueries.updateStarStatus(0L, 320L, 320L, "a1")
+        db.articlesQueries.updateReadStatusByIds(330L, 330L, listOf("a1"))
+        db.articlesQueries.markAllReadAll(340L, 340L)
+        assertEquals(100L, stamp())
+
+        // A body change moves it to the refresh's time…
+        insertArticle(db, "a1", "f1", "g1", isRead = 0, readAt = null, updatedAt = 400, content = "v2")
+        assertEquals(400L, stamp())
+        // …and a change within the same millisecond still moves it forward.
+        insertArticle(db, "a1", "f1", "g1", isRead = 0, readAt = null, updatedAt = 400, content = "v3")
+        assertEquals(401L, stamp())
+        // Any body column counts, the title included.
+        insertArticle(db, "a1", "f1", "g1", isRead = 0, readAt = null, updatedAt = 500, content = "v3", title = "T2")
+        assertEquals(500L, stamp())
+
+        // insertIfAbsent stamps a new row and leaves an existing one alone.
+        db.articlesQueries.insertIfAbsent(
+            id = "a1", feed_id = "f1", guid = "g1", url = "u", title = "other", summary = null, content = "other",
+            author = null, published_at = null, thumbnail_url = null, is_read = 0, read_at = null, is_starred = 0,
+            starred_at = null, cached_at = 900, search_text = "other", updated_at = 900, created_at = 0,
+        )
+        assertEquals(500L, stamp())
+        db.articlesQueries.insertIfAbsent(
+            id = "a2", feed_id = "f1", guid = "g2", url = "u", title = "T", summary = null, content = "c",
+            author = null, published_at = null, thumbnail_url = null, is_read = 0, read_at = null, is_starred = 0,
+            starred_at = null, cached_at = 700, search_text = "c", updated_at = 700, created_at = 0,
+        )
+        assertEquals(700L, db.articlesQueries.getById("a2").executeAsOne().body_updated_at)
+        driver.close()
+    }
+
+    @Test
+    fun aNewerCloudBodyBeatsALocalRowThatWasMerelyReadAfterwards() {
+        // The cloud refreshed a newer body at 300. The local side holds the older body (200) and read
+        // and starred the article at 900 — which moves its updated_at, but not its body stamp.
+        val (cloudFile, cloudDriver, cloudDb) = fileDb()
+        cloudDb.insertFeed("f1", now = 100)
+        insertArticle(cloudDb, "a1", "f1", "g1", isRead = 0, readAt = null, updatedAt = 300, content = "newer")
+        cloudDriver.close()
+
+        val (localFile, localDriver, localDb) = fileDb()
+        localDb.insertFeed("f1", now = 100)
+        insertArticle(localDb, "a1", "f1", "g1", isRead = 0, readAt = null, updatedAt = 200, content = "older")
+        localDb.articlesQueries.updateReadStatus(1L, 900L, 900L, "a1")
+        localDb.articlesQueries.updateStarStatus(1L, 900L, 900L, "a1")
+        localDriver.close()
+
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+
+        val (_, verifyDriver, verifyDb) = reopen(localFile)
+        val merged = verifyDb.articlesQueries.getById("a1").executeAsOne()
+        assertEquals("newer", merged.content)
+        assertEquals(300L, merged.body_updated_at)
+        assertEquals(1L, merged.is_read)
+        assertEquals(1L, merged.is_starred)
+        assertEquals(900L, merged.updated_at)
+        verifyDriver.close()
+    }
+
+    @Test
+    fun aSameMillisecondLocalBodyChangeBeatsTheCloudsOlderBody() = localWriteThenMerge(
+        setup = {
+            it.insertFeed("f1", now = 100)
+            insertArticle(it, "a1", "f1", "g1", isRead = 0, readAt = null, updatedAt = 500, content = "aaa")
+        },
+        // "0-new" < "aaa", so a tie would go to the cloud's body: the local change must stamp 501.
+        write = { insertArticle(it, "a1", "f1", "g1", isRead = 0, readAt = null, updatedAt = 500, content = "0-new") },
+        afterWrite = { db, _ -> assertEquals(501L, db.articlesQueries.getById("a1").executeAsOne().body_updated_at) },
+        verify = { db, _ ->
+            val article = db.articlesQueries.getById("a1").executeAsOne()
+            assertEquals("0-new", article.content)
+            assertEquals(501L, article.body_updated_at)
         },
     )
 

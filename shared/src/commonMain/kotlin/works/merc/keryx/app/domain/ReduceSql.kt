@@ -11,10 +11,10 @@ package works.merc.keryx.app.domain
  * idempotent, commutative and associative, and merging a fold equal to merging its inputs one by
  * one.
  *
- * Deliberately **not** applied here: the star-revive rule (an article whose winning star is newer
- * than its winning deletion is shown again) — the fold keeps the raw winners and every receiving
- * merge applies the rule itself. `created_at` takes the earliest value, `cached_at` the latest, and an
- * article's `summary` is dropped once it has `content`.
+ * There are no special cases on top of the groups: an article's star and deletion are one group
+ * ([SyncLww.ARTICLE_RETENTION]), resolved like any other. `created_at` takes the earliest value,
+ * an article's `cached_at` and `updated_at` (no group's key) the latest, and an article's `summary` is
+ * dropped once it has `content`.
  *
  * Columns are listed explicitly; both sides must be transport files of [TransportSchema.VERSION].
  */
@@ -63,8 +63,12 @@ object ReduceSql {
 
     private val articles = upsert(
         table("articles"),
-        listOf(SyncLww.ARTICLE_BODY, SyncLww.ARTICLE_READ, SyncLww.ARTICLE_STAR, SyncLww.ARTICLE_DELETION),
-        listOf(EARLIEST_CREATED_AT, "cached_at = MAX(cached_at, excluded.cached_at)"),
+        listOf(SyncLww.ARTICLE_BODY, SyncLww.ARTICLE_READ, SyncLww.ARTICLE_RETENTION),
+        listOf(
+            EARLIEST_CREATED_AT,
+            "cached_at = MAX(cached_at, excluded.cached_at)",
+            "updated_at = MAX(updated_at, excluded.updated_at)",
+        ),
     )
 
     private val feedTags = upsert(table("feed_tags"), listOf(SyncLww.FEED_TAG))

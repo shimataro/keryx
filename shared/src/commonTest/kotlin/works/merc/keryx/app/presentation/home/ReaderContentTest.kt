@@ -19,7 +19,7 @@ class ReaderContentTest {
         id = id, feed_id = "f1", guid = "g$id", url = "https://example.com/$id", title = "Article $id",
         summary = null, content = "<p>$id</p>", author = null, published_at = 1L, thumbnail_url = null,
         is_read = 1L, read_at = null, is_starred = 0L, starred_at = null, cached_at = 0L, search_text = "",
-        updated_at = 0L, created_at = 1L, deleted_at = null, deleted_updated_at = null,
+        updated_at = 0L, created_at = 1L, deleted_at = null, deleted_updated_at = null, body_updated_at = null,
     )
 
     @Test

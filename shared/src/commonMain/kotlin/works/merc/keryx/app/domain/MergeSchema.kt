@@ -25,8 +25,8 @@ object MergeSchema {
     }
 
     /**
-     * Schema version 2: `feeds` still carries its fetch state, and `tags` / `folders` have no
-     * per-field stamps yet.
+     * Schema version 2: `feeds` still carries its fetch state, `tags` / `folders` have no per-field
+     * stamps yet, and `articles` has no `body_updated_at`.
      */
     private val EXPECTED_TABLES_V2: List<TableSpec> = EXPECTED_TABLES_V3.map { table ->
         when (table.name) {
@@ -36,6 +36,7 @@ object MergeSchema {
                 .withColumnAfter("error_count", opt("last_error", TEXT))
             "tags" -> table.without("name_updated_at", "color_updated_at", "sort_order_updated_at")
             "folders" -> table.without("name_updated_at", "sort_order_updated_at")
+            "articles" -> table.without("body_updated_at")
             else -> table
         }
     }

@@ -8,9 +8,17 @@
 -- is a field-specific last-wins timestamp for the deletion/undeletion event (like
 -- read_at / starred_at, and like feeds.deleted_updated_at), kept separate from the row's
 -- `updated_at` so a content refresh / read / star change (which all bump updated_at) can't
--- clobber a deletion during the sync merge. NULL = no delete/undelete event yet. A star
--- newer than the deletion revives the article (deleted_at -> NULL) in the merge, since
--- cache cleanup only ever deletes non-starred articles.
+-- clobber a deletion during the sync merge. NULL = no delete/undelete event yet. In the merge the
+-- star (is_starred / starred_at) and the deletion (deleted_at / deleted_updated_at) are ONE
+-- last-write-wins group, ranked by the newer of starred_at and deleted_updated_at: the newer
+-- operation wins and the whole group comes from it (no "a newer star revives" special case).
+--
+-- body_updated_at is the body's own last-write-wins stamp (content, summary, title, url, author,
+-- published_at, thumbnail_url): set when the article is inserted and moved forward only when a
+-- body column actually changes, never by a read / star / deletion write — so merely opening an
+-- article never makes its older body beat a newer one from another device. updated_at stays the
+-- row's generic stamp and is no merge group's key. Nullable only because migration 2 -> 3 adds it
+-- (initialized to updated_at there); every write here sets it.
 
 CREATE TABLE articles (
     id            TEXT    NOT NULL PRIMARY KEY,
@@ -33,6 +41,7 @@ CREATE TABLE articles (
     created_at    INTEGER NOT NULL,
     deleted_at         INTEGER,
     deleted_updated_at INTEGER,
+    body_updated_at    INTEGER,
     FOREIGN KEY (feed_id) REFERENCES feeds(id),
     UNIQUE (feed_id, guid)
 );
@@ -165,12 +174,16 @@ INNER JOIN feeds f ON f.id = a.feed_id
 WHERE a.is_read = 0 AND f.folder_id IS NOT NULL AND f.deleted_at IS NULL AND a.deleted_at IS NULL
 GROUP BY f.folder_id;
 
+-- body_updated_at: the insert's own time on a new row; on an existing one it moves forward
+-- (MAX(now, previous + 1), like the other stamps) only when a body column actually changes, so a
+-- refresh that rewrites an unchanged article leaves it where it was. Every SET expression is
+-- evaluated against the row as it was, so the comparison sees the old body.
 insert:
 INSERT INTO articles (
     id, feed_id, guid, url, title, summary, content, author, published_at,
     thumbnail_url, is_read, read_at, is_starred, starred_at, cached_at,
-    search_text, updated_at, created_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    search_text, updated_at, created_at, body_updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, :updated_at, ?, :updated_at)
 ON CONFLICT(feed_id, guid) DO UPDATE SET
     url = excluded.url,
     title = excluded.title,
@@ -181,7 +194,18 @@ ON CONFLICT(feed_id, guid) DO UPDATE SET
     thumbnail_url = excluded.thumbnail_url,
     cached_at = excluded.cached_at,
     search_text = excluded.search_text,
-    updated_at = excluded.updated_at;
+    updated_at = excluded.updated_at,
+    body_updated_at = CASE
+        WHEN url IS NOT excluded.url
+            OR title IS NOT excluded.title
+            OR summary IS NOT excluded.summary
+            OR content IS NOT excluded.content
+            OR author IS NOT excluded.author
+            OR published_at IS NOT excluded.published_at
+            OR thumbnail_url IS NOT excluded.thumbnail_url
+        THEN MAX(excluded.body_updated_at, COALESCE(body_updated_at, 0) + 1)
+        ELSE body_updated_at
+    END;
 
 -- As insert, but leaves an article already stored for the feed (tombstoned or not) exactly as it
 -- is, adding only the ones not there yet. For a subscribe that kept a refresh's newer feed values
@@ -191,8 +215,8 @@ insertIfAbsent:
 INSERT INTO articles (
     id, feed_id, guid, url, title, summary, content, author, published_at,
     thumbnail_url, is_read, read_at, is_starred, starred_at, cached_at,
-    search_text, updated_at, created_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    search_text, updated_at, created_at, body_updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, :updated_at, ?, :updated_at)
 ON CONFLICT(feed_id, guid) DO NOTHING;
 
 -- Only writes when the state actually changes, so re-opening an already-read article neither
@@ -205,6 +229,10 @@ ON CONFLICT(feed_id, guid) DO NOTHING;
 -- (the cloud side wins), which knows nothing of which write came later, so a change stamped at the
 -- value the row already holds — two changes within one millisecond, or one made right after a merge
 -- brought that stamp in — would lose to the older value on the next merge. See docs/db-schema.md.
+-- starred_at and deleted_updated_at rank one merge group together (the newer of the two wins it), so
+-- a star or a deletion stamps above BOTH of them: a star made right after a merged deletion (or a
+-- deletion right after a merged star) is then the group's newest event and wins it.
+-- None of these touch body_updated_at.
 updateReadStatus:
 UPDATE articles SET is_read = :is_read, read_at = MAX(:read_at, COALESCE(read_at, 0) + 1), updated_at = ? WHERE id = ? AND is_read <> :is_read;
 
@@ -216,9 +244,17 @@ UPDATE articles SET is_read = :is_read, read_at = MAX(:read_at, COALESCE(read_at
 updateReadStatusByIds:
 UPDATE articles SET is_read = 1, read_at = MAX(:read_at, COALESCE(read_at, 0) + 1), updated_at = ? WHERE id IN ? AND is_read = 0 AND deleted_at IS NULL;
 
--- Same no-op guard as updateReadStatus, for starred_at.
+-- Same no-op guard as updateReadStatus, for starred_at. A star also clears deleted_at: starring keeps
+-- the article (cache cleanup never deletes a starred one), so a star made on an article a merge has
+-- just tombstoned — still on screen in the reader — revives it, here and, as the newest event of the
+-- retention group, on every other device. An unstar leaves deleted_at alone. So a row is never both
+-- starred and deleted, and neither is any version the merge takes the group from.
 updateStarStatus:
-UPDATE articles SET is_starred = :is_starred, starred_at = MAX(:starred_at, COALESCE(starred_at, 0) + 1), updated_at = ? WHERE id = ? AND is_starred <> :is_starred;
+UPDATE articles SET is_starred = :is_starred,
+    starred_at = MAX(:starred_at, COALESCE(starred_at, 0) + 1, COALESCE(deleted_updated_at, 0) + 1),
+    deleted_at = CASE WHEN :is_starred = 1 THEN NULL ELSE deleted_at END,
+    updated_at = ?
+WHERE id = ? AND is_starred <> :is_starred;
 
 -- The feed_id EXISTS guard on markAllReadAll/markAllReadByTag keeps this in the same row set as
 -- the corresponding plain list query (watchAll/watchByTag, both INNER JOIN feeds ... f.deleted_at
@@ -262,7 +298,7 @@ WHERE is_read = 0 AND deleted_at IS NULL AND feed_id IN (
 -- set cannot shift while the statement runs — which makes per-row re-evaluation redundant.
 softDeleteExpired:
 UPDATE articles
-SET deleted_at = ?, deleted_updated_at = MAX(:deleted_updated_at, COALESCE(deleted_updated_at, 0) + 1), updated_at = ?
+SET deleted_at = ?, deleted_updated_at = MAX(:deleted_updated_at, COALESCE(deleted_updated_at, 0) + 1, COALESCE(starred_at, 0) + 1), updated_at = ?
 WHERE is_starred = 0
   AND deleted_at IS NULL
   AND cached_at < ?

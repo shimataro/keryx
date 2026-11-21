@@ -37,6 +37,7 @@ class ArticleContentCacheTest {
         created_at = 0L,
         deleted_at = null,
         deleted_updated_at = null,
+        body_updated_at = null,
     )
 
     // UnconfinedTestDispatcher for the same reason ArticleReturnRippleTest uses it: request()'s

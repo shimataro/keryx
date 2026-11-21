@@ -31,7 +31,9 @@
 - **ほかの last-write-wins のタイムスタンプも、すべて同じように行の上で前にしか進まない**（`MAX(今の時刻, 前の値 + 1)`）。
   `feeds.custom_title_updated_at` / `folder_updated_at` / `sort_order_updated_at`（`updateCustomTitle`、`updateFolder`、
   `updateSortOrder`、`updateFolderAndSortOrder`）、`articles.read_at` / `starred_at`（`updateReadStatus`、
-  `updateReadStatusByIds`、`updateStarStatus`、`markAllRead*` の各クエリ）と `deleted_updated_at`（`softDeleteExpired`）、
+  `updateReadStatusByIds`、`updateStarStatus`、`markAllRead*` の各クエリ）と `deleted_updated_at`（`softDeleteExpired`）
+  ——`starred_at` と `deleted_updated_at` はマージで 1 つのグループとして順位を付けるので、スターもキャッシュ削除も
+  その*両方*より大きく打刻する——、`articles.body_updated_at`（記事の upsert。本文の列が変わったときだけ進める）、
   `tags.name_updated_at` / `color_updated_at` / `sort_order_updated_at` と `folders.name_updated_at` /
   `sort_order_updated_at`（それぞれ自分のフィールドが変わったときだけ進める——`upsert`、`updateSortOrder`、
   `upsertByName`）、`feed_tags.updated_at` / `global_settings.updated_at`（`upsert`）がそれにあたる。こうしないと、行が
@@ -44,7 +46,7 @@
   （`2.sqm`）は、同期の管理情報（`sync_outbox`、`sync_capture`、`sync_merging`、`sync_applied`、`sync_cursor`、
   `ks_search_pending` と記録用トリガー）を追加し、`feeds` の `etag` / `last_modified` / `error_count` / `last_error` を
   `feed_fetch_state` に移し（`ALTER TABLE … DROP COLUMN`、SQLite 3.35 以上）、`tags` / `folders` のフィールドごとの
-  スタンプを追加し（初期値は `updated_at`）、`search_text` が生の `content` / `summary` と同じままの記事（HTML 除去の
+  スタンプと `articles.body_updated_at` を追加し（初期値はいずれも `updated_at`）、`search_text` が生の `content` / `summary` と同じままの記事（HTML 除去の
   導入前に書かれた行）を `ks_search_pending` に登録する。（SQLDelight は最大のマイグレーションファイル + 1 で
   バージョンを導出。）スキーマを変える場合は `.sqm` ファイル（`<移行元バージョン>.sqm`）を追加すればバージョンは自動で
   上がる。あわせて `domain/MergeSchema.EXPECTED_SCHEMAS`（`DatabaseMerger.validateSchema` が参照する期待スキーマ）、
@@ -105,7 +107,8 @@
 
 `id`(PK), `feed_id`(FK→feeds), `guid`, `url`, `title`, `summary`, `content`, `author`,
 `published_at`, `thumbnail_url`, `is_read`, `read_at`, `is_starred`, `starred_at`, `cached_at`,
-`search_text`, `updated_at`, `created_at`, `deleted_at`, `deleted_updated_at`。`UNIQUE(feed_id, guid)`。
+`search_text`, `updated_at`, `created_at`, `deleted_at`, `deleted_updated_at`, `body_updated_at`(NULL可)。
+`UNIQUE(feed_id, guid)`。
 インデックス: `feed_id`、`is_read`、`is_starred`、および一覧の並び順用の複合インデックス
 `(published_at DESC, created_at DESC, id DESC)`。
 
@@ -113,7 +116,14 @@
   全デバイスで同一 ID になるため、同期マージ（記事を `id` で照合する）が既読・スターを後勝ちで
   伝播できる。既存行は `upsert` の `ON CONFLICT(feed_id, guid)` が既存 ID を保持する
   （決定的生成は新規行のみに効く）。
-- 既読・スターの競合解決は `read_at` / `starred_at` で後勝ち。状態が実際に変わったときだけ打刻される（`updateReadStatus` / `updateStarStatus` が変化を条件にしている）ため、既読の記事を再度開いても `read_at` は更新されない。
+- 既読の競合解決は `read_at` で後勝ち。スターは保持グループ（後述）の一部で、`starred_at` で順位を付ける。どちらも状態が実際に変わったときだけ打刻される（`updateReadStatus` / `updateStarStatus` が変化を条件にしている）ため、既読の記事を再度開いても `read_at` は更新されない。
+- `body_updated_at` は本文自身の後勝ちタイムスタンプで、マージが 1 つの版からまとめて取る `content`・`summary`・
+  `title`・`url`・`author`・`published_at`・`thumbnail_url` に対するもの。記事の upsert（`insert`、`insertIfAbsent`）は
+  新しい行では書き込みの時刻を入れ、既存の行では本文の列が実際に変わったときだけ前に進める（`MAX(今の時刻, 前の値 + 1)`）。
+  既読・スター・削除の書き込みは決して触れない。したがって、記事を開いただけの端末が、自分の古い本文で別の端末の
+  新しい本文に勝つことはない。`updated_at` は行の汎用のタイムスタンプ（どの書き込みでも進む）のままで、どのマージ
+  グループのキーでもない。列が NULL 可なのは `2.sqm` が追加する（初期値は `updated_at`）からにすぎず、どの書き込みも
+  値を入れる。
 - `content` は `summary` より優先して表示。両方 NULL の場合、その場にローカライズされた「本文なし」の
   プレースホルダーを表示する（外部ブラウザーで開くリンク／ボタン付き）。自動で何かが開くことはない。
 - `search_text` ＝ `content`（無ければ `summary`）の HTML タグを除去した平文。両方 NULL なら `""`。
@@ -125,9 +135,14 @@
   （`softDeleteExpired`）のみで、スター付き記事は削除しない（同期マージも `deleted_at` を書き込み、
   他デバイスでの削除を伝播する。後述）。`deleted_updated_at` は削除/復活イベントの
   フィールド別後勝ちタイムスタンプ（`read_at` / `starred_at`、および `feeds.deleted_updated_at` と同様）で、
-  コンテンツ更新・既読・スター変更が同期マージで削除を上書きしないよう `updated_at` とは分離する。
-  マージでは `deleted_updated_at` の後勝ちで削除が伝播するが、削除より新しいスターがあれば記事を
-  **復活**（`deleted_at` → NULL）させる（キャッシュ削除は非スター記事しか消さないため）。これにより、
+  コンテンツ更新・既読の変更が同期マージで削除を上書きしないよう `updated_at` とは分離する。
+  マージではスターと削除を **1 つのグループ**（*保持*グループ: `is_starred`・`starred_at`・`deleted_at`・
+  `deleted_updated_at`）とし、`MAX(starred_at, deleted_updated_at)`（NULL は 0）で順位を付ける: 新しいほうの操作が
+  勝ち、グループ全体をその操作から取る。スターは `deleted_at` を消す（`updateStarStatus`）——スターは記事を残す操作
+  なので、マージが削除したばかりの記事にスターを付ければ、この端末でもほかのすべての端末でも記事は復活する——一方、
+  スター解除は削除に触れない。スターもキャッシュ削除も行の両方のタイムスタンプより大きく打刻するので、それぞれが
+  自分の変えたグループに勝つ。したがって、スター付きかつ削除済みの行は存在しない。別の端末のスターで復活し、
+  そのあとスターを外された記事は、次のキャッシュ削除で再び削除されるまで表示されたままになる。これにより、
   削除が次回同期でクラウドから復活せず、他デバイスへ伝播する。ここでは行を物理削除しない（古い
   トゥームストーンの物理GCは将来対応）。全 UI/一覧/検索クエリは `deleted_at IS NULL` で除外し、
   `upsert`（フィード更新）は `deleted_at` に触れないため、更新が削除済み記事を復活させることはない。

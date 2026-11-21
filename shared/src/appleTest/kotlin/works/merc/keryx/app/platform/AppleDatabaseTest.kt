@@ -155,6 +155,7 @@ class AppleDatabaseTest {
             listOf("name_updated_at", "sort_order_updated_at").forEach { db.exec("ALTER TABLE folders DROP COLUMN $it") }
             db.exec("ALTER TABLE articles DROP COLUMN deleted_at")
             db.exec("ALTER TABLE articles DROP COLUMN deleted_updated_at")
+            db.exec("ALTER TABLE articles DROP COLUMN body_updated_at")
             db.exec("PRAGMA user_version = 1")
         }
         assertEquals(1, RawSqliteConnection.userVersionOf(path(name)))

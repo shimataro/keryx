@@ -1,9 +1,13 @@
 package works.merc.keryx.app.domain
 
 /**
- * One last-write-wins field group of a synced table: a [stamp] column and the [values] it stamps.
+ * One last-write-wins field group of a synced table: its stamp column(s) and the [values] they stamp.
  * [MergeSql] and [ReduceSql] resolve every group with [SyncLww.wins], so both order a group's
  * versions identically.
+ *
+ * @property stamps the group's stamp columns. Usually one; a group with several (an article's
+ * retention group) is ranked by the greatest of them — `MAX(COALESCE(s1, 0), COALESCE(s2, 0), …)`,
+ * present when any of them is — so the newest of its events wins the whole group.
  *
  * @property bodyFirst for an article's body group: ranks a version carrying `content` above every
  * version without, then one carrying any body (`content` or `summary`) above one carrying none —
@@ -12,9 +16,15 @@ package works.merc.keryx.app.domain
  * content (the content OR-merge). `summary` is ranked as [SyncLww.normalizedSummary], since a
  * summary is dropped once content exists.
  */
-data class LwwGroup(val stamp: String, val values: List<String>, val bodyFirst: Boolean = false) {
-    /** Every column the group writes: the stamp and its values. */
-    val columns: List<String> get() = listOf(stamp) + values
+data class LwwGroup(val stamps: List<String>, val values: List<String>, val bodyFirst: Boolean = false) {
+    constructor(stamp: String, values: List<String>, bodyFirst: Boolean = false) : this(listOf(stamp), values, bodyFirst)
+
+    init {
+        require(stamps.isNotEmpty()) { "A last-write-wins group needs a stamp" }
+    }
+
+    /** Every column the group writes: the stamps and their values. */
+    val columns: List<String> get() = stamps + values
 }
 
 /**
@@ -23,11 +33,13 @@ data class LwwGroup(val stamp: String, val values: List<String>, val bodyFirst: 
  * **The canonical comparison.** A group version's rank is the row value
  *
  * ```
- * ( [has_content, has_body,]  stamp IS NOT NULL, COALESCE(stamp, 0),  v1 IS NOT NULL, COALESCE(v1, 0),  … )
+ * ( [has_content, has_body,]  stamp IS NOT NULL, COALESCE(stamp, 0),  c1 IS NOT NULL, COALESCE(c1, 0),  … )
  * ```
  *
- * (the bracketed prefix only for [LwwGroup.bodyFirst]).
- *
+ * (the bracketed prefix only for [LwwGroup.bodyFirst]), where `c1, …` are every column of
+ * [LwwGroup.columns] — the stamp column(s) themselves, then the values — and, for a group with
+ * several stamps, `stamp IS NOT NULL` is "any of them is not NULL" and `COALESCE(stamp, 0)` is
+ * `MAX(COALESCE(s1, 0), COALESCE(s2, 0), …)`,
  * compared lexicographically with SQLite's row-value `>` (BINARY collation; NULL-free by
  * construction, so the comparison is always true or false, never NULL). A version replaces another
  * only when its rank is strictly greater. So:
@@ -55,6 +67,10 @@ object SyncLww {
             if (group.bodyFirst) {
                 add("(${col(alias, "content")} IS NOT NULL)")
                 add("(${col(alias, "content")} IS NOT NULL OR ${col(alias, "summary")} IS NOT NULL)")
+            }
+            if (group.stamps.size > 1) {
+                add(group.stamps.joinToString(" OR ", prefix = "(", postfix = ")") { "${col(alias, it)} IS NOT NULL" })
+                add(group.stamps.joinToString(", ", prefix = "MAX(", postfix = ")") { "COALESCE(${col(alias, it)}, 0)" })
             }
             group.columns.forEach { column ->
                 add(key(if (group.bodyFirst && column == "summary") normalizedSummary(alias) else col(alias, column)))
@@ -103,18 +119,30 @@ object SyncLww {
     val FEED_DELETION = LwwGroup("deleted_updated_at", listOf("deleted_at"))
 
     /**
-     * An article's fetched content: body first ([LwwGroup.bodyFirst]), then `updated_at`. `feed_id`
-     * and `guid` ride with it so a transport fold picks them deterministically (the local merge never
-     * rewrites them on an existing row).
+     * An article's fetched content: body first ([LwwGroup.bodyFirst]), then `body_updated_at` — a stamp
+     * only a change of the body columns moves, so reading, starring or deleting an article never
+     * makes its older body beat a newer one. `feed_id` and `guid` ride with it so a transport fold
+     * picks them deterministically (the local merge never rewrites them on an existing row).
      */
     val ARTICLE_BODY = LwwGroup(
-        "updated_at",
+        "body_updated_at",
         listOf("content", "summary", "title", "url", "author", "published_at", "thumbnail_url", "feed_id", "guid"),
         bodyFirst = true,
     )
     val ARTICLE_READ = LwwGroup("read_at", listOf("is_read"))
-    val ARTICLE_STAR = LwwGroup("starred_at", listOf("is_starred"))
-    val ARTICLE_DELETION = LwwGroup("deleted_updated_at", listOf("deleted_at"))
+
+    /**
+     * An article's retention: its star and its deletion as **one** group, ranked by the newer of
+     * `starred_at` and `deleted_updated_at` — the newer operation wins, and the whole group (star
+     * flag, deletion and both stamps) comes from the version holding it. Two separate groups with a
+     * "a newer star revives" rule on top would not be commutative (delete, star, unstar merged in
+     * different orders would disagree). A local star or deletion stamps above both stamps of its own
+     * row (`updateStarStatus`, `softDeleteExpired`), so it wins the group it changed.
+     */
+    val ARTICLE_RETENTION = LwwGroup(
+        listOf("starred_at", "deleted_updated_at"),
+        listOf("is_starred", "deleted_at"),
+    )
 
     val FEED_TAG = LwwGroup("updated_at", listOf("deleted_at"))
     val GLOBAL_SETTING = LwwGroup("updated_at", listOf("value"))

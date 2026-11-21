@@ -64,7 +64,7 @@ object TransportSchema {
             opt("summary", TEXT), opt("content", TEXT), opt("author", TEXT), opt("published_at", INTEGER),
             opt("thumbnail_url", TEXT), req("is_read", BOOLEAN), opt("read_at", STAMP), req("is_starred", BOOLEAN),
             opt("starred_at", STAMP), req("cached_at", STAMP), req("updated_at", STAMP), req("created_at", STAMP),
-            opt("deleted_at", STAMP), opt("deleted_updated_at", STAMP),
+            opt("deleted_at", STAMP), opt("deleted_updated_at", STAMP), opt("body_updated_at", STAMP),
         ),
         primaryKey = listOf("id"),
     )

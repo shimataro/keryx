@@ -18,7 +18,7 @@
 -- synced column actually changed, so a refresh that rewrites an unchanged row records nothing:
 -- - feeds: every column but updated_at (a refresh rewrites it every cycle) and created_at;
 -- - articles: a body column change (content, summary, title, url, author, published_at,
---   thumbnail_url) is recorded with heavy = 1, a read/star/deletion change alone with heavy = 0,
+--   thumbnail_url, or the body's stamp body_updated_at) is recorded with heavy = 1, a read/star/deletion change alone with heavy = 0,
 --   and cached_at only when its day changes; updated_at and search_text are ignored;
 -- - tags, folders, feed_tags, global_settings: every column.
 -- No row of a synced table is ever physically deleted (every delete is a tombstone), so there are
@@ -101,6 +101,7 @@ WHEN (SELECT enabled FROM sync_capture WHERE id = 1) = 1 AND NOT EXISTS (SELECT 
         OR old.author IS NOT new.author
         OR old.published_at IS NOT new.published_at
         OR old.thumbnail_url IS NOT new.thumbnail_url
+        OR old.body_updated_at IS NOT new.body_updated_at
         OR old.is_read IS NOT new.is_read
         OR old.read_at IS NOT new.read_at
         OR old.is_starred IS NOT new.is_starred
@@ -117,6 +118,7 @@ BEGIN
             OR old.author IS NOT new.author
             OR old.published_at IS NOT new.published_at
             OR old.thumbnail_url IS NOT new.thumbnail_url
+            OR old.body_updated_at IS NOT new.body_updated_at
         THEN 1 ELSE 0 END);
 END;
 
