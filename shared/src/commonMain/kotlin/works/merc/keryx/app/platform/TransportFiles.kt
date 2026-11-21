@@ -1,6 +1,7 @@
 package works.merc.keryx.app.platform
 
 import works.merc.keryx.app.core.KS_DELTA_GRACE_MS
+import works.merc.keryx.app.core.LEGACY_STUB_USER_VERSION
 import works.merc.keryx.app.core.SchemaVersionException
 import works.merc.keryx.app.domain.BaseCoverage
 import works.merc.keryx.app.domain.DeltaExportSql
@@ -375,6 +376,35 @@ object TransportFiles {
 
     private fun TransportConnection.createdAt(): Long? =
         queryRows("SELECT value FROM ks_meta WHERE key = '${TransportSchema.MetaKeys.CREATED_AT}'").firstOrNull()?.firstOrNull()?.toLongOrNull()
+
+    /**
+     * Whether the file at [path] is the pre-delta stub: `user_version` [LEGACY_STUB_USER_VERSION] and no
+     * tables (a platform's own `android_metadata` aside). Read-only. `false` when the file cannot be
+     * read as a database — the caller's validation then classifies it.
+     */
+    fun isLegacyStub(path: String): Boolean = try {
+        TransportConnections.open(path, TransportOpenMode.READ_ONLY).use { connection ->
+            connection.userVersion() == LEGACY_STUB_USER_VERSION &&
+                connection.queryRows(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE name <> 'android_metadata'",
+                ).firstOrNull()?.firstOrNull()?.toLongOrNull() == 0L
+        }
+    } catch (_: Exception) {
+        false
+    }
+
+    /**
+     * Creates the pre-delta stub at [path] (replacing whatever was there): an empty SQLite database
+     * whose `user_version` is [LEGACY_STUB_USER_VERSION], which an older build rejects before writing.
+     */
+    fun createLegacyStub(path: String) {
+        FileIO.delete(path)
+        FileIO.delete("$path-journal")
+        TransportConnections.open(path, TransportOpenMode.CREATE).use { connection ->
+            connection.exec("PRAGMA user_version = $LEGACY_STUB_USER_VERSION")
+            DeltaExportSql.platformCleanupStatements.forEach(connection::exec)
+        }
+    }
 
     private fun TransportConnection.userVersion(): Long =
         queryRows("PRAGMA user_version").firstOrNull()?.firstOrNull()?.toLongOrNull() ?: 0L
