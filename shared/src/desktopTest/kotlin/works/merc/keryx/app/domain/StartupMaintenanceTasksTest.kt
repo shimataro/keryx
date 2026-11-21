@@ -16,6 +16,8 @@ import org.koin.dsl.koinApplication
 import org.koin.dsl.module
 import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.Clock
+import works.merc.keryx.app.core.ArticleFilter
+import works.merc.keryx.app.data.local.FtsManager
 import works.merc.keryx.app.data.local.FtsSearch
 import works.merc.keryx.app.data.local.LocalSettingsStore
 import works.merc.keryx.app.data.local.db.KeryxDatabase
@@ -80,6 +82,7 @@ class StartupMaintenanceTasksTest {
                     single { articleRepository }
                     single { activityCenter }
                     single<Clock> { clock }
+                    single { SearchTextBackfill(db, FtsManager(driver), Dispatchers.Unconfined) }
                 },
             )
         }.koin
@@ -191,6 +194,53 @@ class StartupMaintenanceTasksTest {
             assertEquals(now, koin.get<SettingsRepository>().getLocalSettings().lastCacheCleanupAt)
             // A step that failed before the cycle even started must not leave a cycle counted.
             assertFalse(koin.get<ActivityCenter>().activity.value.refreshCycleRunning)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun runStartupMaintenanceRecomputesPendingSearchTextAndIndexesIt() = runTest {
+        val (driver, db) = inMemoryDb()
+        try {
+            val now = 10 * ONE_DAY_MS
+            db.insertFeed("f1")
+            db.insertArticle("merged", "f1", publishedAt = 0L, cachedAt = now)
+            driver.execute(null, "UPDATE articles SET content = '<p>merged body</p>', search_text = '' WHERE id = 'merged'", 0)
+            driver.execute(null, "INSERT INTO ks_search_pending (rowid) SELECT rowid FROM articles WHERE id = 'merged'", 0)
+            // Startup's ensureIndexed() ran before the backfill and skipped the pending row.
+            FtsManager(driver).ensureIndexed()
+            val koin = testKoin(db, driver, now)
+            koin.get<SettingsRepository>().mutateLocalSettings { it } // setup complete
+
+            runStartupMaintenance(koin)
+
+            assertEquals("merged body", db.articlesQueries.getById("merged").executeAsOne().search_text)
+            assertEquals(listOf("merged"), FtsSearch(driver).search("merged body", ArticleFilter.All).map { it.id })
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun maybeRebuildFtsIndexRecomputesPendingSearchTextBeforeRebuilding() = runTest {
+        val (driver, db) = inMemoryDb()
+        try {
+            val now = 10 * ONE_DAY_MS
+            db.insertFeed("f1")
+            db.insertArticle("merged", "f1", publishedAt = 0L, cachedAt = now)
+            driver.execute(null, "UPDATE articles SET content = '<p>merged body</p>', search_text = '' WHERE id = 'merged'", 0)
+            driver.execute(null, "INSERT INTO ks_search_pending (rowid) SELECT rowid FROM articles WHERE id = 'merged'", 0)
+            val fts = FtsManager(driver)
+            fts.createTable()
+            val koin = testKoin(db, driver, now)
+            koin.loadModules(listOf(module { single { fts } }))
+
+            maybeRebuildFtsIndex(koin)
+
+            // The rebuild indexed the recomputed text, not the '' the row held while pending —
+            // indexMissing() would never have revisited it once indexed.
+            assertEquals(listOf("merged"), FtsSearch(driver).search("merged body", ArticleFilter.All).map { it.id })
         } finally {
             driver.close()
         }

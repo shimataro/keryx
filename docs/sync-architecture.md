@@ -180,8 +180,9 @@ only the retries of a revision-checked write (the pointer, the stub); delta and 
 
 ### Sending
 
-1. **Build the delta** with `platform/DeltaExporter` (one `actual` per platform), which opens its own connection
-   and `ATTACH`es an empty transport file:
+1. **Build the delta** with `platform/DeltaExporter` (`commonMain`; the SQL is `domain/DeltaExportSql`, run over
+   `TransportConnections`' per-platform connection), which opens its own connection on a new, empty transport file
+   and `ATTACH`es the source database to it:
    - **Ordinary delta** — inside one read transaction: `S = MAX(sync_outbox.seq)`, then the **current** row for
      every key with an outbox entry `≤ S`, plus every row those rows reference (a feed's folder, an article's feed,
      a `feed_tags` row's tag and feed), so the receiving merge never finds a referenced row missing. An article
@@ -524,12 +525,17 @@ Index maintenance is two-tier:
 - **`search_text` after a merge.** `search_text` is not synced. The merge registers every article whose body it
   filled in or changed in `ks_search_pending` (in the merge transaction), and a newly inserted article starts with
   `search_text = ''`. After the commit and **before** `indexMissing()`, `SyncRepository` recomputes `search_text`
-  with `HtmlText.toPlainText` in batches, each batch updating the rows and removing them from `ks_search_pending` in
-  one transaction; a row whose conversion throws gets `''` (and a log entry) rather than blocking the rest. The
-  pending table is committed state, so an interrupted pass resumes at the next sync or launch. `indexMissing()`
+  (`domain/SearchTextBackfill`) with `HtmlText.toPlainText` in batches: the HTML is converted outside any
+  transaction, then each batch updates the rows and removes them from `ks_search_pending` in one transaction — only
+  for rows whose `content` / `summary` are still the ones converted, so a row a concurrent refresh changed stays
+  pending and is converted again from its new body. A row whose conversion throws gets `''` (and a log entry) rather
+  than blocking the rest. The pending table is committed state, so an interrupted pass resumes at the next sync or
+  launch: startup maintenance runs the same backfill first, in the background, then `indexMissing()` (the
+  launch-time `ensureIndexed()` has skipped those rows meanwhile). `indexMissing()`
   skips rows still in `ks_search_pending`, so a new article is indexed with its computed text, never with `''`. An
   article that was already indexed keeps its old tokens until the daily rebuild — the same accepted staleness as a
-  body changed by a refresh.
+  body changed by a refresh. The daily rebuild recomputes the pending rows first (`maybeRebuildFtsIndex`), since
+  `'rebuild'` indexes every row from its current `search_text` and would otherwise index a pending row with `''`.
 - **Healing full rebuild (`rebuildIndex()` = `'rebuild'`)**:
   Executed only in the daily idle pass (`domain/StartupMaintenanceTasks.kt`'s `maybeRebuildFtsIndex`, shared by
   desktop and Android, gated by `local_settings.lastFtsRebuiltAt` 24h gate + `ActivityCenter` idle — no sync, no feed

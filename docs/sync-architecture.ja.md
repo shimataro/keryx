@@ -174,7 +174,8 @@ Depth 1 の `PROPFIND`。Drive と OneDrive の一覧は結果整合で、書い
 
 ### 送信
 
-1. **差分を作る。** `platform/DeltaExporter`（プラットフォームごとに `actual`）が専用の接続を開き、空の転送ファイルを
+1. **差分を作る。** `platform/DeltaExporter`（`commonMain`。SQL は `domain/DeltaExportSql` で、`TransportConnections` の
+   プラットフォームごとの接続で実行する）が、新しい空の転送ファイルに専用の接続を開き、そこへ元のデータベースを
    `ATTACH` する:
    - **通常の差分**——1 つの読み取りトランザクションの中で: `S = MAX(sync_outbox.seq)` を読み、`≤ S` の outbox の
      記録を持つすべてのキーについて**現在の**行を書き出す。それらの行が参照する行（フィードのフォルダー、記事の
@@ -592,11 +593,16 @@ ATTACH する前に、Apple の `migrateCloudIfOlder` は古いクラウドフ�
 - **マージ後の `search_text`。** `search_text` は同期しない。マージは、本文を埋めた、または変えたすべての記事を
   （マージのトランザクションの中で）`ks_search_pending` に登録し、新しく挿入された記事は `search_text = ''` から
   始まる。コミット後、`indexMissing()` の**前に**、`SyncRepository` が `HtmlText.toPlainText` で `search_text` を
-  バッチごとに再計算する。各バッチは、行の更新と `ks_search_pending` からの削除を 1 つのトランザクションで行う。変換で
-  例外が出た行は、残りを止めずに `''` にする（ログにも残す）。保留の表はコミット済みの状態なので、中断した処理は次の
-  同期か起動時に再開する。`indexMissing()` は `ks_search_pending` に残っている行を飛ばすので、新しい記事は計算後の
+  バッチごとに再計算する（`domain/SearchTextBackfill`）。HTML の変換はトランザクションの外で行い、各バッチは行の更新と
+  `ks_search_pending` からの削除を 1 つのトランザクションで行う——ただし `content` / `summary` が変換したときのままの
+  行だけで、並行するフィード更新が変えた行は保留のまま残り、新しい本文からもう一度変換される。変換で例外が出た行は、
+  残りを止めずに `''` にする（ログにも残す）。保留の表はコミット済みの状態なので、中断した処理は次の同期か起動時に
+  再開する: 起動時のメンテナンスが同じ処理を最初にバックグラウンドで行い、続けて `indexMissing()` を呼ぶ（その間、
+  起動時の `ensureIndexed()` はそれらの行を飛ばしている）。`indexMissing()` は `ks_search_pending` に残っている行を飛ばすので、新しい記事は計算後の
   テキストで索引され、`''` で索引されることはない。すでに索引済みの記事は、日次の rebuild まで古いトークンのまま
-  になる——フィード更新で本文が変わった場合と同じ、許容済みの古さである。
+  になる——フィード更新で本文が変わった場合と同じ、許容済みの古さである。日次の rebuild は先に保留中の行を再計算する
+  （`maybeRebuildFtsIndex`）。`'rebuild'` はすべての行をその時点の `search_text` から索引するので、そうしないと保留中の
+  行を `''` で索引してしまうためである。
 - **healing 用の全再構築（`rebuildIndex()` = `'rebuild'`）**:
   `domain/StartupMaintenanceTasks.kt` の `maybeRebuildFtsIndex`（desktop と Android で共有）による日次アイドル
   pass（`local_settings.lastFtsRebuiltAt` の 24h ゲート + `ActivityCenter` アイドル。同期・フィード更新に加え、
