@@ -131,7 +131,7 @@
   ビルド・インストールは完結する。2つの鍵が存在する理由は build.ja.md の
   「Google Play への公開」を参照。
 - **実機または起動中の Android エミュレータ**: Android の計装テストスイート2つ
-  ——`androidDeviceTest`（`DatabaseMerger`/`DatabaseSnapshot` の Android 実装を実際の
+  ——`androidDeviceTest`（`DatabaseMerger` の Android 実装を実際の
   バンドル SQLite に対して検証）と `androidApp` 自身のスイート（Compose UI のジェスチャテスト）
   ——のいずれかを実行する場合にのみ必要。両方の詳細は [testing.ja.md](testing.ja.md) を参照。ビルド・
   `./gradlew build`・その他のテストタスクはいずれも実機/エミュレータ無しで動く。Linux で

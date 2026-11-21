@@ -10,7 +10,7 @@ The live file's actual path differs by platform: desktop's `JdbcSqliteDriver` op
 `Context.getDatabasePath("keryx.db")` — `<dataDir>/databases/keryx.db`, a different directory than
 `AppDirs.appDataDir()` (`Context.filesDir`, i.e. `<dataDir>/files`). `platform/DatabaseFile.kt`'s
 `databaseFilePath()` is the single `expect` function that resolves the real value per platform;
-`DatabaseMerger`/`DatabaseSnapshot` (both work by path, not through the driver) must always go
+`DatabaseMerger`/`DeltaExporter` (both work by path, not through the driver) must always go
 through it rather than composing `AppDirs.appDataDir()` with the filename themselves.
 
 ## Design Philosophy

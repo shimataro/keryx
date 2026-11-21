@@ -237,8 +237,8 @@ class GoogleDriveStorageTest {
     @Test
     fun metadataReturnsVersionOrNullWhenAbsent() = runTest {
         val (yes, yesHistory, yesVerify) = storage("tok", { respond(foundFile(), HttpStatusCode.OK) })
-        // The rev, not merely its presence: it is what the unchanged-transfer skip compares against
-        // sync_state.cloud_file_rev to decide whether a download can be skipped.
+        // The rev, not merely its presence: LegacyCloudFile compares it against
+        // sync_state.ks_legacy_stub_rev to tell whether the pre-delta file changed.
         val meta = assertNotNull((yes.metadata(CLOUD_DB_PATH) as Result.Ok<CloudFileMeta?>).value)
         assertEquals("F1:r1", meta.rev)
         assertEquals(1, yesHistory.size)

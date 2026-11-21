@@ -2,7 +2,6 @@ package works.merc.keryx.app.platform
 
 import works.merc.keryx.app.core.SQLITE_BUSY_TIMEOUT_MS
 import works.merc.keryx.app.domain.DeltaExportSql
-import works.merc.keryx.app.domain.SnapshotSql
 import works.merc.keryx.app.domain.TransportFileKind
 import works.merc.keryx.app.domain.TransportFileName
 import works.merc.keryx.app.domain.TransportMeta
@@ -73,16 +72,16 @@ object DeltaExporter {
 
     /**
      * Writes a consistent copy of the live database at [localDbPath] to [destPath] with `VACUUM
-     * INTO` (replacing it), the input of [exportFull]. Unlike [DatabaseSnapshot.exportForUpload] it
-     * keeps every table — [exportFull] reads `S` from the copy's `sync_outbox` — and the live
-     * database's read lock is held only for the copy.
+     * INTO` (replacing it), the input of [exportFull]. The copy keeps every table — [exportFull]
+     * reads `S` from the copy's `sync_outbox` — and the live database's read lock is held only for
+     * the copy.
      */
     fun copyForFullSend(localDbPath: String, destPath: String) {
         FileIO.delete(destPath)
         FileIO.delete("$destPath-journal")
         TransportConnections.open(localDbPath, TransportOpenMode.READ_WRITE).use { connection ->
             connection.setBusyTimeout()
-            connection.exec(SnapshotSql.vacuumIntoStatement(destPath))
+            connection.exec(DeltaExportSql.vacuumInto(destPath))
         }
     }
 

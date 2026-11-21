@@ -17,7 +17,7 @@ const val SETTINGS_TAB_UPDATES = "updates"
 
 /**
  * SQLite `busy_timeout`, applied everywhere the DB is opened (main driver, `DatabaseMerger`'s ATTACH
- * connection, `DatabaseSnapshot`'s `VACUUM INTO`). Lets a reader/writer wait out — rather than error
+ * connection, `DeltaExporter`'s export connection and its `VACUUM INTO`). Lets a reader/writer wait out — rather than error
  * on `SQLITE_BUSY` against — the brief write lock held by an incremental FTS insert, a full index
  * rebuild, or a sync merge on another connection.
  */
@@ -241,13 +241,6 @@ const val ARTICLE_CONTENT_CACHE_LIMIT = 8
 
 // --- sync_state keys ---
 const val SYNC_STATE_LAST_SYNCED_AT = "last_synced_at"
-
-/**
- * Keys of the pre-delta sync (the revision of `keryx.db.gz` last merged, and the digest of the last
- * uploaded snapshot). No longer written; deleted on disconnect along with the `ks_*` keys.
- */
-const val SYNC_STATE_LEGACY_CLOUD_FILE_REV = "cloud_file_rev"
-const val SYNC_STATE_LEGACY_UPLOADED_DIGEST = "last_uploaded_snapshot_digest"
 
 /** This device's sync identity in the current generation (a lowercase UUID). */
 const val SYNC_STATE_KS_DEVICE_ID = "ks_device_id"

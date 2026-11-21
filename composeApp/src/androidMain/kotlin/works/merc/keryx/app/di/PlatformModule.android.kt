@@ -40,8 +40,8 @@ private fun providerTokenStorage(type: CloudStorageType): TokenStorage =
  * rather than a browser redirect — supplied by the application as an [AndroidGoogleDriveBackend]
  * (`:androidGms`; absent from the `fdroid` flavor) and registered only on a device that actually
  * has Play services (see `core/CloudStorageAvailability.android.kt`).
- * `DatabaseMerger`/`DatabaseSnapshot` are fully implemented (Android actuals), unlike the earlier
- * phases' stubs.
+ * `DatabaseMerger`/`DeltaExporter`'s connections are fully implemented (Android actuals), unlike
+ * the earlier phases' stubs.
  */
 actual val platformModule: Module = module {
     single<OsNotificationSink> { AndroidNotificationSink(AndroidAppContext.application) }

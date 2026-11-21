@@ -5,7 +5,7 @@ import io.requery.android.database.sqlite.SQLiteDatabase
 import works.merc.keryx.app.core.SQLITE_BUSY_TIMEOUT_MS
 
 /**
- * Small helpers shared by [DatabaseMerger] and [DatabaseSnapshot]'s Android actuals, which both
+ * Small helpers shared by [DatabaseMerger]'s and [TransportConnections]' Android actuals, which both
  * open a dedicated `io.requery.android.database.sqlite.SQLiteDatabase` connection directly
  * (bypassing the SQLDelight driver — see each class's own KDoc for why) rather than going through
  * `data/local/DatabaseDriverFactory`.
@@ -22,7 +22,8 @@ import works.merc.keryx.app.core.SQLITE_BUSY_TIMEOUT_MS
  * behavior here: [DatabaseMerger] runs against the downloaded cloud DB (a temp file whose deletion
  * would just make an ambiguous merge failure look like a successful no-op) and against the local
  * DB mid-merge (whose deletion would destroy the user's subscriptions and read state), and
- * [DatabaseSnapshot] runs against a throwaway upload copy. Every connection opened here must pass
+ * [TransportConnections] opens transport files and the full send's copy, whose deletion would make a
+ * failure look like an empty file. Every connection opened here must pass
  * this explicit no-op instead of relying on the 2-arg overload's default.
  */
 internal object NoOpDatabaseErrorHandler : DatabaseErrorHandler {

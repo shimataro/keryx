@@ -11,7 +11,7 @@
   Linux/Windows), so a common test must not use JVM APIs — temp files go through `:testing`'s
   `tempFilePath()`/`tempFileWith()` (kotlinx-io); a test that genuinely needs the JVM belongs in
   `desktopTest`. `appleTest/` holds what only the Apple actuals can show — `AppleDatabaseTest`
-  (NativeSqliteDriver, FTS5 trigram search, snapshot and a real merge on the system SQLite),
+  (NativeSqliteDriver, FTS5 trigram search and a real merge on the system SQLite),
   `ApplePlatformTest` (gzip, digests, files), `KeryxSdkTest`. `macosTest/` holds
   `KeychainTokenStorageTest`: Kotlin/Native runs iOS tests as a bare executable outside any app
   bundle, where no keychain exists (`errSecNotAvailable`), while on macOS it reaches the login
@@ -29,8 +29,8 @@
     Helpers are in `AndroidDbTestSupport.kt` (`createSchemaDbFile()`, mirroring `DbTestSupport.kt`'s
     `fileDb()` but driven through a real `AndroidSqliteDriver` so the schema is installed the same way
     production creates it).
-    - `DatabaseMergerDeviceTest.kt` / `DatabaseSnapshotDeviceTest.kt` — the schema-version guard, the
-      migration path, and merge/snapshot behavior against the bundled `requery` SQLite (a native library);
+    - `DatabaseMergerDeviceTest.kt` — the schema-version guard, the
+      migration path, and merge behavior against the bundled `requery` SQLite (a native library);
       not a full port of `desktopTest`'s suites, since the merge SQL itself (`MergeSql`) is pure and already
       covered there.
     - `MergeFailureClassificationDeviceTest.kt` — exception-*class*-based failure classification (Android's
@@ -176,7 +176,7 @@ into CI:
 
 | Suite | Task | Covers | CI |
 | --- | --- | --- | --- |
-| `shared/src/androidDeviceTest/` | `:shared:connectedAndroidDeviceTest` | `DatabaseMerger`/`DatabaseSnapshot` against the real bundled SQLite | ✓ every branch push (`android-instrumented-test` job, same emulator as the row below) |
+| `shared/src/androidDeviceTest/` | `:shared:connectedAndroidDeviceTest` | `DatabaseMerger` against the real bundled SQLite | ✓ every branch push (`android-instrumented-test` job, same emulator as the row below) |
 | `composeApp/src/androidDeviceTest/` | `:composeApp:connectedAndroidDeviceTest` | The `androidMain`-only logic that has nowhere else to live (SAF writes, Keystore token storage, the consent-screen request slot) | ✗ local only |
 | `androidApp/src/androidTest/` | `:androidApp:connectedGithubDebugAndroidTest` | Compose UI (long-press gesture, search bar) | ✓ every branch push |
 
@@ -247,7 +247,7 @@ Project-wide, this is on top of the three Android instrumented suites above:
 - AppFont (Pango font-description parsing for the Linux UI font)
 - custom URI scheme registration (`UriSchemeRegistration`'s per-OS dispatch and packaged-launcher gate, `LinuxUriSchemeRegistrar`'s desktop-entry generation including the `%u` field code, non-destructive `mimeapps.list` merge, and idempotency)
 - the `.opml` file association (`LaunchArg`'s classification of an OAuth URI vs. an `.opml` path, `registerWindowsOpmlAssociation`'s ProgID registry writes, `LinuxOpmlAssociationRegistrar`'s desktop-entry generation including the `%f` field code, its shared-mime-info package XML, and idempotency, and `OpmlImporter`'s added/failed counting and folder/tag reconciliation)
-- FTS (FtsManager/FtsSearch, including `indexMissing` incremental insert / non-destructive behavior, `rebuildIndex` requiring table existence, sync upload excluding `articles_fts` via `VACUUM INTO` snapshot while preserving `user_version`)
+- FTS (FtsManager/FtsSearch, including `indexMissing` incremental insert / non-destructive behavior, `rebuildIndex` requiring table existence)
 - the Linux SNI tray (`TrayPixmapTest` for the big-endian ARGB32 / RGBA encoders and alpha preservation, `TrayMenuModelTest` for the dbusmenu layout, `TrayMenuRevisionTest` for revision / `AboutToShow` / event dispatch, `DBusSignatureTest` for the exported D-Bus signatures)
 - the Windows tray menu (`WindowsTrayMenuTest` for the built Swing widgets, their labels, their callbacks, and the forced-heavyweight popup — the AWT widgets it replaces overlap their own labels on a HiDPI Windows desktop)
 - the KDE Global Menu / AppMenu (`AppMenuTreeTest` for the shared menu-tree model shape / `isMacOs` omissions / enabled-checked mirroring / the optional "Show Menu Bar" item, `AppMenuLayoutBuilderTest` for the recursive `com.canonical.dbusmenu` layout / property filtering / checkbox mapping / pre-order id stability, `AppMenuRevisionTest` for revision bump / `AboutToShow` / click dispatch / no-dedup, `AppMenuSignatureTest` for the `com.canonical.AppMenu.Registrar` wire signatures, `MenuBarVisibilityTest` for the AWT key-code map / shortcut→node matcher / visibility persistence)
