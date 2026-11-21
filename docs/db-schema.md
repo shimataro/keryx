@@ -157,7 +157,7 @@ being sent: number, name, outbox high-water mark), `ks_pointer_rev`, `ks_legacy_
 
 | Table | Content |
 | --- | --- |
-| `sync_outbox` | `seq`(PK, AUTOINCREMENT), `tbl`, `pk`, `heavy` — one row per local change to a synced row, appended by triggers |
+| `sync_outbox` | `seq`(PK, AUTOINCREMENT), `tbl`, `pk`, `pk2` (`feed_tags` only: the tag id), `heavy` — one row per local change to a synced row, appended by triggers |
 | `sync_capture` | a single row: `enabled` (recording on while connected), `full_pending` (a full send is due) |
 | `sync_merging` | a marker row present only inside a merge transaction, which suppresses recording |
 | `sync_applied` | `name`(PK) — cloud files already merged |

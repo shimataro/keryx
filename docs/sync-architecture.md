@@ -91,7 +91,7 @@ Each file carries `PRAGMA user_version` and:
 
 | Object | Purpose |
 | --- | --- |
-| `sync_outbox(seq INTEGER PRIMARY KEY AUTOINCREMENT, tbl, pk, heavy)` | Every local change to a synced row, in order |
+| `sync_outbox(seq INTEGER PRIMARY KEY AUTOINCREMENT, tbl, pk, pk2, heavy)` | Every local change to a synced row, in order |
 | `sync_capture(id = 1, enabled, full_pending)` | Whether changes are recorded (only while connected), and whether a full send is due |
 | `sync_merging(flag)` | Present only inside a merge transaction (inserted first, deleted just before `COMMIT`), so no other connection ever sees it |
 | `sync_applied(name)` | Cloud files already merged (including this device's own) |

@@ -8,8 +8,8 @@ import kotlin.test.assertTrue
 
 class NameValidationTest {
 
-    private fun folder(id: String, name: String) = Folders(id, name, 0L, null, 0L, 0L)
-    private fun tag(id: String, name: String) = Tags(id, name, null, 0L, null, 0L, 0L)
+    private fun folder(id: String, name: String) = Folders(id, name, 0L, null, 0L, 0L, null, null)
+    private fun tag(id: String, name: String) = Tags(id, name, null, 0L, null, 0L, 0L, null, null, null)
 
     @Test
     fun folderNameIsADuplicateWhenAnotherFolderAlreadyHasIt() {

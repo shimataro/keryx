@@ -26,14 +26,14 @@ struct SidebarRowStaticContent: Equatable, Sendable {
 
 extension SidebarRowStaticContent {
     /// A feed row: its display title and favicon, and whether its last fetch failed or it is gone
-    /// (410) — the gone marker counts as erroring, matching Compose's own `FeedErrorIndicator`.
-    init(feed: Feeds) {
-        let isGone = feed.last_error == ConstantsKt.FEED_ERROR_REASON_GONE
+    /// (410) — `problem` is the feed's entry in `HomeViewModel.feedFetchProblems` (its device-local
+    /// fetch state), and a gone feed counts as erroring, matching Compose's own `FeedErrorIndicator`.
+    init(feed: Feeds, problem: FeedFetchProblem?) {
         self.init(
             title: feed.displayTitle(),
             icon: .favicon(url: feed.favicon_url),
-            isErroring: feed.error_count > 0 || isGone,
-            isGone: isGone
+            isErroring: problem != nil,
+            isGone: problem == .gone
         )
     }
 }

@@ -7,7 +7,10 @@ CREATE TABLE tags (
     sort_order INTEGER NOT NULL DEFAULT 0,
     deleted_at INTEGER,
     updated_at INTEGER NOT NULL,
-    created_at INTEGER NOT NULL
+    created_at INTEGER NOT NULL,
+    name_updated_at       INTEGER,
+    color_updated_at      INTEGER,
+    sort_order_updated_at INTEGER
 );
 
 watchAll:
@@ -27,27 +30,52 @@ SELECT * FROM tags WHERE name = ?;
 -- stamped at or below the row's stamp could lose to the older value on another device, and a delete
 -- and a recreation with equal stamps would leave the recreated row indistinguishable from the one
 -- before the delete. See docs/db-schema.md.
+--
+-- name_updated_at / color_updated_at / sort_order_updated_at are the per-field last-write-wins
+-- stamps of the user-edited fields. A new row stamps all three with its creation time; on an
+-- existing row each moves (forward, MAX(now, previous + 1)) only when its own field actually
+-- changes, so a rename made on one device and a color change made on another both survive the
+-- merge. The SET expressions read the row's values from before the update, so `name IS NOT
+-- excluded.name` compares the stored name with the new one.
 upsert:
-INSERT INTO tags (id, name, color, sort_order, deleted_at, updated_at, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?)
+INSERT INTO tags (
+    id, name, color, sort_order, deleted_at, updated_at, created_at,
+    name_updated_at, color_updated_at, sort_order_updated_at
+)
+VALUES (
+    :id, :name, :color, :sort_order, :deleted_at, :updated_at, :created_at,
+    :updated_at, :updated_at, :updated_at
+)
 ON CONFLICT(id) DO UPDATE SET
     name = excluded.name,
     color = excluded.color,
     sort_order = excluded.sort_order,
     deleted_at = excluded.deleted_at,
-    updated_at = MAX(excluded.updated_at, updated_at + 1);
+    updated_at = MAX(excluded.updated_at, updated_at + 1),
+    name_updated_at = CASE WHEN name IS NOT excluded.name
+        THEN MAX(excluded.updated_at, COALESCE(name_updated_at, 0) + 1) ELSE name_updated_at END,
+    color_updated_at = CASE WHEN color IS NOT excluded.color
+        THEN MAX(excluded.updated_at, COALESCE(color_updated_at, 0) + 1) ELSE color_updated_at END,
+    sort_order_updated_at = CASE WHEN sort_order IS NOT excluded.sort_order
+        THEN MAX(excluded.updated_at, COALESCE(sort_order_updated_at, 0) + 1) ELSE sort_order_updated_at END;
 
 -- Creates the tag named :name, or reactivates the existing one of that name in place (same id,
 -- sort_order and created_at kept; a null :color keeps its color). The name conflict is resolved by
 -- the statement itself rather than by a lookup before it, so a row of the same name that another
 -- writer (a sync merge, a concurrent create) inserted in between is reused instead of failing
 -- UNIQUE(name). :id is used only when no row has the name. A reactivation's updated_at moves forward
--- like every local write (see upsert).
+-- like every local write (see upsert). A new row stamps every per-field stamp with :now; a
+-- reactivation moves color_updated_at only when it actually changes the color (see upsert).
 upsertByName:
-INSERT INTO tags (id, name, color, sort_order, deleted_at, updated_at, created_at)
-VALUES (:id, :name, :color, 0, NULL, :now, :now)
+INSERT INTO tags (
+    id, name, color, sort_order, deleted_at, updated_at, created_at,
+    name_updated_at, color_updated_at, sort_order_updated_at
+)
+VALUES (:id, :name, :color, 0, NULL, :now, :now, :now, :now, :now)
 ON CONFLICT(name) DO UPDATE SET
-    color = COALESCE(excluded.color, color), deleted_at = NULL, updated_at = MAX(excluded.updated_at, updated_at + 1);
+    color = COALESCE(excluded.color, color), deleted_at = NULL, updated_at = MAX(excluded.updated_at, updated_at + 1),
+    color_updated_at = CASE WHEN color IS NOT COALESCE(excluded.color, color)
+        THEN MAX(excluded.updated_at, COALESCE(color_updated_at, 0) + 1) ELSE color_updated_at END;
 
 -- updated_at moves forward like every local write (see upsert).
 softDelete:

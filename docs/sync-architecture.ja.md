@@ -87,7 +87,7 @@ Depth 1 の `PROPFIND`。Drive と OneDrive の一覧は結果整合で、書い
 
 | オブジェクト | 用途 |
 | --- | --- |
-| `sync_outbox(seq INTEGER PRIMARY KEY AUTOINCREMENT, tbl, pk, heavy)` | 同期対象行へのローカルの変更を、順に記録する |
+| `sync_outbox(seq INTEGER PRIMARY KEY AUTOINCREMENT, tbl, pk, pk2, heavy)` | 同期対象行へのローカルの変更を、順に記録する |
 | `sync_capture(id = 1, enabled, full_pending)` | 変更を記録するか（接続中のみ）と、全量送信が必要か |
 | `sync_merging(flag)` | マージのトランザクションの中にだけ存在する（最初に INSERT、`COMMIT` 直前に DELETE）ので、ほかの接続からは決して見えない |
 | `sync_applied(name)` | マージ済みのクラウドファイル（この端末自身のものを含む） |

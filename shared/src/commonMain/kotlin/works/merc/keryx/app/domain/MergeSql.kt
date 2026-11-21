@@ -7,6 +7,9 @@ package works.merc.keryx.app.domain
  * - article body: OR-merge (keep whichever side has it)
  * - feeds / tags / feed_tags / global_settings: timestamp-last-wins
  *
+ * tags / folders are still merged whole-row by `updated_at`; their per-field stamps
+ * (`name_updated_at`, …) travel with the winning row so they stay consistent with its values.
+ *
  * A tie (equal timestamps) always goes to the cloud side, in every statement. The cloud holds a
  * single file at any moment, so every device adopting its value on a tie converges; letting the
  * local side win instead would leave two devices that stamped different values in the same
@@ -24,7 +27,9 @@ object MergeSql {
         UPDATE main.folders
         SET sort_order = c.sort_order,
             deleted_at = c.deleted_at,
-            updated_at = c.updated_at
+            updated_at = c.updated_at,
+            name_updated_at = c.name_updated_at,
+            sort_order_updated_at = c.sort_order_updated_at
         FROM cloud.folders c
         WHERE main.folders.name = c.name
           AND main.folders.id <> c.id
@@ -32,14 +37,18 @@ object MergeSql {
     """.trimIndent()
 
     private val insertFolders = """
-        INSERT INTO main.folders (id, name, sort_order, deleted_at, updated_at, created_at)
-        SELECT c.id, c.name, c.sort_order, c.deleted_at, c.updated_at, c.created_at
+        INSERT INTO main.folders (
+            id, name, sort_order, deleted_at, updated_at, created_at, name_updated_at, sort_order_updated_at
+        )
+        SELECT c.id, c.name, c.sort_order, c.deleted_at, c.updated_at, c.created_at,
+               c.name_updated_at, c.sort_order_updated_at
         FROM cloud.folders c
         WHERE NOT EXISTS (SELECT 1 FROM main.folders l WHERE l.id = c.id AND l.updated_at > c.updated_at)
           AND NOT EXISTS (SELECT 1 FROM main.folders l2 WHERE l2.name = c.name AND l2.id <> c.id)
         ON CONFLICT(id) DO UPDATE SET
             name = excluded.name, sort_order = excluded.sort_order,
-            deleted_at = excluded.deleted_at, updated_at = excluded.updated_at
+            deleted_at = excluded.deleted_at, updated_at = excluded.updated_at,
+            name_updated_at = excluded.name_updated_at, sort_order_updated_at = excluded.sort_order_updated_at
         WHERE excluded.updated_at >= updated_at;
     """.trimIndent()
 
@@ -54,14 +63,16 @@ object MergeSql {
     // may reference a folder this device has never seen (main.folders gets its own row from
     // insertFolders, which must run before this), and only mergeFeedFolderId's FK-safe resolution
     // (folders before feeds, mergeFeedFolderId after both) is allowed to set it.
+    // A feed's fetch state (feed_fetch_state: validators, error count) is device-local and never
+    // merged: a feed new to this device starts with none, as if never fetched here.
     private val feeds = """
         INSERT INTO main.feeds (
-            id, url, site_url, title, description, favicon_url, etag, last_modified,
-            error_count, last_error, custom_title, deleted_at, updated_at, created_at, sort_order,
+            id, url, site_url, title, description, favicon_url,
+            custom_title, deleted_at, updated_at, created_at, sort_order,
             sort_order_updated_at, custom_title_updated_at, deleted_updated_at
         )
-        SELECT c.id, c.url, c.site_url, c.title, c.description, c.favicon_url, c.etag,
-               c.last_modified, c.error_count, c.last_error, c.custom_title,
+        SELECT c.id, c.url, c.site_url, c.title, c.description, c.favicon_url,
+               c.custom_title,
                c.deleted_at, c.updated_at, c.created_at, c.sort_order,
                c.sort_order_updated_at, c.custom_title_updated_at, c.deleted_updated_at
         FROM cloud.feeds c
@@ -70,8 +81,6 @@ object MergeSql {
         ON CONFLICT(id) DO UPDATE SET
             url = excluded.url, site_url = excluded.site_url, title = excluded.title,
             description = excluded.description, favicon_url = excluded.favicon_url,
-            etag = excluded.etag, last_modified = excluded.last_modified,
-            error_count = excluded.error_count, last_error = excluded.last_error,
             updated_at = excluded.updated_at
         WHERE excluded.updated_at >= updated_at;
     """.trimIndent()
@@ -237,7 +246,10 @@ object MergeSql {
         SET color = c.color,
             sort_order = c.sort_order,
             deleted_at = c.deleted_at,
-            updated_at = c.updated_at
+            updated_at = c.updated_at,
+            name_updated_at = c.name_updated_at,
+            color_updated_at = c.color_updated_at,
+            sort_order_updated_at = c.sort_order_updated_at
         FROM cloud.tags c
         WHERE main.tags.name = c.name
           AND main.tags.id <> c.id
@@ -245,14 +257,20 @@ object MergeSql {
     """.trimIndent()
 
     private val insertTags = """
-        INSERT INTO main.tags (id, name, color, sort_order, deleted_at, updated_at, created_at)
-        SELECT c.id, c.name, c.color, c.sort_order, c.deleted_at, c.updated_at, c.created_at
+        INSERT INTO main.tags (
+            id, name, color, sort_order, deleted_at, updated_at, created_at,
+            name_updated_at, color_updated_at, sort_order_updated_at
+        )
+        SELECT c.id, c.name, c.color, c.sort_order, c.deleted_at, c.updated_at, c.created_at,
+               c.name_updated_at, c.color_updated_at, c.sort_order_updated_at
         FROM cloud.tags c
         WHERE NOT EXISTS (SELECT 1 FROM main.tags l WHERE l.id = c.id AND l.updated_at > c.updated_at)
           AND NOT EXISTS (SELECT 1 FROM main.tags l2 WHERE l2.name = c.name AND l2.id <> c.id)
         ON CONFLICT(id) DO UPDATE SET
             name = excluded.name, color = excluded.color, sort_order = excluded.sort_order,
-            deleted_at = excluded.deleted_at, updated_at = excluded.updated_at
+            deleted_at = excluded.deleted_at, updated_at = excluded.updated_at,
+            name_updated_at = excluded.name_updated_at, color_updated_at = excluded.color_updated_at,
+            sort_order_updated_at = excluded.sort_order_updated_at
         WHERE excluded.updated_at >= updated_at;
     """.trimIndent()
 

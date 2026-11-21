@@ -8,19 +8,24 @@ struct SidebarModelTests {
     private func feed(_ id: String, sortOrder: Int64, folderId: String? = nil) -> Feeds {
         Feeds(
             id: id, url: "https://example.com/\(id)", site_url: nil, title: id, description: nil,
-            favicon_url: nil, etag: nil, last_modified: nil, error_count: 0, last_error: nil,
-            custom_title: nil, folder_id: folderId, deleted_at: nil, updated_at: 0, created_at: 0,
+            favicon_url: nil, custom_title: nil, folder_id: folderId, deleted_at: nil, updated_at: 0, created_at: 0,
             sort_order: sortOrder, folder_updated_at: nil, sort_order_updated_at: nil,
             custom_title_updated_at: nil, deleted_updated_at: nil
         )
     }
 
     private func folder(_ id: String, sortOrder: Int64) -> Folders {
-        Folders(id: id, name: id, sort_order: sortOrder, deleted_at: nil, updated_at: 0, created_at: 0)
+        Folders(
+            id: id, name: id, sort_order: sortOrder, deleted_at: nil, updated_at: 0, created_at: 0,
+            name_updated_at: nil, sort_order_updated_at: nil
+        )
     }
 
     private func tag(_ id: String, sortOrder: Int64) -> Tags {
-        Tags(id: id, name: id, color: nil, sort_order: sortOrder, deleted_at: nil, updated_at: 0, created_at: 0)
+        Tags(
+            id: id, name: id, color: nil, sort_order: sortOrder, deleted_at: nil, updated_at: 0, created_at: 0,
+            name_updated_at: nil, color_updated_at: nil, sort_order_updated_at: nil
+        )
     }
 
     private func model(
@@ -139,10 +144,11 @@ struct SidebarModelTests {
         let m = F.model(
             feeds: [
                 F.feed("a", sortOrder: 1, customTitle: "Mine"),
-                F.feed("b", sortOrder: 2, errorCount: 3),
-                F.feed("c", sortOrder: 3, lastError: ConstantsKt.FEED_ERROR_REASON_GONE),
+                F.feed("b", sortOrder: 2),
+                F.feed("c", sortOrder: 3),
             ],
-            tags: [F.tag("t1", sortOrder: 1, color: "#ff0000")]
+            tags: [F.tag("t1", sortOrder: 1, color: "#ff0000")],
+            fetchProblems: ["b": .error, "c": .gone]
         )
         #expect(m.feedContents["a"] == SidebarRowStaticContent(title: "Mine", icon: .favicon(url: "https://example.com/a.ico")))
         #expect(m.feedContents["b"].map { $0.isErroring && !$0.isGone } == true)
