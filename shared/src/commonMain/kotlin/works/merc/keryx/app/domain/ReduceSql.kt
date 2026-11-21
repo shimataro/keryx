@@ -80,7 +80,7 @@ object ReduceSql {
 
     /**
      * Combines `src`'s coverage into `main`'s: the vector takes the component-wise maximum and the
-     * covered names their union. Extending the vector over contiguous covered deltas is
+     * covered names their union (each with its earliest known creation time). Extending the vector over contiguous covered deltas is
      * [TransportVector.extend]'s job, done after these.
      */
     val combineCoverage: List<String> = listOf(
@@ -89,6 +89,18 @@ object ReduceSql {
             SELECT device, seq FROM src.ks_vector WHERE true
             ON CONFLICT(device) DO UPDATE SET seq = MAX(seq, excluded.seq);
         """.trimIndent(),
-        "INSERT OR IGNORE INTO main.ks_covered (name) SELECT name FROM src.ks_covered;",
+        """
+            INSERT INTO main.ks_covered (name, created_at)
+            SELECT name, created_at FROM src.ks_covered WHERE true
+            ON CONFLICT(name) DO UPDATE SET created_at = $EARLIEST_KNOWN_COVERED_AT;
+        """.trimIndent(),
     )
+
+    /**
+     * The `ON CONFLICT` assignment that keeps the earliest known creation time of a covered delta
+     * (NULL meaning unknown).
+     */
+    const val EARLIEST_KNOWN_COVERED_AT: String =
+        "CASE WHEN created_at IS NULL THEN excluded.created_at WHEN excluded.created_at IS NULL THEN created_at " +
+            "ELSE MIN(created_at, excluded.created_at) END"
 }

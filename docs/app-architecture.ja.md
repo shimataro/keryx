@@ -406,6 +406,11 @@ ATTACH DATABASE マージは**専用の JDBC コネクション 1 本**で行う
 見えない。`DatabaseMerger` が attach → バージョン確認 → マージ（トランザクション）→ detach を
 1 コネクションで完結させる。
 
+入口は 2 つで、各 `actual` の実装は 1 つ: 差分同期の転送ファイル用の `mergeTransport`（`TransportSchema` と照らす
+——そのバージョン、`TransportFiles.prepareForMerge` によるマイグレーション、分類のスキーマ確認には
+`TransportFiles.schemaMatches`。`KeryxDatabase.Schema.migrate` は決して実行しない）と、差分同期以前のデータベース用の
+`merge`（`KeryxDatabase.Schema.migrate` でマイグレーションし、`MergeSchema` と照らす）。
+
 プラットフォーム固有なのは SQLite ドライバとのやりとりだけである。判定*ロジック*自体は `commonMain` に
 ある: `domain/MergeFailureClassifier`（純粋関数。失敗カテゴリと、カテゴリごとに必要な判断材料 →
 `CloudDataIncompatibleException?`。入力と、それを集めるために各 `actual` が実行するチェックは

@@ -308,7 +308,8 @@ class TransportFilesTest {
         }
         val coverage = TransportFixtures.dump(acc, coverage = true)
         assertEquals(listOf("$DEV_A|2"), coverage.getValue("ks_vector"))
-        assertEquals(listOf(1L, 2L, 4L).map { deltaName(DEV_A, it).fileName }.sorted(), coverage.getValue("ks_covered"))
+        // Each covered delta carries its creation time (the fixture's ks_meta.created_at).
+        assertEquals(listOf(1L, 2L, 4L).map { "${deltaName(DEV_A, it).fileName}|1000" }.sorted(), coverage.getValue("ks_covered"))
 
         // A base whose vector covers delta 3 closes the gap: the vector then extends over 4.
         val base = baseName(DEV_B, 1)
@@ -316,6 +317,59 @@ class TransportFilesTest {
         TransportFiles.fold(acc.absolutePath, baseFile.absolutePath, base)
         assertEquals(listOf("$DEV_A|4"), TransportFixtures.dump(acc, coverage = true).getValue("ks_vector"))
         assertEquals(TransportValidation.Valid, TransportFiles.validate(acc.absolutePath, ValidationTarget.Transport(baseName(DEV_A, 1))))
+    }
+
+    @Test
+    fun aFoldKeepsTheEarliestKnownCreationTimeOfACoveredDelta() {
+        val acc = TransportFixtures.accumulator()
+        val delta = deltaName(DEV_A, 1)
+        val base = baseName(DEV_B, 1)
+        val baseFile = transportFile(base, "INSERT INTO ks_covered (name, created_at) VALUES ('${delta.fileName}', 400)")
+        TransportFiles.fold(acc.absolutePath, transportFile(delta).absolutePath, delta, extendVector = false)
+        TransportFiles.fold(acc.absolutePath, baseFile.absolutePath, base, extendVector = false)
+        assertEquals(listOf("${delta.fileName}|400"), TransportFixtures.dump(acc, coverage = true).getValue("ks_covered"))
+
+        val unknown = baseName(DEV_B, 2)
+        val unknownFile = transportFile(unknown, "INSERT INTO ks_covered (name) VALUES ('${delta.fileName}')")
+        TransportFiles.fold(acc.absolutePath, unknownFile.absolutePath, unknown, extendVector = false)
+        assertEquals(listOf("${delta.fileName}|400"), TransportFixtures.dump(acc, coverage = true).getValue("ks_covered"), "an unknown time never replaces a known one")
+    }
+
+    @Test
+    fun finalizeBaseExtendsTheVectorOnlyOverOldDeltasAndListsOnlyWhatItDoesNotImply() {
+        val acc = TransportFixtures.accumulator()
+        // Deltas 1 and 2 were created at 1000 (old enough), delta 3 at 5000 (too recent), delta 5 past a gap.
+        for (seq in listOf(1L, 2L)) {
+            val name = deltaName(DEV_A, seq)
+            TransportFiles.fold(acc.absolutePath, transportFile(name).absolutePath, name, extendVector = false)
+        }
+        for (seq in listOf(3L, 5L)) {
+            val name = deltaName(DEV_A, seq)
+            val file = transportFile(name)
+            exec(file, "UPDATE ks_meta SET value = '5000' WHERE key = 'created_at'")
+            TransportFiles.fold(acc.absolutePath, file.absolutePath, name, extendVector = false)
+        }
+
+        TransportFiles.finalizeBase(acc.absolutePath, impliableCutoff = 2_000)
+
+        val coverage = TransportFixtures.dump(acc, coverage = true)
+        assertEquals(listOf("$DEV_A|2"), coverage.getValue("ks_vector"))
+        assertEquals(listOf(3L, 5L).map { "${deltaName(DEV_A, it).fileName}|5000" }, coverage.getValue("ks_covered"))
+    }
+
+    @Test
+    fun finalizeBaseKeepsEveryDuplicateOfACloneListed() {
+        val acc = TransportFixtures.accumulator()
+        val first = deltaName(DEV_A, 1)
+        val duplicate = first.copy(hash12 = "ba9876543210")
+        TransportFiles.fold(acc.absolutePath, transportFile(first).absolutePath, first, extendVector = false)
+        TransportFiles.fold(acc.absolutePath, transportFile(duplicate).absolutePath, duplicate, extendVector = false)
+
+        TransportFiles.finalizeBase(acc.absolutePath, impliableCutoff = 2_000)
+
+        val coverage = TransportFixtures.dump(acc, coverage = true)
+        assertEquals(listOf("$DEV_A|1"), coverage.getValue("ks_vector"))
+        assertEquals(listOf(first, duplicate).map { "${it.fileName}|1000" }.sorted(), coverage.getValue("ks_covered"))
     }
 
     @Test
