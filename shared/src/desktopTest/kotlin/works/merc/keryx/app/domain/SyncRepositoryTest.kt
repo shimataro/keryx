@@ -359,7 +359,7 @@ class SyncRepositoryTest {
                         read_at INTEGER, is_starred INTEGER NOT NULL DEFAULT 0, starred_at INTEGER,
                         cached_at INTEGER NOT NULL, search_text TEXT NOT NULL DEFAULT '',
                         updated_at INTEGER NOT NULL, created_at INTEGER NOT NULL,
-                        deleted_at INTEGER, deleted_updated_at INTEGER,
+                        deleted_at INTEGER, deleted_updated_at INTEGER, body_updated_at INTEGER,
                         UNIQUE (feed_id, guid)
                     )
                     """.trimIndent(),

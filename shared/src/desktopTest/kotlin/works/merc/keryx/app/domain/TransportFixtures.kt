@@ -146,6 +146,7 @@ internal object TransportFixtures {
         id: String, feedId: String, guid: String = "g-$id", title: String = "Article $id", updatedAt: Long = 100,
         createdAt: Long = 100, content: String? = null, summary: String? = null, isRead: Long = 0, readAt: Long? = null,
         isStarred: Long = 0, starredAt: Long? = null, cachedAt: Long = 100, deletedAt: Long? = null, deletedUpdatedAt: Long? = null,
+        bodyAt: Long? = updatedAt,
     ) = insert(
         "articles",
         mapOf(
@@ -153,7 +154,7 @@ internal object TransportFixtures {
             "summary" to summary, "content" to content, "author" to null, "published_at" to 50, "thumbnail_url" to null,
             "is_read" to isRead, "read_at" to readAt, "is_starred" to isStarred, "starred_at" to starredAt,
             "cached_at" to cachedAt, "updated_at" to updatedAt, "created_at" to createdAt,
-            "deleted_at" to deletedAt, "deleted_updated_at" to deletedUpdatedAt,
+            "deleted_at" to deletedAt, "deleted_updated_at" to deletedUpdatedAt, "body_updated_at" to bodyAt,
         ),
     )
 

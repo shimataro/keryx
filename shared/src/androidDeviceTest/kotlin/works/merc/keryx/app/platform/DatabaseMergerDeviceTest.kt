@@ -126,6 +126,7 @@ class DatabaseMergerDeviceTest {
             listOf("name_updated_at", "sort_order_updated_at").forEach { db.execSQL("ALTER TABLE folders DROP COLUMN $it") }
             db.execSQL("ALTER TABLE articles DROP COLUMN deleted_at")
             db.execSQL("ALTER TABLE articles DROP COLUMN deleted_updated_at")
+            db.execSQL("ALTER TABLE articles DROP COLUMN body_updated_at")
             db.execSQL("PRAGMA user_version=1")
         }
 
