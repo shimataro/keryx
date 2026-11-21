@@ -3,6 +3,10 @@ package works.merc.keryx.app.platform
 import org.sqlite.SQLiteErrorCode
 import org.sqlite.SQLiteException
 import works.merc.keryx.app.core.CloudDataIncompatibleException
+import works.merc.keryx.app.core.SchemaVersionException
+import works.merc.keryx.app.domain.TransportFileKind
+import works.merc.keryx.app.domain.TransportMeta
+import works.merc.keryx.app.domain.TransportSchema
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.domain.MergeSchema
 import works.merc.keryx.app.domain.MergeSql
@@ -25,6 +29,74 @@ import kotlin.test.assertTrue
  * as a genuinely incompatible schema (see [works.merc.keryx.app.domain.MergeFailureClassifier]).
  */
 class DatabaseMergerTest {
+
+    // ---- Transport mode ----
+
+    private fun transportFile(vararg statements: String): File {
+        val file = File.createTempFile("keryx-transport-", ".db").apply { deleteOnExit() }
+        TransportFiles.createEmpty(
+            file.absolutePath,
+            TransportMeta("0f1e2d3c-4b5a-4968-8778-695a4b3c2d1e", TransportFileKind.DELTA, "a1b2c3d4-e5f6-4789-8abc-def012345678", 1, 1),
+        )
+        TransportConnections.open(file.absolutePath, TransportOpenMode.READ_WRITE).use { c -> statements.forEach(c::exec) }
+        return file
+    }
+
+    private fun tables(file: File): Set<String> = DriverManager.getConnection("jdbc:sqlite:${file.absolutePath}").use { c ->
+        c.createStatement().use { st -> st.executeQuery("SELECT name FROM sqlite_master WHERE type = 'table'").use { rs -> buildSet { while (rs.next()) add(rs.getString(1)) } } }
+    }
+
+    @Test
+    fun aTransportFileIsMergedWithoutTheLocalMigrationsTouchingIt() {
+        val (local, driver, _) = fileDb()
+        driver.close()
+        val transport = transportFile(
+            "INSERT INTO feeds (id, url, title, updated_at, created_at, sort_order) VALUES ('ft', 'https://t', 'T', 1, 1, 0)",
+        )
+        val before = tables(transport)
+        try {
+            DatabaseMerger.mergeTransport(local.absolutePath, transport.absolutePath, MergeSql.all)
+            assertEquals(before, tables(transport), "no device-local table or trigger is added to a transport file")
+            assertTrue(DriverManager.getConnection("jdbc:sqlite:${local.absolutePath}").use { c ->
+                c.createStatement().use { st -> st.executeQuery("SELECT COUNT(*) FROM feeds WHERE id = 'ft'").use { rs -> rs.next(); rs.getInt(1) == 1 } }
+            })
+        } finally {
+            local.delete()
+            transport.delete()
+        }
+    }
+
+    @Test
+    fun aNewerTransportFileIsASchemaVersionException() {
+        val (local, driver, _) = fileDb()
+        driver.close()
+        val transport = transportFile("PRAGMA user_version = ${TransportSchema.VERSION + 1}")
+        try {
+            val e = assertFailsWith<SchemaVersionException> { DatabaseMerger.mergeTransport(local.absolutePath, transport.absolutePath, MergeSql.all) }
+            assertEquals(TransportSchema.VERSION, e.localVersion)
+        } finally {
+            local.delete()
+            transport.delete()
+        }
+    }
+
+    @Test
+    fun aTransportFileMissingATableIsIncompatibleButALocalFaultIsNot() {
+        val (local, driver, _) = fileDb()
+        driver.close()
+        val broken = transportFile("DROP TABLE tags")
+        val intact = transportFile()
+        try {
+            assertFailsWith<CloudDataIncompatibleException> { DatabaseMerger.mergeTransport(local.absolutePath, broken.absolutePath, MergeSql.all) }
+            DriverManager.getConnection("jdbc:sqlite:${local.absolutePath}").use { c -> c.createStatement().use { it.execute("DROP TABLE global_settings") } }
+            // A broken local schema with an intact transport file is rethrown unclassified.
+            assertFailsWith<SQLException> { DatabaseMerger.mergeTransport(local.absolutePath, intact.absolutePath, MergeSql.all) }
+        } finally {
+            local.delete()
+            broken.delete()
+            intact.delete()
+        }
+    }
 
     @Test
     fun validSchemaReturnsTrue() {

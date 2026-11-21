@@ -1,8 +1,6 @@
 -- Cloud sync metadata (KVS, device-local — NOT synced). Known keys are the
--- core/Constants.kt SYNC_STATE_* values: SYNC_STATE_LAST_SYNCED_AT ("last_synced_at", Unix ms),
--- SYNC_STATE_CLOUD_FILE_REV ("cloud_file_rev" — provider-specific: Dropbox rev / Google Drive
--- version / OneDrive eTag, used for conflict detection), SYNC_STATE_LAST_UPLOADED_DIGEST
--- ("last_uploaded_snapshot_digest").
+-- core/Constants.kt SYNC_STATE_* values: SYNC_STATE_LAST_SYNCED_AT ("last_synced_at", Unix ms) and
+-- the delta sync's ks_* keys (see "Local Bookkeeping" in docs/sync-architecture.md).
 
 CREATE TABLE sync_state (
     key   TEXT NOT NULL PRIMARY KEY,
@@ -16,3 +14,12 @@ upsert:
 INSERT INTO sync_state (key, value)
 VALUES (?, ?)
 ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+
+delete:
+DELETE FROM sync_state WHERE key = ?;
+
+-- Disconnecting: every key tied to the cloud connection (the ks_* keys and the pre-delta ones),
+-- keeping last_synced_at.
+deleteConnectionKeys:
+DELETE FROM sync_state
+WHERE key LIKE 'ks!_%' ESCAPE '!' OR key IN ('cloud_file_rev', 'last_uploaded_snapshot_digest');

@@ -244,3 +244,40 @@ WHERE rowid = :rowid AND content IS :content AND summary IS :summary;
 removeSearchPendingOrphan:
 DELETE FROM ks_search_pending
 WHERE rowid = :rowid AND NOT EXISTS (SELECT 1 FROM articles WHERE articles.rowid = :rowid);
+
+-- Joining a generation: recording on, a full send due (domain/SyncRepository).
+setCapture:
+UPDATE sync_capture SET enabled = :enabled, full_pending = :fullPending WHERE id = 1;
+
+clearFullPending:
+UPDATE sync_capture SET full_pending = 0 WHERE id = 1;
+
+-- A committed send: the outbox entries it covered (seq <= its high-water mark S).
+deleteOutboxUpTo:
+DELETE FROM sync_outbox WHERE seq <= ?;
+
+outboxNonEmpty:
+SELECT EXISTS (SELECT 1 FROM sync_outbox);
+
+appliedAll:
+SELECT name FROM sync_applied;
+
+insertApplied:
+INSERT OR IGNORE INTO sync_applied (name) VALUES (?);
+
+deleteApplied:
+DELETE FROM sync_applied WHERE name = ?;
+
+clearApplied:
+DELETE FROM sync_applied;
+
+cursorAll:
+SELECT device, seq FROM sync_cursor;
+
+-- A cursor only moves forward.
+upsertCursor:
+INSERT INTO sync_cursor (device, seq) VALUES (:device, :seq)
+ON CONFLICT(device) DO UPDATE SET seq = MAX(seq, excluded.seq);
+
+clearCursors:
+DELETE FROM sync_cursor;

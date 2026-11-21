@@ -183,8 +183,9 @@
 ### sync_state（KVS, 非同期）
 
 `key`(PK), `value`。既知キー: `last_synced_at`（Unix ミリ秒）, `ks_device_id`（現在の世代でのこの端末の同期 ID）,
-`ks_generation`, `ks_last_seq`（この端末が最後に確定した差分）, `ks_attempt`（送信中の差分: 番号・名前・outbox の
-上限）, `ks_pointer_rev`, `ks_legacy_stub_rev`。端末ローカルで、クラウドとの接続を解除・切り替えると
+`ks_generation`, `ks_last_seq`（この端末が最後に確定した差分）, `ks_attempt`（送信中のファイル: 番号・名前・outbox の
+上限・全量送信かどうか）, `ks_pointer_rev`, `ks_received_at`（この端末が最後に受信を終えた時刻）, `ks_bases`（JSON:
+この端末が自分の世代のベースについて知っていること）, `ks_legacy_stub_rev`。端末ローカルで、クラウドとの接続を解除・切り替えると
 （`last_synced_at` 以外）消す。
 
 ### 同期の管理情報（端末ローカル、非同期）

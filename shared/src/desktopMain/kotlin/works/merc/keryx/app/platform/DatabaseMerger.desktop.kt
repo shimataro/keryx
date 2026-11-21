@@ -17,6 +17,7 @@ import works.merc.keryx.app.domain.MainRuledOutVerdict
 import works.merc.keryx.app.domain.MergeFailureClassifier
 import works.merc.keryx.app.domain.MergeSchema
 import works.merc.keryx.app.domain.SqliteFailureCategory
+import works.merc.keryx.app.domain.TransportSchema
 import java.sql.Connection
 import java.sql.DriverManager
 import java.sql.SQLException
@@ -43,6 +44,20 @@ actual object DatabaseMerger {
         mergeStatements: List<String>,
     ) = merge(localDbPath, cloudDbPath, localSchemaVersion, mergeStatements, ::migrateCloudIfOlder)
 
+    actual fun mergeTransport(
+        localDbPath: String,
+        transportPath: String,
+        mergeStatements: List<String>,
+    ) = mergeChecked(
+        localDbPath = localDbPath,
+        cloudDbPath = transportPath,
+        supportedVersion = TransportSchema.VERSION,
+        mergeStatements = mergeStatements,
+        migrateCloud = { path, _ -> TransportFiles.prepareForMerge(path) },
+        validateCloudSchema = TransportFiles::schemaMatches,
+        rollbackMerge = Connection::rollback,
+    )
+
     /**
      * [merge] with its cloud-only phase supplied by the caller — [migrateCloudIfOlder] in
      * production. `internal` so a test can make that phase fail with a genuine SQLite error the
@@ -61,7 +76,32 @@ actual object DatabaseMerger {
         mergeStatements: List<String>,
         migrateCloud: (cloudDbPath: String, localSchemaVersion: Long) -> Unit,
         rollbackMerge: (Connection) -> Unit = Connection::rollback,
+    ) = mergeChecked(
+        localDbPath = localDbPath,
+        cloudDbPath = cloudDbPath,
+        supportedVersion = localSchemaVersion,
+        mergeStatements = mergeStatements,
+        migrateCloud = migrateCloud,
+        validateCloudSchema = { path -> validateSchema(path, localSchemaVersion) },
+        rollbackMerge = rollbackMerge,
+    )
+
+    /**
+     * The merge for either kind of cloud file: [supportedVersion] is the highest `user_version`
+     * accepted, [migrateCloud] brings the file up to it (touching only that file), and
+     * [validateCloudSchema] resolves the ambiguous `SQLITE_ERROR` case against the file's expected
+     * schema.
+     */
+    private fun mergeChecked(
+        localDbPath: String,
+        cloudDbPath: String,
+        supportedVersion: Long,
+        mergeStatements: List<String>,
+        migrateCloud: (cloudDbPath: String, localSchemaVersion: Long) -> Unit,
+        validateCloudSchema: (cloudDbPath: String) -> Boolean?,
+        rollbackMerge: (Connection) -> Unit,
     ) {
+        val localSchemaVersion = supportedVersion
         val verdict = MainRuledOutVerdict()
         try {
             mergeUnclassified(localDbPath, cloudDbPath, localSchemaVersion, mergeStatements, migrateCloud, rollbackMerge, verdict)
@@ -71,7 +111,7 @@ actual object DatabaseMerger {
             // needs an app update, not a cloud-data reset).
             throw e
         } catch (e: Throwable) {
-            throw classifyMergeFailure(e, cloudDbPath, localSchemaVersion, verdict.mainRuledOutFor(e))
+            throw classifyMergeFailure(e, cloudDbPath, validateCloudSchema, verdict.mainRuledOutFor(e))
         }
     }
 
@@ -193,7 +233,7 @@ actual object DatabaseMerger {
     private fun classifyMergeFailure(
         e: Throwable,
         cloudDbPath: String,
-        localSchemaVersion: Long,
+        validateCloudSchema: (cloudDbPath: String) -> Boolean?,
         mainRuledOut: Boolean?,
     ): Throwable {
         val sqliteCause = e.findSqliteCause() ?: return e
@@ -202,7 +242,7 @@ actual object DatabaseMerger {
             category = category,
             errorCodeName = sqliteCause.resultCode.name,
             mainRuledOut = mainRuledOut,
-            validateCloudSchema = { validateSchema(cloudDbPath, localSchemaVersion) },
+            validateCloudSchema = { validateCloudSchema(cloudDbPath) },
             cloudIntegrityOk = { cloudIntegrityOk(cloudDbPath) },
         )
         if (classified == null) {

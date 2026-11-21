@@ -91,6 +91,34 @@ const val CLOUD_DB_BACKUP_SUFFIX = ".db.gz.bak"
 const val MAX_SYNC_DB_SIZE_BYTES = 1024L * 1024 * 1024 // 1 GiB
 
 const val SYNC_MAX_RETRY = 3
+
+/** The pointer file naming the current generation (see "Cloud File Structure" in sync-architecture.md). */
+const val SYNC_POINTER_PATH = "/keryx-sync.json"
+
+/** The pointer `format` this build writes and reads; a newer one is a `SchemaVersionException`. */
+const val SYNC_POINTER_FORMAT = 3L
+
+/** Largest pointer file read (it holds two short fields); a larger one is malformed. */
+const val SYNC_POINTER_MAX_BYTES = 64L * 1024
+
+/** Fold once this many deltas are not covered by any base ("Bases and Garbage Collection"). */
+const val KS_COMPACT_MIN_DELTAS = 100
+
+/** Fold once the uncovered deltas reach this fraction of the largest base's size. */
+const val KS_COMPACT_MAX_DELTA_RATIO = 0.25
+
+/**
+ * How long a delta stays after a base covering it was created; also how old a delta must be before a
+ * base's `ks_vector` (rather than its `ks_covered`) may imply it.
+ */
+const val KS_DELTA_GRACE_MS = 7 * 24 * 60 * 60 * 1000L
+
+/**
+ * A device whose last receive is older than [KS_DELTA_GRACE_MS] minus this margin fetches the bases
+ * of its generation, since a delta it never saw may have been garbage-collected meanwhile. The
+ * margin covers listing delay and clock differences between devices.
+ */
+const val KS_RECEIVE_STALE_MARGIN_MS = 24 * 60 * 60 * 1000L
 const val FEED_TIMEOUT_RETRY_COUNT = 1
 const val SYNC_DEBOUNCE_MS = 5_000L
 
@@ -210,14 +238,34 @@ const val ARTICLE_CONTENT_CACHE_LIMIT = 8
 
 // --- sync_state keys ---
 const val SYNC_STATE_LAST_SYNCED_AT = "last_synced_at"
-const val SYNC_STATE_CLOUD_FILE_REV = "cloud_file_rev"
 
 /**
- * Hex SHA-256 of the snapshot most recently uploaded to the cloud. A freshly built snapshot with
- * the same digest carries no change this device has not already published, so the upload is
- * skipped. Device-local (`sync_state` is excluded from the uploaded snapshot).
+ * Keys of the pre-delta sync (the revision of `keryx.db.gz` last merged, and the digest of the last
+ * uploaded snapshot). No longer written; deleted on disconnect along with the `ks_*` keys.
  */
-const val SYNC_STATE_LAST_UPLOADED_DIGEST = "last_uploaded_snapshot_digest"
+const val SYNC_STATE_LEGACY_CLOUD_FILE_REV = "cloud_file_rev"
+const val SYNC_STATE_LEGACY_UPLOADED_DIGEST = "last_uploaded_snapshot_digest"
+
+/** This device's sync identity in the current generation (a lowercase UUID). */
+const val SYNC_STATE_KS_DEVICE_ID = "ks_device_id"
+
+/** The generation this device has joined (a lowercase UUID, named by the pointer). */
+const val SYNC_STATE_KS_GENERATION = "ks_generation"
+
+/** The number of the last delta this device committed under [SYNC_STATE_KS_DEVICE_ID]. */
+const val SYNC_STATE_KS_LAST_SEQ = "ks_last_seq"
+
+/** The file being sent but not yet committed: `<n>|<name>|<S or empty>|<1 if a full send else 0>`. */
+const val SYNC_STATE_KS_ATTEMPT = "ks_attempt"
+
+/** The pointer revision whose generation equals [SYNC_STATE_KS_GENERATION]. */
+const val SYNC_STATE_KS_POINTER_REV = "ks_pointer_rev"
+
+/** When this device last completed a receive (Unix millis, its own clock). */
+const val SYNC_STATE_KS_RECEIVED_AT = "ks_received_at"
+
+/** What this device knows of the bases of its generation (JSON; see `domain/SyncBaseCache`). */
+const val SYNC_STATE_KS_BASES = "ks_bases"
 
 // --- Window / pane sizing (desktop) ---
 const val WINDOW_DEFAULT_WIDTH = 1280
