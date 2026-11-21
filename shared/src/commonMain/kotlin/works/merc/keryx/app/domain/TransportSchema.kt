@@ -90,8 +90,12 @@ object TransportSchema {
      */
     private val KS_VECTOR = TableSpec("ks_vector", listOf(req("device", ID), req("seq", COUNT)), primaryKey = listOf("device"))
 
-    /** `ks_covered(name)` (filled in bases only): the delta file names this base folded. */
-    private val KS_COVERED = TableSpec("ks_covered", listOf(req("name", ID)), primaryKey = listOf("name"))
+    /**
+     * `ks_covered(name, created_at)` (filled in bases only): the delta file names this base folded
+     * that its vector does not imply, each with the delta's creation time (its `ks_meta.created_at`;
+     * NULL when unknown) — what garbage collection and vector extension measure a delta's age by.
+     */
+    private val KS_COVERED = TableSpec("ks_covered", listOf(req("name", ID), opt("created_at", STAMP)), primaryKey = listOf("name"))
 
     /**
      * The six synced tables of transport version 1, in FK-safe order. They are exactly local schema

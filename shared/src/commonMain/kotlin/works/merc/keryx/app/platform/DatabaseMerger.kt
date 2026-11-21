@@ -29,6 +29,23 @@ expect object DatabaseMerger {
     )
 
     /**
+     * [merge] for a transport file (a delta, a base, or the fold of several — see "Receiving" in
+     * `docs/sync-architecture.md`) rather than a pre-delta database: `KeryxDatabase.Schema.migrate` is
+     * never run on it (it would add the device-local tables and triggers). Before attaching, the file
+     * is brought to [works.merc.keryx.app.domain.TransportSchema.VERSION]
+     * ([TransportFiles.prepareForMerge] — a newer file is a
+     * [works.merc.keryx.app.core.SchemaVersionException]); its `user_version` is checked against that
+     * version, and the ambiguous `SQLITE_ERROR` case is resolved against the transport schema
+     * ([TransportFiles.schemaMatches]) instead of the local one. Everything else — the dedicated
+     * connection, the single transaction, the failure classification — is [merge]'s.
+     */
+    fun mergeTransport(
+        localDbPath: String,
+        transportPath: String,
+        mergeStatements: List<String>,
+    )
+
+    /**
      * Validates that the database at [dbPath] carries the schema (tables and columns)
      * [works.merc.keryx.app.domain.MergeSql] needs for [schemaVersion].
      *

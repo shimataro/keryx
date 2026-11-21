@@ -61,6 +61,7 @@ class BackgroundUpdateLoopTest {
                     single { settingsRepository }
                     single { activityCenter }
                     single { fts }
+                    single { SearchTextBackfill(db, fts, dispatcher = Dispatchers.Unconfined) }
                     factory<RefreshCycleRunner> {
                         refreshCycleAttempts.incrementAndGet()
                         error("refresh cycle failed (test)")

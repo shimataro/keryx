@@ -15,6 +15,7 @@ import works.merc.keryx.app.domain.MainRuledOutVerdict
 import works.merc.keryx.app.domain.MergeFailureClassifier
 import works.merc.keryx.app.domain.MergeSchema
 import works.merc.keryx.app.domain.SqliteFailureCategory
+import works.merc.keryx.app.domain.TransportSchema
 
 /**
  * Android implementation. Opens a dedicated `io.requery.android.database.sqlite.SQLiteDatabase`
@@ -48,17 +49,52 @@ actual object DatabaseMerger {
         cloudDbPath: String,
         localSchemaVersion: Long,
         mergeStatements: List<String>,
+    ) = mergeChecked(
+        localDbPath = localDbPath,
+        cloudDbPath = cloudDbPath,
+        supportedVersion = localSchemaVersion,
+        mergeStatements = mergeStatements,
+        migrateCloud = { path -> migrateCloudIfOlder(path, localSchemaVersion) },
+        validateCloudSchema = { path -> validateSchema(path, localSchemaVersion) },
+    )
+
+    actual fun mergeTransport(
+        localDbPath: String,
+        transportPath: String,
+        mergeStatements: List<String>,
+    ) = mergeChecked(
+        localDbPath = localDbPath,
+        cloudDbPath = transportPath,
+        supportedVersion = TransportSchema.VERSION,
+        mergeStatements = mergeStatements,
+        migrateCloud = TransportFiles::prepareForMerge,
+        validateCloudSchema = TransportFiles::schemaMatches,
+    )
+
+    /**
+     * The merge for either kind of cloud file: [supportedVersion] is the highest `user_version`
+     * accepted, [migrateCloud] brings the file up to it (touching only that file), and
+     * [validateCloudSchema] resolves the ambiguous `SQLITE_ERROR` case against the file's expected
+     * schema.
+     */
+    private fun mergeChecked(
+        localDbPath: String,
+        cloudDbPath: String,
+        supportedVersion: Long,
+        mergeStatements: List<String>,
+        migrateCloud: (cloudDbPath: String) -> Unit,
+        validateCloudSchema: (cloudDbPath: String) -> Boolean?,
     ) {
         val verdict = MainRuledOutVerdict()
         try {
-            mergeUnclassified(localDbPath, cloudDbPath, localSchemaVersion, mergeStatements, verdict)
+            mergeUnclassified(localDbPath, cloudDbPath, supportedVersion, mergeStatements, migrateCloud, verdict)
         } catch (e: SchemaVersionException) {
             // Already classified — must not fall into the Throwable catch-all below, which would
             // reclassify it as CloudDataIncompatibleException (the wrong recovery action: this
             // needs an app update, not a cloud-data reset).
             throw e
         } catch (e: Throwable) {
-            throw classifyMergeFailure(e, cloudDbPath, localSchemaVersion, verdict.mainRuledOutFor(e))
+            throw classifyMergeFailure(e, cloudDbPath, validateCloudSchema, verdict.mainRuledOutFor(e))
         }
     }
 
@@ -73,12 +109,13 @@ actual object DatabaseMerger {
         cloudDbPath: String,
         localSchemaVersion: Long,
         mergeStatements: List<String>,
+        migrateCloud: (cloudDbPath: String) -> Unit,
         verdict: MainRuledOutVerdict,
     ) {
         // Bring an older cloud DB up to the local schema first, so the merge statements can
         // reference columns added in newer versions without a "no such column" failure.
         try {
-            migrateCloudIfOlder(cloudDbPath, localSchemaVersion)
+            migrateCloud(cloudDbPath)
         } catch (e: Throwable) {
             // This phase touches only the downloaded cloud temp file, never main, so main cannot be
             // the cause of anything it throws (e.g. a constraint failure while migrating the cloud
@@ -154,7 +191,7 @@ actual object DatabaseMerger {
     private fun classifyMergeFailure(
         e: Throwable,
         cloudDbPath: String,
-        localSchemaVersion: Long,
+        validateCloudSchema: (cloudDbPath: String) -> Boolean?,
         mainRuledOut: Boolean?,
     ): Throwable {
         val category = e.failureCategory() ?: return e
@@ -162,7 +199,7 @@ actual object DatabaseMerger {
             category = category,
             errorCodeName = e::class.simpleName ?: "SQLiteException",
             mainRuledOut = mainRuledOut,
-            validateCloudSchema = { validateSchema(cloudDbPath, localSchemaVersion) },
+            validateCloudSchema = { validateCloudSchema(cloudDbPath) },
             cloudIntegrityOk = { cloudIntegrityOk(cloudDbPath) },
         )
         if (classified == null) {

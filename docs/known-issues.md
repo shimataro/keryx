@@ -537,6 +537,51 @@ the content, so two files with one name are the same file.
 A server-side precondition on Drive's content update (an `If-Match` on `files.update`, or equivalent).
 With it, `upload` would pass `expectedRev` to the write itself, as the OneDrive and Nextcloud storages do.
 
+## Delta sync measures a delta's age by the clock of the device that wrote it
+
+**Status**: not fixed — closing it needs a time source the devices share, which the providers do not offer
+in a form every one of them supports (a redesign outside delta sync's scope). With ordinary clocks nothing
+happens; a clock far behind delays another device's convergence, and in one case (a cloned database writing under a
+shared identity) can leave a change unreachable for devices that join later.
+
+### Symptom
+
+Two rules of "Bases and Garbage Collection" in [sync-architecture.md](sync-architecture.md) compare a delta's
+`ks_meta.created_at` — the writing device's clock — with the clock of the device that folds or collects:
+
+- a delta is garbage-collected once it is `KS_DELTA_GRACE_MS` old, and
+- a base's `ks_vector` extends only over deltas that old (so a clone's duplicate of a `(device, seq)` cannot be
+  implied without having been folded).
+
+A device whose clock runs far behind writes deltas that look old at once. Its delta can then be collected as
+soon as a base covers it, before a device that last received less than a week ago lists it. That device sees no
+gap when the writer has gone quiet, and merges the change only when its own last receive becomes older than
+`KS_DELTA_GRACE_MS − KS_RECEIVE_STALE_MARGIN_MS` and it fetches the bases — up to six days late. And if that
+writer is a cloned copy of another device, a duplicate it wrote under the shared identity could be implied by a
+vector without having been folded, so a device joining after the duplicate's collection would not get it (the
+devices that merged it while it was listed keep it).
+
+### Diagnosis
+
+The providers' listings carry no reliable server-side creation time across all four providers, so the age has to
+come from inside the file. `KS_RECEIVE_STALE_MARGIN_MS` (one day) absorbs ordinary clock differences and listing
+delay; only a clock off by more than that reaches the cases above. A receive time in this device's future (its
+clock set back since) is treated as stale, so a device's own clock jump never stops it from fetching the bases.
+
+### Ruled out
+
+- **The base's creation time instead of the delta's** — an active account rebuilds its base more often than
+  weekly, and a dominated base is deleted, so no base would ever reach the grace period and no delta would ever
+  be collected.
+- **Listing every folded delta in `ks_covered`** (no vector implication) — closes the clone case, but the list
+  grows with every delta ever written, which is what the vector exists to avoid.
+
+### What a real fix would need
+
+A creation time the server assigns, read from the listing of every provider (Dropbox's `server_modified`, Drive's
+`createdTime`, OneDrive's `createdDateTime`, Nextcloud's `getlastmodified`), carried into `CloudFileEntry` and used
+in place of `ks_meta.created_at` for both rules.
+
 ## Linux/GNOME: the tray menu briefly shows the previous label when it opens
 
 **Status**: not fixed — external (GNOME Shell AppIndicator extension) design limitation, and not

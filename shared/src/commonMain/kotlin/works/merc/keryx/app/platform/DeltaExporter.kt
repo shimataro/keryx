@@ -4,6 +4,7 @@ import works.merc.keryx.app.core.SQLITE_BUSY_TIMEOUT_MS
 import works.merc.keryx.app.domain.DeltaExportSql
 import works.merc.keryx.app.domain.SnapshotSql
 import works.merc.keryx.app.domain.TransportFileKind
+import works.merc.keryx.app.domain.TransportFileName
 import works.merc.keryx.app.domain.TransportMeta
 
 /**
@@ -92,12 +93,22 @@ object DeltaExporter {
      * base just merged) is given, a row identical on every transport column to that file's row is left
      * out ([DeltaExportSql.fullStatements]).
      *
+     * @param vector the `ks_vector` rows to write in the same transaction — a full send uploaded as a
+     * base (the first device's, a reset's) covers its own delta `1` this way. Device ids must be sync
+     * ids.
      * @return the export, whose `S` is the copy's outbox high-water mark (`null` for an empty outbox:
      * a file is still written, since a full send covers every row, not only recorded changes).
      * @throws IllegalStateException when the result would hold a dangling reference; nothing is left
      * at [destPath].
      */
-    fun exportFull(snapshotPath: String, destPath: String, meta: TransportMeta, exceptPath: String?): FullExport {
+    fun exportFull(
+        snapshotPath: String,
+        destPath: String,
+        meta: TransportMeta,
+        exceptPath: String?,
+        vector: Map<String, Long> = emptyMap(),
+    ): FullExport {
+        require(vector.all { (device, seq) -> TransportFileName.isSyncId(device) && seq >= 1 }) { "Malformed vector" }
         val attachments = buildList {
             add(DeltaExportSql.SOURCE to snapshotPath)
             if (exceptPath != null) add(DeltaExportSql.EXCEPT to exceptPath)
@@ -106,6 +117,9 @@ object DeltaExporter {
             writeTransportFile(destPath, meta, attachments) { connection ->
                 val s = connection.highWaterMark()
                 DeltaExportSql.fullStatements(withExcept = exceptPath != null).forEach(connection::exec)
+                for ((device, seq) in vector) {
+                    connection.exec("INSERT INTO main.ks_vector (device, seq) VALUES ('$device', $seq)")
+                }
                 FullExport(s, finish(connection))
             },
         )

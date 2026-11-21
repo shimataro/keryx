@@ -416,6 +416,11 @@ does not override.
 
 ATTACH DATABASE merge runs through `platform/DatabaseMerger`, NOT the SQLDelight driver. SQLDelight's JVM `JdbcSqliteDriver` opens a fresh connection per statement for file DBs, so an `ATTACH` on one call is invisible to the merge statements on the next. `DatabaseMerger` does the whole attach → version check → merge → detach on a single dedicated JDBC connection.
 
+It has two entry points with one implementation per `actual`: `mergeTransport` for a delta-sync transport file
+(checked against `TransportSchema` — its version, its migrations through `TransportFiles.prepareForMerge`, and
+`TransportFiles.schemaMatches` for the classification's schema check; `KeryxDatabase.Schema.migrate` never runs on it)
+and `merge` for a pre-delta database (migrated with `KeryxDatabase.Schema.migrate`, checked against `MergeSchema`).
+
 Only the SQLite-driver conversation is platform-specific. The decision *policy* lives in
 `commonMain`: `domain/MergeFailureClassifier` (a pure function of the failure category and the
 evidence each category needs → `CloudDataIncompatibleException?`; the inputs and the checks each
