@@ -16,31 +16,40 @@
 ## 設計方針
 
 - 全テーブルは SQLDelight（`.sq`）で管理。`articles_fts` のみ生 SQL（`FtsManager`）で別途作成する。
+- **同期対象のテーブル**は `feeds`、`articles`、`tags`、`feed_tags`、`folders`、`global_settings` で、後述の端末ローカルの
+  列（`articles.search_text`。フィードの取得状態は専用のテーブルにある）は除く。同期対象の行へのローカルの変更は
+  すべてトリガーが `sync_outbox` に記録し、差分として送る——[sync-architecture.ja.md](sync-architecture.ja.md) 参照。
 - 論理削除は `deleted_at`（NULL = 生存）。同期タイムスタンプは `updated_at`。
 - 同じ行で、削除と、それを打ち消す操作に同じ時刻がつくことはない。`tags` / `folders` の `updated_at` と、`feeds` の
   `deleted_updated_at` は、論理削除と、作り直し・有効化（`upsertByName`）や再購読（`stampResubscribed`）のときに
   `MAX(今の時刻, 前の値 + 1)` で書くので、1 ミリ秒の中でも必ず増える。同期マージの last-write-wins が順序をつけられるのは
-  時刻の違う操作だけで、同じ時刻だとタイブレーク規則（クラウド側が勝つ。[sync-architecture.ja.md](sync-architecture.ja.md)
+  時刻の違う操作だけで、同じ時刻だとタイブレーク規則（値で決める。[sync-architecture.ja.md](sync-architecture.ja.md)
   参照）で決まる。この規則はどちらが後の操作かを知らないので、同じ時刻だと先の操作が勝つことがあり、作り直した行も
   削除前の行と区別できなくなる。
   これらの時刻は実際の時刻より数ミリ秒先に進むことがあるので、その行へのほかのローカルの書き込みも同じように時刻を
-  前に進め、直後に行った編集が必ず最新になるようにしている。`folders` では、名前変更（`upsert`）と並べ替え
-  （`updateSortOrder`）、`tags` では名前・色の変更（`upsert`）がそれにあたる。
+  前に進め、直後に行った編集が必ず最新になるようにしている。
 - **ほかの last-write-wins のタイムスタンプも、すべて同じように行の上で前にしか進まない**（`MAX(今の時刻, 前の値 + 1)`）。
   `feeds.custom_title_updated_at` / `folder_updated_at` / `sort_order_updated_at`（`updateCustomTitle`、`updateFolder`、
   `updateSortOrder`、`updateFolderAndSortOrder`）、`articles.read_at` / `starred_at`（`updateReadStatus`、
   `updateReadStatusByIds`、`updateStarStatus`、`markAllRead*` の各クエリ）と `deleted_updated_at`（`softDeleteExpired`）、
-  `feed_tags.updated_at` / `global_settings.updated_at`（`upsert`）がそれにあたる。こうしないと、行がすでに持つ値と同じ
-  時刻の書き込み（1 ミリ秒の中の 2 回の書き込みや、マージがその時刻を取り込んだ直後の書き込み）は、同着はクラウド側が
-  勝つので、次のマージで古い値に負ける。これで同着になるのは、2 台の端末で別々に行った書き込みの間だけになる。
+  `tags.name_updated_at` / `color_updated_at` / `sort_order_updated_at` と `folders.name_updated_at` /
+  `sort_order_updated_at`（それぞれ自分のフィールドが変わったときだけ進める——`upsert`、`updateSortOrder`、
+  `upsertByName`）、`feed_tags.updated_at` / `global_settings.updated_at`（`upsert`）がそれにあたる。こうしないと、行が
+  すでに持つ値と同じ時刻の書き込み（1 ミリ秒の中の 2 回の書き込みや、マージがその時刻を取り込んだ直後の書き込み）は、
+  どちらが後の書き込みかを知らない同着の規則によって、次のマージで古い値に負けうる。これで同着になるのは、2 台の端末で別々に行った書き込みの間だけになる。
 - 真偽値・タイムスタンプは **INTEGER（`Long`）**。真偽値は 0/1、時刻は Unix ミリ秒。
-- スキーマバージョンは `PRAGMA user_version`（現在 2）。desktop では `DatabaseDriverFactory` がこのプラグマを見て
+- スキーマバージョンは `PRAGMA user_version`（現在 3）。desktop では `DatabaseDriverFactory` がこのプラグマを見て
   create/migrate を自前で駆動するが、Android では `AndroidSqliteDriver` が自身の `onCreate`/`onUpgrade` コールバック内で
-  内部的に駆動する。バージョン 2 は `1.sqm` で `articles.deleted_at` / `deleted_updated_at` を追加する（SQLDelight は
-  最大のマイグレーションファイル + 1 でバージョンを導出）。スキーマを変える場合は `.sqm` ファイル
-  （`<移行元バージョン>.sqm`）を追加すればバージョンは自動で上がる。あわせて
-  `domain/MergeSchema.EXPECTED_SCHEMAS`（`DatabaseMerger.validateSchema` が参照する期待スキーマ）を
-  新バージョンに追随させること。
+  内部的に駆動する。バージョン 2 は `1.sqm` で `articles.deleted_at` / `deleted_updated_at` を追加する。バージョン 3
+  （`2.sqm`）は、同期の管理情報（`sync_outbox`、`sync_capture`、`sync_merging`、`sync_applied`、`sync_cursor`、
+  `ks_search_pending` と記録用トリガー）を追加し、`feeds` の `etag` / `last_modified` / `error_count` / `last_error` を
+  `feed_fetch_state` に移し（`ALTER TABLE … DROP COLUMN`、SQLite 3.35 以上）、`tags` / `folders` のフィールドごとの
+  スタンプを追加し（初期値は `updated_at`）、`search_text` が生の `content` / `summary` と同じままの記事（HTML 除去の
+  導入前に書かれた行）を `ks_search_pending` に登録する。（SQLDelight は最大のマイグレーションファイル + 1 で
+  バージョンを導出。）スキーマを変える場合は `.sqm` ファイル（`<移行元バージョン>.sqm`）を追加すればバージョンは自動で
+  上がる。あわせて `domain/MergeSchema.EXPECTED_SCHEMAS`（`DatabaseMerger.validateSchema` が参照する期待スキーマ）、
+  `domain/TransportSchema`（差分ファイルのスキーマとそのマイグレーション）、記録用トリガーが比較する列の一覧を
+  一緒に更新すること。
   `user_version` が実行中ビルドのスキーマより新しいファイルは決して開かない：desktop は何も書き込む前に
   `DatabaseTooNewException`（`data/local/DatabaseSchemaGuard.kt`）を投げる。Apple も同じガードで同様に拒否する——
   `DatabaseDriverFactory.apple.kt` の `createDriver` が `NativeSqliteDriver` でファイルを開く前に、ファイルの
@@ -49,12 +58,13 @@
 
 ## テーブル一覧
 
-`feeds` / `articles` / `tags` / `feed_tags` / `folders` / `global_settings` / `sync_state` / `articles_fts`（仮想）。
+`feeds` / `feed_fetch_state` / `articles` / `tags` / `feed_tags` / `folders` / `global_settings` / `sync_state` /
+同期の管理用テーブル / `articles_fts`（仮想）。
 
 ### feeds
 
-`id`(PK, UUID), `url`(UNIQUE), `site_url`, `title`, `description`, `favicon_url`, `etag`,
-`last_modified`, `error_count`, `last_error`, `custom_title`, `folder_id`(FK→folders, NULL可),
+`id`(PK, UUID), `url`(UNIQUE), `site_url`, `title`, `description`, `favicon_url`,
+`custom_title`, `folder_id`(FK→folders, NULL可),
 `deleted_at`, `updated_at`, `created_at`, `sort_order`, `folder_updated_at`(NULL可),
 `sort_order_updated_at`(NULL可), `custom_title_updated_at`(NULL可), `deleted_updated_at`(NULL可)。
 
@@ -64,10 +74,6 @@
   照合）が独立購読されたフィードを収束でき、記事 id（`feed_id` から導出）も一致する。既存 url の再購読は
   既存 id を再利用するため既存行は据え置き（新規のみ決定的）。
 - `deleted_at` で論理削除。再購読時に NULL へ戻す。
-- フィード一覧は `error_count > 0`（またはフィードが gone、後述）でエラー扱いとしてフラグを立てる。
-  `FEED_TIMEOUT_RETRY_COUNT` は無関係な別の定数で、`FeedFetcher` が1回のフェッチを諦めるまでの
-  リトライ予算（`core/Constants.kt`）。
-- `last_error` の用途は 2 つ: 直前の取得失敗の生のエラーテキストと、410 Gone のフィードに対する固定の内部マーカー `FEED_ERROR_REASON_GONE`（`"gone"`、`feeds.markGone` が書き込む）。410 は恒久的でリトライ対象ではないため意図的に `error_count` を増やさないので、このマーカーがフィード消失の唯一の目印であり、フィード一覧の目印（専用のローカライズ済みツールチップ付き。カラムの値そのものはユーザーに表示しない）の判定に使われる。次回の取得成功時に `resetErrorCount` がクリアする。
 - `folder_id` はフィードが属するフォルダー（1フィード = 最大1フォルダー）。タグ（`feed_tags`、多対多）とは
   独立した分類軸。`feeds.upsert`（購読・リフレッシュ用）はこの列に一切触れない設計にしており、
   フォルダー割り当ての変更は `feeds.updateFolder` / `updateFolderAndSortOrder` 経由でのみ行う（購読・
@@ -76,10 +82,24 @@
   **ユーザー編集フィールド（フォルダー割り当て・並び順・手動リネーム・購読状態）それぞれの後勝ち専用
   タイムスタンプ**（記事の `read_at` / `starred_at` と同じ考え方）。行全体の `updated_at`（内容リフレッシュで
   更新される）とは切り離すことで、他デバイスのリフレッシュがこれらの手動操作を同期マージで打ち消す不具合を
-  防ぐ。各フィールドを変える操作クエリのみが対応する列を更新し、`upsert`（リフレッシュ）は一切触らない。
+  防ぐ。各フィールドを変える操作クエリのみが対応する列を更新し、`upsert`（リフレッシュ）は一切触らない——ただし
+  フィードをグループの末尾に移す再購読は、新しい `sort_order` と一緒に `sort_order_updated_at` も打刻するので、新しい
+  位置がほかの端末に届く。
   NULL = そのイベント無し（「時刻 0 に発生」とは区別）。同期マージでは各フィールドをこれらの列で独立に
   後勝ち解決する（[sync-architecture.ja.md](sync-architecture.ja.md)）。購読解除は `softDelete`、再購読は
   `subscribeFeed` 内の `stampResubscribed` が `deleted_updated_at` をスタンプする。
+
+### feed_fetch_state（端末ローカル、非同期）
+
+`feed_id`(PK, FK→feeds), `etag`, `last_modified`, `error_count`（既定 0）, `last_error`。
+
+- この端末が最後にそのフィードを取得したときに得た情報。同期は決してしない: ほかの端末のバリデータ（`etag` /
+  `last_modified`）を使うと、この端末が取得したことのない内容について条件付きリクエストを送ってしまい、エラーは
+  それを見た端末のものだからである。行は最初の取得時に作る。行の無いフィードは「未取得、エラーなし」として扱う。
+- フィード一覧は `error_count > 0`（またはフィードが gone、後述）でエラー扱いとしてフラグを立てる——つまり、
+  **この端末で**取得に失敗したとき。`FEED_TIMEOUT_RETRY_COUNT` は無関係な別の定数で、`FeedFetcher` が1回の
+  フェッチを諦めるまでのリトライ予算（`core/Constants.kt`）。
+- `last_error` の用途は 2 つ: 直前の取得失敗の生のエラーテキストと、410 Gone のフィードに対する固定の内部マーカー `FEED_ERROR_REASON_GONE`（`"gone"`、`markGone` が書き込む）。410 は恒久的でリトライ対象ではないため意図的に `error_count` を増やさないので、このマーカーがフィード消失の唯一の目印であり、フィード一覧の目印（専用のローカライズ済みツールチップ付き。カラムの値そのものはユーザーに表示しない）の判定に使われる。次回の取得成功時に `resetErrorCount` がクリアする。
 
 ### articles
 
@@ -97,7 +117,10 @@
 - `content` は `summary` より優先して表示。両方 NULL の場合、その場にローカライズされた「本文なし」の
   プレースホルダーを表示する（外部ブラウザーで開くリンク／ボタン付き）。自動で何かが開くことはない。
 - `search_text` ＝ `content`（無ければ `summary`）の HTML タグを除去した平文。両方 NULL なら `""`。
-  挿入・更新時に計算する（`ArticleRepository`、`HtmlText.toPlainText`）。
+  挿入・更新時に計算する（`ArticleRepository`、`HtmlText.toPlainText`）。**端末ローカル**で、派生データなので
+  同期しない。同期マージが本文を埋めた、または変えた記事は `ks_search_pending` に登録し、マージの直後に
+  `search_text` を再計算する（新しく挿入された記事は `""` から始まる）。それまで `FtsManager.indexMissing()` は
+  登録された行を飛ばす。
 - `deleted_at`（NULL = 生存）で論理削除する。削除を**ローカルで発生させる**のはキャッシュ削除
   （`softDeleteExpired`）のみで、スター付き記事は削除しない（同期マージも `deleted_at` を書き込み、
   他デバイスでの削除を伝播する。後述）。`deleted_updated_at` は削除/復活イベントの
@@ -111,13 +134,19 @@
 
 ### tags / feed_tags
 
-`tags`: `id`(PK), `name`(UNIQUE), `color`, `sort_order`, `deleted_at`, `updated_at`, `created_at`。
+`tags`: `id`(PK), `name`(UNIQUE), `color`, `sort_order`, `deleted_at`, `updated_at`, `created_at`,
+`name_updated_at`, `color_updated_at`, `sort_order_updated_at`。
+
+- 名前・色・並び順は、それぞれ自分のスタンプで後勝ちにする（`feeds` の利用者が編集するフィールドと同じ）ので、
+  2 台が同じタグの別々のフィールドを変えれば、両方の変更が残る。`updated_at` は作成・削除・再有効化を打刻する。
 `feed_tags`: `feed_id` + `tag_id`（複合 PK）, `deleted_at`, `updated_at`。タグの付け外しは `deleted_at` で表現。
 
 ### folders
 
-`id`(PK), `name`(UNIQUE), `sort_order`, `deleted_at`, `updated_at`, `created_at`。
+`id`(PK), `name`(UNIQUE), `sort_order`, `deleted_at`, `updated_at`, `created_at`, `name_updated_at`,
+`sort_order_updated_at`。
 
+- 名前と並び順は、それぞれ自分のスタンプで後勝ちにする。`updated_at` は `tags` と同じく作成・削除・再有効化を打刻する。
 - タグとは独立した分類軸。1フィード = 最大1フォルダー（`feeds.folder_id`、多対多ではない）ため、
   `feed_tags` のような中間テーブルは持たない。
 - フォルダー削除時は `FolderRepository.deleteFolder` が同一トランザクションで、紐づく `feeds.folder_id`
@@ -138,22 +167,24 @@
 
 ### sync_state（KVS, 非同期）
 
-`key`(PK), `value`。既知キー: `last_synced_at`（Unix ミリ秒）, `cloud_file_rev`（**このデバイスがマージ済みの**
-クラウドファイルのリビジョン。Dropbox は `rev`、Google Drive は file resource の `id` と `version` を `<id>:<version>` にしたもの、OneDrive は
-DriveItem の `eTag`、Nextcloud は WebDAV の `ETag`（引用符を含む））, `last_uploaded_snapshot_digest`（このデバイスが最後にアップロードしたスナップショットの
-SHA-256 を hex 化したもの）。
+`key`(PK), `value`。既知キー: `last_synced_at`（Unix ミリ秒）, `ks_device_id`（現在の世代でのこの端末の同期 ID）,
+`ks_generation`, `ks_last_seq`（この端末が最後に確定した差分）, `ks_attempt`（送信中の差分: 番号・名前・outbox の
+上限）, `ks_pointer_rev`, `ks_legacy_stub_rev`。端末ローカルで、クラウドとの接続を解除・切り替えると
+（`last_synced_at` 以外）消す。
 
-後者2つは「やることが無い同期が何も転送しない」ために存在する。`cloud_file_rev` が変わっていなければ
-ダウンロードを、スナップショットのダイジェストが変わっていなければアップロードをスキップする
-（[sync-architecture.ja.md](sync-architecture.ja.md) の「変更がないときの転送スキップ」参照）。
+### 同期の管理情報（端末ローカル、非同期）
 
-このテーブルは、`articles_fts` および `idx_articles_*` の4本のインデックスとともに
-**アップロード用スナップショットから除外される** — `DatabaseSnapshot.exportForUpload` がこれらすべてを
-`VACUUM INTO` コピー側（ライブ DB 側ではない）で DROP し、最後に `VACUUM` を実行する
-（`domain/SnapshotSql.kt`）。`sync_state` 自体はデバイスローカルな管理情報であり受信側が読むことは
-元々なく（`MergeSql` にも `DatabaseMerger` の期待スキーマにも登場しない）、除外することでスナップショットが
-同期対象データのみの関数になる — さもないと `last_synced_at` が同期成功のたびにバイト列を変え、
-上記のダイジェスト比較が成立しなくなる。
+| テーブル | 内容 |
+| --- | --- |
+| `sync_outbox` | `seq`(PK, AUTOINCREMENT), `tbl`, `pk`, `heavy` — 同期対象の行へのローカルの変更 1 件につき 1 行。トリガーが追記する |
+| `sync_capture` | 1 行だけ: `enabled`（接続中は記録する）, `full_pending`（全量送信が必要） |
+| `sync_merging` | マージのトランザクションの中にだけ存在する印の行。記録を止める |
+| `sync_applied` | `name`(PK) — マージ済みのクラウドファイル |
+| `sync_cursor` | `device`(PK), `seq` — 端末ごとに、すべてをマージし終えている差分の最大番号 |
+| `ks_search_pending` | `rowid`(PK) — `search_text` の再計算が必要な記事 |
+
+これらも、`sync_state`、`feed_fetch_state`、`articles_fts` も、端末の外に出ることは決してない: 差分ファイルと
+ベースは同期対象のテーブルだけから作る（[sync-architecture.ja.md](sync-architecture.ja.md) 参照）。
 
 ### articles_fts（FTS5 仮想テーブル、SQLDelight 管理外）
 
@@ -168,8 +199,8 @@ INSERT INTO articles_fts(articles_fts) VALUES('rebuild');
 
 外部コンテンツ方式でインデックスのみ保持し、本文は `articles.search_text` を参照する。
 
-- **ライブ DB の `articles_fts` は決して DROP しない。** アップロードからの除外は `VACUUM INTO` スナップショット
-  のコピー側で DROP して行う — [sync-architecture.ja.md](sync-architecture.ja.md) の「FTS5 の扱い」参照。
+- **ライブ DB の `articles_fts` は決して DROP しない。** 索引が端末の外に出ることはない: 転送ファイルは同期対象の
+  テーブルだけから作る — [sync-architecture.ja.md](sync-architecture.ja.md) の「FTS5 の扱い」参照。
 - フィード更新・同期マージの後は `FtsManager.indexMissing()` で**未索引の新記事だけを増分投入**する。
   全 `'rebuild'` はホットパスでは決して使わない — `O(索引済みテキスト全体)` で重すぎるため。
 - 全再構築（`rebuildIndex()` ＝ `'rebuild'`）は日次アイドル pass（`local_settings.lastFtsRebuiltAt` の
@@ -253,6 +284,11 @@ SQLite を使う。理由と撤退条件は `.claude/rules/android-sqlite-bundli
 スター付き記事とフィードごとの最新 10 件は保持期間に関わらず削除しない。`null`（無期限）なら実行しない。
 削除は行の物理削除ではなく**論理削除**（`articles.deleted_at` / `deleted_updated_at` を刻む）で、削除が
 クラウドから復活せず同期マージで伝播する。古いトゥームストーンの物理回収は将来対応。
+
+キャッシュ削除は `cached_at`（その記事がフィード内に最後に見えた時刻）で判断する。同期が `cached_at` の変化を
+運ぶのは日付が変わったときだけなので、自分ではそのフィードを更新しない端末には、ほかの端末の `cached_at` が最大で
+約 1 日遅れて届くことがあり、保持期間の境目にあるスターなしの記事を、毎回の同期が正確な値を運んでいた頃より最大
+1 日早く削除することがある。スター付きと最新 10 件の保護は変わらない。
 
 ## favicon・サムネイル
 

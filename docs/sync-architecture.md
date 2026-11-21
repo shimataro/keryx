@@ -3,63 +3,294 @@
 [日本語](sync-architecture.ja.md)
 
 Target: cloud sync (Dropbox / OneDrive / Google Drive / Nextcloud). Implementation is in `domain/SyncRepository.kt`,
-`domain/MergeSql.kt`, `domain/MergeFailureClassifier.kt`, `domain/MergeSchema.kt`, `domain/SnapshotSql.kt`,
-`platform/DatabaseMerger`, `platform/DatabaseSnapshot`.
+`domain/MergeSql.kt`, `domain/ReduceSql.kt`, `domain/TransportSchema.kt`, `domain/MergeFailureClassifier.kt`,
+`domain/MergeSchema.kt`, `domain/SnapshotSql.kt`, `platform/DatabaseMerger`, `platform/DeltaExporter`,
+`platform/DatabaseSnapshot`.
 
 ## Design Philosophy
 
-- The sync file is `keryx.db` (SQLite), **gzip-compressed** before upload. However, the live DB is not read directly; a consistent snapshot is created via `VACUUM INTO`, and **`articles_fts` is DROPped on the copy side** before upload (the live index is never DROPped → concurrent searches do not hit `no such table`. See `articles_fts` section in [db-schema.md](db-schema.md)).
-- Conflict resolution is merge (ATTACH DATABASE) on the app side before upload.
-- FTS5 index is not included in the cloud (dropped on the copy side). New articles from merge are **incrementally indexed** after merge.
-- **The database is never held in memory.** `CloudStorage` moves it by local file path — `download(path, destPath)` streams the response body straight to disk, `upload(path, sourcePath)`/`create` stream the file straight onto the wire — so peak memory is a fixed handful of 64 KB buffers rather than a multiple of the database's size. Both ends of the transfer are files anyway: the merge attaches the downloaded DB as a file, and the upload snapshot is produced as one by `VACUUM INTO`. The shared streaming helpers live in `data/cloud/CloudFileTransfer.kt` and are built on `kotlinx-io`, so they stay in `commonMain` with no platform-specific code. The digest that decides whether to upload (below) and the SQLite-header check (`core/SqliteFile.kt`'s path-based `looksLikeSqliteFile`) both read from the file too — the header check reads only its first 16 bytes.
+- **Delta sync.** Each device appends only the changes it made itself to the cloud, as small immutable delta files;
+  every other device merges them. Once enough deltas have accumulated, any device folds them into a full snapshot
+  (a *base*). Nothing is ever re-uploaded just because it exists: a sync where nothing changed transfers no payload.
+- **State-based, not operation-based.** A delta carries the *current state* of each changed row, with its
+  per-field last-write-wins stamps — never "star article X" as an operation. The merge is per-field-group
+  last-write-wins, so it is **idempotent** (applying a file twice changes nothing), **commutative** (the order files
+  arrive in does not matter) and **associative** (merging files one by one or after folding them together gives the
+  same result). Duplicate files, files arriving out of order, and re-applying a file after a crash are therefore all
+  harmless — the rest of this document relies on that.
+- **Only local changes are sent.** A change that arrived through a merge is never re-sent, so changes do not echo
+  back and forth between devices.
+- **No change is ever unreachable.** Every change is, at every moment, in at least one delta file or base in the
+  cloud. Files are deleted only under the garbage-collection rules that keep this true (see "Bases and Garbage
+  Collection").
+- **The transport files are SQLite** (gzip-compressed), in a dedicated *transport schema* — the synced tables and
+  columns only, with no UNIQUE or foreign-key constraints, plus a few metadata tables. The merge attaches them with
+  `ATTACH DATABASE`, as before.
+- **The database is never held in memory.** `CloudStorage` moves files by local path — `download(path, destPath)`
+  streams the response body straight to disk, `upload`/`create` stream the file straight onto the wire — so peak
+  memory is a fixed handful of 64 KB buffers. The shared streaming helpers live in `data/cloud/CloudFileTransfer.kt`
+  (on `kotlinx-io`, in `commonMain`).
 
 ## Cloud File Structure
 
+Names are flat: Google Drive, OneDrive and Nextcloud address files by basename only, so the kind of each file is
+encoded in its name rather than in a folder.
+
 ```bash
-/keryx.db.gz                           ← Sync SQLite, gzip-compressed (without articles_fts / sync_state / the
-                                          idx_articles_* indexes) — primary
-/keryx.db                              ← Legacy, uncompressed — read-only fallback, never written; see below
-/keryx-YYYYMMDD-HHMMSS.db.gz.bak       ← archive left behind by a cloud-data reset (never pruned)
+/keryx-sync.json                         ← pointer: {"format":3,"generation":"<genId>"}; updated with a revision check
+/ks-<gen>-b-<dev>-<n>-<hash12>.db.gz     ← base: every synced row folded together (immutable)
+/ks-<gen>-d-<dev>-<seq>-<hash12>.db.gz   ← delta: device <dev>'s <seq>-th batch of changes (immutable)
+/keryx.db.gz                             ← after migration: a stub whose user_version is 1000 (see "Migration")
+/keryx-YYYYMMDD-HHMMSS.db.gz.bak         ← archive of the pre-delta file (never pruned)
 ```
 
-Conflict prevention is done via a revision check on upload — Dropbox: `rev`, a real server-side compare-and-set (409 on mismatch); Google Drive: the file's id and `version` field (`<id>:<version>` — `version` counts per file, so the id tells a different file with the same count apart), compared client-side before writing — Drive offers no conditional content update, so an overwrite landing between the check and the write is not detected; the overwritten device merges its changes into the cloud file again on its next sync, under the same rules as any other merge — so a change that loses a tie to the other device's (the tie rule in "Merge (`DatabaseMerger` + `MergeSql`)") stays lost, exactly as it would had the two uploads not raced (see "Google Drive: an upload can overwrite another device's upload unnoticed" in [known-issues.md](known-issues.md)); OneDrive: the DriveItem `eTag`, sent via `If-Match` (412 on mismatch); Nextcloud: the WebDAV `ETag`, sent verbatim via `If-Match` (412 on mismatch, 423 while another write holds the file's lock — see "Nextcloud (Login Flow v2)"). No lock file is used. On Nextcloud these files live in the `/Keryx/` folder of the user's own files rather than an app folder.
+- `<gen>` is the current **generation**, named by the pointer. A cloud-data reset starts a new generation; files of
+  older generations are left in place as an archive and never read again.
+- `<dev>` is the writing device's sync identity (`sync_state.ks_device_id`), issued afresh every time the device
+  joins a generation.
+- `<hash12>` is the first 12 hex digits of the SHA-256 of the *uncompressed* file. Two files with the same name
+  therefore always have the same content, which is what lets every write be a plain `create` whose atomicity does
+  not matter (Google Drive's is not atomic): a second `create` of the same name is the same file, and two different
+  files never share a name. Every download is checked against it.
+- Names are matched against a strict pattern before use; anything that does not match is someone else's file and is
+  ignored (a user may keep files of their own in Nextcloud's `/Keryx` folder). Only names that passed the pattern
+  are ever embedded in SQL.
+
+Conflicts can arise only on the two files that are ever replaced — the pointer and the `keryx.db.gz` stub — and
+both are written with the provider's revision check (Dropbox: `rev`, a real server-side compare-and-set; Google
+Drive: `<id>:<version>`, compared client-side, so not atomic — see "Google Drive: an upload can overwrite another
+device's upload unnoticed" in [known-issues.md](known-issues.md); OneDrive: `eTag` via `If-Match`; Nextcloud:
+`ETag` via `If-Match`, 412/423 → conflict). No lock file is used. On Nextcloud these files live in the `/Keryx/`
+folder of the user's own files rather than an app folder.
+
+### Listing (`CloudStorage.list`)
+
+`list(prefix)` returns every file whose name starts with `prefix` (name, revision, size), following every page:
+Dropbox `list_folder` / `list_folder/continue`, Google Drive `files.list` in `appDataFolder` with `nextPageToken`,
+OneDrive the app folder's `/children` with `@odata.nextLink`, Nextcloud a Depth-1 `PROPFIND` on `/Keryx`. Drive's and
+OneDrive's listings are eventually consistent — a file just written may be missing for a while — which the receiving
+rules tolerate (a gap stops the cursor; it never skips anything). Drive may also list two files of the same name;
+for sync files that only ever means two copies of the same content.
+
+### Transport schema (`domain/TransportSchema.kt`)
+
+A delta or base holds the six synced tables (`feeds`, `articles`, `tags`, `feed_tags`, `folders`,
+`global_settings`) with their synced columns only — `feeds`' fetch state (now `feed_fetch_state`, device-local) and
+`articles.search_text` (recomputed by the receiver) are not in it — and without UNIQUE or foreign-key constraints:
+a base folds rows from several devices, and two devices can legitimately hold different ids for the same tag name.
+Each file carries `PRAGMA user_version` and:
+
+- `ks_meta(key, value)` — format, generation, writing device, creation time, kind (`delta`/`base`);
+- `ks_vector(device, seq)` (bases only) — per device, the highest `seq` such that every delta `1..seq` is covered;
+- `ks_covered(name)` (bases only) — the delta files this base folded directly.
+
+`TransportSchema` holds the DDL, the expected tables/columns/types per version, and the transport migrations.
+`KeryxDatabase.Schema.migrate` is never run on a transport file (it would add the device-local tables and triggers).
+
+## Local Bookkeeping (schema version 3)
+
+| Object | Purpose |
+| --- | --- |
+| `sync_outbox(seq INTEGER PRIMARY KEY AUTOINCREMENT, tbl, pk, heavy)` | Every local change to a synced row, in order |
+| `sync_capture(id = 1, enabled, full_pending)` | Whether changes are recorded (only while connected), and whether a full send is due |
+| `sync_merging(flag)` | Present only inside a merge transaction (inserted first, deleted just before `COMMIT`), so no other connection ever sees it |
+| `sync_applied(name)` | Cloud files already merged (including this device's own) |
+| `sync_cursor(device, seq)` | Per device, the highest `seq` up to which every delta has been merged |
+| `ks_search_pending(rowid)` | Articles whose `search_text` must be recomputed (see "FTS5 Handling") |
+| `feed_fetch_state(feed_id, etag, last_modified, error_count, last_error)` | A feed's fetch state on this device — never synced |
+
+**Triggers** on the six synced tables append to `sync_outbox` (`AFTER INSERT` / `AFTER UPDATE`), guarded by
+`WHEN (SELECT enabled FROM sync_capture) = 1 AND NOT EXISTS (SELECT 1 FROM sync_merging)` — so a merge never
+records what it writes. An `UPDATE` is recorded only when a synced column actually changed (`OLD.x IS NOT NEW.x OR
+…`), so a refresh that rewrites an unchanged row records nothing. For articles:
+
+- a change to `content`, `summary`, `title`, `url`, `author`, `published_at` or `thumbnail_url` (or an insert) is
+  recorded with `heavy = 1` — the delta carries the article's body;
+- a change to the read, star or deletion columns alone is recorded with `heavy = 0` — the delta carries a *light*
+  row, with `content` and `summary` left NULL;
+- `cached_at` is recorded only when its day (`cached_at / 86400000`) changes — a refresh bumps it on every article
+  still in the feed, and sending that every 30 minutes would dwarf every other change (see "Sync Target Article
+  Range" for what this means for cache cleanup);
+- a change to `updated_at` or `search_text` alone is not recorded.
+
+No row of a synced table is ever physically deleted (every delete is a tombstone), so there are no `DELETE`
+triggers.
+
+`sync_state` keys: `last_synced_at`, `ks_device_id`, `ks_generation`, `ks_last_seq`, `ks_attempt` (the delta being
+sent: its number, name and outbox high-water mark), `ks_pointer_rev`, `ks_legacy_stub_rev`. `sync_state` and the
+tables above are device-local and never leave the device.
 
 ## Sync Flow (`SyncRepository.sync()`)
 
-1. `CloudStorage.metadata(CLOUD_DB_GZ_PATH)` fetches the compressed file's revision — or `null` when it does not
-   exist yet remotely, in which case step 1a below runs. This is the only existence/revision check the sync makes;
-   it costs no extra round trip, since every provider's metadata response already carries the revision (Dropbox's
-   `get_metadata` `rev`, Drive's name-lookup `id` and `version`, Graph's item `eTag`, Nextcloud's `PROPFIND` `getetag`).
-   - **1a. Compressed file absent** — `CloudStorage.metadata(CLOUD_DB_PATH)` checks the legacy fallback.
-     - **Both absent (true first sync ever)**: the local DB is exported, compressed, and uploaded via create-only
-       (`createFresh`), and the sync ends. If `createFresh` finds the file already exists after all (a concurrent
-       creator, a stale "absent" reading), it returns `SyncConflictException` and the outer retry loop re-runs the
-       whole sync, which now takes the gz-present branch above instead of clobbering the other device's upload. See
-       "Compressed Upload / Legacy Fallback" below.
-     - **Legacy present, compressed absent (one-time migration)**: the legacy file is downloaded and merged (step 3 below, uncompressed), then the local DB is exported, compressed, and *created* (not rev-guarded — there is no compressed revision yet) at `CLOUD_DB_GZ_PATH`, and the sync ends. The legacy file itself is left untouched.
-2. Stream `keryx.db.gz` from the cloud into a temp file, then decompress it (capped at `MAX_SYNC_DB_SIZE_BYTES`,
-   1 GiB) — **skipped when the revision equals `sync_state.cloud_file_rev`**, i.e. this device has already merged
-   exactly this file. Re-downloading it would only re-merge bytes that are by definition already in the local DB.
-   (Step 1a's legacy download is not gzip-compressed and skips decompression.)
-   - The decompressed file is checked against SQLite's 16-byte file header (`core/SqliteFile.kt`'s path-based `looksLikeSqliteFile`, which reads only those bytes) before the merger opens it — symmetric with the same check on the upload side (step 5). A payload that fails it (truncated download, an HTML error page, a 0-byte or otherwise non-SQLite file) is rejected immediately as `CloudDataIncompatibleException`, rather than reaching `DatabaseMerger` and failing deep inside the merge statements with an ambiguous `no such table: cloud.folders`. A `.gz` payload that isn't valid gzip at all (decompression itself throws) is rejected the same way, before ever reaching this check.
-3. **`DatabaseMerger.merge()` to merge** (see below). Immediately after, `ftsManager.indexMissing()` incrementally indexes new articles from merge (without wiping the live index), then `driver.notifyListeners(...)` (all tables touched by merge) is called. Because merge writes via `DatabaseMerger`'s dedicated raw JDBC connection without firing SQLDelight query notifications, `watchAll` flows (and re-search with updated index) must be re-triggered to reflect sync content in the UI without restart.
-4. Record `sync_state.cloud_file_rev`.
-5. `DatabaseSnapshot.exportForUpload()` creates a `VACUUM INTO` snapshot, **drops `articles_fts`, `sync_state`, and the four `idx_articles_*` indexes on the copy side, then runs a trailing `VACUUM`** (live DB is unchanged; see `domain/SnapshotSql.kt`'s `cleanupStatements`), then gzip-compresses it (`platform/Gzip`). Stream the compressed file to `CLOUD_DB_GZ_PATH` specifying `rev` — **skipped when the snapshot's SHA-256 equals `sync_state.last_uploaded_snapshot_digest` and step 2 merged nothing**, i.e. the cloud already holds exactly these bytes (this skip still records `last_synced_at`, same as an actual upload). The digest is always computed on the *uncompressed* snapshot (see "Compressed Upload / Legacy Fallback" below for why).
-   - If `rev` mismatch (409 → `SyncConflictException`), retry from re-download. `SYNC_MAX_RETRY = 3` bounds the
-     total number of attempts (2 retries after the first).
-6. On success, record `last_synced_at`, the uploaded snapshot's (uncompressed) digest, and **the revision the upload itself produced** (`CloudStorage.upload`/`create` return it). It must come from the write's own response, never a follow-up `metadata()` call: a second request could observe another device's newer write, and storing that revision would make the next sync skip a download whose contents were never merged.
+Everything below runs under `SyncRepository`'s `mutex`.
 
-Debouncing: Because every sync re-uploads the whole database, how often a local change triggers one is what decides the transfer volume. `SyncScheduler` therefore has two windows, both measured from the last change (a burst collapses into one sync):
+0. **Resume an interrupted send.** If `ks_attempt` is set, the delta it names was written locally (and perhaps
+   uploaded) but never committed. Its saved file is decompressed and checked against the hash in its name; if it
+   matches, it is uploaded again under the same name and committed (step 4 of "Sending"). If the file is missing or
+   its hash does not match, the device takes a **new sync identity** (new `ks_device_id`, `ks_last_seq = 0`): the
+   outbox entries the attempt covered were never deleted, so they are sent again under the new identity, and the
+   old identity's file — whether or not it reached the cloud — can only ever be applied harmlessly. A disk-corrupted
+   file is never uploaded. If the generation has changed since, the attempt is simply dropped (the rejoin's full
+   send covers it).
+1. **Read the pointer.** `metadata(keryx-sync.json)`; the file is downloaded only when its revision differs from
+   `ks_pointer_rev`.
+   - Neither the pointer nor `keryx.db.gz` exists → this is the first device ("Joining").
+   - No pointer, but `keryx.db.gz` exists → migrate from the pre-delta format ("Migration").
+   - Its generation differs from `ks_generation` → rejoin ("Joining") — another device reset the cloud data.
+   - It cannot be parsed or lacks a field → `CloudDataIncompatibleException` (a reset rewrites it).
+   - Its `format` is newer than this build knows → `SchemaVersionException` ("update the app").
+   - **Legacy watch:** `metadata(keryx.db.gz)` too; a revision other than `ks_legacy_stub_rev` means an older build
+     wrote a full database there, which is absorbed ("Migration").
+2. **List** `ks-<gen>-*` (`CloudStorage.list`, every page). A file carrying this device's own `<dev>` that it did not
+   write — a `seq ≤ ks_last_seq` whose name is not in `sync_applied`, or a `seq > ks_last_seq` that is not the
+   `ks_attempt` name — means the database was cloned (restored from a backup, or copied to another machine) and both
+   copies are writing as the same device: this device rejoins under a new identity. Nothing is lost meanwhile —
+   the hash in the name keeps the two copies' files apart, and receivers apply both.
+3. **Receive** (see "Receiving").
+4. **Send** (see "Sending").
+5. **Fold and collect garbage**, when the thresholds are met (see "Bases and Garbage Collection").
+6. Record `last_synced_at`.
+
+A sync with nothing to do costs three requests (two `metadata` calls and one listing page) and no payload. The
+`keryx.db.gz` watch goes away with the rest of the pre-delta compatibility at v1.0.0. `SYNC_MAX_RETRY` now bounds
+only the retries of a revision-checked write (the pointer, the stub); delta and base names never collide.
+
+### Receiving
+
+1. **What to fetch.** Every listed delta whose name is not in `sync_applied`. Then, per device D, look for a `seq`
+   above `sync_cursor[D]` that is neither applied nor listed — a delta that was already garbage-collected. If a base
+   covers it (`ks_vector[D] ≥ seq`), that base is fetched too, and its `ks_covered` names count as applied. If no
+   base covers it, the gap is taken as the provider's listing not having caught up yet (Drive's and OneDrive's
+   listings are eventually consistent): the cursor stops below it, every other file is still merged (the merge is
+   commutative), and the next sync looks again. When joining, every base that no other base dominates is fetched.
+2. **Validate** every file ("Validating Cloud Files"). If any file fails, nothing is merged.
+3. **Fold** the files into one temporary transport database with `ReduceSql` (per primary key, per field group,
+   last-write-wins — the same rules as the merge, without its local guards), so the merge runs once however many
+   files arrived.
+4. **Merge** with `DatabaseMerger.merge` in a single transaction (see "Merge"): `INSERT INTO sync_merging` first,
+   then `MergeSql.all`, then the `sync_applied`/`sync_cursor` updates for every file merged and the
+   `ks_search_pending` registrations, then `DELETE FROM sync_merging`. Merging and recording what was merged
+   therefore commit together or not at all — a crash in between re-merges the same files next time, which the
+   merge's idempotence makes harmless.
+5. After the commit: recompute `search_text` for `ks_search_pending` ("FTS5 Handling"), `ftsManager.indexMissing()`,
+   then `driver.notifyListeners(...)` for every synced table — the merge wrote through its own connection, so
+   SQLDelight's flows must be re-triggered for the UI to reflect it.
+6. Names no longer listed are dropped from `sync_applied`; if one ever reappears, applying it again is harmless.
+
+### Sending
+
+1. **Build the delta** with `platform/DeltaExporter` (one `actual` per platform), which opens its own connection
+   and `ATTACH`es an empty transport file:
+   - **Ordinary delta** — inside one read transaction: `S = MAX(sync_outbox.seq)`, then the **current** row for
+     every key with an outbox entry `≤ S`, plus every row those rows reference (a feed's folder, an article's feed,
+     a `feed_tags` row's tag and feed), so the receiving merge never finds a referenced row missing. An article
+     with no `heavy` entry is written as a light row. Because `S` and the rows come from one snapshot, any write
+     after it carries a `seq > S` and goes into the next delta.
+   - **Full send** (when joining) — from a `VACUUM INTO` copy, as the pre-delta upload did, so the live database's
+     read lock is held only for the copy; `S` is read from the copy too. Rows identical to the base just merged
+     (`EXCEPT`) are left out — a fresh device with an empty database sends almost nothing — and, after the
+     filtering, the rows the kept rows reference are added back (the feed of every kept article, the folder of
+     every kept feed, the tag and feed of every kept `feed_tags` row), so the file passes validation check 9 even
+     when a kept article's feed is identical to the merged base.
+2. **Record before uploading**: the compressed file is written to the app's data directory as `pending-<n>.db.gz`,
+   and, in one transaction, `ks_attempt = (n = ks_last_seq + 1, name, S)`.
+3. **Upload** with `create(name)`. An "already exists" answer means the same file is there (same name, same
+   content), which counts as success.
+4. **Commit**, in one transaction: `DELETE FROM sync_outbox WHERE seq ≤ S`, `ks_last_seq = n`, add the name to
+   `sync_applied`, clear `full_pending` if this was the full send, clear `ks_attempt`. Then delete the saved file.
+
+Wherever this is interrupted, nothing is lost or doubled: unsent changes are still in the outbox, and a file that
+did reach the cloud is re-sent under the same name before the commit (step 0 of the flow).
+
+### Bases and Garbage Collection
+
+**When.** Once the deltas not yet folded into a base reach `KS_COMPACT_MIN_DELTAS` (100) files or
+`KS_COMPACT_MAX_DELTA_RATIO` (25%) of the latest base's size. Any device may fold; two folding at once is safe.
+Folding is skipped on a metered network (even for a manual sync) and may be cancelled at any point.
+
+**How.** Every base that no other base dominates, plus every listed delta none of them covers, is validated and
+folded with `ReduceSql` into a new base. A base is **never built from the local database**: the local merge skips
+rows its guards reject (a name collision, say), and a base built from it would silently drop them for every other
+device. `ks_vector` extends the input bases' vector over the deltas that continue it without a gap; `ks_covered`
+lists the deltas folded. The new base is uploaded with `create`; if any input fails validation, no base is built.
+
+**Garbage collection** keeps "no change is ever unreachable" true:
+
+- A delta may be deleted only once a base whose `ks_covered` names it exists (confirmed with `metadata` just before)
+  and was created at least `KS_DELTA_GRACE_MS` (7 days) ago — so a device that syncs within a week catches up from
+  deltas alone, without downloading a base.
+- A base may be deleted only while another base strictly dominates it: a vector at least as high in every component
+  and a superset of its covered names. Equal vectors are ordered by name, so two devices can never delete each
+  other's bases.
+
+**Cost of a new device.** One base (about the size of the pre-delta database file) plus at most the deltas below the
+thresholds; deltas a base covers are not downloaded. That is at most about 1.25× what joining cost before.
+
+### Joining, Reset, Disconnect
+
+- **Joining** (connecting, switching provider, a generation change, a detected clone): issue a new `ks_device_id`
+  and clear the cursors, `sync_applied`, the outbox and `ks_attempt` — in the same transaction, set
+  `sync_capture = (enabled 1, full_pending 1)`, so every write from then on is recorded. Then receive everything and
+  make the full send. The result is what the pre-delta "merge, then upload the whole database" produced.
+- **The first device** joins a new generation, uploads its full send as the first base, and only then creates the
+  pointer (`create`) — so whenever a pointer is visible, its base exists. A device that loses a concurrent pointer
+  creation sees a different generation on its next sync and rejoins.
+- **Reset** (`resetCloudData()`, the recovery for unusable cloud data): join a new generation, upload the local
+  full state as its base, then replace the pointer with a revision check. A revision mismatch (another device reset
+  first) aborts and re-reads the pointer. The old generation's files are left in place as an archive. Every other
+  device sees the new generation and rejoins, sending its own full state — so data only another device held comes
+  back, as it did when other devices merged the re-created file before.
+- **Disconnect / switch** (`clearSyncFailureState()`, under the same mutex): `sync_capture.enabled = 0` (nothing is
+  recorded while local-only), and the `ks_*` keys, the outbox, `sync_applied`, the cursors and any saved pending
+  file are cleared. `ks_search_pending` stays — it belongs to the local search index.
+
+### Validating Cloud Files
+
+Every downloaded delta, base or pre-delta database passes these checks, in order, before any of it is merged —
+including the inputs of a fold. One failure, and nothing from that sync is merged. Checks run read-only on the
+temporary file.
+
+| # | Check | On failure |
+| --- | --- | --- |
+| 1 | Name matches the pattern | Not ours — ignored |
+| 2 | Download completes | Transient; retried next sync |
+| 3 | gzip decompresses (capped at `MAX_SYNC_DB_SIZE_BYTES`), the SQLite header, the hash in the name | Hash mismatch → downloaded once more in the same sync; still mismatched → corrupt |
+| 4 | `user_version` | Newer than this build → `SchemaVersionException` |
+| 5 | Expected tables and columns for that version (`TransportSchema`; `MergeSchema` for a pre-delta database) | Missing → corrupt. No expectation registered for the version → undetermined, treated as transient (never answered with a reset) |
+| 6 | An older version is migrated up (`TransportSchema` migrations; `KeryxDatabase.Schema.migrate` for a pre-delta database) | An SQLite error while migrating → corrupt |
+| 7 | Types and value ranges, by a query generated from the expected schema: ids are non-empty text, stamps are integer or NULL, booleans are 0 or 1, NOT NULL columns hold no NULL | Any violating row → corrupt |
+| 8 | `ks_meta` (generation, kind, device, number) matches the file name; a base's `ks_vector`/`ks_covered` types | Corrupt |
+| 9 | References are closed: every feed's folder, every article's feed, every `feed_tags` row's tag and feed is in the same file | Corrupt |
+
+"Corrupt" is `CloudDataIncompatibleException`, handled as before: automatic syncing is suspended, and the
+notification center offers a reset (a new generation). A reset recovers even the corrupt file's content as long as
+the device that wrote it still exists, since every device re-sends its full state. A corrupt file is never skipped:
+skipping it would lose its changes without a word.
+
+Check 7 exists because SQLite does not enforce column types. A text value in a stamp column compares greater than
+every number, so it would win every last-write-wins comparison from then on — and once in the local database, the
+generated SQLDelight code's `getLong` would throw when reading it, crashing the app. It applies to pre-delta
+databases too, which the pre-delta merge never checked.
+
+Validation and merge failures are classified inside `DatabaseMerger`/`SyncRepository` and returned as `Result.Err`
+(`CloudDataIncompatibleException`, `SchemaVersionException`, or a transient `CloudStorageException`); only
+`CancellationException` propagates. What validation cannot catch is a well-formed file whose content is logically
+wrong — a bug in the writing device; the hash only proves the file is what was uploaded.
+
+### Debouncing
+
+How often a local change triggers a sync decides how many delta files are written, so `SyncScheduler` keeps two
+windows, both measured from the last change (a burst collapses into one sync):
 
 - **Structural changes** (subscribe/unsubscribe, rename, folders, tags, global settings, a single-feed refresh) call `scheduleSync()` and sync after `SYNC_DEBOUNCE_MS` (5 seconds).
 - **Reading-state changes** (read/unread, star, mark-all-read) arrive one by one while reading, so they call `scheduleDeferredSync()` and wait for `DEFERRED_SYNC_DEBOUNCE_MS` (5 minutes) of quiet instead. A structural change arriving meanwhile shortens the wait to the 5-second window, and carries the reading-state changes with it.
-- `SyncRepository.flushPendingSync()` syncs at once if anything is still pending, and is called when the app leaves the foreground: Android's `MainActivity.onStop` (not on a configuration change), the iOS scene entering the background (inside a background task), and the desktop window being hidden to the tray — Compose desktop and the native macOS app alike. Quitting the desktop app does not wait on the network for it; the next launch's startup sync uploads what is pending. It first waits out a sync already in flight (which cleared the pending flag when it started), so the caller's background grace period covers that upload too. Before that, it waits — for at most `LOCAL_WRITES_FLUSH_WAIT_MS` (10 seconds) — for local writes still queued off the caller's thread (a read/unread or star change, a global-setting change, a feed-list action such as unsubscribing or moving a feed), counted in `PendingLocalWrites`: such a write schedules its sync only once it runs, so a change made just before leaving would otherwise find nothing pending yet.
-- On Android and iOS the flush goes through `flushOnLeavingForeground()`, which skips an exit the app caused itself: `BrowserOpener` marks its launch (`ExternalAppLaunch`) and the next exit consumes the mark, so reading an article in the browser does not upload the database once per article. The mark is cleared whenever the app is back in front. The changes stay pending for the long window, the next sync, or the next real exit.
-- Any sync that runs first — a refresh cycle's, a manual one — picks the pending changes up too: an "unsynced changes" flag is cleared as a sync starts (its snapshot includes them) and restored on every exit but success — an error result, an exception or a cancellation (iOS cancels the refresh cycle's sync on backgrounding) — and a debounce window that expires with the flag already cleared does nothing.
+- `SyncRepository.flushPendingSync()` syncs at once if anything is still pending, and is called when the app leaves the foreground: Android's `MainActivity.onStop` (not on a configuration change), the iOS scene entering the background (inside a background task), and the desktop window being hidden to the tray — Compose desktop and the native macOS app alike. Quitting the desktop app does not wait on the network for it; the next launch's startup sync sends what is pending. It first waits out a sync already in flight (which cleared the pending flag when it started), so the caller's background grace period covers that upload too. Before that, it waits — for at most `LOCAL_WRITES_FLUSH_WAIT_MS` (10 seconds) — for local writes still queued off the caller's thread (a read/unread or star change, a global-setting change, a feed-list action such as unsubscribing or moving a feed), counted in `PendingLocalWrites`: such a write schedules its sync only once it runs, so a change made just before leaving would otherwise find nothing pending yet.
+- On Android and iOS the flush goes through `flushOnLeavingForeground()`, which skips an exit the app caused itself: `BrowserOpener` marks its launch (`ExternalAppLaunch`) and the next exit consumes the mark, so reading an article in the browser does not write one delta per article. The mark is cleared whenever the app is back in front. The changes stay pending for the long window, the next sync, or the next real exit.
+- Any sync that runs first — a refresh cycle's, a manual one — picks the pending changes up too: an "unsynced changes" flag is cleared as a sync starts (its delta includes them) and restored on every exit but success — an error result, an exception or a cancellation (iOS cancels the refresh cycle's sync on backgrounding) — and a debounce window that expires with the flag already cleared does nothing.
 - The refresh itself (`FeedRepository.refreshFeeds`, only ever run inside a `RefreshCycleRunner` cycle) schedules no sync. A refresh-then-sync cycle syncs right after it; the startup sync-then-refresh cycle has nothing after its refresh, so it schedules one short-window sync (`scheduleSync()`) for what the refresh wrote.
 - A read/unread or star call that changes nothing (re-opening an already-read article) writes nothing and schedules nothing: the single-row updates are guarded on the state changing, so `read_at` / `starred_at` are stamped only by a real change. Last-write-wins therefore never lets merely re-opening an article beat another device's later "mark unread" — the unread state stays.
 
-Deferring a change never loses it, even when the sync that would have sent it fails or is cancelled: the next sync of any kind finds it in the snapshot (see "Skipping Unchanged Transfers" below). Only how soon other devices see it changes.
+Deferring a change never loses it, even when the sync that would have sent it fails or is cancelled: the next sync of any kind finds it in the outbox (see "Sending" above). Only how soon other devices see it changes.
 
 ### Sync Progress Feedback
 
@@ -70,64 +301,18 @@ snapshot, a plain boolean). Every transition happens inside the same `mutex` `sy
 already hold, so a sync queued behind another never observes a stale phase left by the one ahead of it, and the
 `finally` inside that lock always resets to `IDLE` on the way out — success, a classified `Result.Err`, or an uncaught exception alike.
 
-The phases map onto the steps above: `CHECKING` for each retry loop's `metadata()` round trip (step 1),
-`DOWNLOADING` for the `download()` call in step 2, `MERGING` for the decompress-and-`DatabaseMerger.merge()`
-portion of step 3, `INDEXING` for `ftsManager.indexMissing()` (also step 3), `PREPARING` for building the
-upload snapshot (step 5's `VACUUM INTO` + digest + gzip), and `UPLOADING` for the `create`/`upload` call itself
-(also step 5). `resetCloudData()` adds one phase of its own, `ARCHIVING`, for `archiveCloudDb()`'s rename (or
-delete-fallback), before it too reaches `PREPARING`/`UPLOADING` via `createFresh()`.
+The phases map onto the steps above: `CHECKING` for the pointer/stub `metadata()` calls and the listing (steps 1–2),
+`DOWNLOADING` for fetching cloud files (receiving, and a fold's inputs), `MERGING` for validation, folding and
+`DatabaseMerger.merge()`, `INDEXING` for the `search_text` recomputation and `ftsManager.indexMissing()`,
+`PREPARING` for building a delta or base (`DeltaExporter`, `ReduceSql`, compression), and `UPLOADING` for the
+`create` calls and the pointer/stub replacement. `resetCloudData()` goes through `PREPARING`/`UPLOADING` for its new
+generation's base; `ARCHIVING` is used while the migration archives the pre-delta file.
 
 An `AUTOMATIC` sync skipped by `autoSyncSuspended` never enters `trackSync` at all (see "Automatic-Sync
 Suspension" below), so `syncPhase` stays `IDLE` for its entire (instant) duration — consistent with that skip
 not spinning the sync spinner either. There is no byte-level progress (no phase reports a fraction downloaded
 or uploaded) — `CloudStorage`'s `download`/`upload`/`create` take no progress callback, so a phase is the
 finest granularity available without changing that interface across all three providers.
-
-### Compressed Upload / Legacy Fallback
-
-`CLOUD_DB_GZ_PATH` (`/keryx.db.gz`) is the only path this app ever writes to. `CLOUD_DB_PATH` (`/keryx.db`, the format every version before this feature wrote) is **read-only** and consulted only when the compressed file does not exist remotely yet (step 1a above) — a cloud this device has not synced to since compression was added, or one no device has written to since. Once `CLOUD_DB_GZ_PATH` exists, the legacy file is never read again, and it is never deleted, renamed, or overwritten by this app — see "Resetting (Archiving) Cloud Data" below for why a reset does not touch it either.
-
-Real-DB measurement (a 3,671-article, 21.4 MB snapshot, gzip level default via `java.util.zip.GZIPOutputStream`): **3.47 MB uploaded, an 84% reduction**, compressed in ~0.3s. `platform/Gzip` streams both directions file-to-file (matching the discipline in the "database is never held in memory" bullet above), so this does not reintroduce a whole-payload allocation.
-
-The upload-skip digest (step 5) is deliberately computed on the **uncompressed** snapshot, never the compressed bytes. `GZIPOutputStream` embeds a timestamp in its header, so compressing byte-identical input twice does not produce byte-identical output — hashing the compressed file would make the skip check fail to fire even when nothing changed. Hashing the content that is actually invariant (the plain snapshot) is what makes the skip check work (see "Skipping Unchanged Transfers" below); compression sits downstream of that decision, not inside it.
-
-**This fallback is deliberately temporary**, scoped to the 0.x period (before v1.0.0), and planned for removal at
-v1.0.0 — `CLOUD_DB_PATH`, the legacy-fallback branch in `syncLocked()`, and the corresponding tests are all deleted
-in that release, not deprecated in place, once every device is expected to have upgraded past a `.gz`-unaware build.
-
-Until then, it carries one accepted, narrow risk:
-
-- **A one-way silent divergence** can occur between a `.gz`-aware device and one still running a pre-compression
-  build against the *same* cloud connection. The old build keeps reading and writing only `CLOUD_DB_PATH`; once a
-  `.gz`-aware device migrates a shared cloud, the old build's subsequent writes to the now-frozen legacy file are
-  never seen by any `.gz`-aware device — and neither side's sync ever fails or reports it (both report success).
-- **This is accepted, not engineered around**, because it only matters for a user deliberately running two different
-  app vintages against the same connected account at once — an unusual, transitional-only scenario — and the whole
-  fallback mechanism it depends on is retired at v1.0.0 anyway.
-- It is **not** a risk between two devices both past this release, and **not** a risk for a single-device user at
-  any point.
-
-### Skipping Unchanged Transfers
-
-The background loop syncs on a timer, so the overwhelmingly common case is that neither side changed since last time. Both halves of the cycle are therefore conditional, and a sync in that state costs **one metadata request and zero payload bytes**:
-
-- **Download** is skipped on an unchanged revision (step 2). Because step 6 records the revision the upload produced, a device that is the only writer recognises its own uploads and never downloads them back.
-- **Upload** is skipped when the freshly built snapshot hashes to the same digest as the last uploaded one *and* no merge happened this cycle (step 5). A merge is always followed by an upload even if nothing else changed locally, because last-write-wins can leave the local DB holding rows the cloud lacks.
-
-Comparing the snapshot's own content is what makes skipping safe: a local edit cannot hash to the previous digest, so no change is ever silently dropped — which is also why deferring a reading-state change (see "Debouncing" above) only delays it. The opposite misjudgement — treating identical data as changed — merely uploads, exactly as before. Dropping `sync_state` from the snapshot (step 5) is what makes the digest stable: `last_synced_at` is rewritten on every successful sync, so leaving it in would change the bytes every cycle and the check could never fire. That table is device-local by design (see [db-schema.md](db-schema.md)) and appears in neither `MergeSql` nor `DatabaseMerger`'s expected schema, so no receiving device ever reads it out of the uploaded file.
-
-The digest is stored in `sync_state`, which is itself excluded from the upload — so it is per-device state, and a device that has never uploaded simply finds no digest and uploads.
-
-Both markers describe **one provider's file**, so `clearSyncFailureState()` clears them alongside the failure state when a connection is disconnected or switched (`SettingsViewModel.disconnect()`/`switchTo()`). Each provider's revision is an opaque string in its own format, so a stale one would in practice never match the next provider's — but a match would skip a download that was never merged, and that is not a risk worth leaving to chance. Reconnecting to the same provider re-establishes both on the first sync.
-
-The clear runs **under the same mutex `sync()` holds**. This is why `updateAutoSyncGate()` / `emitErrorNotification()`
-are also called inside that lock rather than after it: all four fields the clear touches (the revision, the digest,
-`lastSyncError`, `autoSyncSuspended`) are written by a sync too. Without the shared lock, a sync already in flight
-could finish *after* the disconnect and restore the markers describing the provider that was just torn down —
-reintroducing exactly the skipped-download-never-merged case the clear exists to prevent. The cost is that
-disconnecting waits out an in-flight sync (bounded by the HTTP timeouts) —
-`SettingsViewModel.disconnecting` covers this whole wait, so the cloud-sync tab shows "disconnecting…" for it
-rather than looking stuck — which is the correct ordering anyway.
 
 ### Automatic-Sync Suspension
 
@@ -152,8 +337,9 @@ Nothing about the reset/notification UI is affected by the gate: the notificatio
 
 ### Network Gate (Metered Networks and Data Saver)
 
-A second `AUTOMATIC`-only gate sits beside the one above. An automatic sync uploads a snapshot of the
-whole database, so on a phone it would spend mobile data on every few mark-as-read taps. The OS
+A second `AUTOMATIC`-only gate sits beside the one above. Deltas are small, but a sync can still move large files —
+a join's full send, a base to catch up from, a fold — so automatic syncing on a phone still waits for an
+unmetered network by default, as it did when every sync uploaded the whole database. The OS
 reports two signals through `platform/NetworkConditionMonitor` (an interface obtained from the
 `platformNetworkConditionMonitor()` expect, as a `core/NetworkCondition(metered, dataSaver)` flow):
 whether the current network is **metered** (Android: the default network lacks
@@ -190,9 +376,8 @@ was deferred while it ran (a generation counter tells), since that deferral cove
 upload. Automatic syncing becoming suspended (`autoSyncSuspended`) and `clearSyncFailureState()`
 (disconnect / switch) drop it too; a deferral racing a disconnect never raises the flag.
 
-Like `autoSyncSuspended`, the deferral is **in-memory**: there is no queue of pending changes to
-remember, because the next sync that is allowed uploads the whole database and so carries every change
-made in the meantime. The waiter only covers the time the process stays alive; Android additionally
+Like `autoSyncSuspended`, the deferral is **in-memory**: the pending changes themselves are already
+persisted in `sync_outbox`, so the next sync that is allowed sends every change made in the meantime. The waiter only covers the time the process stays alive; Android additionally
 hands the deferred sync to a `WorkManager` job that waits for a network the sync is allowed on (an unmetered one, unless the user opted in to syncing on a metered one), so it also happens
 after the app is closed (see "Deferred sync" in [background-update.md](background-update.md)). On iOS a
 deferral left by a closed app is picked up by the next background refresh or foreground sync that the
@@ -204,54 +389,60 @@ stops it.
 
 ## Merge (`DatabaseMerger` + `MergeSql`)
 
-Downloaded DB is attached as `cloud` and merged table-by-table via timestamp comparison.
+The folded transport file (or a validated pre-delta database) is attached as `cloud` and merged table by table.
 
 > [!IMPORTANT]
-> SQLDelight's JVM `JdbcSqliteDriver` opens a new connection per statement for file DBs. Therefore, executing `ATTACH` through the driver makes it invisible to subsequent merge statements (`no such table: cloud.*`). The merge is done on a **single dedicated JDBC connection** in `platform/DatabaseMerger`: attach → version check → merge (transaction) → detach.
+> SQLDelight's JVM `JdbcSqliteDriver` opens a new connection per statement for file DBs. Therefore, executing `ATTACH` through the driver makes it invisible to subsequent merge statements (`no such table: cloud.*`). The merge is done on a **single dedicated connection** in `platform/DatabaseMerger`: attach → version check → merge (transaction) → detach.
 
 Merge SQL (`MergeSql`) key points:
 
-- **Explicitly specify columns** (avoid `SELECT *` which can cause column count mismatch on schema differences).
-- **A tie goes to the cloud, in every statement.** When both sides carry the same timestamp, the cloud side's
-  value is adopted (`>=` on the cloud side). The cloud holds a single file at any moment, so every device adopting
-  its value on a tie converges — whichever provider is used, and even with an older app version on another device.
-  Letting the local side win would leave two devices that stamped different values in the same millisecond each
-  keeping, and re-uploading, their own value forever. A tie with identical values rewrites the same values, which
-  is harmless. A device's own write always stamps above what its row already holds (see "Design Philosophy" in
-  [db-schema.md](db-schema.md)), including a stamp a merge just brought in, so a tie only ever arises between
-  writes made independently on two devices — never between a merged value and a later local edit.
-- feeds / tags / folders / global_settings: last-write-wins (including logical deletion). However, the `ON CONFLICT` in the feeds statement **does not handle user-edited fields (`folder_id` / `sort_order` / `custom_title` / `deleted_at`) at all** (delegated to dedicated statements below). This prevents these fields from being overwritten just because the content is newer.
-  The `ON CONFLICT` only handles content fields (url/title/description/etag etc. + `updated_at`).
-  feeds are matched **`id`** so feed ids must be deterministically generated from `url` as **UUIDv5** at subscription time (`IdGenerator.feedId`), ensuring the same feed has the same id on all devices — otherwise the URL collision guard below would skip independently-subscribed duplicates and they'd never converge (and article ids derived from `feed_id` would also diverge). See `feeds` section in [db-schema.md](db-schema.md) for details.
-- articles: Read (`read_at`) / star (`starred_at`) are last-write-wins, `content` is OR merge (`COALESCE(c.content,
-  l.content)`); `summary` is *not* independently OR-merged — once either side has a non-NULL `content`, `summary` is
-  dropped to NULL rather than carried over, since it's dead weight once `content` covers the same text (see
-  `ArticleRepository.prepareParsed`) and a merged row that ends up with `content` must not resurrect a stale
-  `summary` left over on either side; `cached_at` takes the newer of the two when both sides have a value, else
-  whichever side has one. `search_text` is not
-  recomputed — the merge selects whichever side's already-stored `search_text` matches the winning `content`/`summary`
-  (a `CASE` on which side's `content` is non-NULL). Deletion is last-write-wins on `deleted_at` / `deleted_updated_at`
-  (field-specific, like read/star), so a cache-cleanup soft-delete propagates instead of being resurrected from the
-  cloud; a star newer than the deletion revives the article (`deleted_at` → NULL). `upsert` (feed refresh) never
-  writes `deleted_at`, so a refresh cannot revive a deleted article.
-  Articles are matched **`id`** so article IDs must be deterministically generated from `(feed_id, guid)` as
-  **UUIDv5** (`IdGenerator.articleId`), ensuring the same article has the same ID on all devices — otherwise the
-  guid collision guard below would skip independently-fetched duplicates and read-state would never propagate. See
-  `articles` section in [db-schema.md](db-schema.md) for details.
-- feed_tags: last-write-wins. Only imported if the referenced feed exists in main (FK protection). The tag is
-  resolved more leniently than the feed: if the cloud's `tag_id` also exists **and is alive** in main
-  (`mt.deleted_at IS NULL`), it's used as-is; otherwise the tag is looked up **by name** against `main.tags` via a
-  join through `cloud.tags` (so two devices that created the same tag name independently, with different ids, still
-  converge on one tag) — a row whose tag resolves to neither is skipped.
-- **feeds user-edited fields are merged independently via dedicated statements using field-specific timestamps** (same design as `read_at` / `starred_at` for articles, separated from row-level `updated_at` = content refresh update):
-  `mergeFeedFolderId` (`folder_id` / `folder_updated_at`), `mergeFeedSortOrder` (`sort_order` / `sort_order_updated_at`), `mergeFeedCustomTitle` (`custom_title` / `custom_title_updated_at`), `mergeFeedDeletedAt` (`deleted_at` / `deleted_updated_at`). All use NULL-aware comparison (`c.<ts> IS NOT NULL AND (main is NULL or cloud is the same age or newer)`), satisfying: propagation not blocked by refresh, local preserved if newer, a tie going to the cloud (see above). `folder_id` is resolved by the dedicated statement, in four branches: NULL outright if the cloud's own referenced
-folder isn't alive in `cloud.folders` (`deleted_at IS NULL`); else the cloud's `folder_id` as-is if that folder is
-alive in `main`; else a same-name lookup joining `main.folders`/`cloud.folders` (both sides' `deleted_at IS NULL`);
-else NULL. It is not included in feeds INSERT. `sort_order` / `custom_title` / `deleted_at` remain in feeds INSERT for initial value propagation (only excluded from `ON CONFLICT`).
-- `NOT EXISTS` / `EXISTS` guards skip colliding rows (same URL, different ID, etc.) so UNIQUE / FK violations do not fail the entire transaction.
-- `MergeSql.all` application order:
-  `updateFoldersByName, insertFolders, feeds, mergeFeedFolderId, mergeFeedSortOrder, mergeFeedCustomTitle, mergeFeedDeletedAt, updateTagsByName, insertTags, articles, feedTags, globalSettings`.
-  `folders` is before `feeds` (for `feeds.folder_id` FK), and the four `mergeFeed*` are after `feeds` (and `insertFolders`) (so main has both feed rows and folder rows before resolution).
+- **Explicitly specify columns**, and only columns present both in the transport schema and in a pre-delta database
+  migrated to the current schema, so one statement set serves deltas, bases and the migration.
+- **A tie is decided by value, in every statement.** When both sides carry the same stamp, the group whose
+  normalized values compare greater wins. The pre-delta rule ("a tie goes to the cloud") converged only because the
+  cloud held a single file; with deltas, devices merge files in different orders, and a side-based rule would let
+  that order decide. A device's own write always stamps above what its row already holds (see "Design Philosophy"
+  in [db-schema.md](db-schema.md)), so a tie only arises between writes made independently on two devices in the
+  same millisecond.
+- **Duplicates inside `cloud` are resolved deterministically.** A folded file can hold two rows with the same unique
+  key (`feeds.url`, `articles(feed_id, guid)`, a tag or folder name) from different devices. Statements that match
+  by such a key consider only the winner among them — greatest `updated_at`, then greatest id. Statements that
+  resolve a reference by id (`mergeFeedFolderId`, `feedTags`) still see every row.
+- **Rows absent from `cloud` mean nothing.** A delta holds only some rows; the statements whose outcome depends on a
+  referenced row (`mergeFeedFolderId`'s "the folder is not alive in `cloud` → NULL", `feedTags`' tag resolution)
+  get the same answer as before because every delta carries the rows its rows reference (checked by validation
+  step 9).
+- feeds / tags / folders / global_settings: last-write-wins (including logical deletion). The `ON CONFLICT` in the
+  feeds statement handles only content fields (url/title/description/… + `updated_at`); the user-edited fields are
+  merged by dedicated statements using their own stamps: `mergeFeedFolderId` (`folder_id` / `folder_updated_at`),
+  `mergeFeedSortOrder`, `mergeFeedCustomTitle`, `mergeFeedDeletedAt`. `folder_id` is resolved in four branches:
+  NULL if the cloud's referenced folder isn't alive in `cloud.folders`; else the cloud's `folder_id` if that folder
+  is alive in `main`; else a same-name lookup joining `main.folders`/`cloud.folders` (both alive); else NULL. A
+  feed's fetch state (`feed_fetch_state`) is device-local and never merged.
+  feeds are matched by **`id`**, which is deterministically generated from `url` as **UUIDv5**
+  (`IdGenerator.feedId`), so the same feed has the same id on every device.
+- **tags / folders: per-field last-write-wins**, like feeds: name (`name_updated_at`), color (`color_updated_at`,
+  tags), sort order (`sort_order_updated_at`) each by its own stamp; `updated_at` stamps creation, deletion and
+  reactivation. Two devices changing different fields of the same tag both keep their change. Rows are matched by
+  id, else by name (two devices that created the same name independently, with different ids, converge on one).
+- articles: read (`read_at`) / star (`starred_at`) / deletion (`deleted_updated_at`) are last-write-wins; `content`
+  is OR-merged (`COALESCE(c.content, l.content)`); `summary` is dropped to NULL once either side has `content`;
+  `cached_at` takes the newer value. A star newer than the deletion revives the article. A light row (NULL
+  `content`/`summary`) therefore never erases a body. `search_text` is not merged: an article whose body the merge
+  filled in or changed is registered in `ks_search_pending`, and a newly inserted article starts with `''` (see
+  "FTS5 Handling"). Articles are matched by **`id`** (UUIDv5 of `(feed_id, guid)`, `IdGenerator.articleId`).
+- feed_tags: last-write-wins. Imported only if the feed exists in main. The tag is used as-is if it is alive in
+  main, else looked up by name through `cloud.tags`; a row whose tag resolves to neither is skipped.
+- `NOT EXISTS` / `EXISTS` guards skip rows colliding with main (same URL, different ID, etc.) so UNIQUE / FK
+  violations do not fail the whole transaction.
+- `MergeSql.all` order: folders (by name, then by id, then the per-field statements), feeds, the four `mergeFeed*`,
+  tags (by name, by id, per field), articles, feed_tags, global_settings. Folders precede feeds (for
+  `feeds.folder_id`), and the `mergeFeed*` statements follow both.
+- The bookkeeping tables (`sync_outbox`, `ks_search_pending`, `sync_merging`, …) carry no constraints, so the
+  classification below still holds that main can only already violate FOREIGN KEY constraints.
+
+`ReduceSql` folds transport files into one with the same per-field rules and tie-break, keyed by primary key only —
+no local guards and no name resolution, which belong to each device's own merge.
 
 ### Merge Failure Classification
 
@@ -278,46 +469,42 @@ How each `actual` knows the merge transaction is still open differs, since the o
 
 ## Schema Version
 
-Managed via `PRAGMA user_version`. At merge time, `cloud.user_version` is checked; if the cloud is newer than local, `SchemaVersionException` is thrown to prompt the user to update the app (merge aborts).
-Current `user_version` is 2 (`1.sqm` adds `articles.deleted_at` / `deleted_updated_at`).
+Two versions are in play:
 
-> [!NOTE]
-> **Local-direction migration for older cloud schema**: `DatabaseMerger.merge` checks the downloaded cloud DB's
-> `user_version` before merging, and for a cloud version in `1 until localSchemaVersion`, runs
-> `KeryxDatabase.Schema.migrate` on the temp file to bring it up to the local schema before merging (e.g. a
-> version-1 cloud DB gets `1.sqm` applied so the article merge can reference `deleted_at`). This prevents merge
-> statements referencing newer columns from failing with `no such column` against an old cloud DB. A cloud
-> `user_version` of `0` (pre-dating any `.sqm` migration) is **not** covered by this uplift.
+- **The local schema** (`PRAGMA user_version` of `keryx.db`, currently 3). Version 3 (`2.sqm`) adds the sync
+  bookkeeping tables and triggers, moves `feeds`' fetch state into `feed_fetch_state`, adds the tag/folder per-field
+  stamps (initialized from `updated_at`), and registers every article whose `search_text` still equals its raw
+  `content`/`summary` (rows written before HTML stripping) in `ks_search_pending`.
+- **The transport schema** (`user_version` of each delta/base). A file older than this build is migrated up with
+  `TransportSchema`'s migrations before use; a newer one raises `SchemaVersionException`, which stops the sync
+  without advancing any cursor, so nothing is skipped once the app is updated.
 
-`DatabaseMerger.validateSchema(dbPath, schemaVersion)` returns a **nullable** `Boolean`:
+Adding a `.sqm` must update, together, the transport schema (DDL, expectations, migration), `MergeSchema`, and the
+column lists the capture triggers compare; a test fails when they disagree. Unknown columns are never ignored: an
+older device re-sending a row without them would overwrite the newer columns with NULL.
 
-- `true`/`false` for a registered schema version's tables/columns.
-- `null` when `schemaVersion` has no entry in `domain/MergeSchema.EXPECTED_SCHEMAS` (`commonMain` —
-  the expectation table is plain data shared by every platform; only the `PRAGMA table_info`
-  reflection that checks a file against it lives in each `actual`), or `null` when opening the
-  database or inspecting its tables fails (e.g. a corrupt or unreadable file) — a failed inspection
-  says nothing about whether the schema itself is valid, so it must not be conflated with a
-  completed inspection that finds it invalid (`false`).
-
-**Why `null` is treated as `true`.** This is deliberately fail-safe in the direction that matters: a
-version bump (`KeryxDatabase.Schema.version`) whose expected-schema entry was forgotten degrades
-`validateSchema` from `true` to `null` rather than `false`, and every caller treats `null` the same
-as `true` — an undetermined verdict must never be used to offer a destructive cloud-data reset for
-what is really just a missing registration.
-
-**The test that actually guards this.** `SyncMergerTest.validateSchemaReturnsTrueForValidKeryxDb`
-pins the current schema version to `true`, so a forgotten registration fails that test immediately
-rather than silently degrading behavior in the field; `schemaVersion` is a plain `Long`, so this
-cannot be enforced by the compiler (no sealed/enum exhaustiveness check applies), making that test
-the actual guard.
+`DatabaseMerger.validateSchema` / the transport validation return a **nullable** verdict: `null` when no expectation
+is registered for a version or the inspection itself fails. `null` is never treated as "incompatible" — it must not
+offer a destructive reset for what is really a forgotten registration — and is reported as a transient failure.
+`SyncMergerTest.validateSchemaReturnsTrueForValidKeryxDb` and its transport counterpart pin the current versions.
 
 ## FTS5 Handling
 
-**Never DROP `articles_fts` on the live DB.** Excluding the index from upload is done by `VACUUM INTO` snapshot (`DatabaseSnapshot.exportForUpload`) **dropping it on the copy side**. `VACUUM INTO` preserves `user_version`, so the receiving `DatabaseMerger`'s schema version check works correctly.
+**Never DROP `articles_fts` on the live DB.** The index never leaves the device: transport files are built from the
+synced tables only, and the full send's `VACUUM INTO` copy is only read from.
 
 Index maintenance is two-tier:
 
 - **Hot path (after feed refresh / sync merge)**: `FtsManager.indexMissing()` incrementally indexes only unindexed new articles (O(new rows), does not wipe index). Full rebuild (`'rebuild'`) is O(total indexed text) and heavy, and could reject running searches, so it is not used on hot paths. Indexes of existing articles with updated body text remain stale until the next rebuild (acceptable; they still match old tokens so searches do not regress to zero results).
+- **`search_text` after a merge.** `search_text` is not synced. The merge registers every article whose body it
+  filled in or changed in `ks_search_pending` (in the merge transaction), and a newly inserted article starts with
+  `search_text = ''`. After the commit and **before** `indexMissing()`, `SyncRepository` recomputes `search_text`
+  with `HtmlText.toPlainText` in batches, each batch updating the rows and removing them from `ks_search_pending` in
+  one transaction; a row whose conversion throws gets `''` (and a log entry) rather than blocking the rest. The
+  pending table is committed state, so an interrupted pass resumes at the next sync or launch. `indexMissing()`
+  skips rows still in `ks_search_pending`, so a new article is indexed with its computed text, never with `''`. An
+  article that was already indexed keeps its old tokens until the daily rebuild — the same accepted staleness as a
+  body changed by a refresh.
 - **Healing full rebuild (`rebuildIndex()` = `'rebuild'`)**:
   Executed only in the daily idle pass (`domain/StartupMaintenanceTasks.kt`'s `maybeRebuildFtsIndex`, shared by
   desktop and Android, gated by `local_settings.lastFtsRebuiltAt` 24h gate + `ActivityCenter` idle — no sync, no feed
@@ -595,11 +782,12 @@ Nextcloud is not reached through OAuth and has no app-only folder; everything ab
   browser, since it can take up to the full 20 minutes. The User-Agent names the device to the server
   (`Keryx (Android)`, …), which becomes the app password's name in the account's "Devices & sessions".
 - **Storage (`NextcloudStorage`).** The sync files live in `/Keryx/` under the user's own files
-  (`{server}/remote.php/dav/files/{userId}/Keryx/keryx.db.gz`, …); every request carries the app
+  (`{server}/remote.php/dav/files/{userId}/Keryx/keryx-sync.json`, …); every request carries the app
   password as HTTP Basic credentials and is refused unless the stored server URL is HTTPS. Redirects
   are not followed. `metadata` is a Depth-0 `PROPFIND` for `getetag` (matched by local name, whatever
   the namespace prefix; 404 → absent), `download` a `GET` whose `ETag` is the revision, `upload` a
-  `PUT` with the expected revision passed through verbatim as `If-Match`.
+  `PUT` with the expected revision passed through verbatim as `If-Match`, and `list` a Depth-1 `PROPFIND` for
+  `getetag` and `getcontentlength`.
 - **Revisions.** The revision is the file's ETag, which Nextcloud compares byte for byte, quotes
   included. An `If-Match` that does not match (or names a file that is not there) answers 412 — with no expected
   revision the `PUT` sends no `If-Match` at all and writes unconditionally — and a concurrent overwrite holding the
@@ -615,11 +803,10 @@ Nextcloud is not reached through OAuth and has no app-only folder; everything ab
   upload to the move itself. A 423 from the `MKCOL` or the temporary upload (another write holding a
   lock on `/Keryx` or that path) is a conflict too, left to the sync's retry rather than reported as a
   storage error. The temporary file is deleted again whenever the move does not happen. One
-  whose delete also fails stays in `/Keryx`: `CloudStorage` has no listing API to find it by later,
-  which is accepted.
+  whose delete also fails stays in `/Keryx`; its name never matches the sync file pattern, so the listing
+  ignores it. It is not cleaned up later, which is accepted.
 - **Rename.** `MOVE` with `Overwrite: F` and a full-URL `Destination`: a missing source (404) counts as
-  done, and an occupied destination (412) is a storage error, so `archiveCloudDb` falls back to its
-  delete.
+  done, and an occupied destination (412) is a storage error.
 - **Revocation.** The app password does not expire, so the provider's lifecycle is `Static`;
   disconnecting calls `DELETE /ocs/v2.php/core/apppassword` (with `OCS-APIREQUEST: true`), and the
   local credentials are cleared whether or not that succeeds.
@@ -737,13 +924,57 @@ Nextcloud is not reached through OAuth and has no app-only folder; everything ab
 
 ## Sync Target Article Range
 
-Startup cache cleanup **soft-deletes** articles past the retention period (stamps `deleted_at` / `deleted_updated_at`) rather than physically removing them. The tombstones are uploaded and propagate via the merge (last-write-wins on `deleted_updated_at`), so a device that missed the deletion converges instead of re-adding the article. The rows are not physically reclaimed yet (physical GC of old tombstones is future work), so soft-deleted articles still ride along in the uploaded snapshot until then.
+Startup cache cleanup **soft-deletes** articles past the retention period (stamps `deleted_at` / `deleted_updated_at`)
+rather than physically removing them. The tombstones travel as light rows and propagate via the merge
+(last-write-wins on `deleted_updated_at`), so a device that missed the deletion converges instead of re-adding the
+article. Tombstones are not physically reclaimed yet (future work).
+
+Cleanup decides by `cached_at`, the last time an article was seen in its feed. The merge still keeps the newest
+value, but a delta carries a `cached_at` change only when its day changes. A device that does not refresh a feed
+itself may therefore see another device's `cached_at` up to about a day late, and so clean up an unstarred article at
+the edge of the retention period up to a day earlier than before — and that deletion propagates. Starred articles
+and the latest 10 per feed are kept regardless, and convergence is unaffected.
+
+## Migration from the Pre-Delta Format
+
+The pre-delta format is a single full database at `/keryx.db.gz` (and, before compression, `/keryx.db`). A device
+running this version that finds no pointer but a `keryx.db.gz`:
+
+1. Merges `keryx.db.gz` as before (validated, migrated to the current schema, `MergeSql`) and remembers its
+   revision.
+2. Joins: its full send becomes the first base, and it creates the pointer. If a pointer already exists (another
+   device migrated first), this is an ordinary join.
+3. Uploads the downloaded file as `keryx-YYYYMMDD-HHMMSS.db.gz.bak` (`create`; a name collision is ignored) — a
+   one-time manual way back.
+4. Replaces `keryx.db.gz`, **with a revision check against step 1's revision**, by an empty SQLite file whose
+   `user_version` is 1000. It is not renamed away first: between checking it and renaming it, an older build could
+   write data that would then be archived without ever being merged.
+   - Revision mismatch → download and validate it. A stub (another device got there first) → record its revision;
+     done. A full database (an older build wrote) → merge it **with capture on** (no `sync_merging`), so every row
+     it actually changes enters the outbox and reaches every device as a delta; then retry step 4.
+   - Success → record the revision as `ks_legacy_stub_rev`.
+5. An older build that reads the stub raises `SchemaVersionException` ("update the app") before writing anything:
+   it fails visibly instead of silently diverging.
+
+**An older build writing after the migration.** On Dropbox, OneDrive and Nextcloud its revision-checked upload
+fails, and on retry it reads the stub. On Google Drive the revision check is not atomic, so it can overwrite the
+stub; the legacy watch (step 1 of "Sync Flow") notices the changed revision and absorbs it exactly as in step 4,
+then puts the stub back. If an older build's overwrite and the stub's replacement land at the same moment on Drive,
+that one write of the older build can be lost — the same cause as "Google Drive: an upload can overwrite another
+device's upload unnoticed" in [known-issues.md](known-issues.md).
+
+A pre-delta database holds columns the current schema no longer syncs: migrating it to schema 3 moves its fetch
+state into `feed_fetch_state` inside the temporary file only (never into the local database), initializes the
+per-field stamps from `updated_at`, and its articles' `search_text` is recomputed as for any merge.
+
+Builds older than compression (reading only `/keryx.db`) are unaffected by the stub and keep the one-way divergence
+documented for them; that fallback, the legacy watch and this migration are all removed at v1.0.0.
 
 ## Resetting (Archiving) Cloud Data
 
-`SyncRepository.resetCloudData()` is the recovery path for a cloud DB the app cannot use. It does **not** delete the cloud file outright: `archiveCloudDb()` first renames it to a timestamped path via `CloudStorage.rename()` (`core/CloudBackupPath.kt`'s `cloudBackupPath(clock.nowMillis())`, e.g. `/keryx-20260811-103000.db.gz.bak`, formatted in UTC so the name is deterministic for a fixed instant regardless of device time zone), then `createFresh()` re-uploads a snapshot of the local DB as the new `/keryx.db.gz`. The archive is never automatically pruned — `CloudStorage` has no listing API, and removing that mechanism entirely would defeat the point of keeping a way back to a mistaken reset or a merge bug that only *looked* like corruption.
-
-- **Only `CLOUD_DB_GZ_PATH` is ever touched by a reset.** The legacy `CLOUD_DB_PATH` fallback is deliberately left alone even if present, so it keeps working as a rollback path. This also means a reset self-heals even a merge failure whose real cause was corruption in the legacy file during a migration attempt (see "Compressed Upload / Legacy Fallback" above): the fresh, valid `.gz` created here immediately becomes what every subsequent sync reads, and the corrupt legacy file is simply never looked at again.
-- **`rename` semantics** (`CloudStorage.rename`, implemented per-provider — Dropbox `files/move_v2` with `autorename=false`, Google Drive a metadata `PATCH` on the file id resolved by name lookup, Microsoft Graph a metadata `PATCH` on the app-folder item, Nextcloud a WebDAV `MOVE` with `Overwrite: F`): idempotent when the source is already absent (`Result.Ok`, so a reset on an already-clean cloud folder still proceeds to `createFresh`), and fails rather than overwriting when the destination already exists.
-- **Delete fallback**: if the rename itself fails for a storage reason (e.g. an occupied archive name), `archiveCloudDb()` falls back to `cloud.delete(CLOUD_DB_GZ_PATH)` so a reset can never become permanently blocked. A `CloudAuthException` is the one exception *not* retried as a delete — the same missing credentials would fail identically.
-- **Backup path naming**: deliberately not derived from `CLOUD_DB_GZ_PATH` (`CLOUD_DB_BACKUP_PREFIX`/`CLOUD_DB_BACKUP_SUFFIX` in `core/Constants.kt`), so the archive's basename never matches Google Drive's `name = 'keryx.db.gz'` lookup or OneDrive's basename addressing — otherwise `CloudStorage.metadata(CLOUD_DB_GZ_PATH)` would see the archive too.
+`SyncRepository.resetCloudData()` is the recovery path for cloud data the app cannot use. It deletes nothing: the
+device joins a **new generation**, uploads its local full state as that generation's base, and replaces the pointer
+with a revision check (a mismatch — another device reset first — aborts and re-reads the pointer). The previous
+generation's files stay in place, unread, as the archive. Every other device sees the new generation on its next
+sync and rejoins with its own full send, so data that only another device held comes back. The pre-delta
+`keryx-YYYYMMDD-HHMMSS.db.gz.bak` archives and the stub are never touched by a reset.

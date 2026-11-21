@@ -442,21 +442,23 @@ See `testing.md`'s note on concurrent-write tests for the general pattern.
 ## A sync merge holds the database's write lock for its whole length
 
 **Status**: not fixed — closing it needs a redesign of the merge outside the scope of the change that
-found it (see "What a real fix would need").
+found it (see "What a real fix would need"). Delta sync narrows it: an ordinary sync merges only the few rows
+that changed, so the long hold is now limited to the merges that apply a whole base — a device joining, or
+catching up after more than a week offline.
 
 ### Symptom
 
-While a sync merges the downloaded cloud file, every other write to the local database waits. A write
-that waits longer than `busy_timeout` (`SQLITE_BUSY_TIMEOUT_MS`, 5 s) fails with `SQLITE_BUSY`: a read/star
-change or a feed-list or settings write handed off by the UI is reported as a local-write failure in the
-notification center (`LocalWriteFailureReporter`) and the UI undoes it, and a feed refresh's apply step
-fails for that cycle.
+While a sync merges, every other write to the local database waits. A write that waits longer than
+`busy_timeout` (`SQLITE_BUSY_TIMEOUT_MS`, 5 s) fails with `SQLITE_BUSY`: a read/star change or a feed-list or
+settings write handed off by the UI is reported as a local-write failure in the notification center
+(`LocalWriteFailureReporter`) and the UI undoes it, and a feed refresh's apply step fails for that cycle.
 
 ### Diagnosis
 
 `DatabaseMerger.merge` runs every `MergeSql` statement inside one transaction on its dedicated connection,
 so the write lock is held from the first statement to the commit or rollback, and the time grows with the
-number of rows merged, so with enough articles — which an unlimited cache retention allows — it exceeds
+number of rows merged. A delta holds only the rows changed since, so an ordinary merge is short; a base holds
+every synced row, so with enough articles — which an unlimited cache retention allows — merging it exceeds
 `busy_timeout`. A constraint failure whose verdict needs the deferred re-run (a FOREIGN KEY failure with
 violations already in main, and on Android any constraint failure with violations already in main) holds
 it longer still, since the remaining statements run a second time; other constraint failures do not re-run
@@ -472,30 +474,30 @@ depend on them.
 - **A longer `busy_timeout`** only moves the size at which writes start failing, and makes every write
   that waits on the merge wait longer.
 - **WAL mode** lets readers run alongside the merge, but writers are still serialized behind it.
-- **Splitting the merge into several transactions as it stands** would let a failure or a crash leave a
-  half-applied merge behind while `cloud_file_rev` says nothing about it.
+- **Splitting a base merge into several transactions as it stands** would let a failure or a crash leave a
+  half-applied merge behind while `sync_applied` says nothing about it.
 
 ### What a real fix would need
 
-A merge applied in bounded transactions that each leave the database consistent (foreign-key-safe order)
-and can be re-applied idempotently, with `cloud_file_rev` recorded only after the last one, so the lock is
-released between them and a merge interrupted at any point is simply completed by the next sync. It has to
-keep every guarantee in "Merge (`DatabaseMerger` + `MergeSql`)" and "Merge Failure Classification" in
-[sync-architecture.md](sync-architecture.md) — including the classification's in-transaction checks — and
-the FTS rule that the merge is followed by `indexMissing()`.
+A base merge applied in bounded transactions that each leave the database consistent (foreign-key-safe
+order) and can be re-applied idempotently, with the base recorded in `sync_applied` only after the last one,
+so the lock is released between them and a merge interrupted at any point is simply completed by the next
+sync. It has to keep every guarantee in "Merge (`DatabaseMerger` + `MergeSql`)" and "Merge Failure
+Classification" in [sync-architecture.md](sync-architecture.md) — including the classification's
+in-transaction checks — and the FTS rule that the merge is followed by the `search_text` recomputation and
+`indexMissing()`.
 
 ## Google Drive: an upload can overwrite another device's upload unnoticed
 
 **Status**: not fixed — external (Google Drive API) limitation: Drive offers no conditional content
-update. While the device that made them keeps syncing, the overwritten changes are merged into the
-cloud again, and those that survive the ordinary merge rules return.
+update. Delta sync confines it to the two files that are ever replaced — the sync pointer and the
+pre-delta `keryx.db.gz` stub; delta and base files are never overwritten. One case can still lose data (see
+"What can be lost").
 
 ### Symptom
 
-Two devices syncing through Google Drive at the same moment can both pass the upload's revision check;
-the later write then replaces the earlier one in the cloud without either device seeing a conflict.
-The earlier device's changes are missing from the cloud file — and from any device that downloads it —
-until that device syncs again.
+Two devices replacing the same file through Google Drive at the same moment can both pass the revision check;
+the later write then replaces the earlier one without either device seeing a conflict.
 
 ### Diagnosis
 
@@ -507,24 +509,20 @@ precondition: neither `files.update` nor its media upload documents an ETag / `I
 re-check whether this still holds, look in the official `files.update` reference (and its media upload)
 for an ETag / `If-Match` precondition or a documented `412`.
 
-The first upload has the same shape. Drive has no atomic create-if-absent, so two devices creating the
-file at once each create one, and `GoogleDriveStorage.resolveCreateRace` keeps the lowest id. Drive's
-file listing is not guaranteed to show a just-created file yet, so a device can see only its own file,
-believe it won, and keep writing there until the listing catches up — the re-check after
-`RACE_RECHECK_DELAY_MS` narrows that window but cannot close it. Once the listing shows both,
-`findFile` resolves every device to the lowest id. The revision a Drive device records holds the file's
-id as well as its `version`, so a device moved off its own file sees a revision it has not merged: its
-next sync downloads and merges the winner's file and uploads the result, so its content reaches the
-cloud. Its own file is left behind unused.
+Drive has no atomic create-if-absent either, and its listing is eventually consistent, so two devices
+creating the same name can both succeed. For delta and base files that is harmless: a name embeds the hash of
+the content, so two files with one name are the same file.
 
-### Why nothing is lost in the usual case
+### What can be lost
 
-The overwritten device keeps its own changes in its local DB and recorded the revision its own write
-produced. Its next sync finds a different revision in the cloud, downloads and merges that file, and
-uploads the merged result — so its changes return to the cloud, under the same merge rules as any other
-sync: a change that ties with the other device's on the same timestamp goes to the cloud side, exactly as it
-would had the two uploads not raced. The overwrite itself loses them from the cloud only if that device
-never syncs again (uninstalled, reset, or disconnected from Drive first).
+- **The pointer** (`keryx-sync.json`): two devices resetting the cloud data at once can both replace it. The
+  losing device's generation is simply never used; on its next sync it sees the winning generation and rejoins
+  with its full state, so nothing is lost. Two first devices creating the pointer at once resolve the same way.
+- **The pre-delta stub** (`keryx.db.gz`): a build older than delta sync can overwrite the stub with its full
+  database. The legacy watch notices the changed revision, merges that database (recording what it changes, so
+  it reaches every device as deltas) and puts the stub back. If the older build's overwrite and the stub's
+  replacement land in the same window, that one write of the older build is lost. This lasts only as long as
+  builds older than delta sync are still syncing to the same Drive; the stub and the watch go away at v1.0.0.
 
 ### Ruled out
 
@@ -536,10 +534,8 @@ never syncs again (uninstalled, reset, or disconnected from Drive first).
 
 ### What a real fix would need
 
-A server-side precondition on Drive's content update (an `If-Match` on `files.update`, or equivalent),
-and an atomic create-if-absent (or a strongly consistent listing) for the first upload. With them,
-`upload` would pass `expectedRev` to the write itself, as the OneDrive and Nextcloud storages do, and
-`create` would fail outright instead of reconciling afterwards.
+A server-side precondition on Drive's content update (an `If-Match` on `files.update`, or equivalent).
+With it, `upload` would pass `expectedRev` to the write itself, as the OneDrive and Nextcloud storages do.
 
 ## Linux/GNOME: the tray menu briefly shows the previous label when it opens
 
