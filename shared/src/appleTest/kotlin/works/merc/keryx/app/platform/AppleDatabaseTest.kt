@@ -11,6 +11,7 @@ import works.merc.keryx.app.data.local.FtsManager
 import works.merc.keryx.app.data.local.FtsSearch
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.domain.MergeSql
+import works.merc.keryx.app.domain.SnapshotSql
 import works.merc.keryx.app.tempFilePath
 import kotlin.test.AfterTest
 import kotlin.test.Test
@@ -97,6 +98,11 @@ class AppleDatabaseTest {
         assertTrue("feeds" in tables)
         assertFalse("articles_fts" in tables)
         assertFalse("sync_state" in tables)
+        for (deviceLocal in SnapshotSql.DEVICE_LOCAL_TABLES) assertFalse(deviceLocal in tables, deviceLocal)
+        val triggers = RawSqliteConnection.open(path("snapshot.db")).use {
+            it.queryColumn("SELECT name FROM sqlite_master WHERE type = 'trigger'", "name")
+        }
+        assertTrue(triggers.isEmpty(), "capture triggers must not reach the upload: $triggers")
     }
 
     @Test
@@ -129,8 +135,8 @@ class AppleDatabaseTest {
     }
 
     /**
-     * A schema-version-1 cloud file: the current schema with `1.sqm`'s two columns dropped and
-     * `user_version` set back to 1, holding one feed and one article.
+     * A schema-version-1 cloud file: the current schema with `2.sqm` undone and `1.sqm`'s two
+     * columns dropped, `user_version` set back to 1, holding one feed and one article.
      */
     private fun writeVersion1CloudFile(name: String) {
         val cloud = open(name)
@@ -139,6 +145,14 @@ class AppleDatabaseTest {
         cloud.close()
         drivers -= cloud
         RawSqliteConnection.open(path(name)).use { db ->
+            SnapshotSql.CAPTURE_TRIGGERS.forEach { db.exec("DROP TRIGGER $it") }
+            SnapshotSql.DEVICE_LOCAL_TABLES.filter { it != "sync_state" }.forEach { db.exec("DROP TABLE $it") }
+            db.exec("ALTER TABLE feeds ADD COLUMN etag TEXT")
+            db.exec("ALTER TABLE feeds ADD COLUMN last_modified TEXT")
+            db.exec("ALTER TABLE feeds ADD COLUMN error_count INTEGER NOT NULL DEFAULT 0")
+            db.exec("ALTER TABLE feeds ADD COLUMN last_error TEXT")
+            listOf("name_updated_at", "color_updated_at", "sort_order_updated_at").forEach { db.exec("ALTER TABLE tags DROP COLUMN $it") }
+            listOf("name_updated_at", "sort_order_updated_at").forEach { db.exec("ALTER TABLE folders DROP COLUMN $it") }
             db.exec("ALTER TABLE articles DROP COLUMN deleted_at")
             db.exec("ALTER TABLE articles DROP COLUMN deleted_updated_at")
             db.exec("PRAGMA user_version = 1")
@@ -485,8 +499,7 @@ class AppleDatabaseTest {
         /** The app's feeds table without its UNIQUE(url), so a cloud file can hold a duplicate url. */
         const val LAX_FEEDS_TABLE =
             "CREATE TABLE feeds (id TEXT NOT NULL PRIMARY KEY, url TEXT NOT NULL, site_url TEXT, " +
-                "title TEXT NOT NULL, description TEXT, favicon_url TEXT, etag TEXT, last_modified TEXT, " +
-                "error_count INTEGER NOT NULL DEFAULT 0, last_error TEXT, custom_title TEXT, folder_id TEXT, " +
+                "title TEXT NOT NULL, description TEXT, favicon_url TEXT, custom_title TEXT, folder_id TEXT, " +
                 "deleted_at INTEGER, updated_at INTEGER NOT NULL, created_at INTEGER NOT NULL, " +
                 "sort_order INTEGER NOT NULL DEFAULT 0, folder_updated_at INTEGER, " +
                 "sort_order_updated_at INTEGER, custom_title_updated_at INTEGER, deleted_updated_at INTEGER)"

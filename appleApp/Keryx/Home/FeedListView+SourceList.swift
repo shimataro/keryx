@@ -254,7 +254,7 @@ extension FeedListView {
         let selection = rowSelection(item, item.rowSelection ?? FeedListRowSelectionFeedInFolderGroup(feedId: feed.id))
         let instance = selection.instance
         return row(
-            content: sidebar.feedContents[feed.id] ?? SidebarRowStaticContent(feed: feed),
+            content: sidebar.feedContents[feed.id] ?? SidebarRowStaticContent(feed: feed, problem: nil),
             unread: .feed(feed.id),
             selection: selection,
             item: item,

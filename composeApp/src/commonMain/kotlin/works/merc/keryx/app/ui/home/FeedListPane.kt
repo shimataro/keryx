@@ -181,6 +181,7 @@ internal fun FeedListPane(
     val collapsedFolderIds by vm.collapsedFolderIds.collectAsState()
     val expandedTagIds by vm.expandedTagIds.collectAsState()
     val refreshingFeedIds by vm.refreshingFeedIds.collectAsState()
+    val feedFetchProblems by vm.feedFetchProblems.collectAsState()
     val refreshingFolderIds by vm.refreshingFolderIds.collectAsState()
     val totalUnread by vm.totalUnread.collectAsState()
     val starredUnread by vm.starredUnreadCount.collectAsState()
@@ -569,6 +570,7 @@ internal fun FeedListPane(
                             feed = feed,
                             count = unreadByFeed[feed.id] ?: 0L,
                             refreshing = feed.id in refreshingFeedIds,
+                            fetchProblem = feedFetchProblems[feed.id],
                             selectionTone = toneFor(instance),
                             focused = focused,
                             indented = indented,

@@ -334,7 +334,8 @@ class SyncRepositoryTest {
                     CREATE TABLE folders (
                         id TEXT NOT NULL PRIMARY KEY, name TEXT NOT NULL UNIQUE,
                         sort_order INTEGER NOT NULL DEFAULT 0, deleted_at INTEGER,
-                        updated_at INTEGER NOT NULL, created_at INTEGER NOT NULL
+                        updated_at INTEGER NOT NULL, created_at INTEGER NOT NULL,
+                        name_updated_at INTEGER, sort_order_updated_at INTEGER
                     )
                     """.trimIndent(),
                 )
@@ -344,7 +345,8 @@ class SyncRepositoryTest {
                     CREATE TABLE tags (
                         id TEXT NOT NULL PRIMARY KEY, name TEXT NOT NULL UNIQUE, color TEXT,
                         sort_order INTEGER NOT NULL DEFAULT 0, deleted_at INTEGER,
-                        updated_at INTEGER NOT NULL, created_at INTEGER NOT NULL
+                        updated_at INTEGER NOT NULL, created_at INTEGER NOT NULL,
+                        name_updated_at INTEGER, color_updated_at INTEGER, sort_order_updated_at INTEGER
                     )
                     """.trimIndent(),
                 )
@@ -387,8 +389,7 @@ class SyncRepositoryTest {
         feedsTableSql = """
             CREATE TABLE feeds (
                 id TEXT NOT NULL PRIMARY KEY, url TEXT NOT NULL, site_url TEXT, title TEXT NOT NULL,
-                description TEXT, favicon_url TEXT, etag TEXT, last_modified TEXT,
-                error_count INTEGER NOT NULL DEFAULT 0, last_error TEXT, custom_title TEXT, folder_id TEXT,
+                description TEXT, favicon_url TEXT, custom_title TEXT, folder_id TEXT,
                 deleted_at INTEGER, updated_at INTEGER NOT NULL, created_at INTEGER NOT NULL,
                 sort_order INTEGER NOT NULL DEFAULT 0, folder_updated_at INTEGER,
                 sort_order_updated_at INTEGER, custom_title_updated_at INTEGER, deleted_updated_at INTEGER
@@ -406,8 +407,7 @@ class SyncRepositoryTest {
         feedsTableSql = """
             CREATE TABLE feeds (
                 id TEXT NOT NULL PRIMARY KEY, url TEXT NOT NULL UNIQUE, site_url TEXT, title TEXT,
-                description TEXT, favicon_url TEXT, etag TEXT, last_modified TEXT,
-                error_count INTEGER NOT NULL DEFAULT 0, last_error TEXT, custom_title TEXT, folder_id TEXT,
+                description TEXT, favicon_url TEXT, custom_title TEXT, folder_id TEXT,
                 deleted_at INTEGER, updated_at INTEGER NOT NULL, created_at INTEGER NOT NULL,
                 sort_order INTEGER NOT NULL DEFAULT 0, folder_updated_at INTEGER,
                 sort_order_updated_at INTEGER, custom_title_updated_at INTEGER, deleted_updated_at INTEGER

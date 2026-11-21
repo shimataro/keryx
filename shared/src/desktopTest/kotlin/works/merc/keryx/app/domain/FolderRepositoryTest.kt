@@ -691,4 +691,68 @@ class FolderRepositoryTest {
             driver.close()
         }
     }
+
+    // --- per-field stamps (name_updated_at / sort_order_updated_at) ---
+
+    @Test
+    fun aNewFolderStampsBothFieldsWithItsCreationTime() {
+        val (driver, db) = inMemoryDb()
+        try {
+            val id = newRepo(db, driver, clock = Clock { 100L }).createFolder("Kotlin")
+
+            val row = db.foldersQueries.getById(id).executeAsOne()
+            assertEquals(listOf<Long?>(100L, 100L), listOf(row.name_updated_at, row.sort_order_updated_at))
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun aRenameMovesOnlyTheNameStampAndAReorderOnlyTheMovedFoldersSortStamps() = runTest {
+        val (driver, db) = inMemoryDb()
+        try {
+            var now = 100L
+            val repo = newRepo(db, driver, clock = Clock { now })
+            val a = repo.createFolder("A")
+            val b = repo.createFolder("B")
+            val c = repo.createFolder("C")
+
+            now = 200L
+            repo.updateFolder(a, "A2")
+            val renamed = db.foldersQueries.getById(a).executeAsOne()
+            assertEquals(listOf<Long?>(200L, 100L), listOf(renamed.name_updated_at, renamed.sort_order_updated_at))
+
+            now = 300L
+            repo.reorderFolders(c, b) // A, C, B: C and B change position, A stays
+            fun stamps(id: String) = db.foldersQueries.getById(id).executeAsOne().let { listOf(it.name_updated_at, it.sort_order_updated_at) }
+            assertEquals(listOf<Long?>(200L, 100L), stamps(a))
+            assertEquals(listOf<Long?>(100L, 300L), stamps(b))
+            assertEquals(listOf<Long?>(100L, 300L), stamps(c))
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun reactivatingAFolderStampsTheSortOrderItReappends() = runTest {
+        val (driver, db) = inMemoryDb()
+        try {
+            var now = 100L
+            val repo = newRepo(db, driver, clock = Clock { now })
+            val id = repo.createFolder("Kotlin") // sort_order 0
+            repo.createFolder("Other") // sort_order 1
+            now = 200L
+            repo.deleteFolder(id)
+
+            now = 300L
+            repo.createFolder("Kotlin") // reappended after "Other"
+
+            val row = db.foldersQueries.getById(id).executeAsOne()
+            assertEquals(2L, row.sort_order)
+            assertEquals(300L, row.sort_order_updated_at)
+            assertEquals(100L, row.name_updated_at)
+        } finally {
+            driver.close()
+        }
+    }
 }

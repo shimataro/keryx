@@ -37,6 +37,7 @@ import works.merc.keryx.app.core.map
 import works.merc.keryx.app.core.runCatchingUnlessCancelled
 import works.merc.keryx.app.core.valueOrElse
 import works.merc.keryx.app.data.local.FtsManager
+import works.merc.keryx.app.data.local.db.Feed_fetch_state
 import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.data.local.db.FeedsQueries
 import works.merc.keryx.app.data.local.db.KeryxDatabase
@@ -77,6 +78,9 @@ class FeedRepository(
 ) {
     private val feeds get() = db.feedsQueries
 
+    // A feed's device-local fetch state (validators, error count, last error) — see feed_fetch_state.sq.
+    private val fetchStates get() = db.feed_fetch_stateQueries
+
     // [feedPlacementMutex] guards every read-then-write of `feeds.sort_order` within a group:
     // subscribeFeedWrite's sort-order allocation + upsert + folder assignment, moveFeed's renumbering
     // of its target group, and moveFeedsOutOfFolderLocked's append to the no-folder group (reached
@@ -103,6 +107,20 @@ class FeedRepository(
     val refreshingFeedIds: Flow<Set<String>> = _refreshingFeedCounts.map { it.keys }.distinctUntilChanged()
 
     fun watchAllFeeds(): Flow<List<Feeds>> = feeds.watchAll().asFlow().mapToList(dispatcher)
+
+    /**
+     * The feeds the feed list flags, by id, from their device-local fetch state: a failed last
+     * fetch, or a 410 Gone. A feed with no problem (or no fetch state yet) has no entry.
+     */
+    fun watchFetchProblems(): Flow<Map<String, FeedFetchProblem>> =
+        fetchStates.watchProblems(FEED_ERROR_REASON_GONE).asFlow().mapToList(dispatcher).map { rows ->
+            buildMap {
+                rows.forEach { row -> feedFetchProblem(row.error_count, row.last_error)?.let { put(row.feed_id, it) } }
+            }
+        }
+
+    /** [feedId]'s device-local fetch state, or `null` when it has none yet (never fetched here). */
+    fun getFetchState(feedId: String): Feed_fetch_state? = fetchStates.getByFeedId(feedId).executeAsOneOrNull()
 
     /**
      * Retrieves a feed by its identifier.
@@ -246,8 +264,14 @@ class FeedRepository(
     /** These values with the favicon blanked out: the content and the validators that describe it. */
     private fun FeedValues.withoutFavicon(): FeedValues = copy(faviconUrl = null)
 
-    private val Feeds.feedValues: FeedValues
-        get() = FeedValues(site_url, title, description, favicon_url, etag, last_modified)
+    /**
+     * The feed values stored for the feed at [url] — its content columns and the validators in its
+     * fetch state — read in one statement, or `null` when no row has that url.
+     */
+    private fun storedFeedValues(url: String): StoredFeedValues? =
+        fetchStates.storedValuesByUrl(url).executeAsOneOrNull()?.let {
+            StoredFeedValues(it.id, FeedValues(it.site_url, it.title, it.description, it.favicon_url, it.etag, it.last_modified))
+        }
 
     /**
      * Fetches [url] and resolves its favicon, writing nothing to the DB. A fetch error is returned as
@@ -255,7 +279,7 @@ class FeedRepository(
      */
     internal suspend fun prefetchSubscription(url: String, batch: SubscribeBatch? = null): Result<PrefetchedSubscription> {
         // Read before the fetch starts, so a write that lands while it is in flight shows as a change.
-        val readRow = { feeds.getByUrl(url).executeAsOneOrNull()?.let { StoredFeedValues(it.id, it.feedValues) } }
+        val readRow = { storedFeedValues(url) }
         // In a batch, read together with the count of the batch's committed writes, with no batch write
         // between the two (see SubscribeBatch); only this one read is held under the batch lock.
         val (observedBatchWrites, storedBeforeFetch) =
@@ -494,8 +518,9 @@ class FeedRepository(
             // fetched content, nor the other way round. A change to anything else — a move, a
             // rename, a reorder — leaves both alone, so the fetched values are written. So are they
             // for a new row, a resubscribed one, and a row the prefetch never saw (no row yet, or a
-            // redirect to another feed's URL). (error_count / last_error need no such guard: upsert
-            // never updates them on an existing row.) The articles follow this decision, below.
+            // redirect to another feed's URL). (error_count / last_error need no such guard:
+            // upsertValidators never updates them on an existing row.) The articles follow this
+            // decision, below.
             val fetchedValues = FeedValues(
                 siteUrl = fetched.siteUrl,
                 title = fetched.title ?: effectiveUrl,
@@ -508,7 +533,8 @@ class FeedRepository(
             // write came after the prefetch's read (see writePrefetchedSubscription's batch), else the
             // prefetch's read — only when it read this very row. No baseline means the fetched values
             // are written.
-            val stored = current?.takeIf { it.deleted_at == null }?.feedValues
+            // Read in this transaction, after `current`, so both describe the same committed state.
+            val stored = current?.takeIf { it.deleted_at == null }?.let { storedFeedValues(effectiveUrl)?.values }
             val prefetchRead = storedBeforeFetch?.takeIf { current != null && it.feedId == current.id }?.values
             val contentBaseline = current?.let { batch?.contentWrittenAfter(it.id, observedBatchWrites) } ?: prefetchRead?.withoutFavicon()
             // The favicon can legitimately be null, so "a baseline exists" is tracked apart from its value.
@@ -527,16 +553,16 @@ class FeedRepository(
                 title = values.title,
                 description = values.description,
                 favicon_url = values.faviconUrl,
-                etag = values.etag,
-                last_modified = values.lastModified,
-                error_count = 0,
-                last_error = null,
                 custom_title = current?.custom_title,
                 deleted_at = null,
                 updated_at = now,
                 created_at = current?.created_at ?: now,
                 sort_order = sortOrder,
             )
+            // The validators describing the content just written (kept or fetched, together), in the
+            // feed's device-local fetch state. A new row starts with no errors; an existing row's
+            // error state is left alone, as the feed row's upsert used to leave it.
+            fetchStates.upsertValidators(feedId, values.etag, values.lastModified)
             // Files a brand-new feed into the folder selected in the feed list at add time. A
             // re-subscribed feed (current != null) keeps its prior folder instead — upsert never
             // touches folder_id, so there's nothing to do for that case.
@@ -617,6 +643,7 @@ class FeedRepository(
          */
         class Fetched(
             val feed: Feeds,
+            val fetchState: Feed_fetch_state?,
             val fetch: Result<PreparedFetch>,
             val committed: CompletableDeferred<Unit>,
         ) : RefreshStep
@@ -667,11 +694,14 @@ class FeedRepository(
      * Applies fetched feed data, persists its articles, and emits notifications for permanent removal or URL changes.
      *
      * @param feed The feed being refreshed.
+     * @param state [feed]'s fetch state as read when the refresh started (the one whose validators
+     *   the fetch sent), or `null` when it had none.
      * @param fetch The feed's fetch result, with its prepared article rows when Ok.
      * @return The article update result and whether the fetch contained articles.
      */
     private suspend fun applyFetch(
         feed: Feeds,
+        state: Feed_fetch_state?,
         fetch: Result<PreparedFetch>,
     ): RefreshOutcome {
         val ok = when (val r = fetch) {
@@ -679,20 +709,20 @@ class FeedRepository(
             is Result.Err -> {
                 val ex = r.exception
                 if (ex !is FeedNotFoundException) {
-                    feeds.incrementErrorCount(ex.messageText, clock.nowMillis(), feed.id)
+                    fetchStates.incrementErrorCount(feed.id, ex.messageText)
                 }
                 if (ex is FeedNotFoundException && ex.isGone) {
                     // error_count stays untouched (410 is permanent, not a retry candidate), so record
                     // the reason in last_error instead — that's what keeps the feed list flagged after
                     // the notification is dismissed. Cleared by resetErrorCount if the feed comes back.
                     // Written only on the transition: a gone feed is still refreshed every cycle, and
-                    // any feeds write re-runs the article-list query. The check reads the row taken
-                    // before the fetch, so a marker cleared meanwhile (a single-feed Refresh that
-                    // succeeded, or a sync merge) is not rewritten this cycle; the next one rereads the
-                    // row and restores it — the same assumption as the resetErrorCount guard below. Not
+                    // any write re-runs the queries watching the fetch state. The check reads the state
+                    // taken before the fetch, so a marker cleared meanwhile (a single-feed Refresh that
+                    // succeeded) is not rewritten this cycle; the next one rereads the state and
+                    // restores it — the same assumption as the resetErrorCount guard below. Not
                     // checked in SQL instead: SQLDelight re-runs the queries even when no row changes.
-                    if (feed.last_error != FEED_ERROR_REASON_GONE) {
-                        feeds.markGone(FEED_ERROR_REASON_GONE, clock.nowMillis(), feed.id)
+                    if (state?.last_error != FEED_ERROR_REASON_GONE) {
+                        fetchStates.markGone(feed.id, FEED_ERROR_REASON_GONE)
                     }
                     // Coalesced: a gone feed is still refreshed every cycle, and each one would otherwise
                     // add another copy of the same warning for as long as the session runs. The key
@@ -731,18 +761,19 @@ class FeedRepository(
         // hold the write lock for the entire apply phase (starving concurrent search / mark-as-read
         // of the busy_timeout) and would break the documented incremental appearance of articles.
         //
-        // Each `feeds` write is additionally guarded on the value actually changing, so a refresh
-        // that changed nothing writes nothing at all and notifies no one.
+        // Each write is additionally guarded on the value actually changing, so a refresh that
+        // changed nothing writes nothing at all and notifies no one. The fetch state lives in its
+        // own device-local table, so its writes never move the feed row's sync stamps.
         val newCount = db.transactionWithResult {
-            if (feed.error_count != 0L || feed.last_error != null) {
-                feeds.resetErrorCount(now, feed.id)
+            if (state != null && (state.error_count != 0L || state.last_error != null)) {
+                fetchStates.resetErrorCount(feed.id)
             }
 
             // A 304 carries no validators, so writing them back would erase the ones that produced it.
             if (!fetched.notModified &&
-                (fetched.etag != feed.etag || fetched.lastModified != feed.last_modified)
+                (fetched.etag != state?.etag || fetched.lastModified != state?.last_modified)
             ) {
-                feeds.updateCacheHeaders(fetched.etag, fetched.lastModified, now, feed.id)
+                fetchStates.upsertValidators(feed.id, fetched.etag, fetched.lastModified)
             }
 
             if (fetched.title != null || fetched.description != null) {
@@ -850,7 +881,10 @@ class FeedRepository(
                 // permit for the next fetch rather than wait for the writer. How many results can
                 // queue here is bounded separately, by REFRESH_PENDING_APPLY_LIMIT.
                 val steps = Channel<RefreshStep>(Channel.UNLIMITED)
-                launchFetches(feedList, steps)
+                // Read with [feedList] (fresh from the DB, per the KDoc above): the validators each
+                // conditional request sends, and the error state applyFetch compares against.
+                val fetchStatesAtStart = fetchStates.getAll().executeAsList().associateBy { it.feed_id }
+                launchFetches(feedList, fetchStatesAtStart, steps)
                 applySteps(steps, state)
             }
         } catch (e: Exception) {
@@ -873,10 +907,15 @@ class FeedRepository(
      * follows that commit under a permit of its own, so it never delays that feed's articles. [steps]
      * is closed once every fetch has finished.
      */
-    private fun CoroutineScope.launchFetches(feedList: List<Feeds>, steps: SendChannel<RefreshStep>) {
+    private fun CoroutineScope.launchFetches(
+        feedList: List<Feeds>,
+        fetchStatesAtStart: Map<String, Feed_fetch_state>,
+        steps: SendChannel<RefreshStep>,
+    ) {
         val semaphore = Semaphore(FEED_FETCH_CONCURRENCY)
         val pendingApply = Semaphore(REFRESH_PENDING_APPLY_LIMIT)
         val fetches = feedList.map { feed ->
+            val state = fetchStatesAtStart[feed.id]
             launch(dispatcher) {
                 val faviconLookup = trackRefreshing(feed.id) {
                     // The pending-apply permit is taken only once this feed's turn for a fetch slot
@@ -887,7 +926,7 @@ class FeedRepository(
                     fetchHoldingPendingApply(
                         semaphore,
                         pendingApply,
-                        fetch = { feedFetcher.fetch(feed.url, feed.etag, feed.last_modified) },
+                        fetch = { feedFetcher.fetch(feed.url, state?.etag, state?.last_modified) },
                     ) { fetch ->
                         // Holds no fetch permit while waiting, so a writer within
                         // REFRESH_PENDING_APPLY_LIMIT of the fetches never caps the fetch concurrency.
@@ -897,7 +936,7 @@ class FeedRepository(
                         // any; an exception propagates like any other failure of this coroutine.
                         val prepared = fetch.map { PreparedFetch(it, articleRepository.prepareRows(feed.id, it.articles)) }
                         val committed = CompletableDeferred<Unit>()
-                        steps.send(RefreshStep.Fetched(feed, prepared, committed))
+                        steps.send(RefreshStep.Fetched(feed, state, prepared, committed))
                         committed.await()
                         // Only the site URL outlives the commit: the lookup below can wait on a permit
                         // and the network for a while, and must not keep every parsed article resident
@@ -956,7 +995,7 @@ class FeedRepository(
         for (step in steps) {
             when (step) {
                 is RefreshStep.Fetched -> {
-                    val outcome = applyFetch(step.feed, step.fetch)
+                    val outcome = applyFetch(step.feed, step.fetchState, step.fetch)
                     val wasLast = state.recordFetched(step.feed.id, outcome.result, outcome.hadArticles)
                     step.committed.complete(Unit)
                     if (wasLast) indexIfNeeded(state)
