@@ -42,6 +42,7 @@ import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.core.SYNC_STATE_LAST_SYNCED_AT
 import works.merc.keryx.app.data.cloud.AppPasswordCredentials
 import works.merc.keryx.app.data.cloud.CloudCredentials
+import works.merc.keryx.app.data.cloud.CloudFileEntry
 import works.merc.keryx.app.data.cloud.CloudFileMeta
 import works.merc.keryx.app.data.cloud.CloudStorage
 import works.merc.keryx.app.data.cloud.DropboxAuthManager
@@ -93,6 +94,7 @@ private class AlwaysFailingCloudStorage : CloudStorage {
     override suspend fun delete(path: String): Result<Unit> = fail()
     override suspend fun rename(from: String, to: String): Result<Unit> = fail()
     override suspend fun metadata(path: String): Result<CloudFileMeta?> = fail()
+    override suspend fun list(prefix: String): Result<List<CloudFileEntry>> = fail()
 }
 
 /**
@@ -117,6 +119,7 @@ private class GatedCloudStorage(
     override suspend fun create(path: String, sourcePath: String): Result<CloudFileMeta> = fail()
     override suspend fun delete(path: String): Result<Unit> = Result.Ok(Unit)
     override suspend fun rename(from: String, to: String): Result<Unit> = Result.Ok(Unit)
+    override suspend fun list(prefix: String): Result<List<CloudFileEntry>> = Result.Ok(emptyList())
 }
 
 /**

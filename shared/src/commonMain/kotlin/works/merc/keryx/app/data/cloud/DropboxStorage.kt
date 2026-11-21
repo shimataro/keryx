@@ -11,8 +11,12 @@ import io.ktor.http.ContentType
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import works.merc.keryx.app.core.CloudStorageException
 import works.merc.keryx.app.core.MAX_SYNC_DB_SIZE_BYTES
@@ -205,6 +209,49 @@ class DropboxStorage(
             response.status.value == 409 -> response.okIfConflictBodyContains("from_lookup/not_found", absent = Unit)
             else -> mapError(response.status.value, response.bodyAsText())
         }
+    }
+
+    /**
+     * Lists the app folder's files whose name starts with [prefix] through `files/list_folder`,
+     * then `files/list_folder/continue` for as long as Dropbox reports `has_more`.
+     *
+     * Sync paths are flat (`/keryx.db.gz`), so the app folder's root (`""`) holds every one of them.
+     * A 409 `path/not_found` (nothing ever written to the app folder) is an empty listing.
+     *
+     * @param prefix The basename prefix to keep.
+     * @return The matching files, or a mapped storage error.
+     */
+    override suspend fun list(prefix: String): Result<List<CloudFileEntry>> = withToken { token ->
+        val entries = mutableListOf<CloudFileEntry>()
+        var response = postJson(token, "$apiBase/2/files/list_folder", buildJsonObject { put("path", "") })
+        while (true) {
+            if (!response.status.isSuccess()) {
+                if (response.status.value == 409) {
+                    return@withToken response.okIfConflictBodyContains("path/not_found", absent = emptyList())
+                }
+                return@withToken mapError(response.status.value, response.bodyAsText())
+            }
+            val page = json.parseToJsonElement(response.bodyAsText()) as? JsonObject
+                ?: return@withToken Result.Err(CloudStorageException("Malformed list_folder response"))
+            val items = page["entries"] as? JsonArray
+                ?: return@withToken Result.Err(CloudStorageException("Missing entries in list_folder response"))
+            for (item in items) {
+                val obj = item as? JsonObject ?: continue
+                if (obj[".tag"]?.jsonPrimitive?.content != "file") continue
+                val name = obj["name"]?.jsonPrimitive?.content ?: continue
+                if (!name.startsWith(prefix)) continue
+                val rev = obj["rev"]?.jsonPrimitive?.content
+                    ?: return@withToken Result.Err(CloudStorageException("Missing rev in list_folder entry"))
+                val size = obj["size"]?.jsonPrimitive?.longOrNull
+                    ?: return@withToken Result.Err(CloudStorageException("Missing size in list_folder entry"))
+                entries += CloudFileEntry(name, rev, size)
+            }
+            if (page["has_more"]?.jsonPrimitive?.booleanOrNull != true) break
+            val cursor = page["cursor"]?.jsonPrimitive?.content
+                ?: return@withToken Result.Err(CloudStorageException("Missing cursor in list_folder response"))
+            response = postJson(token, "$apiBase/2/files/list_folder/continue", buildJsonObject { put("cursor", cursor) })
+        }
+        Result.Ok(entries)
     }
 
     /** POSTs [body] as JSON to the RPC endpoint [url], authorized with [token]. */
