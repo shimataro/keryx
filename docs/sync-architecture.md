@@ -188,7 +188,10 @@ only the retries of a revision-checked write (the pointer, the stub); delta and 
      after it carries a `seq > S` and goes into the next delta.
    - **Full send** (when joining) — from a `VACUUM INTO` copy, as the pre-delta upload did, so the live database's
      read lock is held only for the copy; `S` is read from the copy too. Rows identical to the base just merged
-     (`EXCEPT`) are left out — a fresh device with an empty database sends almost nothing.
+     (`EXCEPT`) are left out — a fresh device with an empty database sends almost nothing — and, after the
+     filtering, the rows the kept rows reference are added back (the feed of every kept article, the folder of
+     every kept feed, the tag and feed of every kept `feed_tags` row), so the file passes validation check 9 even
+     when a kept article's feed is identical to the merged base.
 2. **Record before uploading**: the compressed file is written to the app's data directory as `pending-<n>.db.gz`,
    and, in one transaction, `ks_attempt = (n = ks_last_seq + 1, name, S)`.
 3. **Upload** with `create(name)`. An "already exists" answer means the same file is there (same name, same
