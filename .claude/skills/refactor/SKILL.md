@@ -297,9 +297,10 @@ affected docs and **update the stale references in place**:
   moved.
 
 **Doc edits follow the doc's own language.** `.claude/CLAUDE.md` and `docs/*.md`
-files other than `docs/*.ja.md` are English (source code stays English too, #9).
-Only `docs/*.ja.md` files are Japanese. Every `docs/X.md` you edit has a `docs/X.ja.md`
-twin: update it in the same step (`.claude/rules/docs-translation.md`). **Do NOT edit `README.md` or
+files other than their translations (`docs/*.<lang>.md`) are English (source code stays English
+too, #9); each translation is in its own language. Every `docs/X.md` you edit has a translation per
+documentation locale (`ls docs/X.*.md` — today `docs/X.ja.md`): update all of them in the same step
+(`.claude/rules/docs-translation.md`). **Do NOT edit `README.md` or
 `docs/external-spec.md`**
 — behavior is unchanged and `README.md` is user-facing only (see
 `.claude/CLAUDE.md` "Documentation"). This is a targeted pass, not a full re-read

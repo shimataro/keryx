@@ -159,7 +159,7 @@ knowledge_base:
       # CLAUDE.md itself is auto-detected by CodeRabbit's default patterns (**/CLAUDE.md) —
       # no entry needed here. These add the docs/*.md and .claude/rules/*.md files it does not
       # auto-detect, scoped to the source areas they actually describe. Only the English (.md)
-      # doc is referenced, not its .ja.md sibling, to avoid doubling near-duplicate context.
+      # doc is referenced, not its translations (*.<lang>.md), to avoid doubling near-duplicate context.
       - files: "docs/app-architecture.md"
         applyTo: "{shared,composeApp,testing}/src/**,appleApp/**"
       - files: "docs/error-design.md"

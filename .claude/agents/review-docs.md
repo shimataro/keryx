@@ -1,6 +1,6 @@
 ---
 name: review-docs
-description: Reviews whether Keryx documentation still matches the code after a change, whether the English and Japanese doc pairs moved together, whether THIRD-PARTY-LICENSES.md tracks libs.versions.toml, and the quality of user-facing prose in docs, README, and the ja/en string resources. Read-only.
+description: Reviews whether Keryx documentation still matches the code after a change, whether the English docs and their translations moved together, whether THIRD-PARTY-LICENSES.md tracks libs.versions.toml, and the quality of user-facing prose in docs, README, and the ja/en string resources. Read-only.
 tools: Read, Grep, Glob, Bash
 model: sonnet
 ---
@@ -74,16 +74,17 @@ Report a specific stale sentence with its location, not "the docs may need updat
 
 ## Checklist — parallel files that must move together
 
-- **`docs/*.md` and `docs/*.ja.md` are updated together** — every English page has a Japanese
-  counterpart, including the `docs/README.md` index table. See `.claude/rules/docs-translation.md`;
+- **`docs/*.md` and their translations are updated together** — every English page has a
+  translation `docs/*.<lang>.md` for each documentation locale (today `.ja.md`; list them, don't
+  assume), including the `docs/README.md` index table. See `.claude/rules/docs-translation.md`;
   it cites two past commits where this was missed. A pair that has diverged is a finding.
 - **`gradle/libs.versions.toml` and `THIRD-PARTY-LICENSES.md`**: when a *shipped runtime* dependency
   whose license requires attribution (Apache-2.0, MIT, BSD, …) is added or removed, its row must be
   added or removed too. This applies equally to bundled non-Gradle assets (e.g. the icon set under
   `composeResources/`). Test-only dependencies are excluded. It is the single source of truth behind
   the About dialog's Open Source Licenses link. (CLAUDE.md constraint #8)
-- **Repo-root policy pages move in ja/en pairs too**: `README`, `SECURITY`, `PRIVACY`, and `TERMS`
-  each have a `.ja.md` twin.
+- **Repo-root policy pages move with their translations too**: `README`, `SECURITY`, `PRIVACY`, and
+  `TERMS` each have a translation per documentation locale (today `.ja.md`).
 - **`PRIVACY.md` matches the app.** Its "Network requests this app makes" list must cover every
   host the code contacts, and `appleApp/Keryx/Resources/PrivacyInfo.xcprivacy` must declare the same
   data use. A new endpoint, or a new data type collected, without a matching line is a finding.
@@ -97,15 +98,15 @@ Report a specific stale sentence with its location, not "the docs may need updat
 
 ## Checklist — prose quality
 
-Applies to `docs/*.md` and `*.ja.md`, the repo-root `*.md` pages, the store listings, and the user-facing
+Applies to `docs/*.md` and their translations, the repo-root `*.md` pages, the store listings, and the user-facing
 strings in `values/strings.xml` (English) and `values-ja/strings.xml` (Japanese).
 
 - Sentences that are hard to parse on one read: buried subject, stacked modifiers, a pronoun with no
   clear referent.
 - Redundancy: a sentence restating the previous one, a hedge that carries no information.
-- Inconsistent terminology — the same concept called two things across pages or across ja/en.
-- ja/en drift in *meaning*, not just in presence: the Japanese page saying something the English one
-  does not, or vice versa.
+- Inconsistent terminology — the same concept called two things across pages or between the English page and a translation.
+- Translation drift in *meaning*, not just in presence: a translated page saying something the
+  English one does not, or vice versa.
 - UI strings: is the wording natural for a user who does not know the implementation? Does the
   Japanese and the English say the same thing at the same register?
 
@@ -130,7 +131,7 @@ reached from `errorMessage(ErrorKind)`, `notificationText` / `infoDialogText`, a
   applies), the failure is still recognizable without the text, and the explanation and next step
   are still available elsewhere. If any of these no longer holds, it is `Medium` despite the entry.
   A key that is not listed, or has no comment, is still `Medium`; and a diff that adds such an
-  exception must also add it to that list in both `error-design.md` and `error-design.ja.md`.
+  exception must also add it to that list in `error-design.md` and every translation of it.
 - Technical detail in the text — an HTTP status code, an exception name, an internal term — is a
   `Medium` finding.
 - ja and en give the same cause and the same next step.

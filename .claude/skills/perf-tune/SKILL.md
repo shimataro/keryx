@@ -441,8 +441,8 @@ commit for the item that triggered it — not as a separate later pass — so th
 doc fix rides along in that same item's single commit.
 
 Update only the docs whose stated performance characteristics actually changed.
-**`docs/` is bilingual — every page has an English `X.md` and a Japanese
-`X.ja.md`, so both must be updated together.** Likely targets:
+**Every `docs/` page has an English `X.md` and a translation `X.<lang>.md` per
+documentation locale (today `X.ja.md`), so all of them must be updated together.** Likely targets:
 
 - `docs/db-schema.md` — indexes, PRAGMAs, schema version.
 - `docs/sync-architecture.md` — FTS index maintenance, merge, upload flow.

@@ -294,8 +294,8 @@ The package root is `works.merc.keryx.app` (reverse-DNS of `keryx.merc.works`).
 9. **Source code (comments, KDoc, log/exception messages, non-UI string
    literals) must be written in English**, regardless of the language used
    in conversation with the user (this file and `docs/*.md` are themselves
-   in English — see "Working language" above for reply language; `docs/*.ja.md`
-   are Japanese translations for readers, and UI text goes through the localized
+   in English — see "Working language" above for reply language; `docs/*.<lang>.md`
+   are translations for readers — currently Japanese, `.ja.md` — and UI text goes through the localized
    resource files per constraint #3). Exceptions: (a) UI-facing strings
    still go through Compose Resources per #3 and are localized there (both
    shipped locales); (b)

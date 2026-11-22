@@ -358,8 +358,8 @@ If no item is Fix & commit, output `No implementation plan is needed.` and go to
    - **Context** — what the issue asks for and why it is being done.
    - **One section per Fix & commit item**, in item order: **Files to modify**, **Changes**
      (concrete actions) and **Verification** (tests, build targets, manual checks). Tests follow
-     CLAUDE.md constraint #7 and `docs/testing.md`; a doc change updates both the English and
-     the `.ja.md` file, and a string change both `values/` and `values-ja/` `strings.xml`. For
+     CLAUDE.md constraint #7 and `docs/testing.md`; a doc change updates the English file and
+     every translation of it (`.claude/rules/docs-translation.md`), and a string change both `values/` and `values-ja/` `strings.xml`. For
      an item whose evidence came from temporary instrumentation and whose effect is measurable,
      add "re-measure per 9.4".
    - **Commit Strategy** — one commit per item, in item order, per
