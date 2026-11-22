@@ -588,6 +588,14 @@ against raw, but the upload — a snapshot of the local database — carries onl
 then ranks as if it were raw. Shipping the raw id instead would not help on its own: the folder it names may not
 exist on the sender, so a receiver could not resolve it.
 
+The same cause leaves a feed pointing at a deleted folder. `mergeFeedFolderId` resolves a feed's folder only when
+an incoming raw assignment strictly wins, so a later file that deletes the folder but carries the same assignment
+never re-resolves it. With folder `d` live and feed `f` assigned to `d` at stamp 500, merging a file with `d` live
+and then one with `d` deleted (both still assigning `f` to `d` at 500) leaves `f.folder_id = d`; the other order
+leaves NULL. The UI already shows a deleted folder as "no folder", but the stored and uploaded values differ.
+Re-resolving under the final folder state would need the raw folder's name, since its id may not exist locally,
+and a rule that also stays order-independent across a folder's deletion and revival.
+
 ### What a real fix would need
 
 Folder ids that converge across devices — for instance, re-keying a folder matched by name onto a canonical id on
