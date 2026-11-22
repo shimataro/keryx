@@ -42,6 +42,7 @@ import works.merc.keryx.app.core.encode
 import works.merc.keryx.app.core.toDbFlag
 import works.merc.keryx.app.data.local.db.Articles
 import works.merc.keryx.app.data.local.db.Feeds
+import works.merc.keryx.app.domain.FeedFetchProblem
 import works.merc.keryx.app.data.local.db.Folders
 import works.merc.keryx.app.data.local.db.Tags
 import works.merc.keryx.app.domain.ActivityCenter
@@ -134,13 +135,13 @@ class HomeViewModel(
     val feeds: StateFlow<List<Feeds>> = feedsSnapshot.derived(::sameListOrBothEmpty) { it.orEmpty() }
 
     /**
-     * [feeds], minus the emissions that change only `etag` / `last_modified` / `updated_at`
-     * ([feedsStructurallyEqual]) — what a refresh rewrites once per fetched feed without anything on
-     * screen reading it. What both UIs render the feed list, the article rows' feed info and every
+     * [feeds], minus the emissions that change only `updated_at` ([feedsStructurallyEqual]) — what a
+     * refresh rewrites without anything on screen reading it. What both UIs render the feed list, the article rows' feed info and every
      * feed lookup from (the Compose panes and menu bar, and the Apple app's sidebar), so a refresh
-     * that only moves those three fields recomposes / rebuilds nothing; the comparison runs on
-     * [dispatcher] instead of on the main thread. Its `Feeds` may therefore lag [feeds] in those
-     * three fields — which is why [refreshFeed] takes an id and re-reads the row itself.
+     * that only moves that field recomposes / rebuilds nothing; the comparison runs on
+     * [dispatcher] instead of on the main thread. Its `Feeds` may therefore lag [feeds] in that
+     * field — and [refreshFeed] takes an id and re-reads the row itself, so a refresh always starts
+     * from the current row.
      */
     val structuralFeeds: StateFlow<List<Feeds>> =
         feeds.distinctUntilChanged(::feedsStructurallyEqual)
@@ -162,6 +163,15 @@ class HomeViewModel(
 
     val feedTagMap: StateFlow<Map<String, Set<String>>> =
         tagRepository.watchFeedTagMap().stateIn(viewModelScope, started, emptyMap())
+
+    /**
+     * Why the feed list flags a feed, by feed id: its last fetch on this device failed, or it is
+     * gone (410) — see [FeedRepository.watchFetchProblems]. A feed with no problem has no entry.
+     * Kept apart from [feeds] because the fetch state is device-local (`feed_fetch_state`), not a
+     * column of the feed row; both UIs read a feed row's error indicator from here.
+     */
+    val feedFetchProblems: StateFlow<Map<String, FeedFetchProblem>> =
+        feedRepository.watchFetchProblems().stateIn(viewModelScope, started, emptyMap())
 
     val unreadByFeed: StateFlow<Map<String, Long>> =
         articleRepository.watchUnreadCountsByFeed().stateIn(viewModelScope, started, emptyMap())

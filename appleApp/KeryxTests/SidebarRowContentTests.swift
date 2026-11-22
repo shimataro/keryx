@@ -8,13 +8,14 @@ struct SidebarRowContentTests {
 
     private func contents(
         feeds: [Feeds] = F.feeds,
+        fetchProblems: [String: FeedFetchProblem] = [:],
         selectionDisplayed: Bool = true,
         selectedRow: FeedListRowSelection = FeedListRowSelectionAll(),
         filter: ArticleFilter = ArticleFilterAll()
     ) -> [SidebarItemID: SidebarRowContent] {
         SidebarRowContent.build(
             outline: F.outline(feeds: feeds),
-            model: F.model(feeds: feeds),
+            model: F.model(feeds: feeds, fetchProblems: fetchProblems),
             selectionDisplayed: selectionDisplayed,
             selectedRow: selectedRow,
             filter: filter
@@ -45,10 +46,10 @@ struct SidebarRowContentTests {
     func aFeedShowsItsCustomTitleAndErrorState() {
         let feeds = [
             F.feed("a", sortOrder: 1, customTitle: "Mine"),
-            F.feed("b", sortOrder: 2, errorCount: 2),
-            F.feed("c", sortOrder: 3, lastError: ConstantsKt.FEED_ERROR_REASON_GONE),
+            F.feed("b", sortOrder: 2),
+            F.feed("c", sortOrder: 3),
         ]
-        let all = contents(feeds: feeds)
+        let all = contents(feeds: feeds, fetchProblems: ["b": .error, "c": .gone])
         #expect(all[.feed("a")]?.title == "Mine")
         #expect(all[.feed("a")].map { !$0.isErroring && !$0.isGone } == true)
         #expect(all[.feed("b")].map { $0.isErroring && !$0.isGone } == true)
@@ -81,8 +82,7 @@ struct SidebarRowContentTests {
     func changedItemsAreOnlyTheRowsWhoseContentDiffers() {
         let before = contents()
         // Feed `a` starts erroring: both of its rows (under its folder and under tag t1) change.
-        let erroring = F.feeds.map { $0.id == "a" ? F.feed("a", sortOrder: 1, folderId: "d1", errorCount: 1) : $0 }
-        let after = contents(feeds: erroring)
+        let after = contents(fetchProblems: ["a": .error])
         #expect(
             SidebarRowContent.changedItems(from: before, to: after)
                 == [.feed("a"), .feedInTag(feedId: "a", tagId: "t1")]

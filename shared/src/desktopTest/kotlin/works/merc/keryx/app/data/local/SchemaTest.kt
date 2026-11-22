@@ -24,10 +24,11 @@ class SchemaTest {
         }
 
     @Test
-    fun schemaVersionIsTwo() {
-        // Bumped to 2 by 1.sqm (adds articles.deleted_at / deleted_updated_at). SQLDelight derives
+    fun schemaVersionIsThree() {
+        // Bumped to 2 by 1.sqm (adds articles.deleted_at / deleted_updated_at) and to 3 by 2.sqm
+        // (delta-sync bookkeeping, feed_fetch_state, tag/folder per-field stamps). SQLDelight derives
         // the version from the highest migration file (+1).
-        assertEquals(2L, KeryxDatabase.Schema.version)
+        assertEquals(3L, KeryxDatabase.Schema.version)
     }
 
     @Test

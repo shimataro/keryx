@@ -30,10 +30,10 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import org.jetbrains.compose.resources.stringResource
-import works.merc.keryx.app.core.FEED_ERROR_REASON_GONE
 import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.data.local.db.Folders
 import works.merc.keryx.app.data.local.db.Tags
+import works.merc.keryx.app.domain.FeedFetchProblem
 import works.merc.keryx.app.domain.displayTitle
 import works.merc.keryx.app.platform.NativeCheckMenuItem
 import works.merc.keryx.app.platform.NativeMenuItem
@@ -332,6 +332,8 @@ internal fun NoFolderHeader(
  *   when there are no folders at all (otherwise the first folder's header always precedes every
  *   feed row). Paints a full-thickness top marker instead of half, since nothing precedes it.
  * @param activeBoundaryState The currently active insertion boundary.
+ * @param fetchProblem Why this feed is flagged (its last fetch failed, or it is gone), or `null`
+ *   for none — from [works.merc.keryx.app.presentation.home.HomeViewModel.feedFetchProblems].
  * @param onRename Starts inline editing of the feed's display title.
  * @param editingName Whether the title is currently open for inline editing (see [InlineRenameField]).
  * @param onRenameCommit Applies an edited title; a blank value resets it to the feed's own title.
@@ -382,6 +384,7 @@ internal fun FeedRow(
     onCreateNewFolderForFeed: () -> Unit = {},
     onCreateNewTagForFeed: () -> Unit = {},
     refreshing: Boolean = false,
+    fetchProblem: FeedFetchProblem? = null,
 ) {
     val refreshLabel = stringResource(Res.string.home_refresh)
     val refreshingStateLabel = stringResource(Res.string.home_feed_refreshing)
@@ -503,12 +506,10 @@ internal fun FeedRow(
                 )
             },
         )
-        // A 410-Gone feed deliberately keeps error_count at 0 (it is permanent, not a retry
-        // candidate), so it is recognized by its last_error marker instead — otherwise a
-        // disappeared feed would look completely normal here once its notification is dismissed.
-        val gone = feed.last_error == FEED_ERROR_REASON_GONE
-        if (feed.error_count > 0 || gone) {
-            FeedErrorIndicator(gone)
+        // A 410-Gone feed is flagged too (FeedFetchProblem.GONE), so a disappeared feed does not
+        // look completely normal here once its notification is dismissed.
+        if (fetchProblem != null) {
+            FeedErrorIndicator(gone = fetchProblem == FeedFetchProblem.GONE)
             Spacer(Modifier.width(4.dp))
         }
         if (count > 0) CountBadge(count, selectionTone == RowSelectionTone.PRIMARY, focused)

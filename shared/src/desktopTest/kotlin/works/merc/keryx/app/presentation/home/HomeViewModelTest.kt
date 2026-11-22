@@ -82,6 +82,7 @@ import works.merc.keryx.app.ftsManager
 import works.merc.keryx.app.ftsManagerIndexed
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
+import works.merc.keryx.app.setFeedFetchState
 import works.merc.keryx.app.insertFeedTag
 import works.merc.keryx.app.insertFolder
 import works.merc.keryx.app.insertTag
@@ -4173,7 +4174,7 @@ class HomeViewModelTest {
     @Test
     fun refreshFeedSendsTheFeedsCurrentConditionalHeadersReadFromTheDb() = runTest {
         db.insertFeed("f1")
-        db.feedsQueries.updateCacheHeaders("etag-current", null, 0L, "f1")
+        driver.setFeedFetchState("f1", etag = "etag-current")
         val sentEtags = java.util.Collections.synchronizedList(mutableListOf<String?>())
         val vm = newViewModel(feedFetcher = fetcherWith { request ->
             sentEtags += request.headers[io.ktor.http.HttpHeaders.IfNoneMatch]
@@ -7121,12 +7122,12 @@ class HomeViewModelTest {
     }
 
     /**
-     * [HomeViewModel.structuralFeeds] must skip a refresh's per-feed re-emission that only rewrites
-     * the cache headers, while still passing on a change a view reads (here, a rename) — and
+     * [HomeViewModel.structuralFeeds] must skip a refresh's re-emission that only rewrites
+     * `updated_at`, while still passing on a change a view reads (here, a rename) — and
      * [HomeViewModel.feeds] itself keeps emitting both.
      */
     @Test
-    fun structuralFeedsSkipsCacheHeaderOnlyChangesButEmitsOtherChanges() = runTest {
+    fun structuralFeedsSkipsUpdatedAtOnlyChangesButEmitsOtherChanges() = runTest {
         db.insertFeed("f1")
         val vm = newViewModel()
         subscribeAll(vm)
@@ -7136,12 +7137,13 @@ class HomeViewModelTest {
         assertEquals(listOf("f1"), vm.structuralFeeds.value.map { it.id })
         val afterLoad = emissions.size
 
-        db.feedsQueries.updateCacheHeaders("\"v2\"", "Wed, 30 Sep 2026 00:00:00 GMT", 1_000L, "f1")
+        // The same content, stamped later: what a refresh's updateContent writes for an unchanged feed.
+        db.feedsQueries.updateContent(site_url = null, title = "Feed f1", description = null, updated_at = 1_000L, id = "f1")
         testScheduler.advanceUntilIdle()
-        assertEquals("\"v2\"", vm.feeds.value.single().etag)
+        assertEquals(1_000L, vm.feeds.value.single().updated_at)
         assertEquals(afterLoad, emissions.size)
-        // The structural list keeps the row it last emitted, so its cache headers lag.
-        assertNull(vm.structuralFeeds.value.single().etag)
+        // The structural list keeps the row it last emitted, so its updated_at lags.
+        assertEquals(0L, vm.structuralFeeds.value.single().updated_at)
 
         db.feedsQueries.updateCustomTitle("Mine", 2_000L, 2_000L, "f1")
         testScheduler.advanceUntilIdle()
@@ -7150,7 +7152,7 @@ class HomeViewModelTest {
         testScheduler.runCurrent()
         assertEquals(afterLoad + 1, emissions.size)
         assertEquals(listOf<String?>("Mine"), emissions.last())
-        assertEquals("\"v2\"", vm.structuralFeeds.value.single().etag)
+        assertEquals(2_000L, vm.structuralFeeds.value.single().updated_at)
     }
 
     // --- Reader pager: pagerArticles / articleContents / requestArticleContent ---

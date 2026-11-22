@@ -175,8 +175,7 @@ fun KeryxDatabase.insertFeed(
 ) {
     feedsQueries.upsert(
         id = id, url = url, site_url = null, title = "Feed $id", description = null,
-        favicon_url = null, etag = null, last_modified = null, error_count = 0, last_error = null,
-        custom_title = null, deleted_at = deletedAt, updated_at = now, created_at = now,
+        favicon_url = null, custom_title = null, deleted_at = deletedAt, updated_at = now, created_at = now,
         sort_order = sortOrder,
     )
     if (folderId != null) {
@@ -186,6 +185,30 @@ fun KeryxDatabase.insertFeed(
     // what unsubscribeFeed does, so merge tests resolve deleted_at by that field.
     if (deletedAt != null) {
         feedsQueries.softDelete(deletedAt, now, deletedAt, id)
+    }
+}
+
+/**
+ * Writes [feedId]'s device-local fetch state (`feed_fetch_state`) directly, replacing any row it
+ * has. The feed must already exist (the table's FK).
+ */
+fun SqlDriver.setFeedFetchState(
+    feedId: String,
+    etag: String? = null,
+    lastModified: String? = null,
+    errorCount: Long = 0,
+    lastError: String? = null,
+) {
+    execute(
+        null,
+        "INSERT OR REPLACE INTO feed_fetch_state (feed_id, etag, last_modified, error_count, last_error) VALUES (?, ?, ?, ?, ?)",
+        5,
+    ) {
+        bindString(0, feedId)
+        bindString(1, etag)
+        bindString(2, lastModified)
+        bindLong(3, errorCount)
+        bindString(4, lastError)
     }
 }
 

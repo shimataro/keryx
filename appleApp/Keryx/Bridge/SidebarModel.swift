@@ -34,13 +34,16 @@ struct SidebarModel {
     /// `SidebarRowSelection`. All / Starred and the headers are left out.
     let rowSelections: [SidebarItemID: SidebarRowSelection]
 
+    /// - Parameter fetchProblems: `HomeViewModel.feedFetchProblems` — why a feed row is flagged,
+    ///   by feed id (none for a feed without an entry).
     init(
         feeds: [Feeds],
         folders: [Folders],
         tags: [Tags],
         feedTagMap: [String: Set<String>],
         collapsedFolderIds: Set<String>,
-        expandedTagIds: Set<String>
+        expandedTagIds: Set<String>,
+        fetchProblems: [String: FeedFetchProblem] = [:]
     ) {
         sortedFolders = folders.sorted { $0.sort_order < $1.sort_order }
         sortedFeeds = feeds.sorted { $0.sort_order < $1.sort_order }
@@ -80,7 +83,7 @@ struct SidebarModel {
 
         var feedContents: [String: SidebarRowStaticContent] = [:]
         for feed in sortedFeeds where feedContents[feed.id] == nil {
-            feedContents[feed.id] = SidebarRowStaticContent(feed: feed)
+            feedContents[feed.id] = SidebarRowStaticContent(feed: feed, problem: fetchProblems[feed.id])
         }
         self.feedContents = feedContents
         folderContents = Dictionary(
