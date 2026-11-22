@@ -229,5 +229,8 @@ INSERT INTO sync_merging (flag) VALUES (1);
 endMerging:
 DELETE FROM sync_merging;
 
+clearFeedFolderRaw:
+DELETE FROM ks_feed_folder_raw;
+
 searchPendingAll:
 SELECT rowid FROM ks_search_pending ORDER BY rowid;

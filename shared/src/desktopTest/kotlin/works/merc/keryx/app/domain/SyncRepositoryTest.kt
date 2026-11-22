@@ -1,5 +1,6 @@
 package works.merc.keryx.app.domain
 
+import app.cash.sqldelight.db.QueryResult
 import app.cash.sqldelight.db.SqlDriver
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -46,6 +47,7 @@ import works.merc.keryx.app.platform.FakeNetworkConditionMonitor
 import works.merc.keryx.app.platform.Gzip
 import works.merc.keryx.app.fileDb
 import works.merc.keryx.app.insertFeed
+import works.merc.keryx.app.insertFolder
 import java.io.File
 import java.nio.file.Files
 import java.sql.DriverManager
@@ -518,6 +520,38 @@ class SyncRepositoryTest {
 
         assertEquals(downloadsBefore + 1, cloud.downloadCount)
         assertEquals(uploadsBefore + 1, cloud.uploadCount)
+    }
+
+    @Test
+    fun clearSyncFailureStateDropsTheRawFolderVersionsOfTheOldConnection() = runTest {
+        // A raw folder version recorded from the old provider's files ("dz") ranks above the new
+        // provider's equal-stamped version ("dm"), so carrying it over would reject a folder move
+        // that reseeding from the feed's own folder ("da") accepts.
+        localDb.insertFolder("da", "A")
+        localDb.insertFolder("dm", "B")
+        localDb.insertFeed("f1", folderId = "da")
+        localDriver.execute(null, "UPDATE feeds SET folder_updated_at = 500 WHERE id = 'f1';", 0)
+        localDriver.execute(null, "INSERT INTO ks_feed_folder_raw (feed_id, folder_updated_at, folder_id) VALUES ('f1', 500, 'dz');", 0)
+
+        val (file, driver, db) = fileDb()
+        db.insertFolder("dm", "B")
+        db.insertFeed("f1", folderId = "dm")
+        driver.execute(null, "UPDATE feeds SET folder_updated_at = 500 WHERE id = 'f1';", 0)
+        driver.close()
+        val cloud = FakeCloudStorage()
+        cloud.put(CLOUD_DB_GZ_PATH, gzipOf(file.readBytes()), "r1")
+        file.delete()
+        val repo = newRepo(cloud)
+
+        repo.clearSyncFailureState()
+        val rawRows = localDriver.executeQuery(null, "SELECT COUNT(*) FROM ks_feed_folder_raw;", { c ->
+            c.next()
+            QueryResult.Value(c.getLong(0))
+        }, 0).value
+        assertEquals(0L, rawRows)
+        assertIs<Result.Ok<Unit>>(repo.sync())
+
+        assertEquals("dm", localDb.feedsQueries.getById("f1").executeAsOne().folder_id)
     }
 
     @Test
