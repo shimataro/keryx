@@ -934,7 +934,10 @@ class SyncRepositoryTest {
         val bytes = cloud.bytesOf(base.fileName)!!
         val vector = SyncFiles.query(bytes, "SELECT device, seq FROM ks_vector").associate { it[0] to it[1]!!.toLong() }
         val covered = SyncFiles.query(bytes, "SELECT name FROM ks_covered").map { TransportFileName.parse(it[0]!!)!! }
-        assertTrue(vector.getValue(a.deviceId()) >= 4, "deltas older than the grace period extend the vector: $vector")
+        assertEquals(4L, vector.getValue(a.deviceId()), "deltas older than the grace period extend the vector, the fresh one does not: $vector")
+        val y0 = cloud.written.mapNotNull(TransportFileName::parse)
+            .single { it.kind == TransportFileKind.DELTA && it.device == a.deviceId() && it.number == 5L }
+        assertTrue(y0 in covered, "the fresh delta y0 is listed by name, outside the vector: $covered")
         assertTrue(covered.all { it.number > vector.getValue(it.device) }, "implied names are not listed: $covered")
     }
 
