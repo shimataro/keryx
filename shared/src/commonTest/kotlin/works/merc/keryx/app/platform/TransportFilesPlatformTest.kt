@@ -27,7 +27,7 @@ class TransportFilesPlatformTest {
 
     private fun newFile(name: TransportFileName, vararg rows: String): String {
         val path = tempFilePath("ks-", ".db").also { paths += it }
-        TransportFiles.createEmpty(path, TransportMeta(name.generation, name.kind, name.device, name.number, 1))
+        TransportFiles.createEmpty(path, TransportMeta(name.generation, name.kind, name.device, name.number, name.createdAt))
         TransportConnections.open(path, TransportOpenMode.READ_WRITE).use { c -> rows.forEach(c::exec) }
         return path
     }
@@ -37,8 +37,8 @@ class TransportFilesPlatformTest {
 
     @Test
     fun createValidateAndFold() {
-        val d1 = TransportFileName(gen, TransportFileKind.DELTA, dev, 1, "0123456789ab")
-        val d2 = TransportFileName(gen, TransportFileKind.DELTA, dev, 2, "0123456789ab")
+        val d1 = TransportFileName(gen, TransportFileKind.DELTA, dev, 1, 1_000, "0123456789ab")
+        val d2 = TransportFileName(gen, TransportFileKind.DELTA, dev, 2, 1_000, "0123456789ab")
         val first = newFile(d1, feed)
         val second = newFile(
             d2,
@@ -49,7 +49,7 @@ class TransportFilesPlatformTest {
         assertEquals(TransportValidation.Valid, TransportFiles.validate(first, ValidationTarget.Transport(d1)))
         assertEquals(TransportValidation.Valid, TransportFiles.validate(second, ValidationTarget.Transport(d2)))
 
-        val baseName = TransportFileName(gen, TransportFileKind.BASE, dev, 1, "0123456789ab")
+        val baseName = TransportFileName(gen, TransportFileKind.BASE, dev, 1, 1_000, "0123456789ab")
         val acc = newFile(baseName)
         TransportFiles.fold(acc, first, d1)
         TransportFiles.fold(acc, second, d2)
@@ -63,7 +63,7 @@ class TransportFilesPlatformTest {
 
     @Test
     fun aViolationIsCorruptAndAMissingFileUndetermined() {
-        val d1 = TransportFileName(gen, TransportFileKind.DELTA, dev, 1, "0123456789ab")
+        val d1 = TransportFileName(gen, TransportFileKind.DELTA, dev, 1, 1_000, "0123456789ab")
         val file = newFile(d1, feed, "UPDATE feeds SET updated_at = 'soon'")
         val result = TransportFiles.validate(file, ValidationTarget.Transport(d1))
         assertIs<TransportValidation.Corrupt>(result)

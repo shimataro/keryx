@@ -108,8 +108,9 @@ const val KS_COMPACT_MIN_DELTAS = 100
 const val KS_COMPACT_MAX_DELTA_RATIO = 0.25
 
 /**
- * How long a delta stays after a base covering it was created; also how old a delta must be before a
- * base's `ks_vector` (rather than its `ks_covered`) may imply it.
+ * How long a delta stays after it was created once a base covers it; also how old a delta must be
+ * before a base's `ks_vector` (rather than its `ks_covered`) may imply it — measured from the base's
+ * own creation time, so a duplicate of an implied `(device, seq)` written after that is never implied.
  */
 const val KS_DELTA_GRACE_MS = 7 * 24 * 60 * 60 * 1000L
 
@@ -119,6 +120,14 @@ const val KS_DELTA_GRACE_MS = 7 * 24 * 60 * 60 * 1000L
  * margin covers listing delay and clock differences between devices.
  */
 const val KS_RECEIVE_STALE_MARGIN_MS = 24 * 60 * 60 * 1000L
+
+/**
+ * The oldest an interrupted send may be and still be uploaded under its recorded name (step 0 of
+ * "Sync Flow"). An older one is resent under a new sync identity instead, with a fresh creation time:
+ * uploaded late under its old time, it could look old enough to garbage-collect before a device that
+ * syncs occasionally ever listed it. Smaller than [KS_RECEIVE_STALE_MARGIN_MS].
+ */
+const val KS_RESUME_MAX_AGE_MS = 12 * 60 * 60 * 1000L
 const val FEED_TIMEOUT_RETRY_COUNT = 1
 const val SYNC_DEBOUNCE_MS = 5_000L
 

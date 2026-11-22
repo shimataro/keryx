@@ -304,7 +304,7 @@ internal object SyncFiles {
         try {
             TransportFiles.createEmpty(plain.absolutePath, meta)
             TransportConnections.open(plain.absolutePath, TransportOpenMode.READ_WRITE).use { c -> statements.forEach(c::exec) }
-            val name = TransportFileName(meta.generation, meta.kind, meta.device, meta.number, sha256Hex(plain).take(12))
+            val name = meta.fileName(sha256Hex(plain).take(12))
             return name to gzip(plain)
         } finally {
             plain.delete()

@@ -14,6 +14,7 @@ import works.merc.keryx.app.core.KS_COMPACT_MAX_DELTA_RATIO
 import works.merc.keryx.app.core.KS_COMPACT_MIN_DELTAS
 import works.merc.keryx.app.core.KS_DELTA_GRACE_MS
 import works.merc.keryx.app.core.KS_RECEIVE_STALE_MARGIN_MS
+import works.merc.keryx.app.core.KS_RESUME_MAX_AGE_MS
 import works.merc.keryx.app.core.KeryxException
 import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.MAX_SYNC_DB_SIZE_BYTES
@@ -338,7 +339,8 @@ internal class DeltaSync(
 
     /**
      * A new sync identity within the current generation, keeping the outbox (so the changes an
-     * unverifiable send covered are sent again) — step 0 of "Sync Flow".
+     * unverifiable or too old send covered are sent again, with a fresh creation time) — step 0 of
+     * "Sync Flow".
      */
     private fun takeNewIdentity(attempt: SendAttempt) {
         db.transaction {
@@ -373,6 +375,14 @@ internal class DeltaSync(
         val pending = pendingPath(attempt.number)
         if (attempt.name.generation != generation || attempt.name.device != state(SYNC_STATE_KS_DEVICE_ID)) {
             Log.warn(TAG, "Sync: dropping a send of another generation or identity")
+            takeNewIdentity(attempt)
+            return Result.Ok(Unit)
+        }
+        val age = clock.nowMillis() - attempt.name.createdAt
+        if (age !in 0..KS_RESUME_MAX_AGE_MS) {
+            // Uploaded now under its old creation time, it could be garbage-collected before a device
+            // that syncs occasionally lists it; a send dated in the future proves nothing about its age.
+            Log.warn(TAG, "Sync: the recorded send is too old to resume; taking a new sync identity")
             takeNewIdentity(attempt)
             return Result.Ok(Unit)
         }
@@ -823,7 +833,7 @@ internal class DeltaSync(
         val pending = pendingPath(meta.number)
         val name = try {
             val hash = checkNotNull(ContentDigest.sha256File(plain)) { "The file to send cannot be read" }.lowercase()
-            val name = TransportFileName(meta.generation, meta.kind, meta.device, meta.number, hash.take(12))
+            val name = meta.fileName(hash.take(12))
             if (meta.kind == TransportFileKind.BASE) {
                 saveBases(loadBases().values + TransportFiles.readCoverage(plain, name))
             }
@@ -955,7 +965,9 @@ internal class DeltaSync(
         val gz = FileIO.join(tempDir, "ks-base.db.gz")
         try {
             setPhase(SyncPhase.PREPARING)
-            TransportFiles.createEmpty(accumulator, TransportMeta(generation, TransportFileKind.BASE, self, number, clock.nowMillis()))
+            // The name carries the same creation time, and finalizeBase derives the impliable cutoff from it.
+            val meta = TransportMeta(generation, TransportFileKind.BASE, self, number, clock.nowMillis())
+            TransportFiles.createEmpty(accumulator, meta)
             // Each covered delta carries its creation time into ks_covered (TransportFiles.fold).
             for (name in inputBases.map { it.fileName } + inputDeltas.sortedBy { it.fileName }) {
                 currentCoroutineContext().ensureActive()
@@ -964,9 +976,9 @@ internal class DeltaSync(
                 setPhase(SyncPhase.PREPARING)
                 TransportFiles.fold(accumulator, checkNotNull(downloads.pathFor(name)), name, extendVector = false)
             }
-            TransportFiles.finalizeBase(accumulator, impliableCutoff = clock.nowMillis() - KS_DELTA_GRACE_MS)
+            TransportFiles.finalizeBase(accumulator)
             val hash = checkNotNull(ContentDigest.sha256File(accumulator)) { "The new base cannot be read" }.lowercase()
-            val name = TransportFileName(generation, TransportFileKind.BASE, self, number, hash.take(12))
+            val name = meta.fileName(hash.take(12))
             val coverage = TransportFiles.readCoverage(accumulator, name)
             Gzip.compressFile(accumulator, gz)
             val size = SystemFileSystem.metadataOrNull(Path(gz))?.size ?: 0L

@@ -101,7 +101,7 @@ object SyncValidationSql {
 
     /**
      * Check 8, `ks_meta` against the file name: every key is present, generation / device / kind /
-     * number match [name], and format / created_at are decimal (format at least 1). Returns the first
+     * number / created_at match [name], and format / created_at are decimal (format at least 1). Returns the first
      * problem, or `null`.
      */
     fun metaProblem(meta: Map<String, String>, name: TransportFileName): String? {
@@ -110,6 +110,7 @@ object SyncValidationSql {
         val format = meta.getValue(keys.FORMAT)
         if (!DECIMAL.matches(format) || format == "0") return "ks_meta.format is not a version"
         if (!DECIMAL.matches(meta.getValue(keys.CREATED_AT))) return "ks_meta.created_at is not a time"
+        if (meta[keys.CREATED_AT] != name.createdAt.toString()) return "ks_meta.created_at does not match the file name"
         if (meta[keys.GENERATION] != name.generation) return "ks_meta.generation does not match the file name"
         if (meta[keys.DEVICE] != name.device) return "ks_meta.device does not match the file name"
         if (meta[keys.KIND] != name.kind.metaValue) return "ks_meta.kind does not match the file name"

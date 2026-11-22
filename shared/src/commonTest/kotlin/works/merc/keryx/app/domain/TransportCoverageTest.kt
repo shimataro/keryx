@@ -1,6 +1,7 @@
 package works.merc.keryx.app.domain
 
 import works.merc.keryx.app.core.CloudDataIncompatibleException
+import works.merc.keryx.app.core.KS_DELTA_GRACE_MS
 import works.merc.keryx.app.core.NetworkCondition
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.core.SchemaVersionException
@@ -17,11 +18,14 @@ class TransportCoverageTest {
     private val a = "a1b2c3d4-e5f6-4789-8abc-def012345678"
     private val b = "b1b2c3d4-e5f6-4789-8abc-def012345678"
 
-    private fun delta(device: String, seq: Long, hash: String = "0123456789ab") =
-        TransportFileName(gen, TransportFileKind.DELTA, device, seq, hash)
+    /** Deltas are created at 1 000 by default, long before [baseCreatedAt]'s vector cutoff. */
+    private fun delta(device: String, seq: Long, hash: String = "0123456789ab", createdAt: Long = 1_000) =
+        TransportFileName(gen, TransportFileKind.DELTA, device, seq, createdAt, hash)
 
-    private fun base(n: Long, vector: Map<String, Long>, covered: Map<String, Long?> = emptyMap(), createdAt: Long = 0, device: String = a) =
-        BaseCoverage(TransportFileName(gen, TransportFileKind.BASE, device, n, "0123456789ab").fileName, vector, covered, createdAt)
+    private val baseCreatedAt = KS_DELTA_GRACE_MS + 10_000
+
+    private fun base(n: Long, vector: Map<String, Long>, covered: Map<String, Long?> = emptyMap(), createdAt: Long = baseCreatedAt, device: String = a) =
+        BaseCoverage(TransportFileName(gen, TransportFileKind.BASE, device, n, createdAt, "0123456789ab").fileName, vector, covered, createdAt)
 
     @Test
     fun aBaseCoversByItsVectorOrByName() {
@@ -45,14 +49,29 @@ class TransportCoverageTest {
     }
 
     @Test
+    fun aVectorImpliesOnlyDeltasCreatedByItsCutoff() {
+        val coverage = base(1, mapOf(a to 3))
+        assertEquals(baseCreatedAt - KS_DELTA_GRACE_MS, coverage.vectorCutoff)
+        assertTrue(coverage.covers(delta(a, 2, createdAt = coverage.vectorCutoff)))
+        val young = delta(a, 2, "ba9876543210", createdAt = coverage.vectorCutoff + 1)
+        assertFalse(coverage.covers(young), "a copy of an implied (device, seq) created after the cutoff was never folded")
+        assertTrue(coverage.coversSeq(a, 2), "the seq itself stays covered, for the cursor and gaps")
+        assertFalse(coverage.coveredBefore(young, cutoff = Long.MAX_VALUE))
+
+        val listed = base(2, mapOf(a to 3), mapOf(young.fileName to young.createdAt))
+        assertTrue(listed.covers(young), "a name the base lists is covered whatever its age")
+    }
+
+    @Test
     fun aDeltaIsCollectableOnceOldEnough() {
         val explicit = delta(a, 5)
-        val coverage = base(1, mapOf(a to 3), mapOf(explicit.fileName to 1_000, delta(a, 6).fileName to null), createdAt = 3_000)
-        assertTrue(coverage.coveredBefore(delta(a, 2), cutoff = 0), "an implied delta is old by construction")
+        val coverage = base(1, mapOf(a to 3), mapOf(explicit.fileName to 1_000, delta(a, 6).fileName to null))
+        assertTrue(coverage.coveredBefore(delta(a, 2), cutoff = 1_000), "an implied delta by the creation time in its name")
+        assertFalse(coverage.coveredBefore(delta(a, 2), cutoff = 999))
         assertTrue(coverage.coveredBefore(explicit, cutoff = 1_000))
         assertFalse(coverage.coveredBefore(explicit, cutoff = 999))
-        assertFalse(coverage.coveredBefore(delta(a, 6), cutoff = 2_999), "unknown time: the base's own")
-        assertTrue(coverage.coveredBefore(delta(a, 6), cutoff = 3_000))
+        assertFalse(coverage.coveredBefore(delta(a, 6), cutoff = baseCreatedAt - 1), "unknown time: the base's own")
+        assertTrue(coverage.coveredBefore(delta(a, 6), cutoff = baseCreatedAt))
         assertFalse(coverage.coveredBefore(delta(a, 9), cutoff = Long.MAX_VALUE), "not covered at all")
     }
 
@@ -71,6 +90,27 @@ class TransportCoverageTest {
         val incomparable = base(4, mapOf(a to 5))
         assertFalse(incomparable.dominates(large))
         assertFalse(large.dominates(incomparable))
+    }
+
+    @Test
+    fun anOlderBaseNeverDominatesANewerOne() {
+        val newer = base(1, mapOf(a to 2))
+        val olderButLarger = base(2, mapOf(a to 3), createdAt = baseCreatedAt - 1)
+        assertFalse(olderButLarger.dominates(newer), "its vector cutoff is earlier: it may not imply what the newer one does")
+        assertFalse(newer.dominates(olderButLarger))
+    }
+
+    @Test
+    fun equalCoverageIsDecidedByCreationTimeThenByName() {
+        val earlier = base(1, mapOf(a to 3), device = b)
+        val later = base(1, mapOf(a to 3), createdAt = baseCreatedAt + 1, device = a)
+        assertTrue(later.dominates(earlier), "the later one wins although its name is smaller")
+        assertFalse(earlier.dominates(later))
+
+        val sameTimeLow = base(2, mapOf(a to 3), device = a)
+        val sameTimeHigh = base(2, mapOf(a to 3), device = b)
+        assertTrue(sameTimeHigh.dominates(sameTimeLow))
+        assertFalse(sameTimeLow.dominates(sameTimeHigh))
     }
 
     @Test

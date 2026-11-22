@@ -25,6 +25,7 @@ import works.merc.keryx.app.core.CloudStorageException
 import works.merc.keryx.app.core.DEFERRED_SYNC_DEBOUNCE_MS
 import works.merc.keryx.app.core.ErrorKind
 import works.merc.keryx.app.core.KS_DELTA_GRACE_MS
+import works.merc.keryx.app.core.KS_RESUME_MAX_AGE_MS
 import works.merc.keryx.app.core.LOCAL_WRITES_FLUSH_WAIT_MS
 import works.merc.keryx.app.core.MILLIS_PER_DAY
 import works.merc.keryx.app.core.NetworkCondition
@@ -41,6 +42,8 @@ import works.merc.keryx.app.core.SYNC_STATE_KS_RECEIVED_AT
 import works.merc.keryx.app.core.SYNC_STATE_LAST_SYNCED_AT
 import works.merc.keryx.app.core.SchemaVersionException
 import works.merc.keryx.app.core.SyncConflictException
+import works.merc.keryx.app.data.cloud.CloudFileEntry
+import works.merc.keryx.app.data.cloud.CloudStorage
 import works.merc.keryx.app.data.local.FtsManager
 import works.merc.keryx.app.data.local.FtsSearch
 import works.merc.keryx.app.data.local.db.KeryxDatabase
@@ -390,7 +393,7 @@ class SyncRepositoryTest {
         val (a, gen) = seeded(cloud)
         val (good, goodBytes) = SyncFiles.transportFile(TransportMeta(gen, TransportFileKind.DELTA, ids(), 1, now), feedRow("good"))
         cloud.put(good.fileName, goodBytes)
-        val corrupt = TransportFileName(gen, TransportFileKind.DELTA, ids(), 1, "0123456789ab")
+        val corrupt = TransportFileName(gen, TransportFileKind.DELTA, ids(), 1, now, "0123456789ab")
         cloud.put(corrupt.fileName, "not gzip".encodeToByteArray())
         var corruptDownloads = 0
         cloud.downloadHook = { if (it == corrupt.fileName) corruptDownloads++ }
@@ -727,6 +730,43 @@ class SyncRepositoryTest {
     }
 
     @Test
+    fun aSendInterruptedLongerAgoThanTheResumeLimitIsResentUnderANewIdentity() = runTest {
+        val (a, cloud) = crashingSend(SyncHookPoint.BEFORE_SEND_UPLOAD)
+        val oldId = a.deviceId()
+        val stale = SendAttempt.decode(a.state(SYNC_STATE_KS_ATTEMPT))!!.name
+        now += KS_RESUME_MAX_AGE_MS + 1
+
+        a.syncOk()
+
+        assertFalse(stale.fileName in cloud.names(), "an old send is never uploaded under its old creation time")
+        assertNotEquals(oldId, a.deviceId())
+        val resent = deltasOf(cloud, a.deviceId()).single()
+        assertEquals(now, resent.createdAt, "the changes are resent with a fresh creation time")
+        assertNull(a.state(SYNC_STATE_KS_ATTEMPT))
+        assertTrue(a.outbox().isEmpty())
+        assertFalse(a.pendingFile(2).exists())
+        val b = device("b", cloud)
+        b.syncOk()
+        assertTrue(b.db.hasFeed("f2"))
+    }
+
+    @Test
+    fun aSendDatedInTheFutureIsNotResumed() = runTest {
+        val (a, cloud) = crashingSend(SyncHookPoint.BEFORE_SEND_UPLOAD)
+        val oldId = a.deviceId()
+        val stale = SendAttempt.decode(a.state(SYNC_STATE_KS_ATTEMPT))!!.name
+        now -= 1 // the clock was set back since
+
+        a.syncOk()
+
+        assertFalse(stale.fileName in cloud.names())
+        assertNotEquals(oldId, a.deviceId())
+        val b = device("b", cloud)
+        b.syncOk()
+        assertTrue(b.db.hasFeed("f2"))
+    }
+
+    @Test
     fun aFailedUploadKeepsTheAttemptForTheNextSync() = runTest {
         val cloud = FakeCloudStorage()
         val a = device("a", cloud)
@@ -796,6 +836,53 @@ class SyncRepositoryTest {
         b.syncOk()
         assertTrue(b.db.hasFeed("fa"))
         assertTrue(b.db.hasFeed("fc"))
+    }
+
+    /** A [CloudStorage] whose listing leaves out the names [hidden] accepts, as a lagging listing would. */
+    private class LaggingListing(private val inner: FakeCloudStorage, private val hidden: (String) -> Boolean) : CloudStorage by inner {
+        override suspend fun list(prefix: String): Result<List<CloudFileEntry>> = when (val r = inner.list(prefix)) {
+            is Result.Ok -> Result.Ok(r.value.filterNot { hidden(it.name) })
+            is Result.Err -> r
+        }
+    }
+
+    @Test
+    fun aCopysLateDuplicateOfAnImpliedSeqStaysReachableThroughGarbageCollection() = runTest {
+        val cloud = FakeCloudStorage()
+        val a = device("a", cloud)
+        a.syncOk()
+        val shared = a.deviceId()
+        val copyFile = File.createTempFile("keryx-clone-", ".db")
+        Files.copy(a.file.toPath(), copyFile.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+        a.churn("x", 3) // deltas 2..4 of the shared identity
+        now += KS_DELTA_GRACE_MS + MILLIS_PER_DAY
+        a.churn("y", 1) // a fold whose vector now implies 2..4; the old deltas are collected
+        val implying = basesOf(cloud).single()
+        val vector = SyncFiles.query(cloud.bytesOf(implying.fileName)!!, "SELECT device, seq FROM ks_vector").associate { it[0] to it[1]!!.toLong() }
+        assertTrue(vector.getValue(shared) >= 2, "the vector implies the shared identity's delta 2: $vector")
+        assertTrue(deltasOf(cloud, shared).none { it.number == 2L }, "the original delta 2 was collected")
+
+        // The copy, whose listing does not show the new base yet, writes its own delta 2 under the shared identity.
+        val unseen = cloud.names()
+        val copy = SyncDevice(
+            "copy", LaggingListing(cloud) { it in unseen }, clock, backgroundScope, ids,
+            compactionAllowed = { false }, existingDbFile = copyFile,
+        ).also(devices::add)
+        copy.db.insertFeed("fc", now = now)
+        copy.syncOk()
+        val duplicate = deltasOf(cloud, shared).single { it.number == 2L }
+        assertEquals(now, duplicate.createdAt)
+
+        a.syncOk()
+        assertTrue(duplicate in deltasOf(cloud), "a young duplicate is not covered by the vector, so it is not collected")
+        now += KS_DELTA_GRACE_MS + MILLIS_PER_DAY
+        a.syncOk()
+        a.syncOk()
+
+        val c = device("c", cloud)
+        c.syncOk()
+        assertTrue(c.db.hasFeed("x0"), "the original delta 2's change")
+        assertTrue(c.db.hasFeed("fc"), "the copy's delta 2's change was folded before its file was collected")
     }
 
     // ---- Bases and garbage collection ----

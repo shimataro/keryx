@@ -41,17 +41,20 @@ Names are flat: Google Drive, OneDrive and Nextcloud address files by basename o
 encoded in its name rather than in a folder.
 
 ```bash
-/keryx-sync.json                         ← pointer: {"format":3,"generation":"<genId>"}; updated with a revision check
-/ks-<gen>-b-<dev>-<n>-<hash12>.db.gz     ← base: every synced row folded together (immutable)
-/ks-<gen>-d-<dev>-<seq>-<hash12>.db.gz   ← delta: device <dev>'s <seq>-th batch of changes (immutable)
-/keryx.db.gz                             ← after migration: a stub whose user_version is 1000 (see "Migration")
-/keryx-YYYYMMDD-HHMMSS.db.gz.bak         ← archive of the pre-delta file (never pruned)
+/keryx-sync.json                                     ← pointer: {"format":3,"generation":"<genId>"}; updated with a revision check
+/ks-<gen>-b-<dev>-<n>-<createdAt>-<hash12>.db.gz     ← base: every synced row folded together (immutable)
+/ks-<gen>-d-<dev>-<seq>-<createdAt>-<hash12>.db.gz   ← delta: device <dev>'s <seq>-th batch of changes (immutable)
+/keryx.db.gz                                         ← after migration: a stub whose user_version is 1000 (see "Migration")
+/keryx-YYYYMMDD-HHMMSS.db.gz.bak                     ← archive of the pre-delta file (never pruned)
 ```
 
 - `<gen>` is the current **generation**, named by the pointer. A cloud-data reset starts a new generation; files of
   older generations are left in place as an archive and never read again.
 - `<dev>` is the writing device's sync identity (`sync_state.ks_device_id`), issued afresh every time the device
   joins a generation.
+- `<createdAt>` is the file's creation time (Unix milliseconds, in decimal), the same value as its
+  `ks_meta.created_at`. It puts a delta's age in its name, so whether a base's vector may imply that delta is decided
+  from the listing alone (see "Transport schema").
 - `<hash12>` is the first 12 hex digits of the SHA-256 of the *uncompressed* file. Two files with the same name
   therefore always have the same content, which is what lets every write be a plain `create` whose atomicity does
   not matter (Google Drive's is not atomic): a second `create` of the same name is the same file, and two different
@@ -86,15 +89,21 @@ a base folds rows from several devices, and two devices can legitimately hold di
 Each file carries `PRAGMA user_version` and:
 
 - `ks_meta(key, value)` — `format`, `generation`, `device` (the writing device), `created_at`, `kind` (`delta`/`base`)
-  and `number` (the delta's `seq` or the base's `n`); generation, device, kind and number must match the file name;
+  and `number` (the delta's `seq` or the base's `n`); generation, device, kind, number and creation time must match
+  the file name;
 - `ks_vector(device, seq)` (bases only) — per device, the highest `seq` such that every delta `1..seq` is covered;
 - `ks_covered(name, created_at)` (bases only) — the delta files this base folded that its vector does **not** imply,
   each with the delta's own creation time (its `ks_meta.created_at`; NULL when unknown).
 
 A base covers a delta `(device, seq)` either by its vector (`seq ≤ ks_vector[device]`) or by name (`ks_covered`). The
-vector implies a delta only while `ks_covered` names no delta of the same `(device, seq)`: when a cloned database
-wrote two different files with one `(device, seq)`, the base lists every copy it folded, so a copy it never saw is not
-implied. `ks_covered` therefore stays small — the deltas of the last `KS_DELTA_GRACE_MS`, deltas past a gap, and clone
+vector implies a delta only if the delta was created at least `KS_DELTA_GRACE_MS` before the base itself (the
+creation times in the two names; `BaseCoverage.vectorCutoff`), and only while `ks_covered` names no delta of the
+same `(device, seq)`. Both rules keep a file the base never folded from being implied when two different files share
+one `(device, seq)` — written by a cloned database, or by a send uploaded long after it was built. A copy created
+after the base's cutoff is never implied, so it is received, folded and kept like any delta no base covers; and of
+copies the base did fold, it lists every one, so a copy it never saw is not implied either. The vector still counts
+for the `(device, seq)` itself — the receiving cursor and the gap search go by sequence, not by file. `ks_covered`
+therefore stays small — the deltas of the last `KS_DELTA_GRACE_MS`, deltas past a gap, and clone
 copies — rather than growing with every delta ever folded (see "Bases and Garbage Collection" for when the vector may
 extend).
 
@@ -145,12 +154,16 @@ above are device-local and never leave the device.
 Everything below runs under `SyncRepository`'s `mutex`.
 
 0. **Resume an interrupted send** (once step 1 has named the generation). If `ks_attempt` is set, the file it names
-   was written locally (and perhaps uploaded) but never committed. Its saved file is decompressed and checked against
-   the hash in its name; if it matches, it is uploaded again under the same name and committed (step 4 of "Sending").
-   If the file is missing, its hash does not match, or the record itself cannot be read, the device takes a **new
-   sync identity** (new `ks_device_id`, `ks_last_seq = 0`): the outbox entries the attempt covered were never deleted,
+   was written locally (and perhaps uploaded) but never committed. If it was created at most `KS_RESUME_MAX_AGE_MS`
+   (12 hours) ago by the creation time in its name, its saved file is decompressed and checked against the hash in its
+   name; if it matches, it is uploaded again under the same name and committed (step 4 of "Sending").
+   If the send is older than that (or dated in this device's future), the file is missing, its hash does not match, or
+   the record itself cannot be read, the device takes a **new sync identity** (new `ks_device_id`, `ks_last_seq = 0`): the outbox entries the attempt covered were never deleted,
    so they are sent again under the new identity, and the old identity's file — whether or not it reached the cloud —
-   can only ever be applied harmlessly. A disk-corrupted file is never uploaded. If the generation has changed since,
+   can only ever be applied harmlessly. A disk-corrupted file is never uploaded, and neither is an old one: uploaded
+   late under its old creation time, it would look old enough to garbage-collect at once, before a device that syncs
+   occasionally had listed it, and could be implied by a vector without having been folded. Resent under the new
+   identity, the same changes carry a fresh creation time. (The limit is below `KS_RECEIVE_STALE_MARGIN_MS`.) If the generation has changed since,
    the attempt is simply dropped (the rejoin's full send covers it). With no attempt recorded, a saved file left by a
    crash between a commit and its deletion (only ever the last committed one) is deleted.
 1. **Read the pointer.** `metadata(keryx-sync.json)`; the file is downloaded only when its revision differs from
@@ -266,25 +279,31 @@ failure is logged and left to a later sync, while a corrupt or too-new input is 
 **How.** Every base that no other base dominates, plus every listed delta none of them covers, is validated and
 folded with `ReduceSql` into a new base. A base is **never built from the local database**: the local merge skips
 rows its guards reject (a name collision, say), and a base built from it would silently drop them for every other
-device. The new base is named `ks-<gen>-b-<dev>-<n>-<hash12>`, `n` one above this device's highest listed base.
-`ks_vector` combines the input bases' vectors and extends them over the folded deltas that continue them without a gap
-— **counting only deltas created at least `KS_DELTA_GRACE_MS` ago** (`ks_covered.created_at`); `ks_covered` then keeps
+device. The new base is named `ks-<gen>-b-<dev>-<n>-<createdAt>-<hash12>`, `n` one above this device's highest listed
+base. `ks_vector` combines the input bases' vectors and extends them over the folded deltas that continue them without a
+gap — **counting only deltas created at least `KS_DELTA_GRACE_MS` before the base's own creation time**
+(`ks_covered.created_at` against the base's `ks_meta.created_at` — the same cutoff a reader applies when it decides
+what the vector implies); `ks_covered` then keeps
 only the folded deltas the extended vector does not imply, plus every copy of a `(device, seq)` it folded more than
-one of (`TransportFiles.finalizeBase`). The age rule is what makes the vector safe to trust: a clone's duplicate of an
-old `(device, seq)` would have had to stay invisible to every listing for the whole grace period to be implied without
-having been folded. The new base is uploaded with `create`; if any input fails validation, no base is built.
+one of (`TransportFiles.finalizeBase`). The age rule is what makes the vector safe to trust: a duplicate of an implied
+`(device, seq)` created after the base's cutoff is not implied (see "Transport schema"), so to be implied without having
+been folded, a duplicate would have had to be created before that cutoff and stay invisible to every listing for the
+whole grace period — see "Delta sync measures a delta's age by the clock of the device that wrote it" in
+[known-issues.md](known-issues.md). The first base of a generation (`b-<dev>-1`, "Joining"), whose vector `{dev: 1}` is written directly rather than
+extended, is read by the same rule: it implies no delta file of that number created after its cutoff. The new base is uploaded with `create`; if any input fails validation, no base is built.
 
 **Garbage collection** keeps "no change is ever unreachable" true:
 
 - A delta may be deleted only once a base covering it exists (confirmed with `metadata` just before) and the delta
   itself was created at least `KS_DELTA_GRACE_MS` (7 days) ago — its `ks_covered.created_at`, or for a delta the
-  vector implies, true by construction (`BaseCoverage.coveredBefore`) — so a device that syncs within a week catches
+  vector implies, the creation time in its name (`BaseCoverage.coveredBefore`) — so a device that syncs within a week catches
   up from deltas alone, without downloading a base. (The delta's own age, not the base's: bases are rebuilt more often
   than weekly on an active account, and a rule on the base's age would never let a delta go.)
-- A base may be deleted only while another base strictly dominates it (confirmed with `metadata` just before): a
-  vector at least as high in every component, every delta it names explicitly covered by the other too — a clone copy
-  it lists must be listed by the other, not merely implied — and more coverage or, for equal coverage, a greater name.
-  So two devices can never delete each other's bases.
+- A base may be deleted only while another base strictly dominates it (confirmed with `metadata` just before): created
+  no earlier (so the other's vector implies everything this one's does), a vector at least as high in every component,
+  every delta it names explicitly covered by the other too — a clone copy it lists must be listed by the other, not
+  merely implied — and then more coverage, or for equal coverage a later creation time, or for an equal time too a
+  greater name. So two devices can never delete each other's bases.
 
 **Cost of a new device.** One base (about the size of the pre-delta database file) plus at most the deltas below the
 thresholds; deltas a base covers are not downloaded. That is at most about 1.25× what joining cost before.
@@ -327,7 +346,7 @@ temporary file.
 | 5 | Expected tables and columns for that version (`TransportSchema`; `MergeSchema` for a pre-delta database). A transport file's expected tables must have exactly the expected columns: a writer that adds a column bumps the transport version, so an extra column at the same version is a broken file, which a fold would otherwise drop without a word. A pre-delta database, a full local database with device-local columns of its own (`search_text`, say), is checked for missing columns only. Tables the expectation does not name are allowed | Missing (or, in a transport file, extra) → corrupt. No expectation registered for the version → undetermined, treated as transient (never answered with a reset) |
 | 6 | An older version is migrated up (`TransportSchema` migrations; `KeryxDatabase.Schema.migrate` for a pre-delta database) | An SQLite error while migrating → corrupt |
 | 7 | Types and value ranges, by a query generated from the expected schema: ids are non-empty text, stamps are integer or NULL, booleans are 0 or 1, NOT NULL columns hold no NULL | Any violating row → corrupt |
-| 8 | `ks_meta` (generation, kind, device, number) matches the file name; a base's `ks_vector`/`ks_covered` types | Corrupt |
+| 8 | `ks_meta` (generation, kind, device, number, creation time) matches the file name; a base's `ks_vector`/`ks_covered` types | Corrupt |
 | 9 | References are closed: every feed's folder, every article's feed, every `feed_tags` row's tag and feed is in the same file | Corrupt |
 
 "Corrupt" is `CloudDataIncompatibleException`, handled as before: automatic syncing is suspended, and the

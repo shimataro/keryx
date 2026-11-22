@@ -657,24 +657,37 @@ With it, `upload` would pass `expectedRev` to the write itself, as the OneDrive 
 **Status**: not fixed — closing it needs a time source the devices share, which the providers do not offer
 in a form every one of them supports (a redesign outside delta sync's scope). With ordinary clocks nothing
 happens; a clock far behind delays another device's convergence, and in one case (a cloned database writing under a
-shared identity) can leave a change unreachable for devices that join later.
+shared identity) can leave a change unreachable for devices that join later. That case is also reachable with
+correct clocks, through a provider listing that lags for about the grace period.
 
 ### Symptom
 
 Two rules of "Bases and Garbage Collection" in [sync-architecture.md](sync-architecture.md) compare a delta's
-`ks_meta.created_at` — the writing device's clock — with the clock of the device that folds or collects:
+creation time — `ks_meta.created_at`, also in its name, from the writing device's clock — with another device's clock:
 
-- a delta is garbage-collected once it is `KS_DELTA_GRACE_MS` old, and
-- a base's `ks_vector` extends only over deltas that old (so a clone's duplicate of a `(device, seq)` cannot be
-  implied without having been folded).
+- a delta is garbage-collected once it is `KS_DELTA_GRACE_MS` old by the collecting device's clock, and
+- a base's `ks_vector` implies only deltas created at least `KS_DELTA_GRACE_MS` before the base itself, by the base's
+  own creation time — the folding device's clock (so a duplicate of an implied `(device, seq)`, written by a cloned
+  database, is not taken as folded when it was not).
 
 A device whose clock runs far behind writes deltas that look old at once. Its delta can then be collected as
 soon as a base covers it, before a device that last received less than a week ago lists it. That device sees no
 gap when the writer has gone quiet, and merges the change only when its own last receive becomes older than
-`KS_DELTA_GRACE_MS − KS_RECEIVE_STALE_MARGIN_MS` and it fetches the bases — up to six days late. And if that
-writer is a cloned copy of another device, a duplicate it wrote under the shared identity could be implied by a
-vector without having been folded, so a device joining after the duplicate's collection would not get it (the
-devices that merged it while it was listed keep it).
+`KS_DELTA_GRACE_MS − KS_RECEIVE_STALE_MARGIN_MS` and it fetches the bases — up to six days late.
+
+Two cases can leave a change unreachable:
+
+- **A duplicate written under a clock off by days.** If the slow writer is a cloned copy of another device, a
+  duplicate it writes under the shared identity, of a `(device, seq)` a base already implies, carries a creation time
+  days in the past. It can then fall before that base's cutoff and be implied without having been folded: no device
+  folds it, receivers that know the base skip it, and once it is collected a device joining afterwards does not get
+  it (the devices that merged it while it was listed keep it).
+- **A listing lag lasting about the grace period.** With correct clocks, a duplicate created before a base's cutoff
+  but missing from every listing until that base was built — at least `KS_DELTA_GRACE_MS` later — is implied the same
+  way. Ordinary listing delays are far shorter.
+
+A send resumed after an interruption is not a third case: it is uploaded under its recorded name only within
+`KS_RESUME_MAX_AGE_MS` of its creation, and otherwise resent with a fresh creation time (step 0 of "Sync Flow").
 
 ### Diagnosis
 
@@ -695,7 +708,9 @@ clock set back since) is treated as stale, so a device's own clock jump never st
 
 A creation time the server assigns, read from the listing of every provider (Dropbox's `server_modified`, Drive's
 `createdTime`, OneDrive's `createdDateTime`, Nextcloud's `getlastmodified`), carried into `CloudFileEntry` and used
-in place of `ks_meta.created_at` for both rules.
+in place of `ks_meta.created_at` for both rules. That closes the clock case; the listing-lag case would also need
+every provider's listing to show a file within a bounded time of its creation, which Drive and OneDrive do not
+promise.
 
 ## Linux/GNOME: the tray menu briefly shows the previous label when it opens
 

@@ -199,12 +199,14 @@ enum class TransportFileKind(
 }
 
 /**
- * A transport file's name, `ks-<gen>-d-<dev>-<seq>-<hash12>.db.gz` (delta) or
- * `ks-<gen>-b-<dev>-<n>-<hash12>.db.gz` (base).
+ * A transport file's name, `ks-<gen>-d-<dev>-<seq>-<createdAt>-<hash12>.db.gz` (delta) or
+ * `ks-<gen>-b-<dev>-<n>-<createdAt>-<hash12>.db.gz` (base).
  *
  * `<gen>` and `<dev>` are lowercase UUIDs (8-4-4-4-12 hex digits), the number is a positive decimal
- * without leading zeros (at most 18 digits, so it always fits a Long), and `<hash12>` is 12
- * lowercase hex digits. Construction enforces the same rules [parse] does, so a built name always
+ * without leading zeros (at most 18 digits, so it always fits a Long), `<createdAt>` is the file's
+ * `ks_meta.created_at` (Unix millis, a non-negative decimal without leading zeros, at most 18
+ * digits) — so a file's age is known from its name alone ([BaseCoverage.covers]) — and `<hash12>` is
+ * 12 lowercase hex digits. Construction enforces the same rules [parse] does, so a built name always
  * parses back, and only names that passed them are ever embedded in SQL.
  */
 data class TransportFileName(
@@ -212,17 +214,20 @@ data class TransportFileName(
     val kind: TransportFileKind,
     val device: String,
     val number: Long,
+    /** The file's creation time (its `ks_meta.created_at`), Unix millis. */
+    val createdAt: Long,
     val hash12: String,
 ) {
     init {
         require(isSyncId(generation)) { "Not a generation id" }
         require(isSyncId(device)) { "Not a device id" }
         require(number in 1..MAX_NUMBER) { "File number out of range" }
+        require(createdAt in 0..MAX_NUMBER) { "Creation time out of range" }
         require(HASH12.matches(hash12)) { "Not a 12-digit lowercase hex hash" }
     }
 
     /** The file name. */
-    val fileName: String get() = "ks-$generation-${kind.token}-$device-$number-$hash12.db.gz"
+    val fileName: String get() = "ks-$generation-${kind.token}-$device-$number-$createdAt-$hash12.db.gz"
 
     override fun toString(): String = fileName
 
@@ -230,9 +235,9 @@ data class TransportFileName(
         private const val UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
         private val SYNC_ID = Regex("^$UUID$")
         private val HASH12 = Regex("^[0-9a-f]{12}$")
-        private val NAME = Regex("^ks-($UUID)-([db])-($UUID)-([1-9][0-9]{0,17})-([0-9a-f]{12})\\.db\\.gz$")
+        private val NAME = Regex("^ks-($UUID)-([db])-($UUID)-([1-9][0-9]{0,17})-(0|[1-9][0-9]{0,17})-([0-9a-f]{12})\\.db\\.gz$")
 
-        /** The largest number a name may carry (18 decimal digits). */
+        /** The largest number or creation time a name may carry (18 decimal digits). */
         private const val MAX_NUMBER = 999_999_999_999_999_999L
 
         /** Whether [value] is a well-formed generation or device id (a lowercase UUID). */
@@ -247,12 +252,13 @@ data class TransportFileName(
         /** Parses [name], or returns `null` for anything that is not exactly a transport file name. */
         fun parse(name: String): TransportFileName? {
             val match = NAME.matchEntire(name) ?: return null
-            val (generation, token, device, number, hash12) = match.destructured
+            val (generation, token, device, number, createdAt, hash12) = match.destructured
             return TransportFileName(
                 generation = generation,
                 kind = TransportFileKind.fromToken(token) ?: return null,
                 device = device,
                 number = number.toLongOrNull() ?: return null,
+                createdAt = createdAt.toLongOrNull() ?: return null,
                 hash12 = hash12,
             )
         }
@@ -273,6 +279,9 @@ data class TransportMeta(
         require(number >= 1) { "File number out of range" }
         require(createdAt >= 0) { "Negative creation time" }
     }
+
+    /** The name of the file carrying this meta whose uncompressed content hashes to [hash12]. */
+    fun fileName(hash12: String): TransportFileName = TransportFileName(generation, kind, device, number, createdAt, hash12)
 
     /** The `ks_meta` rows, key to value. */
     val rows: Map<String, String>

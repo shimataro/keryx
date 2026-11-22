@@ -2,6 +2,7 @@ package works.merc.keryx.app.domain
 
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import works.merc.keryx.app.core.KS_DELTA_GRACE_MS
 
 /**
  * What a base covers — its `ks_vector`, its explicit `ks_covered` names and its creation time — as
@@ -9,9 +10,11 @@ import kotlinx.serialization.json.Json
  * `docs/sync-architecture.md`.
  *
  * A base covers a delta `(device, seq)` either **explicitly** (its name is in [covered]) or **by its
- * vector** (`seq <= vector[device]`). The vector implies a delta only while [covered] names no delta
- * of the same `(device, seq)`: when two files share a `(device, seq)` — a cloned database writing as
- * one device — the base lists every one it folded, so a duplicate it never saw is not implied.
+ * vector** (`seq <= vector[device]`). The vector implies a delta only if the delta was created at or
+ * before [vectorCutoff] — the base folded every delta it implies before that time, so a file of an
+ * implied `(device, seq)` created later (a cloned database's duplicate, a send uploaded late) is one
+ * it never saw — and only while [covered] names no delta of the same `(device, seq)`: when two files
+ * share a `(device, seq)` the base lists every one it folded, so a duplicate it never saw is not implied.
  */
 @Serializable
 data class BaseCoverage(
@@ -24,6 +27,13 @@ data class BaseCoverage(
     /** The parsed [name] (bases are only ever recorded under a name that parsed). */
     val fileName: TransportFileName get() = checkNotNull(TransportFileName.parse(name)) { "Malformed base name" }
 
+    /**
+     * The latest creation time of a delta the vector may imply: [KS_DELTA_GRACE_MS] before this base
+     * was created, the same cutoff [works.merc.keryx.app.platform.TransportFiles.finalizeBase] extends
+     * the vector by.
+     */
+    val vectorCutoff: Long get() = createdAt - KS_DELTA_GRACE_MS
+
     /** The `(device, seq)` pairs named explicitly by [covered]. */
     private val explicitSeqs: Set<Pair<String, Long>> by lazy {
         covered.keys.mapNotNullTo(mutableSetOf()) { TransportFileName.parse(it)?.let { n -> n.device to n.number } }
@@ -33,18 +43,18 @@ data class BaseCoverage(
     fun covers(delta: TransportFileName): Boolean {
         if (delta.kind != TransportFileKind.DELTA) return false
         if (delta.fileName in covered) return true
-        return delta.number <= (vector[delta.device] ?: 0L) && (delta.device to delta.number) !in explicitSeqs
+        return delta.number <= (vector[delta.device] ?: 0L) && delta.createdAt <= vectorCutoff &&
+            (delta.device to delta.number) !in explicitSeqs
     }
 
     /**
      * Whether [delta], which this base covers, is old enough to be garbage-collected: created at or
-     * before [cutoff]. A delta its vector implies always is — a vector only extends over deltas that
-     * were at least `KS_DELTA_GRACE_MS` old when the base was built ([works.merc.keryx.app.platform.TransportFiles.finalizeBase])
-     * — and an explicit one by its recorded creation time, or this base's own when unknown.
+     * before [cutoff]. A delta its vector implies by the creation time in its name; an explicit one by
+     * its recorded creation time, or this base's own when unknown.
      */
     fun coveredBefore(delta: TransportFileName, cutoff: Long): Boolean {
         if (!covers(delta)) return false
-        if (delta.fileName !in covered) return true
+        if (delta.fileName !in covered) return delta.createdAt <= cutoff
         return (covered[delta.fileName] ?: createdAt) <= cutoff
     }
 
@@ -53,13 +63,16 @@ data class BaseCoverage(
         seq <= (vector[device] ?: 0L) || (device to seq) in explicitSeqs
 
     /**
-     * Whether this base strictly dominates [other]: every component of its vector at least as high,
-     * every delta [other] names explicitly covered here too, and either more coverage or — for equal
-     * coverage — a greater name. The last rule makes domination a strict order, so two devices can
-     * never delete each other's bases.
+     * Whether this base strictly dominates [other]: created no earlier (so its [vectorCutoff] is no
+     * earlier either, and its vector implies every delta [other]'s does), every component of its vector
+     * at least as high, every delta [other] names explicitly covered here too, and then either more
+     * coverage, or — for equal coverage — a later creation, or — for an equal creation time too — a
+     * greater name. The tie-breaks make domination a strict order, so two devices can never delete
+     * each other's bases.
      */
     fun dominates(other: BaseCoverage): Boolean {
         if (other.name == name) return false
+        if (createdAt < other.createdAt) return false
         if (other.vector.any { (device, seq) -> (vector[device] ?: 0L) < seq }) return false
         val otherNames = other.covered.keys.mapNotNull(TransportFileName::parse)
         // Clone duplicates [other] lists must be listed here too: a vector cannot vouch for which copy
@@ -68,7 +81,7 @@ data class BaseCoverage(
         if (otherNames.any { if (it in duplicated) it.fileName !in covered else !covers(it) }) return false
         val strictlyMore = vector.any { (device, seq) -> seq > (other.vector[device] ?: 0L) } ||
             covered.keys.mapNotNull(TransportFileName::parse).any { !other.covers(it) }
-        return strictlyMore || name > other.name
+        return strictlyMore || createdAt > other.createdAt || name > other.name
     }
 }
 

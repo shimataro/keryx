@@ -11,10 +11,10 @@ class SyncValidationSqlTest {
 
     private val gen = "0f1e2d3c-4b5a-4968-8778-695a4b3c2d1e"
     private val dev = "a1b2c3d4-e5f6-4789-8abc-def012345678"
-    private val delta = TransportFileName(gen, TransportFileKind.DELTA, dev, 7, "0123456789ab")
-    private val base = TransportFileName(gen, TransportFileKind.BASE, dev, 2, "0123456789ab")
+    private val delta = TransportFileName(gen, TransportFileKind.DELTA, dev, 7, 1_000, "0123456789ab")
+    private val base = TransportFileName(gen, TransportFileKind.BASE, dev, 2, 1_000, "0123456789ab")
 
-    private fun meta(name: TransportFileName) = TransportMeta(name.generation, name.kind, name.device, name.number, 1_000).rows
+    private fun meta(name: TransportFileName) = TransportMeta(name.generation, name.kind, name.device, name.number, name.createdAt).rows
 
     @Test
     fun violationConditionsFollowTheColumnKind() {
@@ -81,13 +81,14 @@ class SyncValidationSqlTest {
             meta(delta) + (k.FORMAT to "0"),
             meta(delta) + (k.FORMAT to "one"),
             meta(delta) + (k.CREATED_AT to "-5"),
+            meta(delta) + (k.CREATED_AT to "1001"), // not the name's creation time
         )
         for (case in cases) assertNotNull(SyncValidationSql.metaProblem(case, delta), case.toString())
     }
 
     @Test
     fun coverageRules() {
-        val covered = TransportFileName(gen, TransportFileKind.DELTA, dev, 3, "0123456789ab").fileName
+        val covered = TransportFileName(gen, TransportFileKind.DELTA, dev, 3, 1_000, "0123456789ab").fileName
         assertNull(SyncValidationSql.coverageProblem(delta, emptyList(), emptyList()))
         assertNotNull(SyncValidationSql.coverageProblem(delta, listOf(dev), emptyList()))
         assertNotNull(SyncValidationSql.coverageProblem(delta, emptyList(), listOf(covered)))
@@ -96,7 +97,7 @@ class SyncValidationSqlTest {
         assertNotNull(SyncValidationSql.coverageProblem(base, listOf("not-a-device"), emptyList()))
         assertNotNull(SyncValidationSql.coverageProblem(base, emptyList(), listOf("keryx.db.gz")))
         assertNotNull(SyncValidationSql.coverageProblem(base, emptyList(), listOf(base.fileName)))
-        val otherGeneration = TransportFileName("1f1e2d3c-4b5a-4968-8778-695a4b3c2d1e", TransportFileKind.DELTA, dev, 1, "0123456789ab")
+        val otherGeneration = TransportFileName("1f1e2d3c-4b5a-4968-8778-695a4b3c2d1e", TransportFileKind.DELTA, dev, 1, 1_000, "0123456789ab")
         assertNotNull(SyncValidationSql.coverageProblem(base, emptyList(), listOf(otherGeneration.fileName)))
     }
 }

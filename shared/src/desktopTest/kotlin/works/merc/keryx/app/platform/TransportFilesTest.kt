@@ -1,5 +1,6 @@
 package works.merc.keryx.app.platform
 
+import works.merc.keryx.app.core.KS_DELTA_GRACE_MS
 import works.merc.keryx.app.createSchemaV2
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.domain.MergeSchema
@@ -226,6 +227,7 @@ class TransportFilesTest {
         assertCorrupt(validate(file, deltaName(DEV_B, 1)), "ks_meta.device")
         assertCorrupt(validate(file, deltaName(DEV_A, 2)), "ks_meta.number")
         assertCorrupt(validate(file, baseName(DEV_A, 1)), "ks_meta.kind")
+        assertCorrupt(validate(file, deltaName(DEV_A, 1, createdAt = 1_001)), "ks_meta.created_at")
         exec(file, "DELETE FROM ks_meta WHERE key = 'created_at'")
         assertCorrupt(validate(file), "created_at")
     }
@@ -337,35 +339,34 @@ class TransportFilesTest {
 
     @Test
     fun finalizeBaseExtendsTheVectorOnlyOverOldDeltasAndListsOnlyWhatItDoesNotImply() {
-        val acc = TransportFixtures.accumulator()
+        // The base's own creation time sets the impliable cutoff: 2000.
+        val acc = TransportFixtures.accumulator(createdAt = 2_000 + KS_DELTA_GRACE_MS)
         // Deltas 1 and 2 were created at 1000 (old enough), delta 3 at 5000 (too recent), delta 5 past a gap.
         for (seq in listOf(1L, 2L)) {
             val name = deltaName(DEV_A, seq)
             TransportFiles.fold(acc.absolutePath, transportFile(name).absolutePath, name, extendVector = false)
         }
         for (seq in listOf(3L, 5L)) {
-            val name = deltaName(DEV_A, seq)
-            val file = transportFile(name)
-            exec(file, "UPDATE ks_meta SET value = '5000' WHERE key = 'created_at'")
-            TransportFiles.fold(acc.absolutePath, file.absolutePath, name, extendVector = false)
+            val name = deltaName(DEV_A, seq, createdAt = 5_000)
+            TransportFiles.fold(acc.absolutePath, transportFile(name).absolutePath, name, extendVector = false)
         }
 
-        TransportFiles.finalizeBase(acc.absolutePath, impliableCutoff = 2_000)
+        TransportFiles.finalizeBase(acc.absolutePath)
 
         val coverage = TransportFixtures.dump(acc, coverage = true)
         assertEquals(listOf("$DEV_A|2"), coverage.getValue("ks_vector"))
-        assertEquals(listOf(3L, 5L).map { "${deltaName(DEV_A, it).fileName}|5000" }, coverage.getValue("ks_covered"))
+        assertEquals(listOf(3L, 5L).map { "${deltaName(DEV_A, it, createdAt = 5_000).fileName}|5000" }, coverage.getValue("ks_covered"))
     }
 
     @Test
     fun finalizeBaseKeepsEveryDuplicateOfACloneListed() {
-        val acc = TransportFixtures.accumulator()
+        val acc = TransportFixtures.accumulator(createdAt = 2_000 + KS_DELTA_GRACE_MS)
         val first = deltaName(DEV_A, 1)
         val duplicate = first.copy(hash12 = "ba9876543210")
         TransportFiles.fold(acc.absolutePath, transportFile(first).absolutePath, first, extendVector = false)
         TransportFiles.fold(acc.absolutePath, transportFile(duplicate).absolutePath, duplicate, extendVector = false)
 
-        TransportFiles.finalizeBase(acc.absolutePath, impliableCutoff = 2_000)
+        TransportFiles.finalizeBase(acc.absolutePath)
 
         val coverage = TransportFixtures.dump(acc, coverage = true)
         assertEquals(listOf("$DEV_A|1"), coverage.getValue("ks_vector"))
@@ -383,7 +384,7 @@ class TransportFilesTest {
     @Test
     fun createEmptyReplacesAnExistingFile() {
         val file = validFile()
-        TransportFiles.createEmpty(file.absolutePath, works.merc.keryx.app.domain.TransportMeta(TransportFixtures.GEN, delta.kind, DEV_A, 1, 5))
+        TransportFiles.createEmpty(file.absolutePath, works.merc.keryx.app.domain.TransportMeta(TransportFixtures.GEN, delta.kind, DEV_A, 1, delta.createdAt))
         assertTrue(TransportFixtures.dump(file).values.all { it.isEmpty() })
         assertEquals(TransportValidation.Valid, validate(file))
     }

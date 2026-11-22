@@ -1,5 +1,6 @@
 package works.merc.keryx.app.platform
 
+import works.merc.keryx.app.core.KS_DELTA_GRACE_MS
 import works.merc.keryx.app.core.SchemaVersionException
 import works.merc.keryx.app.domain.BaseCoverage
 import works.merc.keryx.app.domain.DeltaExportSql
@@ -270,8 +271,9 @@ object TransportFiles {
      * Completes a base folded with `extendVector = false`, in one transaction on one connection:
      *
      * - the vector is extended over the covered deltas that continue it without a gap, **counting only
-     *   deltas created at or before [impliableCutoff]** (`ks_covered.created_at`; an unknown time never
-     *   counts) — see "Bases and Garbage Collection";
+     *   deltas created at or before the impliable cutoff** — `KS_DELTA_GRACE_MS` before the base's own
+     *   `ks_meta.created_at`, exactly [BaseCoverage.vectorCutoff] — by `ks_covered.created_at` (an
+     *   unknown time never counts); see "Bases and Garbage Collection";
      * - every covered name the extended vector now implies is removed from `ks_covered`, except where
      *   two covered names share a `(device, seq)` (a cloned database): those stay listed, so a
      *   duplicate this base never folded is not implied by its vector ([BaseCoverage.covers]);
@@ -281,10 +283,12 @@ object TransportFiles {
      * The file is complete afterwards: hash it as it is and never open it for writing again (on
      * Android that would add `android_metadata` back and change its bytes).
      */
-    fun finalizeBase(path: String, impliableCutoff: Long) {
+    fun finalizeBase(path: String) {
         TransportConnections.open(path, TransportOpenMode.READ_WRITE).use { connection ->
             check(connection.userVersion() == TransportSchema.VERSION) { "The base is not a current transport file" }
             connection.transaction {
+                val createdAt = checkNotNull(connection.createdAt()) { "The base has no creation time" }
+                val impliableCutoff = createdAt - KS_DELTA_GRACE_MS
                 val vector = connection.queryRows("SELECT device, seq FROM main.ks_vector")
                     .associate { it[0].orEmpty() to (it[1]?.toLongOrNull() ?: 0L) }
                 val rows = connection.queryRows("SELECT name, created_at FROM main.ks_covered")
@@ -317,8 +321,7 @@ object TransportFiles {
      */
     fun readCoverage(path: String, name: TransportFileName): BaseCoverage =
         TransportConnections.open(path, TransportOpenMode.READ_ONLY).use { connection ->
-            val createdAt = connection.queryRows("SELECT value FROM ks_meta WHERE key = '${TransportSchema.MetaKeys.CREATED_AT}'")
-                .firstOrNull()?.firstOrNull()?.toLongOrNull() ?: 0L
+            val createdAt = connection.createdAt() ?: 0L
             val vector = connection.queryRows("SELECT device, seq FROM ks_vector")
                 .associate { it[0].orEmpty() to (it[1]?.toLongOrNull() ?: 0L) }
             val covered = connection.queryRows("SELECT name, created_at FROM ks_covered")
@@ -364,6 +367,9 @@ object TransportFiles {
     } catch (_: Exception) {
         null
     }
+
+    private fun TransportConnection.createdAt(): Long? =
+        queryRows("SELECT value FROM ks_meta WHERE key = '${TransportSchema.MetaKeys.CREATED_AT}'").firstOrNull()?.firstOrNull()?.toLongOrNull()
 
     private fun TransportConnection.userVersion(): Long =
         queryRows("PRAGMA user_version").firstOrNull()?.firstOrNull()?.toLongOrNull() ?: 0L
