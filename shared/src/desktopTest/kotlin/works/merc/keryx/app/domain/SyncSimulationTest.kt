@@ -86,7 +86,7 @@ class SyncSimulationTest {
             val items = (1..12).joinToString("") { i ->
                 "<item><guid>$url#$i</guid><title>Item $n.$i</title><link>https://site.example/$n/$i</link>" +
                     "<description>&lt;p&gt;Body $n $i&lt;/p&gt;</description>" +
-                    "<pubDate>Mon, ${String.format("%02d", i)} Jan 2024 10:00:00 GMT</pubDate></item>"
+                    "<pubDate>${WEEKDAYS[(i - 1) % 7]}, ${i.toString().padStart(2, '0')} Jan 2024 10:00:00 GMT</pubDate></item>"
             }
             return "<?xml version=\"1.0\"?><rss version=\"2.0\"><channel><title>Feed $n</title>" +
                 "<link>https://site.example/$n</link><description>d</description>$items</channel></rss>"
@@ -356,5 +356,8 @@ class SyncSimulationTest {
 
     private companion object {
         const val COLUMNS = 8
+
+        /** RFC 822 weekday names, starting from 2024-01-01 (a Monday). */
+        val WEEKDAYS = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
     }
 }
