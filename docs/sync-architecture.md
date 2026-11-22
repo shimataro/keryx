@@ -164,8 +164,11 @@ Everything below runs under `SyncRepository`'s `mutex`.
    late under its old creation time, it would look old enough to garbage-collect at once, before a device that syncs
    occasionally had listed it, and could be implied by a vector without having been folded. Resent under the new
    identity, the same changes carry a fresh creation time. (The limit is below `KS_RECEIVE_STALE_MARGIN_MS`.) If the generation has changed since,
-   the attempt is simply dropped (the rejoin's full send covers it). With no attempt recorded, a saved file left by a
-   crash between a commit and its deletion (only ever the last committed one) is deleted.
+   the attempt is simply dropped (the rejoin's full send covers it). With no attempt recorded, every saved file in the
+   data directory (`pending-<n>.db.gz`) is left over — by a crash between a commit and its deletion, or between clearing
+   a record and deleting its file — and is swept away; so are they whenever a new identity is taken, on joining and on
+   disconnecting. The sweep is best effort: a file that cannot be deleted is logged and left for the next sweep, and
+   never stops the step around it (only a recorded send is ever uploaded).
 1. **Read the pointer.** `metadata(keryx-sync.json)`; the file is downloaded only when its revision differs from
    `ks_pointer_rev`.
    - Neither the pointer nor `keryx.db.gz` exists → this is the first device ("Joining") — unless this device has
@@ -328,7 +331,7 @@ thresholds; deltas a base covers are not downloaded. That is at most about 1.25�
   back, as it did when other devices merged the re-created file before.
 - **Disconnect / switch** (`clearSyncFailureState()`, under the same mutex): `sync_capture.enabled = 0` (nothing is
   recorded while local-only), and the `ks_*` keys, the outbox, `sync_applied`, the cursors, `ks_feed_folder_raw`
-  and any saved pending file are cleared. `ks_search_pending` stays — it belongs to the local search index.
+  and every saved pending file (the best-effort sweep of step 0) are cleared. `ks_search_pending` stays — it belongs to the local search index.
   `ks_feed_folder_raw` goes with `sync_applied`: it describes which raw version, among the files this device has
   merged, won each feed's folder, and the files of a new generation are compared afresh — against the value this
   device's own full send carries (main's resolved one), as every other device's fold compares them.

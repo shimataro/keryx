@@ -1155,6 +1155,39 @@ class SyncRepositoryTest {
     }
 
     @Test
+    fun clearSyncFailureStateCompletesWhenASavedSendFileCannotBeDeleted() = runTest {
+        val (a, _) = crashingSend(SyncHookPoint.BEFORE_SEND_UPLOAD)
+        assertTrue(a.pendingFile(2).exists())
+        // A non-empty directory under a saved send's name: deleting it fails on every platform.
+        val undeletable = File(a.dataDir, "pending-9.db.gz").apply { mkdirs() }
+        File(undeletable, "inside").writeText("x")
+
+        a.repo.clearSyncFailureState()
+
+        assertEquals(0L, a.capture().enabled)
+        assertNull(a.state(SYNC_STATE_KS_ATTEMPT))
+        assertTrue(a.outbox().isEmpty())
+        assertFalse(a.pendingFile(2).exists(), "the other files are still swept")
+        assertTrue(undeletable.exists())
+    }
+
+    @Test
+    fun anOrphanedSavedSendFileIsSweptOnJoining() = runTest {
+        val cloud = FakeCloudStorage()
+        val a = device("a", cloud)
+        a.syncOk()
+        val b = device("b", cloud)
+        b.syncOk()
+        // No record names it, and its number is not this identity's last committed one.
+        val orphan = a.pendingFile(7).apply { writeBytes(byteArrayOf(1, 2, 3)) }
+        assertIs<Result.Ok<Unit>>(b.repo.resetCloudData())
+
+        a.syncOk() // a new generation: a joins it
+
+        assertFalse(orphan.exists())
+    }
+
+    @Test
     fun clearSyncFailureStateIsNotUndoneByAnInFlightSync() = runTest {
         val cloud = FakeCloudStorage()
         val a = device("a", cloud)

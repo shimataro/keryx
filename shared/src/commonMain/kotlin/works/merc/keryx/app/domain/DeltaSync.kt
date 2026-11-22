@@ -314,10 +314,10 @@ internal class DeltaSync(
      * Joins [generation] ("Joining"): a new sync identity, and — in the same transaction — the cursors,
      * `sync_applied`, the raw folder versions (`ks_feed_folder_raw`, which describe the files merged
      * before), the outbox, the base cache and a pending send cleared, recording on and a full send
-     * due, so every write from then on is recorded and everything before it is in the full send.
+     * due, so every write from then on is recorded and everything before it is in the full send. Every
+     * saved send file goes afterwards ([sweepPendingFiles]), orphans included.
      */
     private fun join(generation: String, pointerRev: String?) {
-        val attempt = SendAttempt.decode(state(SYNC_STATE_KS_ATTEMPT))
         val device = newId()
         db.transaction {
             setState(SYNC_STATE_KS_DEVICE_ID, device)
@@ -333,7 +333,7 @@ internal class DeltaSync(
             db.sync_bookkeepingQueries.clearOutbox()
             db.sync_bookkeepingQueries.setCapture(enabled = 1, fullPending = 1)
         }
-        attempt?.let { FileIO.delete(pendingPath(it.number)) }
+        sweepPendingFiles()
         Log.info(TAG, "Joined generation $generation as device $device")
     }
 
@@ -342,13 +342,13 @@ internal class DeltaSync(
      * unverifiable or too old send covered are sent again, with a fresh creation time) — step 0 of
      * "Sync Flow".
      */
-    private fun takeNewIdentity(attempt: SendAttempt) {
+    private fun takeNewIdentity() {
         db.transaction {
             setState(SYNC_STATE_KS_DEVICE_ID, newId())
             setState(SYNC_STATE_KS_LAST_SEQ, "0")
             deleteState(SYNC_STATE_KS_ATTEMPT)
         }
-        FileIO.delete(pendingPath(attempt.number))
+        sweepPendingFiles()
     }
 
     // ---- Step 0: resuming a send ----
@@ -356,9 +356,9 @@ internal class DeltaSync(
     private suspend fun resumeAttempt(cloud: CloudStorage, generation: String): Result<Unit> {
         val raw = state(SYNC_STATE_KS_ATTEMPT)
         if (raw == null) {
-            // A crash between a commit and deleting its saved file leaves that file behind; it can
-            // only be the last committed one.
-            lastSeq().takeIf { it >= 1 }?.let { FileIO.delete(pendingPath(it)) }
+            // No send is being resumed, so every saved send file is left over: from a crash between a
+            // commit and deleting its file, or from a record cleared before its file was deleted.
+            sweepPendingFiles()
             return Result.Ok(Unit)
         }
         val attempt = SendAttempt.decode(raw) ?: run {
@@ -375,7 +375,7 @@ internal class DeltaSync(
         val pending = pendingPath(attempt.number)
         if (attempt.name.generation != generation || attempt.name.device != state(SYNC_STATE_KS_DEVICE_ID)) {
             Log.warn(TAG, "Sync: dropping a send of another generation or identity")
-            takeNewIdentity(attempt)
+            takeNewIdentity()
             return Result.Ok(Unit)
         }
         val age = clock.nowMillis() - attempt.name.createdAt
@@ -383,12 +383,12 @@ internal class DeltaSync(
             // Uploaded now under its old creation time, it could be garbage-collected before a device
             // that syncs occasionally lists it; a send dated in the future proves nothing about its age.
             Log.warn(TAG, "Sync: the recorded send is too old to resume; taking a new sync identity")
-            takeNewIdentity(attempt)
+            takeNewIdentity()
             return Result.Ok(Unit)
         }
         if (!pendingFileMatches(pending, attempt.name.hash12)) {
             Log.warn(TAG, "Sync: the saved send is missing or damaged; taking a new sync identity")
-            takeNewIdentity(attempt)
+            takeNewIdentity()
             return Result.Ok(Unit)
         }
         setPhase(SyncPhase.UPLOADING)
@@ -1045,12 +1045,28 @@ internal class DeltaSync(
 
     private fun pendingPath(number: Long): String = FileIO.join(dataDir, "pending-$number.db.gz")
 
-    /** Deletes every saved send file in [dataDir], whether or not a record still names it. */
+    /**
+     * Deletes every saved send file in [dataDir], whether or not a record still names it. Called only
+     * once no send is being resumed (its record cleared, or none recorded). Best effort: a file that
+     * cannot be deleted is logged and left for the next sweep, and nothing is thrown, so a disconnect
+     * or a join is never stopped by it — a leftover file is never uploaded, since only a recorded send
+     * is.
+     */
     private fun sweepPendingFiles() {
-        val dir = Path(dataDir)
-        if (!SystemFileSystem.exists(dir)) return
-        for (path in SystemFileSystem.list(dir)) {
-            if (PENDING_FILE_NAME.matches(path.name)) SystemFileSystem.delete(path, mustExist = false)
+        val entries = try {
+            val dir = Path(dataDir)
+            if (!SystemFileSystem.exists(dir)) return
+            SystemFileSystem.list(dir).filter { PENDING_FILE_NAME.matches(it.name) }
+        } catch (e: Exception) {
+            Log.warn(TAG, "Sync: listing saved send files failed: ${e.message}")
+            return
+        }
+        for (path in entries) {
+            try {
+                SystemFileSystem.delete(path, mustExist = false)
+            } catch (e: Exception) {
+                Log.warn(TAG, "Sync: deleting the saved send file ${path.name} failed: ${e.message}")
+            }
         }
     }
 
