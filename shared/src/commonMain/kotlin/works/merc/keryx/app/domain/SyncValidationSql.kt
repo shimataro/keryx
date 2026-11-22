@@ -36,20 +36,35 @@ object SyncValidationSql {
         return "SELECT CASE $cases END FROM ${quote(table.name)} WHERE $any LIMIT 1"
     }
 
-    /** `PRAGMA table_info` of [table]; its second column (index 1) is the column name. */
-    fun tableInfoQuery(table: String): String = "PRAGMA table_info(${quote(table)})"
+    /**
+     * `PRAGMA table_xinfo` of [table]; its second column (index 1) is the column name. `table_xinfo`
+     * rather than `table_info`, which leaves out generated columns — an extra column must not pass
+     * check 5 by being generated.
+     */
+    fun tableInfoQuery(table: String): String = "PRAGMA table_xinfo(${quote(table)})"
 
     /**
-     * The first problem with [actualColumns] (table name to its columns, an empty set for a table the
-     * file lacks) against [expected], or `null` when every expected table and column is present.
-     * Extra tables and columns are ignored.
+     * Check 5: the first problem with [actualColumns] (table name to its columns, an empty set for a
+     * table the file lacks) against [expected], or `null` when the file matches. Every expected table
+     * and column must be present. With [rejectExtra], an expected table must also carry no column
+     * beyond its spec: a correct writer bumps the transport version whenever it adds a column, so an
+     * extra column at the same version means a broken file — and folding would silently drop it.
+     * A pre-delta database passes `false`, since it legitimately has device-local columns (e.g.
+     * `search_text`). Tables the expectation does not name are allowed either way. Names compare
+     * case-insensitively, like SQLite's.
      */
-    fun missingColumnsProblem(expected: List<TableSpec>, actualColumns: Map<String, Set<String>>): String? {
+    fun columnsProblem(expected: List<TableSpec>, actualColumns: Map<String, Set<String>>, rejectExtra: Boolean): String? {
         for (table in expected) {
-            val actual = actualColumns[table.name].orEmpty().map { it.lowercase() }.toSet()
+            val actualNames = actualColumns[table.name].orEmpty()
+            val actual = actualNames.map { it.lowercase() }.toSet()
             if (actual.isEmpty()) return "missing table ${table.name}"
             val missing = table.columnNames.firstOrNull { it.lowercase() !in actual }
             if (missing != null) return "missing column ${table.name}.$missing"
+            if (rejectExtra) {
+                val known = table.columnNames.map { it.lowercase() }.toSet()
+                val extra = actualNames.firstOrNull { it.lowercase() !in known }
+                if (extra != null) return "unexpected column ${table.name}.$extra"
+            }
         }
         return null
     }

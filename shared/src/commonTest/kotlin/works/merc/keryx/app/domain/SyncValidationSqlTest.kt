@@ -39,18 +39,27 @@ class SyncValidationSqlTest {
     }
 
     @Test
-    fun missingTablesAndColumnsAreReported() {
+    fun missingTablesAndColumnsAreReportedAndExtraColumnsOnlyWhenRejected() {
         val expected = TransportSchema.EXPECTED_TABLES.getValue(1L)
         val complete = expected.associate { it.name to it.columnNames.toSet() }
-        assertNull(SyncValidationSql.missingColumnsProblem(expected, complete))
-        assertNull(SyncValidationSql.missingColumnsProblem(expected, complete + ("extra" to setOf("x"))))
-        assertEquals("missing table ks_covered", SyncValidationSql.missingColumnsProblem(expected, complete - "ks_covered"))
-        assertEquals(
-            "missing column feeds.favicon_url",
-            SyncValidationSql.missingColumnsProblem(expected, complete + ("feeds" to complete.getValue("feeds") - "favicon_url")),
-        )
-        // Column names compare case-insensitively, like SQLite's.
-        assertNull(SyncValidationSql.missingColumnsProblem(expected, complete.mapValues { (_, c) -> c.map { it.uppercase() }.toSet() }))
+        for (rejectExtra in listOf(true, false)) {
+            assertNull(SyncValidationSql.columnsProblem(expected, complete, rejectExtra))
+            // Tables the expectation does not name are allowed either way.
+            assertNull(SyncValidationSql.columnsProblem(expected, complete + ("extra" to setOf("x")), rejectExtra))
+            assertEquals("missing table ks_covered", SyncValidationSql.columnsProblem(expected, complete - "ks_covered", rejectExtra))
+            assertEquals(
+                "missing column feeds.favicon_url",
+                SyncValidationSql.columnsProblem(expected, complete + ("feeds" to complete.getValue("feeds") - "favicon_url"), rejectExtra),
+            )
+            // Column names compare case-insensitively, like SQLite's.
+            assertNull(SyncValidationSql.columnsProblem(expected, complete.mapValues { (_, c) -> c.map { it.uppercase() }.toSet() }, rejectExtra))
+        }
+
+        val extraColumn = complete + ("articles" to complete.getValue("articles") + "extra_body")
+        assertEquals("unexpected column articles.extra_body", SyncValidationSql.columnsProblem(expected, extraColumn, rejectExtra = true))
+        assertNull(SyncValidationSql.columnsProblem(expected, extraColumn, rejectExtra = false))
+        val extraMetaColumn = complete + ("ks_meta" to complete.getValue("ks_meta") + "note")
+        assertEquals("unexpected column ks_meta.note", SyncValidationSql.columnsProblem(expected, extraMetaColumn, rejectExtra = true))
     }
 
     @Test

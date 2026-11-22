@@ -195,6 +195,32 @@ class TransportFilesTest {
     }
 
     @Test
+    fun anExtraColumnInATransportFileIsCorrupt() {
+        // A writer adding a column bumps the transport version; folding would silently drop it.
+        val file = validFile()
+        exec(file, "ALTER TABLE articles ADD COLUMN extra_body TEXT")
+        assertCorrupt(validate(file), "unexpected column articles.extra_body")
+    }
+
+    @Test
+    fun anExtraGeneratedColumnInATransportFileIsCorrupt() {
+        // PRAGMA table_info leaves generated columns out; the check must still see them.
+        val file = validFile()
+        exec(file, "ALTER TABLE articles ADD COLUMN extra_title TEXT GENERATED ALWAYS AS (title) VIRTUAL")
+        assertCorrupt(validate(file), "unexpected column articles.extra_title")
+    }
+
+    @Test
+    fun anExtraColumnInAPreDeltaDatabaseIsAccepted() {
+        // A pre-delta database is a full local database, with device-local columns of its own.
+        val (file, driver, db) = fileDb()
+        db.insertFeed("f1", now = 10)
+        driver.close()
+        exec(file, "ALTER TABLE articles ADD COLUMN extra_body TEXT", "PRAGMA user_version = ${KeryxDatabase.Schema.version}")
+        assertEquals(TransportValidation.Valid, TransportFiles.validate(file.absolutePath, ValidationTarget.PreDelta(KeryxDatabase.Schema.version)))
+    }
+
+    @Test
     fun metaThatDisagreesWithTheNameIsCorrupt() {
         val file = validFile()
         assertCorrupt(validate(file, deltaName(DEV_B, 1)), "ks_meta.device")

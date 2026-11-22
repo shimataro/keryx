@@ -264,7 +264,7 @@ temporary file.
 | 2 | Download completes | Transient; retried next sync |
 | 3 | gzip decompresses (capped at `MAX_SYNC_DB_SIZE_BYTES`), the SQLite header, the hash in the name | Hash mismatch → downloaded once more in the same sync; still mismatched → corrupt |
 | 4 | `user_version` | Newer than this build → `SchemaVersionException` |
-| 5 | Expected tables and columns for that version (`TransportSchema`; `MergeSchema` for a pre-delta database) | Missing → corrupt. No expectation registered for the version → undetermined, treated as transient (never answered with a reset) |
+| 5 | Expected tables and columns for that version (`TransportSchema`; `MergeSchema` for a pre-delta database). A transport file's expected tables must have exactly the expected columns: a writer that adds a column bumps the transport version, so an extra column at the same version is a broken file, which a fold would otherwise drop without a word. A pre-delta database, a full local database with device-local columns of its own (`search_text`, say), is checked for missing columns only. Tables the expectation does not name are allowed | Missing (or, in a transport file, extra) → corrupt. No expectation registered for the version → undetermined, treated as transient (never answered with a reset) |
 | 6 | An older version is migrated up (`TransportSchema` migrations; `KeryxDatabase.Schema.migrate` for a pre-delta database) | An SQLite error while migrating → corrupt |
 | 7 | Types and value ranges, by a query generated from the expected schema: ids are non-empty text, stamps are integer or NULL, booleans are 0 or 1, NOT NULL columns hold no NULL | Any violating row → corrupt |
 | 8 | `ks_meta` (generation, kind, device, number) matches the file name; a base's `ks_vector`/`ks_covered` types | Corrupt |
@@ -526,7 +526,8 @@ Two versions are in play:
 
 Adding a `.sqm` must update, together, the transport schema (DDL, expectations, migration), `MergeSchema`, and the
 column lists the capture triggers compare; a test fails when they disagree. Unknown columns are never ignored: an
-older device re-sending a row without them would overwrite the newer columns with NULL.
+older device re-sending a row without them would overwrite the newer columns with NULL. Likewise, a transport file carrying a column its version does not define is rejected as corrupt (check 5 of
+"Validating Cloud Files"), never merged or folded with the column dropped.
 
 `DatabaseMerger.validateSchema` / the transport validation return a **nullable** verdict: `null` when no expectation
 is registered for a version or the inspection itself fails. `null` is never treated as "incompatible" — it must not

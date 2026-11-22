@@ -121,9 +121,13 @@ object TransportFiles {
             is ValidationTarget.PreDelta -> MergeSchema.EXPECTED_TABLES[version]
         } ?: return TransportValidation.Undetermined("no expectation registered for version $version")
 
-        // Check 5.
+        // Check 5. A transport file must match exactly; a pre-delta database also holds device-local columns.
         TransportConnections.open(path, TransportOpenMode.READ_ONLY).use { connection ->
-            SyncValidationSql.missingColumnsProblem(expected, connection.columnsOf(expected))
+            SyncValidationSql.columnsProblem(
+                expected,
+                connection.columnsOf(expected),
+                rejectExtra = target is ValidationTarget.Transport,
+            )
         }?.let { return TransportValidation.Corrupt(it) }
 
         // Check 6.
