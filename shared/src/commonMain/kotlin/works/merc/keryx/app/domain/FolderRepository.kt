@@ -16,6 +16,8 @@ class FolderRepository(
     private val syncScheduler: SyncScheduler,
     private val clock: Clock,
     private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
+    /** Issues the id of a newly created row (a test passes a deterministic source). */
+    private val newId: () -> String = IdGenerator::newId,
 ) {
     private val folders get() = db.foldersQueries
 
@@ -91,7 +93,7 @@ class FolderRepository(
      * read only after that write, so the transaction never reads before it writes.
      */
     private fun upsertFolderByName(name: String, now: Long): String {
-        folders.upsertByName(id = IdGenerator.newId(), name = name, now = now)
+        folders.upsertByName(id = newId(), name = name, now = now)
         return folders.getByName(name).executeAsOne().id
     }
 

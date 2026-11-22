@@ -101,8 +101,8 @@ class SyncSimulationTest {
             db, FeedFetcher(sim.client), FaviconResolver(sim.failingClient), articles, sync.fts, SyncScheduler {},
             NotificationCenter(), sim.clock, Dispatchers.Unconfined, faviconMisses = InMemoryFaviconMissStore(),
         )
-        val folders = FolderRepository(db, feeds, SyncScheduler {}, sim.clock, Dispatchers.Unconfined)
-        val tags = TagRepository(db, SyncScheduler {}, sim.clock, Dispatchers.Unconfined)
+        val folders = FolderRepository(db, feeds, SyncScheduler {}, sim.clock, Dispatchers.Unconfined, newId = sim.ids)
+        val tags = TagRepository(db, SyncScheduler {}, sim.clock, Dispatchers.Unconfined, newId = sim.ids)
 
         override fun close() = sync.close()
     }
