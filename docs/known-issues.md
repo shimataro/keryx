@@ -548,7 +548,8 @@ which differs between the files and main — so the survivor depends on the orde
 The same cause — an identity taken from content that can change — makes matching tags and folders by name
 non-associative: a cloud row merged into a main row because they share a name is ignored once the fold also
 holds that main row's id, and is no longer matched after its name changes. `feedTags`' and
-`mergeFeedFolderId`'s lookups by name are affected the same way.
+`mergeFeedFolderId`'s lookups by name are affected the same way (see also "Same-name folders keep different ids
+per device, so folder assignments can diverge").
 
 ### What a real fix would need
 
@@ -563,6 +564,35 @@ holds that main row's id, and is no longer matched after its name changes. `feed
 
 Even then, a loser whose URL changes again after the re-key comes back as a separate feed, and a pre-delta cloud
 file cannot be rewritten, so devices can still diverge in those cases.
+
+## Same-name folders keep different ids per device, so folder assignments can diverge
+
+**Status**: not fixed — closing it needs folder ids that converge across devices, a redesign outside the scope
+of the change that found it (see "What a real fix would need"). It breaks the merge's commutativity (see
+"Design Philosophy" in [sync-architecture.md](sync-architecture.md)) for feeds' folder assignments.
+
+### Symptom
+
+Two devices settle on different folders for the same feed when two folder moves carry the same
+`folder_updated_at`. For example, device A holds the move to cloud folder `dz` (resolved to its own folder `da`
+of the same name) and device B holds the move to `dm`; after each merges the other's upload, A keeps `da` and B
+keeps `dm`.
+
+### Diagnosis
+
+Two devices that create a folder of the same name independently give it different ids, and the merge matches a
+cloud folder to a local one by name, keeping the local id (the name-based matching also noted under "Feeds sharing
+one URL under different ids keep whichever arrived first"). A feed's `folder_id` therefore holds a **resolved**
+id. `MergeSql` keeps the raw winning version beside it (`ks_feed_folder_raw`) so one device's merges rank raw
+against raw, but the upload — a snapshot of the local database — carries only the resolved id, which the receiver
+then ranks as if it were raw. Shipping the raw id instead would not help on its own: the folder it names may not
+exist on the sender, so a receiver could not resolve it.
+
+### What a real fix would need
+
+Folder ids that converge across devices — for instance, re-keying a folder matched by name onto a canonical id on
+every device, with the feeds that reference it — so that a feed's folder id means the same folder everywhere and
+no resolution is needed.
 
 ## Google Drive: an upload can overwrite another device's upload unnoticed
 
