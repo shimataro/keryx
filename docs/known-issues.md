@@ -777,6 +777,62 @@ The same as the entry above: creation times the server assigns, used for bases t
 enter the domination rule. Alternatively, a cutoff per vector component, which changes the transport format and
 the validation, folding, garbage-collection and domination rules.
 
+## Delta sync: an interrupted sync can leave one device's search index holding stale tokens
+
+**Status**: not fixed — the root cause is not yet identified, and finding it was outside the scope of the
+change that exposed it (rebasing the pre-delta migration onto the delta sync). No synced data is affected.
+`SyncSimulationTest.devicesConvergeUnderRandomOperationsInterruptionsAndDelays` fails on seed 37 until it is
+fixed.
+
+### Symptom
+
+After the simulation's random operations, interruptions and delays, and a quiescing round in which every
+device syncs until nothing changes, one of the three devices finds fewer articles in a search than the other
+two (12 fewer for "Body" in seed 37). The test never reaches quiescence, because its observable state
+includes the search results. On a real device, those articles cannot be found by their current text until
+the daily full rebuild (`maybeRebuildFtsIndex` → `FtsManager.rebuildIndex()`) heals the index.
+
+### Diagnosis
+
+What was observed on the diverging device, compared with the other two:
+
+- Every synced table's observable columns are identical (the simulation's `dump`), and so is each article's
+  `search_text`.
+- `ks_search_pending` is empty, `sync_index_pending` is absent, and `articles_fts_docsize` lists every article
+  (72 of 72) on all three devices.
+- On the diverging device only, the affected articles' rows are in the index but do not `MATCH` the text
+  their `search_text` now holds. They were indexed from an earlier text (an earlier body, or the `''` a merge
+  inserts), and `indexMissing()` never revisits a row that is already indexed.
+
+So some path indexes an article before its `search_text` is final, or changes that text after the article
+is indexed without ever registering it in `ks_search_pending` again. The design meant to prevent this is in
+"FTS5 Handling" in [sync-architecture.md](sync-architecture.md): a merged row stays in `ks_search_pending`
+until its text is recomputed, and `indexMissing()` skips pending rows.
+
+What brings it to the surface: the simulation picks its crash point from `SyncHookPoint.entries`. The
+pre-delta migration added five entries, and a call for `AFTER_POINTER_CREATE` in `DeltaSync.createPointer`.
+Adding just those to the base commit the migration was rebased onto (0d9401cc) reproduces the same failure.
+That base passes on its own, and also passes with one extra `metadata` call per sync (what the legacy watch
+adds when there is no `keryx.db.gz`). The defect is therefore already in the delta sync's crash and indexing
+paths: the new crash points, and the different random sequence they cause, only expose it.
+
+### Ruled out
+
+- **The rebase's conflict resolution** — reproduced on the base without any of the migration's code, as above.
+- **A search failing and returning nothing** (`ArticleRepository.search`'s best-effort catch) — the device
+  returned a non-empty, smaller result, and `FtsSearch` called directly returned the same.
+- **Pending work left undone** — `ks_search_pending` is empty and `sync_index_pending` is absent everywhere.
+
+### What a real fix would need
+
+First, the root cause: which interruption (crash point and step) leaves a row indexed from a text other than
+its final one. A narrow probe on seed 37 should find it: log each `articles_fts` insert for the affected
+article ids, together with the `SyncHookPoint` the run crashed at. The fix then has to keep the rule that no
+row is indexed while its `search_text` can still change. That means either registering the row in
+`ks_search_pending` in the same transaction as every write that changes its body, or making `indexMissing()`
+replace an indexed row's tokens when its text has changed. The second must not reintroduce the full-rebuild
+cost on a hot path.
+
 ## Linux/GNOME: the tray menu briefly shows the previous label when it opens
 
 **Status**: not fixed — external (GNOME Shell AppIndicator extension) design limitation, and not
