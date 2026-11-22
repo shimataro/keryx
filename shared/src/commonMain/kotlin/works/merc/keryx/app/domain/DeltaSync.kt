@@ -310,8 +310,9 @@ internal class DeltaSync(
 
     /**
      * Joins [generation] ("Joining"): a new sync identity, and — in the same transaction — the cursors,
-     * `sync_applied`, the outbox, the base cache and a pending send cleared, recording on and a full
-     * send due, so every write from then on is recorded and everything before it is in the full send.
+     * `sync_applied`, the raw folder versions (`ks_feed_folder_raw`, which describe the files merged
+     * before), the outbox, the base cache and a pending send cleared, recording on and a full send
+     * due, so every write from then on is recorded and everything before it is in the full send.
      */
     private fun join(generation: String, pointerRev: String?) {
         val attempt = SendAttempt.decode(state(SYNC_STATE_KS_ATTEMPT))
@@ -326,6 +327,7 @@ internal class DeltaSync(
             deleteState(SYNC_STATE_KS_BASES)
             db.sync_bookkeepingQueries.clearCursors()
             db.sync_bookkeepingQueries.clearApplied()
+            db.sync_bookkeepingQueries.clearFeedFolderRaw()
             db.sync_bookkeepingQueries.clearOutbox()
             db.sync_bookkeepingQueries.setCapture(enabled = 1, fullPending = 1)
         }

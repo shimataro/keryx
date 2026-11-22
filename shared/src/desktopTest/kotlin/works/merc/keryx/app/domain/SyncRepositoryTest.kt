@@ -297,6 +297,27 @@ class SyncRepositoryTest {
         assertTrue(a.db.hasFeed("fx"))
     }
 
+    @Test
+    fun joiningAGenerationClearsTheRawFolderVersionsOfTheFilesMergedBefore() = runTest {
+        val cloud = FakeCloudStorage()
+        val a = device("a", cloud)
+        a.db.insertFeed("fa", now = 1)
+        a.syncOk()
+        // A raw folder version recorded from the old generation's files would outrank the new
+        // generation's equal-stamped version in the merge, so it must not survive the rejoin.
+        a.driver.execute(null, "INSERT INTO ks_feed_folder_raw (feed_id, folder_updated_at, folder_id) VALUES ('fa', 500, 'dz')", 0)
+        val newGeneration = ids()
+        val (base, bytes) = SyncFiles.transportFile(TransportMeta(newGeneration, TransportFileKind.BASE, ids(), 1, now), feedRow("fx"))
+        cloud.put(base.fileName, bytes)
+        cloud.put(SYNC_POINTER_PATH, SyncPointer.encode(newGeneration).encodeToByteArray())
+
+        a.syncOk()
+
+        assertEquals(newGeneration, a.state(SYNC_STATE_KS_GENERATION))
+        // The new generation's merge seeds rows of its own (for the feeds its files carry); the old one's must be gone.
+        assertEquals(0L, a.driver.executeQuery(null, "SELECT COUNT(*) FROM ks_feed_folder_raw WHERE feed_id = 'fa'", { c -> c.next(); QueryResult.Value(c.getLong(0)!!) }, 0).value)
+    }
+
     // ---- Pointer and pre-delta data ----
 
     @Test
