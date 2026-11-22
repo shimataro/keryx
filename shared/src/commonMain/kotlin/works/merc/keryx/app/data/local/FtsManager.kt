@@ -57,7 +57,10 @@ class FtsManager internal constructor(
      *
      * This is mutual exclusion between *writers only*. Searches are deliberately not serialized
      * here: they rely on the rebuild being one atomic transaction plus `busy_timeout`, so a
-     * reader waits rather than erroring and never observes a half-built index.
+     * reader waits rather than erroring and never observes a half-built index — as long as the
+     * rebuild releases the write lock within `busy_timeout`. The database is in rollback-journal
+     * mode, so a search that waits longer fails with `SQLITE_BUSY`, which `ArticleRepository.search`
+     * turns into no results (its best-effort fallback).
      */
     private val indexWriteMutex = Mutex()
 

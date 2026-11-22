@@ -205,7 +205,9 @@ External content mode keeps only the index, referencing `articles.search_text` f
   24h gate + `ActivityCenter` idle), to rebuild stale existing rows whose body text changed since incremental
   indexing.
 - `'rebuild'` is atomic and waits on `busy_timeout`, so a search running concurrently never regresses to zero
-  results.
+  results — as long as the rebuild releases its write lock within `busy_timeout`. A search that waits longer fails
+  with `SQLITE_BUSY`, and `ArticleRepository.search` then returns no results (see
+  [sync-architecture.md](sync-architecture.md) "FTS5 Handling").
 **On startup, call `FtsManager.ensureIndexed()` to create the table on first run and backfill any missing rows.**
 Android instead calls the cheaper `ensureIndexedIfTableAbsent()` on every process start (including a `WorkManager`
 wakeup, up to ~96 times/day) — it skips straight to a no-op once the table already exists, instead of re-running

@@ -222,7 +222,9 @@ INSERT INTO articles_fts(articles_fts) VALUES('rebuild');
 - 全再構築（`rebuildIndex()` ＝ `'rebuild'`）は日次アイドル pass（`local_settings.lastFtsRebuiltAt` の
   24h ゲート ＋ `ActivityCenter` のアイドル）でのみ行い、増分投入以降に本文が更新されて古くなった既存行を
   作り直す。
-- `'rebuild'` はアトミックかつ `busy_timeout` 待ちなので、実行中の検索が 0 件に後退することはない。
+- `'rebuild'` はアトミックかつ `busy_timeout` 待ちなので、実行中の検索が 0 件に後退することはない——ただし再構築が
+  `busy_timeout` 以内に書き込みロックを手放す場合に限る。それより長く待った検索は `SQLITE_BUSY` で失敗し、
+  `ArticleRepository.search` は結果なしを返す（[sync-architecture.ja.md](sync-architecture.ja.md) の「FTS5 の扱い」を参照）。
 **起動時に `FtsManager.ensureIndexed()` を呼び、テーブルが無ければ作成し、索引に未登録の記事があれば増分投入する。**
 Android はこれより軽い `ensureIndexedIfTableAbsent()` をプロセス起動のたびに呼ぶ（`WorkManager` の
 ウェイクアップ含め1日最大約96回）— テーブルが既に存在すれば毎回 `indexMissing()` の `O(記事数)` スキャンを
