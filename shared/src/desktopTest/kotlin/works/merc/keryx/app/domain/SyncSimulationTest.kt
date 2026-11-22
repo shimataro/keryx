@@ -41,8 +41,8 @@ import kotlin.test.fail
  * absences, and one reset. At the end every device syncs until nothing changes, and then:
  *
  * - every device shows the same state (observable columns of every synced table);
- * - for every field group anyone ever wrote, that state is the newest write (the oracle) — no
- *   change was lost;
+ * - for every field group any device's local write ever changed, that state is the newest such write
+ *   (the oracle, built from local writes only) — no change was lost;
  * - nothing is left to send.
  *
  * Deterministic for a seed: ids, clock, operations, delays and interruptions all come from it.
@@ -131,9 +131,12 @@ class SyncSimulationTest {
                         if (result is Result.Err) fail("seed $seed step $step: reset failed: ${result.exception}")
                     }
                     sim.random.nextInt(100) < 40 -> syncWithChaos(sim, device, devices, "seed $seed step $step")
-                    else -> operate(sim, device)
+                    else -> {
+                        val before = groups(device).toSet()
+                        operate(sim, device)
+                        record(sim, groups(device).filter { it !in before })
+                    }
                 }
-                record(sim, device)
                 if (sim.random.nextInt(100) < 3) sim.now += 3 * MILLIS_PER_DAY
             }
             // The run must have exercised what it is about, or it proves nothing.
@@ -145,7 +148,6 @@ class SyncSimulationTest {
             assertTrue(written.count { it.kind == TransportFileKind.BASE } > 3 && sim.cloud.deleteCount > 0, "seed $seed: $stats")
             assertEquals(2, written.map { it.generation }.distinct().size, "seed $seed: $stats")
             quiesce(sim, devices, seed)
-            devices.forEach { record(sim, it) }
 
             val dumps = devices.map { dump(it) }
             for (i in 1 until dumps.size) {
@@ -243,9 +245,12 @@ class SyncSimulationTest {
         }
     }
 
-    /** Folds [device]'s current field groups into the oracle (the newest stamp wins). */
-    private fun record(sim: Sim, device: Device) {
-        for ((key, stamp, value) in groups(device)) {
+    /**
+     * Folds the field groups a local write just changed into the oracle (the newest stamp wins). Only
+     * local writes feed it, so a value a merge brought in is checked against it rather than trusted.
+     */
+    private fun record(sim: Sim, changed: List<Group>) {
+        for ((key, stamp, value) in changed) {
             if (stamp == null) continue
             val known = sim.oracle[key]
             if (known == null || stamp > known.first) sim.oracle[key] = stamp to value
