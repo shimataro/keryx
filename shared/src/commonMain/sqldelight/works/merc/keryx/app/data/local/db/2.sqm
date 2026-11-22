@@ -67,6 +67,10 @@ CREATE TABLE ks_search_pending (
     rowid INTEGER NOT NULL PRIMARY KEY
 );
 
+CREATE TABLE ks_search_awaiting_body (
+    id TEXT NOT NULL PRIMARY KEY
+);
+
 CREATE TABLE ks_feed_folder_raw (
     feed_id           TEXT NOT NULL PRIMARY KEY,
     folder_updated_at INTEGER,

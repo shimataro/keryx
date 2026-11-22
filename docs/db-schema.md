@@ -47,7 +47,7 @@ through it rather than composing `AppDirs.appDataDir()` with the filename themse
   drives create/migrate manually off this pragma; on Android, `AndroidSqliteDriver` drives it internally via its own
   `onCreate`/`onUpgrade` callbacks. Version 2 adds `articles.deleted_at` / `deleted_updated_at` via `1.sqm`.
   Version 3 (`2.sqm`) adds the sync bookkeeping (`sync_outbox`, `sync_capture`, `sync_merging`, `sync_applied`,
-  `sync_cursor`, `ks_search_pending`, `ks_feed_folder_raw`, and the capture triggers), moves `feeds`' `etag` / `last_modified` /
+  `sync_cursor`, `ks_search_pending`, `ks_search_awaiting_body`, `ks_feed_folder_raw`, and the capture triggers), moves `feeds`' `etag` / `last_modified` /
   `error_count` / `last_error` into `feed_fetch_state` (`ALTER TABLE … DROP COLUMN`, SQLite 3.35+), adds the
   per-field stamps of `tags` / `folders` and `articles.body_updated_at` (all initialized from `updated_at`), and
   registers in `ks_search_pending` every
@@ -182,6 +182,7 @@ with it, so a failed indexing is retried by the next sync). Device-local; cleare
 | `sync_applied` | `name`(PK) — cloud files already merged |
 | `sync_cursor` | `device`(PK), `seq` — per device, the highest delta number up to which everything is merged |
 | `ks_search_pending` | `rowid`(PK) — articles whose `search_text` must be recomputed |
+| `ks_search_awaiting_body` | `id`(PK) — articles a merge inserted without a body (a light row), kept out of the search index until one arrives or the daily rebuild indexes them |
 | `ks_feed_folder_raw` | `feed_id`(PK), `folder_updated_at`, `folder_id` — per feed, the raw folder version (as the winning sync file carried it) that `feeds.folder_id`'s resolved value came from, so the merge ranks raw against raw; valid only while `folder_updated_at` equals the feed's own |
 
 None of these, nor `sync_state`, `feed_fetch_state` or `articles_fts`, ever leaves the device: delta and base files

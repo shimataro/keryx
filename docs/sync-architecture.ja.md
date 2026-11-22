@@ -115,6 +115,7 @@ Depth 1 の `PROPFIND`。既にたどったページ指定（カーソル、ペ�
 | `sync_applied(name)` | マージ済みのクラウドファイル（この端末自身のものを含む） |
 | `sync_cursor(device, seq)` | 端末ごとに、すべての差分をマージし終えている最大の `seq` |
 | `ks_search_pending(rowid)` | `search_text` の再計算が必要な記事（「FTS5 の扱い」参照） |
+| `ks_search_awaiting_body(id)` | マージが本文なし（軽量行）で挿入した記事。本文が届くまで検索索引に入れない（「FTS5 の扱い」参照） |
 | `ks_feed_folder_raw(feed_id, folder_updated_at, folder_id)` | フィードごとに、`feeds.folder_id` の解決後の値の元になった生のフォルダー版（勝ったファイルが持っていたままのもの）。スタンプがフィードの `folder_updated_at` と等しい間だけ有効（「マージ」参照） |
 | `feed_fetch_state(feed_id, etag, last_modified, error_count, last_error)` | この端末でのフィードの取得状態——同期しない |
 
@@ -324,7 +325,7 @@ Depth 1 の `PROPFIND`。既にたどったページ指定（カーソル、ペ�
   ない差分同期以前の `keryx.db.gz` は退避してスタブに置き換える（「クラウドデータのリセット（退避）」を参照）。
 - **接続解除・切り替え**（`clearSyncFailureState()`、同じ mutex の内側）: `sync_capture.enabled = 0`（ローカル
   のみで使う間は何も記録しない）にし、`ks_*` キー、outbox、`sync_applied`、カーソル、`ks_feed_folder_raw`、
-  保存中のファイルすべて（手順 0 の best effort の掃除）を消す。`ks_search_pending` は残す——ローカルの検索索引のものだからである。
+  保存中のファイルすべて（手順 0 の best effort の掃除）を消す。`ks_search_pending` と `ks_search_awaiting_body` は残す——ローカルの検索索引のものだからである。
   `ks_feed_folder_raw` を `sync_applied` と一緒に消すのは、これがこの端末がマージしたファイルのうちどの生の版が
   各フィードのフォルダーで勝ったかを表すものであり、新しい世代のファイルは改めて比べる——この端末自身の全量送信が
   持つ値（main の解決後の値）と比べる。ほかの端末の畳み込みが比べるのと同じである——からである。
@@ -579,7 +580,8 @@ SQLDelight コードの `getLong` がそれを読むときに例外を投げ、�
 
   `cached_at` と `updated_at` は新しいほうを取り（`updated_at` は行の汎用のスタンプで、どのグループのキーでもない）、
   `created_at` は古いほうを取る。`search_text` はマージしない: マージが本文を埋めた、または変えた記事は `ks_search_pending` に
-  登録し、新しく挿入された記事は `''` から始まる（「FTS5 の扱い」参照）。articles は **`id`**（`(feed_id, guid)` の
+  登録し、新しく挿入された記事は `''` から始まり、本文なしで挿入された記事は `ks_search_awaiting_body` に記録する
+  （「FTS5 の扱い」参照）。articles は **`id`**（`(feed_id, guid)` の
   UUIDv5、`IdGenerator.articleId`）で照合する。
 - feed_tags: 後勝ち。フィードが main にあるときだけ取り込む。タグは、main で生きていればそのまま使い、そうでなければ
   `cloud.tags` を通じて名前で探す。どちらでも解決できない行は飛ばす。
@@ -708,6 +710,16 @@ ATTACH する前に、Apple の `migrateCloudIfOlder` は古いクラウドフ�
   `indexMissing()` で再開する。`indexMissing()` は `ks_search_pending` に残っている行を飛ばすので、新しい記事は計算後の
   テキストで索引され、`''` で索引されることはない。すでに索引済みの記事は、日次の rebuild まで古いトークンのまま
   になる——フィード更新で本文が変わった場合と同じ、許容済みの古さである。
+- **本文なしでマージされた記事。** 軽量行（既読・スター・削除の変更）は、その記事の本文を運ぶファイルより先に
+  端末へ届くことがある——結果整合の一覧では後の差分が先に並びうる——ので、マージは `content` も `summary` もない
+  記事を挿入する。すぐに索引すると `''` しか持たず、索引済みの行は二度と見直されないため、本文が届いた後も本文で
+  検索できないままになる（単に古いのではない）。そこでマージはそのような記事を `ks_search_awaiting_body` に記録し
+  （マージのトランザクションの中、articles の文の前に、id で照合）、`indexMissing()` はまだ本文のない間それを飛ばす。
+  本文が付けば——後のマージ（どの本文の変更とも同じく `ks_search_pending` に登録する）からでも、この端末自身の
+  フィード更新からでも——`indexMissing()` が記録を外し、ほかの新しい行と同じく索引する。差分の上では軽量行と
+  本当に本文のないフィード項目を区別できないので、本文が届かないままの記事は次の日次 rebuild がタイトルで索引し、
+  表を空にする。その rebuild より後に本文が届くと、その行はまた以前のトークンのまま残る——
+  [known-issues.ja.md](known-issues.ja.md) の「差分同期: 行のテキストが変わっても検索トークンが差し替えられない」を参照。
 - **healing 用の全再構築（`rebuildIndex()` = `'rebuild'`）**:
   `domain/StartupMaintenanceTasks.kt` の `maybeRebuildFtsIndex`（desktop と Android で共有）による日次アイドル
   pass（`local_settings.lastFtsRebuiltAt` の 24h ゲート + `ActivityCenter` アイドル。同期・フィード更新に加え、
@@ -717,7 +729,8 @@ ATTACH する前に、Apple の `migrateCloudIfOlder` は古いクラウドフ�
   保留に残った記事がそのまま索引され、その後の `indexMissing()` は再計算はしても索引済みとして飛ばしてしまう。
   それでもなお保留に残った行（その間に本文が変わった行）は、`'rebuild'` と同じトランザクションの中で索引から外す
   （外部コンテンツの `'delete'`）。そこではその行の値は `'rebuild'` が索引した値とちょうど一致する。外した行は次の
-  `indexMissing()` が再計算して索引する。トランザクションは原子的で書き込みから始まり（読み手は再構築前後どちらかを
+  `indexMissing()` が再計算して索引する。`'rebuild'` はそれらの記事も索引したばかりなので、`ks_search_awaiting_body` も
+  同じトランザクションの中で空にする。トランザクションは原子的で書き込みから始まり（読み手は再構築前後どちらかを
   見るだけ）、検索は `busy_timeout` で待つため、実行中の検索も 0 件にならない——ただし再構築が `busy_timeout` 以内に
   書き込みロックを手放す場合に限る。データベースは rollback journal モードで動くので、それより長く待った検索は
   `SQLITE_BUSY` で失敗し、`ArticleRepository.search` は結果なしを返す（文書化済みのベストエフォートの扱い。

@@ -121,6 +121,7 @@ extend).
 | `sync_applied(name)` | Cloud files already merged (including this device's own) |
 | `sync_cursor(device, seq)` | Per device, the highest `seq` up to which every delta has been merged |
 | `ks_search_pending(rowid)` | Articles whose `search_text` must be recomputed (see "FTS5 Handling") |
+| `ks_search_awaiting_body(id)` | Articles a merge inserted without a body (a light row), kept out of the search index until one arrives (see "FTS5 Handling") |
 | `ks_feed_folder_raw(feed_id, folder_updated_at, folder_id)` | Per feed, the raw folder version (as the winning file carried it) that `feeds.folder_id`'s resolved value came from; valid only while its stamp equals the feed's `folder_updated_at` (see "Merge") |
 | `feed_fetch_state(feed_id, etag, last_modified, error_count, last_error)` | A feed's fetch state on this device — never synced |
 
@@ -335,7 +336,7 @@ thresholds; deltas a base covers are not downloaded. That is at most about 1.25�
   `keryx.db.gz` that is not the stub is archived and replaced by it (see "Resetting (Archiving) Cloud Data").
 - **Disconnect / switch** (`clearSyncFailureState()`, under the same mutex): `sync_capture.enabled = 0` (nothing is
   recorded while local-only), and the `ks_*` keys, the outbox, `sync_applied`, the cursors, `ks_feed_folder_raw`
-  and every saved pending file (the best-effort sweep of step 0) are cleared. `ks_search_pending` stays — it belongs to the local search index.
+  and every saved pending file (the best-effort sweep of step 0) are cleared. `ks_search_pending` and `ks_search_awaiting_body` stay — they belong to the local search index.
   `ks_feed_folder_raw` goes with `sync_applied`: it describes which raw version, among the files this device has
   merged, won each feed's folder, and the files of a new generation are compared afresh — against the value this
   device's own full send carries (main's resolved one), as every other device's fold compares them.
@@ -564,7 +565,8 @@ Merge SQL (`MergeSql`) key points:
 
   `cached_at` and `updated_at` take the newer value (`updated_at` is the row's generic stamp, no group's key), and
   `created_at` the earlier. `search_text` is not merged: an article whose body the merge
-  filled in or changed is registered in `ks_search_pending`, and a newly inserted article starts with `''` (see
+  filled in or changed is registered in `ks_search_pending`, a newly inserted article starts with `''`, and one inserted
+  without a body is recorded in `ks_search_awaiting_body` (see
   "FTS5 Handling"). Articles are matched by **`id`** (UUIDv5 of `(feed_id, guid)`, `IdGenerator.articleId`).
 - feed_tags: last-write-wins. Imported only if the feed exists in main. The tag is used as-is if it is alive in
   main, else looked up by name through `cloud.tags`; a row whose tag resolves to neither is skipped.
@@ -649,6 +651,18 @@ Index maintenance is two-tier:
   computed text, never with `''`. An
   article that was already indexed keeps its old tokens until the daily rebuild — the same accepted staleness as a
   body changed by a refresh.
+- **An article merged without its body.** A light row (a read, star or deletion change) can reach a device before
+  the file that carries the article's body — an eventually consistent listing lets a later delta be listed first —
+  and the merge then inserts the article with no `content` or `summary`. Indexed at once, it would hold only `''`
+  and, since an indexed row is never revisited, stay unsearchable by its body after the body arrived, rather than
+  merely stale. The merge therefore records such an article in `ks_search_awaiting_body` (in the merge transaction,
+  before the articles statement, matched by id), and `indexMissing()` skips it while it still has no body. Once it
+  has one — from a later merge (which registers it in `ks_search_pending` as any body change) or from this device's
+  own refresh — `indexMissing()` drops its record and indexes it like any new row. A light row and a feed item that
+  genuinely has no body look the same in a delta, so an article that never gets one is indexed by its title at the
+  next daily rebuild, which clears the table. A body that arrives only after that rebuild leaves the row with its
+  earlier tokens again — see "Delta sync: a row's search tokens are not replaced when its text changes" in
+  [known-issues.md](known-issues.md).
 - **Healing full rebuild (`rebuildIndex()` = `'rebuild'`)**:
   Executed only in the daily idle pass (`domain/StartupMaintenanceTasks.kt`'s `maybeRebuildFtsIndex`, shared by
   desktop and Android, gated by `local_settings.lastFtsRebuiltAt` 24h gate + `ActivityCenter` idle — no sync, no feed
@@ -659,7 +673,8 @@ Index maintenance is two-tier:
   otherwise an article left pending with `''` would be indexed with it, and `indexMissing()` would then recompute it
   but skip it as already indexed. A row still pending after that (its body changed meanwhile) is taken back out of the
   index (an external-content `'delete'`) in the same transaction as `'rebuild'`, where its values are exactly what
-  `'rebuild'` just indexed, and the next `indexMissing()` recomputes and indexes it. The transaction is atomic and
+  `'rebuild'` just indexed, and the next `indexMissing()` recomputes and indexes it. `ks_search_awaiting_body` is
+  cleared in the same transaction, since `'rebuild'` has just indexed those articles too. The transaction is atomic and
   starts with a write (readers see only before or after), and searches wait on `busy_timeout`, so running searches
   do not regress to zero results either — as long as the rebuild releases its write lock within `busy_timeout`. The
   database runs in rollback-journal mode, so a search that waits longer fails with `SQLITE_BUSY`, and

@@ -44,7 +44,7 @@
   create/migrate を自前で駆動するが、Android では `AndroidSqliteDriver` が自身の `onCreate`/`onUpgrade` コールバック内で
   内部的に駆動する。バージョン 2 は `1.sqm` で `articles.deleted_at` / `deleted_updated_at` を追加する。バージョン 3
   （`2.sqm`）は、同期の管理情報（`sync_outbox`、`sync_capture`、`sync_merging`、`sync_applied`、`sync_cursor`、
-  `ks_search_pending`、`ks_feed_folder_raw` と記録用トリガー）を追加し、`feeds` の `etag` / `last_modified` / `error_count` / `last_error` を
+  `ks_search_pending`、`ks_search_awaiting_body`、`ks_feed_folder_raw` と記録用トリガー）を追加し、`feeds` の `etag` / `last_modified` / `error_count` / `last_error` を
   `feed_fetch_state` に移し（`ALTER TABLE … DROP COLUMN`、SQLite 3.35 以上）、`tags` / `folders` のフィールドごとの
   スタンプと `articles.body_updated_at` を追加し（初期値はいずれも `updated_at`）、`search_text` が生の `content` / `summary` と同じままの記事（HTML 除去の
   導入前に書かれた行）を `ks_search_pending` に登録する。（SQLDelight は最大のマイグレーションファイル + 1 で
@@ -199,6 +199,7 @@
 | `sync_applied` | `name`(PK) — マージ済みのクラウドファイル |
 | `sync_cursor` | `device`(PK), `seq` — 端末ごとに、すべてをマージし終えている差分の最大番号 |
 | `ks_search_pending` | `rowid`(PK) — `search_text` の再計算が必要な記事 |
+| `ks_search_awaiting_body` | `id`(PK) — マージが本文なし（軽量行）で挿入した記事。本文が届くか、日次 rebuild が索引するまで検索索引に入れない |
 | `ks_feed_folder_raw` | `feed_id`(PK), `folder_updated_at`, `folder_id` — フィードごとに、`feeds.folder_id` の解決後の値の元になった生のフォルダー版（勝った同期ファイルが持っていたままのもの）。マージが生の値どうしで順位を比べるためのもの。`folder_updated_at` がフィード自身の値と等しい間だけ有効 |
 
 これらも、`sync_state`、`feed_fetch_state`、`articles_fts` も、端末の外に出ることは決してない: 差分ファイルと
