@@ -562,15 +562,21 @@ Index maintenance is two-tier:
   desktop and Android, gated by `local_settings.lastFtsRebuiltAt` 24h gate + `ActivityCenter` idle — no sync, no feed
   refresh, and no refresh-then-sync cycle (`refreshCycleRunning`, which also covers the gap between a cycle's refresh
   and its sync) in flight). Rebuilds stale
-  existing rows (body text updated since incremental indexing). `'rebuild'` is a single atomic statement (readers
-  see only before or after) + `busy_timeout` wait, so running searches do not regress to zero results either.
+  existing rows (body text updated since incremental indexing). `'rebuild'` indexes every article's current
+  `search_text`, so `rebuildIndex()` first recomputes the rows in `ks_search_pending`, as `indexMissing()` does —
+  otherwise an article left pending with `''` would be indexed with it, and `indexMissing()` would then recompute it
+  but skip it as already indexed. A row still pending after that (its body changed meanwhile) is taken back out of the
+  index (an external-content `'delete'`) in the same transaction as `'rebuild'`, where its values are exactly what
+  `'rebuild'` just indexed, and the next `indexMissing()` recomputes and indexes it. The transaction is atomic and
+  starts with a write (readers see only before or after), and searches wait on `busy_timeout`, so running searches
+  do not regress to zero results either.
 
 The two index writers are **mutually exclusive**: `FtsManager` serializes `indexMissing()` and
 `rebuildIndex()` behind an internal mutex (both are therefore `suspend`). The daily pass's idle gate is a
 lock-free `ActivityCenter` check, so a refresh starting just after it passes would otherwise overlap the
 rebuild — always wasted work (a rebuild subsumes an incremental insert), and on a corpus whose rebuild
 outlasts `busy_timeout`, a raw `SQLiteException` no caller catches. Searches are deliberately **not**
-serialized: they still rely on `'rebuild'` being a single atomic statement plus the `busy_timeout` wait.
+serialized: they still rely on the rebuild being one atomic transaction plus the `busy_timeout` wait.
 
 On desktop startup, `FtsManager.ensureIndexed()` (initial creation + unindexed row incremental insert) is called
 from a `runBlocking` in `main.kt` — the window must not open on an absent index. The writer mutex is

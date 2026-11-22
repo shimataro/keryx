@@ -626,16 +626,20 @@ ATTACH する前に、Apple の `migrateCloudIfOlder` は古いクラウドフ�
   `domain/StartupMaintenanceTasks.kt` の `maybeRebuildFtsIndex`（desktop と Android で共有）による日次アイドル
   pass（`local_settings.lastFtsRebuiltAt` の 24h ゲート + `ActivityCenter` アイドル。同期・フィード更新に加え、
   更新 → 同期の一連の処理（`refreshCycleRunning`。その更新と同期の間の一瞬も含む）も実行中でないこと）でのみ実行。増分投入以降に
-  本文が更新されて古くなった既存行を作り直す。
-  `'rebuild'` は単一文で原子的（読み手は再構築前後どちらかを見るだけ）＋ `busy_timeout` で待つため、
-  実行中の検索も 0 件にならない。
+  本文が更新されて古くなった既存行を作り直す。`'rebuild'` は各記事の現在の `search_text` を索引するので、
+  `rebuildIndex()` はまず `indexMissing()` と同じく `ks_search_pending` の行を再計算する——そうしないと `''` のまま
+  保留に残った記事がそのまま索引され、その後の `indexMissing()` は再計算はしても索引済みとして飛ばしてしまう。
+  それでもなお保留に残った行（その間に本文が変わった行）は、`'rebuild'` と同じトランザクションの中で索引から外す
+  （外部コンテンツの `'delete'`）。そこではその行の値は `'rebuild'` が索引した値とちょうど一致する。外した行は次の
+  `indexMissing()` が再計算して索引する。トランザクションは原子的で書き込みから始まり（読み手は再構築前後どちらかを
+  見るだけ）、検索は `busy_timeout` で待つため、実行中の検索も 0 件にならない。
 
 2 つの索引ライタは**相互排他**とする: `FtsManager` は `indexMissing()` と `rebuildIndex()` を内部の
 mutex で直列化する（このため両者は `suspend`）。日次 pass のアイドル判定は `ActivityCenter` のロックなしの
 参照なので、その直後に始まったフィード更新は検知されず rebuild と重なり得る。重なりは常に無駄な作業
 （rebuild は増分投入を包含する）であり、rebuild が `busy_timeout` を超えて書き込みロックを保持する規模では、
 どの呼び出し元も catch しない生の `SQLiteException` になる。検索は**意図的に直列化しない**: 従来どおり
-`'rebuild'` が単一のアトミックな文であることと `busy_timeout` の待機に依存する。
+再構築が 1 つのアトミックなトランザクションであることと `busy_timeout` の待機に依存する。
 
 desktop の起動時は `main.kt` の `runBlocking` から `FtsManager.ensureIndexed()`（初回作成 + 未索引行の増分
 投入）を呼ぶ（索引不在のままウィンドウを開かせないため）。ライタ mutex はコルーチンベースで、この時点では

@@ -223,6 +223,83 @@ class FtsManagerTest {
         }
     }
 
+    /**
+     * A merged article whose recompute an earlier call left undone is still pending with `''`. The
+     * daily rebuild must recompute it before `'rebuild'` indexes it: indexed with `''`, the next
+     * `indexMissing` would recompute it but skip it as already indexed, leaving its body unsearchable.
+     */
+    @Test
+    fun rebuildIndexRecomputesPendingSearchTextBeforeIndexing() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f1")
+            db.insertMergedArticle("a1", "f1", "Merged", "<p>pending pangolin</p>")
+            driver.registerPending("a1")
+            val manager = ftsManager(driver)
+            manager.createTable()
+
+            runBlocking { manager.rebuildIndex() }
+
+            assertEquals("pending pangolin", driver.searchTextOf("a1"))
+            assertFalse(driver.isPending("a1"))
+            assertEquals(listOf("a1"), FtsSearch(driver).search("pangolin", ArticleFilter.All).map { it.id })
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
+     * A row whose body changes during the rebuild's recompute stays pending; `'rebuild'` would index
+     * it with its `''`, so the rebuild takes it back out of the index, and the next `indexMissing`
+     * recomputes and indexes it. Runs on a file DB, so the concurrent write goes through a connection
+     * of its own.
+     */
+    @Test
+    fun rebuildIndexLeavesARowStillPendingOutOfTheIndexForTheNextIndexMissing() {
+        val (file, driver, db) = fileDb()
+        try {
+            db.insertFeed("f1")
+            db.insertMergedArticle("a1", "f1", "Changing", "<p>older ocelot</p>")
+            db.insertMergedArticle("a2", "f1", "Steady", "<p>steady stoat</p>")
+            listOf("a1", "a2").forEach(driver::registerPending)
+            var interleaved = false
+            val manager = FtsManager(
+                driver,
+                beforePendingWrite = {
+                    if (!interleaved) {
+                        interleaved = true
+                        driver.execute(null, "UPDATE articles SET content = '<p>newer narwhal</p>' WHERE id = 'a1';", 0)
+                    }
+                },
+                toPlainText = HtmlText::toPlainText,
+            )
+            manager.createTable()
+
+            runBlocking { manager.rebuildIndex() }
+
+            assertTrue(interleaved)
+            assertTrue(driver.isPending("a1"))
+            assertFalse(driver.isIndexed("a1"), "a row still pending must not stay indexed with ''")
+            assertTrue(driver.isIndexed("a2"))
+            // The index is still internally consistent after the external-content 'delete'.
+            driver.execute(null, "INSERT INTO articles_fts(articles_fts, rank) VALUES('integrity-check', 0);", 0)
+            assertEquals(listOf("a2"), FtsSearch(driver).search("stoat", ArticleFilter.All).map { it.id })
+
+            runBlocking { manager.indexMissing() }
+
+            assertEquals("newer narwhal", driver.searchTextOf("a1"))
+            assertFalse(driver.isPending("a1"))
+            assertEquals(listOf("a1"), FtsSearch(driver).search("narwhal", ArticleFilter.All).map { it.id })
+            assertEquals(listOf("a1"), FtsSearch(driver).search("Changing", ArticleFilter.All).map { it.id })
+            assertTrue(FtsSearch(driver).search("ocelot", ArticleFilter.All).isEmpty())
+            // Back in step with the content table: the full check (rank = 1) compares against it too.
+            driver.execute(null, "INSERT INTO articles_fts(articles_fts, rank) VALUES('integrity-check', 1);", 0)
+        } finally {
+            driver.close()
+            file.delete()
+        }
+    }
+
     @Test
     fun indexMissingAddsNewRowsWithoutWipingExisting() {
         val (driver, db) = inMemoryDb()

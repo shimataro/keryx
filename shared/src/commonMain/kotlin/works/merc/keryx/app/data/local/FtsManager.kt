@@ -56,7 +56,7 @@ class FtsManager internal constructor(
      * loser throws a raw `SQLiteException` that no caller catches.
      *
      * This is mutual exclusion between *writers only*. Searches are deliberately not serialized
-     * here: they rely on `'rebuild'` being a single atomic statement plus `busy_timeout`, so a
+     * here: they rely on the rebuild being one atomic transaction plus `busy_timeout`, so a
      * reader waits rather than erroring and never observes a half-built index.
      */
     private val indexWriteMutex = Mutex()
@@ -351,9 +351,35 @@ class FtsManager internal constructor(
 
     /**
      * Rebuilds the full-text index from the current articles, including removing entries for deleted articles.
+     *
+     * `'rebuild'` indexes every article's current `search_text`, so it first recomputes the rows
+     * listed in `ks_search_pending` ([recomputePendingSearchText]) — otherwise a merged article whose
+     * recompute an earlier call left undone would be indexed with its `''`, and the next
+     * [indexMissing] would recompute it but never index it (it is already in the index), leaving its
+     * body unsearchable until the next day's rebuild.
+     *
+     * A row still pending after the recompute (its body changed while it was being converted) is
+     * then taken back out of the index, in the same transaction as `'rebuild'`: there its `title` and
+     * `search_text` are exactly what `'rebuild'` just indexed, as an external-content `'delete'`
+     * requires. The next [indexMissing] recomputes and indexes it. The transaction's first statement
+     * is a write, so it takes the write lock from the start (see "A concurrent write can fail a
+     * read-then-write transaction" in `docs/known-issues.md`); to a concurrent search the whole
+     * transaction is still one atomic change.
      */
     suspend fun rebuildIndex(): Unit = indexWriteMutex.withLock {
-        driver.execute(null, "INSERT INTO articles_fts(articles_fts) VALUES('rebuild');", 0)
+        recomputePendingSearchText()
+        transacter.transaction {
+            driver.execute(null, "INSERT INTO articles_fts(articles_fts) VALUES('rebuild');", 0)
+            driver.execute(
+                null,
+                """
+                    INSERT INTO articles_fts(articles_fts, rowid, title, search_text)
+                    SELECT 'delete', a.rowid, a.title, a.search_text FROM articles a
+                    WHERE a.rowid IN (SELECT rowid FROM ks_search_pending);
+                """.trimIndent(),
+                0,
+            )
+        }
     }
 
     internal companion object {
