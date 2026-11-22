@@ -189,7 +189,10 @@ only the retries of a revision-checked write (the pointer, the stub); delta and 
    from `ks_bases`; a listed base this device has never looked at is downloaded to find out. If no base covers it, the
    gap is taken as the provider's listing not having caught up yet (Drive's and OneDrive's listings are eventually
    consistent): the cursor stops below it, every other file is still merged (the merge is commutative), and the next
-   sync looks again. A known base that covers something this device lacks is fetched as well.
+   sync looks again. A known base that covers something this device lacks is fetched as well. A delta a base names
+   explicitly (`ks_covered`) counts as merged only when its own name is in `sync_applied`: the cursor proves only that
+   some file of each `(device, seq)` was merged, and a clone's duplicate of a `seq` below the cursor is a different
+   file, whose changes may be nowhere else.
    - **Joining, or away too long.** When joining — and whenever `ks_received_at` is older than `KS_DELTA_GRACE_MS`
      minus `KS_RECEIVE_STALE_MARGIN_MS` (one day, for listing delay and clock differences) — every listed base this
      device does not know is fetched. A delta is garbage-collected only once it is that old (see below), so a device
@@ -205,15 +208,17 @@ only the retries of a revision-checked write (the pointer, the stub); delta and 
    files arrived.
 4. **Merge** with `DatabaseMerger.mergeTransport` in a single transaction (see "Merge"): `INSERT INTO sync_merging` first,
    then `MergeSql.all`, then the `sync_applied`/`sync_cursor` updates for every file merged and the
-   `ks_search_pending` registrations, then `DELETE FROM sync_merging`. Merging and recording what was merged
+   `ks_search_pending` registrations, then `DELETE FROM sync_merging`. The names `sync_applied` records include every
+   name a merged base lists explicitly, whether listed or not (garbage-collected meanwhile). Merging and recording what was merged
    therefore commit together or not at all — a crash in between re-merges the same files next time, which the
    merge's idempotence makes harmless.
 5. After the commit: `ftsManager.indexMissing()`, which first recomputes `search_text` for `ks_search_pending`
    ("FTS5 Handling"), then `driver.notifyListeners(...)` for every synced table — the merge wrote through its own connection, so
    SQLDelight's flows must be re-triggered for the UI to reflect it.
 6. Names no longer listed are dropped from `sync_applied`; if one ever reappears, applying it again is harmless.
-   This device's own deltas stay until a known base covers them, so a listing that does not show a just-sent delta yet
-   never makes it look like a clone's (step 2).
+   A name a known listed base lists explicitly stays — step 1 would otherwise take it as missing and fetch that base
+   again on every sync. This device's own deltas stay until a known base covers them, so a listing that does not show
+   a just-sent delta yet never makes it look like a clone's (step 2).
 
 ### Sending
 

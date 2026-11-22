@@ -468,13 +468,14 @@ internal class DeltaSync(
         val sinceReceived = receivedAt?.let { clock.nowMillis() - it }
         val stale = joining || sinceReceived == null || sinceReceived < 0 || sinceReceived > KS_DELTA_GRACE_MS - KS_RECEIVE_STALE_MARGIN_MS
 
+        // A delta a base names explicitly is applied only if its own name is in sync_applied: the cursor
+        // proves only that *some* file of each (device, seq) was merged, and a clone's duplicate of a
+        // seq below it is a different file whose changes may be nowhere else.
         fun lacks(base: BaseCoverage): Boolean =
             base.vector.any { (device, seq) ->
                 val from = cursor[device] ?: 0L
                 seq > from && ((from + 1)..seq).any { (device to it) !in appliedSeqs }
-            } || base.covered.keys.mapNotNull(TransportFileName::parse).any {
-                it.fileName !in applied && it.number > (cursor[it.device] ?: 0L)
-            }
+            } || base.covered.keys.mapNotNull(TransportFileName::parse).any { it.fileName !in applied }
 
         val fetchedBases = mutableListOf<BaseCoverage>()
         val accumulator = FileIO.join(tempDir, "ks-receive.db")
@@ -546,8 +547,11 @@ internal class DeltaSync(
             }
 
             if (accumulatorCreated) {
+                // A merged base's explicitly covered names are recorded too, listed or not (garbage-
+                // collected meanwhile), so `lacks` does not fetch that base again for them.
                 val merged = fetchedBases.map { it.name } + fetchedDeltas.map { it.fileName } +
-                    listing.deltas.keys.filter { name -> fetchedBases.any { it.covers(name) } }.map { it.fileName }
+                    listing.deltas.keys.filter { name -> fetchedBases.any { it.covers(name) } }.map { it.fileName } +
+                    fetchedBases.flatMap { it.covered.keys }.filter { TransportFileName.parse(it) != null }
                 val mergedSeqs = merged.mapNotNull(TransportFileName::parse).filter { it.kind == TransportFileKind.DELTA }
                     .mapTo(mutableSetOf()) { it.device to it.number }
                 val devices = cursor.keys + fetchedBases.flatMap { it.vector.keys } + mergedSeqs.map { it.first }
@@ -693,14 +697,16 @@ internal class DeltaSync(
     }
 
     /**
-     * Step 6: names no longer listed leave `sync_applied`. This device's own deltas stay until a known
-     * base covers them, so a listing that does not show a just-sent delta yet never makes it look like
-     * someone else's (step 2's clone rule).
+     * Step 6: names no longer listed leave `sync_applied` — except a name a known listed base ([known])
+     * names explicitly, which `lacks` would otherwise take as missing and fetch that base for again.
+     * This device's own deltas stay until a known base covers them, so a listing that does not show a
+     * just-sent delta yet never makes it look like someone else's (step 2's clone rule).
      */
     private fun dropUnlisted(listing: Listing, self: String, known: Collection<BaseCoverage>) {
         val listed = listing.deltas.keys.mapTo(mutableSetOf()) { it.fileName } + listing.bases.keys.map { it.fileName }
+        val namedByBases = known.flatMapTo(mutableSetOf()) { it.covered.keys }
         val stale = appliedNames().filter { name ->
-            if (name in listed) return@filter false
+            if (name in listed || name in namedByBases) return@filter false
             val parsed = TransportFileName.parse(name) ?: return@filter true
             parsed.kind == TransportFileKind.BASE || parsed.device != self || known.any { it.covers(parsed) }
         }

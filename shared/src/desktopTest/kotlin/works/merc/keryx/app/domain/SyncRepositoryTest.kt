@@ -33,6 +33,7 @@ import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.core.SYNC_DEBOUNCE_MS
 import works.merc.keryx.app.core.SYNC_POINTER_PATH
 import works.merc.keryx.app.core.SYNC_STATE_KS_ATTEMPT
+import works.merc.keryx.app.core.SYNC_STATE_KS_BASES
 import works.merc.keryx.app.core.SYNC_STATE_KS_DEVICE_ID
 import works.merc.keryx.app.core.SYNC_STATE_KS_GENERATION
 import works.merc.keryx.app.core.SYNC_STATE_KS_RECEIVED_AT
@@ -504,6 +505,43 @@ class SyncRepositoryTest {
         a.syncOk()
         assertTrue(a.db.hasFeed("one"))
         assertEquals(2L, a.db.sync_bookkeepingQueries.cursorAll().executeAsList().single { it.device == other }.seq)
+    }
+
+    @Test
+    fun aKnownBaseNamingACloneDeltaBelowTheCursorIsFetchedOnceThatDeltaIsGone() = runTest {
+        val cloud = FakeCloudStorage()
+        val (a, gen) = seeded(cloud)
+        val x = ids()
+        // Two copies of device x each wrote a delta 1. a merges copy A; copy B never shows in a's listing.
+        val (deltaA, bytesA) = SyncFiles.transportFile(TransportMeta(gen, TransportFileKind.DELTA, x, 1, now), feedRow("fromA"))
+        val (deltaB, bytesB) = SyncFiles.transportFile(TransportMeta(gen, TransportFileKind.DELTA, x, 1, now), feedRow("fromB"))
+        cloud.put(deltaA.fileName, bytesA)
+        cloud.files[deltaB.fileName] = FakeCloudStorage.StoredFile(bytesB, "rev-b", Long.MAX_VALUE)
+        // Another device's fold of both copies, which names each of them explicitly.
+        val (base, baseBytes) = SyncFiles.transportFile(
+            TransportMeta(gen, TransportFileKind.BASE, ids(), 1, now),
+            feedRow("fromA"),
+            feedRow("fromB"),
+            "INSERT INTO ks_covered (name, created_at) VALUES ('${deltaA.fileName}', $now), ('${deltaB.fileName}', $now)",
+        )
+        cloud.put(base.fileName, baseBytes)
+
+        a.syncOk()
+
+        assertTrue(a.db.hasFeed("fromA"))
+        assertFalse(a.db.hasFeed("fromB"))
+        assertTrue(base.fileName in SyncBaseCache.decode(a.state(SYNC_STATE_KS_BASES)), "the fold looked the base up without merging it")
+        assertEquals(1L, a.db.sync_bookkeepingQueries.cursorAll().executeAsList().single { it.device == x }.seq)
+
+        cloud.files.remove(deltaB.fileName) // garbage-collected before a ever listed it
+
+        a.syncOk()
+
+        assertTrue(a.db.hasFeed("fromB"), "the cursor is no proof that the clone's delta 1 was merged")
+        val downloads = cloud.downloadCount
+        a.syncOk()
+        a.syncOk()
+        assertEquals(downloads, cloud.downloadCount, "a merged base is not fetched again for the names it lists")
     }
 
     @Test
