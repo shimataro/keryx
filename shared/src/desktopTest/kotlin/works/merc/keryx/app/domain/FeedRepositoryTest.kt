@@ -1022,22 +1022,38 @@ class FeedRepositoryTest {
 
     @Test
     fun aFeedThatStaysGoneIsNotRewrittenEachRefresh(): Unit = runBlocking {
-        // Any feeds write re-runs the article-list query, so only the transition to gone writes.
+        // Any feed_fetch_state write re-runs the queries watching it (the feed list's problem flags),
+        // so only the transition to gone writes.
         val (driver, db) = inMemoryDb()
         try {
             val repo = newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK) })
             repo.subscribeFeed("https://ex.com/feed")
             val feed = db.feedsQueries.getByUrl("https://ex.com/feed").executeAsOne()
 
+            val problemsQuery = db.feed_fetch_stateQueries.watchProblems(FEED_ERROR_REASON_GONE)
+            var fetchStateNotifications = 0
+            val listener = app.cash.sqldelight.Query.Listener { fetchStateNotifications++ }
+            problemsQuery.addListener(listener)
+
             var now = 2000L
             val goneRepo = newRepo(db, driver, fetcherWith { respond("", HttpStatusCode.Gone) }, clock = Clock { now++ })
             goneRepo.refreshFeed(db.feedsQueries.getById(feed.id).executeAsOne())
             val afterFirst = db.feedsQueries.getById(feed.id).executeAsOne()
+            val notificationsAfterFirst = fetchStateNotifications
             repeat(2) { goneRepo.refreshFeed(db.feedsQueries.getById(feed.id).executeAsOne()) }
             val afterThird = db.feedsQueries.getById(feed.id).executeAsOne()
+            problemsQuery.removeListener(listener)
 
-            assertEquals(FEED_ERROR_REASON_GONE, db.fetchStateOf(afterFirst.id)?.last_error)
-            assertEquals(db.fetchStateOf(afterFirst.id)?.last_error, db.fetchStateOf(afterThird.id)?.last_error)
+            assertEquals(FEED_ERROR_REASON_GONE, db.fetchStateOf(feed.id)?.last_error)
+            assertTrue(
+                notificationsAfterFirst > 0,
+                "the transition to gone notified no fetch-state listener, so this test proved nothing",
+            )
+            assertEquals(
+                notificationsAfterFirst,
+                fetchStateNotifications,
+                "a feed that stayed gone rewrote its fetch state",
+            )
             assertEquals(afterFirst.updated_at, afterThird.updated_at)
         } finally {
             driver.close()
