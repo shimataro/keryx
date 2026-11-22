@@ -121,6 +121,21 @@ class TransportCoverageTest {
     }
 
     @Test
+    fun aBaseDoesNotDominateOneWhoseImpliedSeqItListsByName() {
+        val grace = KS_DELTA_GRACE_MS
+        val young = delta(b, 1, "ba9876543210", createdAt = 3 * grace)
+        val implying = base(1, mapOf(b to 1), createdAt = 2 * grace)
+        val naming = base(2, mapOf(b to 1), mapOf(young.fileName to young.createdAt), createdAt = 3 * grace)
+        val oldCopy = delta(b, 1)
+        assertTrue(implying.covers(oldCopy))
+        assertFalse(naming.covers(oldCopy), "naming the young copy stops the vector implying the old one")
+        assertFalse(naming.dominates(implying), "deleting it could remove the old copy's only cover")
+
+        val withoutName = base(2, mapOf(b to 1), createdAt = 3 * grace)
+        assertTrue(withoutName.dominates(implying))
+    }
+
+    @Test
     fun theBaseCacheRoundTripsAndDropsWhatIsNotABase() {
         val coverage = base(1, mapOf(a to 3), mapOf(delta(b, 2).fileName to 10, delta(b, 3).fileName to null), createdAt = 7)
         assertEquals(mapOf(coverage.name to coverage), SyncBaseCache.decode(SyncBaseCache.encode(listOf(coverage))))

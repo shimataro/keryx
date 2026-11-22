@@ -65,10 +65,15 @@ data class BaseCoverage(
     /**
      * Whether this base strictly dominates [other]: created no earlier (so its [vectorCutoff] is no
      * earlier either, and its vector implies every delta [other]'s does), every component of its vector
-     * at least as high, every delta [other] names explicitly covered here too, and then either more
-     * coverage, or — for equal coverage — a later creation, or — for an equal creation time too — a
-     * greater name. The tie-breaks make domination a strict order, so two devices can never delete
-     * each other's bases.
+     * at least as high, every delta [other] names explicitly covered here too, no `(device, seq)` this
+     * base names explicitly that [other]'s vector implies without [other] naming it too, and then
+     * either more coverage, or — for equal coverage — a later creation, or — for an equal creation
+     * time too — a greater name. The tie-breaks make domination a strict order, so two devices can
+     * never delete each other's bases.
+     *
+     * The named-seq condition exists because [covers] stops letting the vector imply any copy of a
+     * `(device, seq)` this base names: the copy [other]'s vector implies there is then not covered
+     * here, and deleting [other] could remove that copy's only cover.
      */
     fun dominates(other: BaseCoverage): Boolean {
         if (other.name == name) return false
@@ -79,6 +84,14 @@ data class BaseCoverage(
         // of a (device, seq) it folded.
         val duplicated = otherNames.groupBy { it.device to it.number }.filterValues { it.size > 1 }.values.flatten().toSet()
         if (otherNames.any { if (it in duplicated) it.fileName !in covered else !covers(it) }) return false
+        // A (device, seq) this base names is no longer implied here by any other copy (see [covers]),
+        // so the copy [other]'s vector implies at that seq would lose its cover.
+        if (explicitSeqs.any { (device, seq) ->
+                seq <= (other.vector[device] ?: 0L) && (device to seq) !in other.explicitSeqs
+            }
+        ) {
+            return false
+        }
         val strictlyMore = vector.any { (device, seq) -> seq > (other.vector[device] ?: 0L) } ||
             covered.keys.mapNotNull(TransportFileName::parse).any { !other.covers(it) }
         return strictlyMore || createdAt > other.createdAt || name > other.name

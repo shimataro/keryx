@@ -724,7 +724,10 @@ lists for another copy. When a new base folds an input base that implies an old 
 the same `(device, seq)` (a cloned database's duplicate, kept by `TransportFiles.finalizeBase` until its grace
 period ends), the new base no longer covers the old copy. While that old copy is still listed, a device joining
 from the new base downloads it, and the next fold takes it as an input. That fold lists both copies by name (two
-copies of one `(device, seq)` are always kept), after which both are covered and collected normally.
+copies of one `(device, seq)` are always kept), after which both are covered and collected normally. The input base
+that implied the old copy is likewise no longer dominated by the new base (`BaseCoverage.dominates()` refuses a base
+that names a `(device, seq)` the other's vector implies), so it stays — and every fold downloads it as an input —
+until the young name ages past the grace period and is pruned, or a later fold also names the old copy.
 
 ### Diagnosis
 

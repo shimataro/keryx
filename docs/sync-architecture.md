@@ -307,8 +307,10 @@ extended, is read by the same rule: it implies no delta file of that number crea
 - A base may be deleted only while another base strictly dominates it (confirmed with `metadata` just before): created
   no earlier (so the other's vector implies everything this one's does), a vector at least as high in every component,
   every delta it names explicitly covered by the other too — a clone copy it lists must be listed by the other, not
-  merely implied — and then more coverage, or for equal coverage a later creation time, or for an equal time too a
-  greater name. So two devices can never delete each other's bases.
+  merely implied —, no `(device, seq)` named by the other that this one's vector implies unless this one names it too
+  (naming a seq stops a base's vector implying any other copy of it, so the copy this one implies there would lose its
+  cover), and then more coverage, or for equal coverage a later creation time, or for an equal time too a greater
+  name. So two devices can never delete each other's bases.
 
 **Cost of a new device.** One base (about the size of the pre-delta database file) plus at most the deltas below the
 thresholds; deltas a base covers are not downloaded. That is at most about 1.25× what joining cost before.
