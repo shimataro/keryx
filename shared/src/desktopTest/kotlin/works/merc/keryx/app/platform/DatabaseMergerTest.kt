@@ -42,8 +42,13 @@ class DatabaseMergerTest {
         return file
     }
 
-    private fun tables(file: File): Set<String> = DriverManager.getConnection("jdbc:sqlite:${file.absolutePath}").use { c ->
-        c.createStatement().use { st -> st.executeQuery("SELECT name FROM sqlite_master WHERE type = 'table'").use { rs -> buildSet { while (rs.next()) add(rs.getString(1)) } } }
+    /** The file's tables and triggers, as `type:name`. */
+    private fun schemaEntries(file: File): Set<String> = DriverManager.getConnection("jdbc:sqlite:${file.absolutePath}").use { c ->
+        c.createStatement().use { st ->
+            st.executeQuery("SELECT type || ':' || name FROM sqlite_master WHERE type IN ('table', 'trigger')").use { rs ->
+                buildSet { while (rs.next()) add(rs.getString(1)) }
+            }
+        }
     }
 
     @Test
@@ -53,10 +58,10 @@ class DatabaseMergerTest {
         val transport = transportFile(
             "INSERT INTO feeds (id, url, title, updated_at, created_at, sort_order) VALUES ('ft', 'https://t', 'T', 1, 1, 0)",
         )
-        val before = tables(transport)
+        val before = schemaEntries(transport)
         try {
             DatabaseMerger.mergeTransport(local.absolutePath, transport.absolutePath, MergeSql.all)
-            assertEquals(before, tables(transport), "no device-local table or trigger is added to a transport file")
+            assertEquals(before, schemaEntries(transport), "no device-local table or trigger is added to a transport file")
             assertTrue(DriverManager.getConnection("jdbc:sqlite:${local.absolutePath}").use { c ->
                 c.createStatement().use { st -> st.executeQuery("SELECT COUNT(*) FROM feeds WHERE id = 'ft'").use { rs -> rs.next(); rs.getInt(1) == 1 } }
             })
