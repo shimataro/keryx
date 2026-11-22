@@ -731,17 +731,20 @@ copies of one `(device, seq)` are always kept), after which both are covered and
 With correct clocks the rule is redundant: limiting the vector to deltas created before `vectorCutoff` already
 keeps it from implying a copy it never folded. A duplicate written under a clock running days behind (the first
 case of the entry above) looks old and passes that time limit; when the base names another copy of the same
-`(device, seq)`, this rule is what still keeps the vector from implying it.
+`(device, seq)`, this rule is what still keeps the vector from implying it. The same holds with correct clocks for a
+duplicate missing from every listing until after a base's cutoff (the second case of the entry above): when the base
+names another copy of that `(device, seq)`, this rule keeps the vector from implying it.
 
 ### Ruled out
 
-- **Dropping the rule** — removes the extra fetch and fold, but widens the "duplicate written under a clock off by
-  days" hole of the entry above.
+- **Dropping the rule** — removes the extra fetch and fold, but widens both holes of the entry above: the
+  "duplicate written under a clock off by days" and the "listing lag lasting about the grace period".
 
 ### What a real fix would need
 
 The same as the entry above: creation times the server assigns, read from every provider's listing in place of
-`ks_meta.created_at`. Once the writer's clock no longer decides a delta's age, the rule can be dropped safely.
+`ks_meta.created_at`. Once the writer's clock no longer decides a delta's age, and every provider's listing shows a
+file within a bounded time of its creation, the rule can be dropped safely.
 
 ## Delta sync: a base built under a clock running behind cannot dominate a newer input base
 
