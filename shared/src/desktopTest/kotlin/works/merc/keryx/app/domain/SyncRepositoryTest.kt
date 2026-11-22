@@ -949,6 +949,29 @@ class SyncRepositoryTest {
     }
 
     @Test
+    fun foldingStopsWhenTheNetworkStopsAllowingItMidFold() = runTest {
+        val cloud = FakeCloudStorage()
+        var allowed = false
+        val a = device("a", cloud, compactionAllowed = { allowed })
+        a.syncOk()
+        a.churn("x", 5)
+        val basesBefore = basesOf(cloud)
+        val deltasBefore = deltasOf(cloud)
+        assertEquals(1, basesBefore.size)
+        assertEquals(5, deltasBefore.size)
+
+        allowed = true
+        val downloadsBefore = cloud.downloadCount
+        cloud.downloadHook = { name -> if (TransportFileName.parse(name) != null) allowed = false }
+        a.syncOk()
+        cloud.downloadHook = null
+
+        assertEquals(downloadsBefore + 1, cloud.downloadCount, "no input is downloaded once the fold is no longer allowed")
+        assertEquals(basesBefore, basesOf(cloud), "no base is uploaded")
+        assertEquals(deltasBefore, deltasOf(cloud))
+    }
+
+    @Test
     fun aDeviceAwayLongerThanTheGracePeriodFetchesTheBasesForWhatWasCollected() = runTest {
         val cloud = FakeCloudStorage()
         val a = device("a", cloud)

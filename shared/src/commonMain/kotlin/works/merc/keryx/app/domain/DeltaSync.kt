@@ -948,7 +948,8 @@ internal class DeltaSync(
     /**
      * Folds [inputBases] and every listed delta none of them covers into a new base — **never from the
      * local database**, whose merge may have skipped rows — and uploads it. Returns its coverage and
-     * listing entry, or `null` when it would add nothing.
+     * listing entry, or `null` when it would add nothing or [compactionAllowed] stops allowing the fold
+     * before an input's download or the upload.
      */
     private suspend fun buildBase(
         cloud: CloudStorage,
@@ -971,6 +972,9 @@ internal class DeltaSync(
             // Each covered delta carries its creation time into ks_covered (TransportFiles.fold).
             for (name in inputBases.map { it.fileName } + inputDeltas.sortedBy { it.fileName }) {
                 currentCoroutineContext().ensureActive()
+                // The network may stop allowing a fold midway (a switch to a metered network): stop
+                // before the next download rather than finish a fold the policy no longer allows.
+                if (!compactionAllowed()) return Result.Ok(null)
                 // An input gone meanwhile leaves the base incomplete: build it on a later sync.
                 fetch(cloud, name, downloads).valueOrElse { return it } ?: return Result.Ok(null)
                 setPhase(SyncPhase.PREPARING)
@@ -983,6 +987,7 @@ internal class DeltaSync(
             Gzip.compressFile(accumulator, gz)
             val size = SystemFileSystem.metadataOrNull(Path(gz))?.size ?: 0L
             currentCoroutineContext().ensureActive()
+            if (!compactionAllowed()) return Result.Ok(null)
             setPhase(SyncPhase.UPLOADING)
             testHook?.invoke(SyncHookPoint.BEFORE_BASE_UPLOAD, name.fileName)
             when (val created = cloud.create("/${name.fileName}", gz)) {
