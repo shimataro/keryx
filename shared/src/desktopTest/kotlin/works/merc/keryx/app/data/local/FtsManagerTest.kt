@@ -601,6 +601,63 @@ class FtsManagerTest {
         }
     }
 
+    /**
+     * A long body whose first NUL lies past the first chunk is reassembled whole: the chunks are read
+     * as bytes, since TEXT `substr` stops at the first NUL and would leave the body truncated, the
+     * byte comparison unmatched and the row pending forever.
+     */
+    @Test
+    fun aLongBodyWithANulPastTheFirstChunkIsReassembledWhole() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f1")
+            val content = "a".repeat(17) + "\u0000zephyrine" + "<p>body-term</p>"
+            db.insertMergedArticle("a1", "f1", "Nul", content)
+            driver.registerPending("a1")
+            assertEquals(
+                1L,
+                driver.countOf("SELECT COUNT(*) FROM articles WHERE length(CAST(content AS BLOB)) > length(content)"),
+                "the NUL must be stored, so the chunked byte read is what is exercised",
+            )
+            val manager = smallBoundManager(driver, TINY_INLINE_BOUND)
+            manager.createTable()
+
+            runBlocking { manager.indexMissing() }
+
+            assertFalse(driver.isPending("a1"))
+            val searchText = driver.searchTextOf("a1").orEmpty()
+            assertEquals(HtmlText.toPlainText(content), searchText)
+            assertTrue("zephyrine" in searchText, searchText)
+            assertTrue("body-term" in searchText, searchText)
+            assertTrue(driver.isIndexed("a1"))
+        } finally {
+            driver.close()
+        }
+    }
+
+    /** Multibyte characters split across byte-chunk boundaries survive, since bytes are decoded once after assembly. */
+    @Test
+    fun aMultibyteBodySplitAcrossChunksIsRestoredExactly() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f1")
+            // An odd ASCII prefix keeps the 4-byte emoji off the 16-byte chunk boundaries.
+            val content = "<p>x" + "\uD83D\uDE00\uD83C\uDF89\u3042".repeat(20) + " quokkaish</p>"
+            db.insertMergedArticle("a1", "f1", "Emoji", content)
+            driver.registerPending("a1")
+            val manager = smallBoundManager(driver, TINY_INLINE_BOUND)
+            manager.createTable()
+
+            runBlocking { manager.indexMissing() }
+
+            assertFalse(driver.isPending("a1"))
+            assertEquals(HtmlText.toPlainText(content), driver.searchTextOf("a1"))
+            assertEquals(listOf("a1"), FtsSearch(driver).search("quokkaish", ArticleFilter.All).map { it.id })
+        } finally {
+            driver.close()
+        }
+    }
+
     @Test
     fun morePendingRowsThanOneBatchAreAllProcessedInOneCall() {
         val (driver, db) = inMemoryDb()
@@ -628,11 +685,14 @@ class FtsManagerTest {
 /** An inline bound small enough for a test body to take the chunked path. */
 private const val SMALL_INLINE_BOUND = 64L
 
-private fun smallBoundManager(driver: SqlDriver) = FtsManager(
+/** An inline bound (and byte-chunk size) small enough to split a test body across several chunks. */
+private const val TINY_INLINE_BOUND = 16L
+
+private fun smallBoundManager(driver: SqlDriver, bound: Long = SMALL_INLINE_BOUND) = FtsManager(
     driver,
     beforePendingWrite = {},
     toPlainText = HtmlText::toPlainText,
-    inlineBodyMaxBytes = SMALL_INLINE_BOUND,
+    inlineBodyMaxBytes = bound,
 )
 
 /** Reads a single-row COUNT(*) query straight off the driver. */

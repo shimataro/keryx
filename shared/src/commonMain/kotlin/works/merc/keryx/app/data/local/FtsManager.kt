@@ -45,13 +45,6 @@ class FtsManager internal constructor(
      * Opens SQLDelight transactions on [driver]. A raw `BEGIN` would not do: the JVM
      * `JdbcSqliteDriver` uses a fresh connection per statement outside a transaction.
      */
-    /**
-     * Characters per chunk in [readTextInChunks]: a quarter of [inlineBodyMaxBytes], since a character
-     * is at most 4 bytes of UTF-8, so a chunk is never longer in bytes than an inline column
-     * (128K characters in production, as before).
-     */
-    private val chunkMaxChars: Long = (inlineBodyMaxBytes / UTF8_MAX_BYTES_PER_CHAR).coerceAtLeast(1L)
-
     private val transacter = object : TransacterImpl(driver) {}
 
     /**
@@ -236,7 +229,7 @@ class FtsManager internal constructor(
 
     /**
      * Reads the next [PENDING_BATCH_SIZE] pending rows after rowid [after] ([pendingBatchSql]). A body
-     * column longer than [inlineBodyMaxBytes] bytes is read separately, in chunks ([readTextInChunks]),
+     * column longer than [inlineBodyMaxBytes] bytes is read separately, in chunks ([readBytesInChunks]),
      * so no single cursor row outgrows Android's `CursorWindow`.
      */
     private fun readPendingBatch(after: Long): List<PendingRow> {
@@ -271,41 +264,61 @@ class FtsManager internal constructor(
             PendingRow(
                 rowid = raw.rowid,
                 articleExists = raw.exists,
-                content = if (raw.contentLong) readTextInChunks(raw.rowid, "content")?.encodeToByteArray() else raw.content,
-                summary = if (raw.summaryLong) readTextInChunks(raw.rowid, "summary")?.encodeToByteArray() else raw.summary,
+                content = if (raw.contentLong) readBytesInChunks(raw.rowid, "content") else raw.content,
+                summary = if (raw.summaryLong) readBytesInChunks(raw.rowid, "summary") else raw.summary,
             )
         }
     }
 
     /**
-     * Reads one long body column of the article at [rowid] in chunks of [chunkMaxChars] characters. The chunks are separate statements, so a concurrent write can leave the result
-     * mixed from two versions (or `null` when the row went away) — harmless, since the conditional
-     * update in [recomputePendingSearchText] then matches nothing and the row stays pending.
+     * Reads the stored bytes of one long body column of the article at [rowid], in chunks of
+     * [inlineBodyMaxBytes] bytes (`substr` over `CAST(... AS BLOB)`, so offsets and lengths count
+     * bytes), concatenated; `null` when the column is `NULL` or the row is gone.
+     *
+     * The column is read as a BLOB rather than as TEXT: TEXT `substr` stops at the first NUL, which
+     * would truncate a body whose first NUL lies past the first chunk — the conditional update in
+     * [recomputePendingSearchText] compares the stored bytes, so it would never match and the row
+     * would stay pending (and unindexed) forever. Byte chunks also keep a multibyte character split
+     * across a chunk boundary intact; the bytes are decoded once, after assembly ([plainTextOf]).
+     *
+     * The chunks are separate statements, so a concurrent write can leave the result mixed from two
+     * versions (or `null` when the row went away) — harmless, since the conditional update then
+     * matches nothing and the row stays pending.
      */
-    private fun readTextInChunks(rowid: Long, column: String): String? {
-        val builder = StringBuilder()
+    private fun readBytesInChunks(rowid: Long, column: String): ByteArray? {
+        val chunks = mutableListOf<ByteArray>()
         var start = 1L
         while (true) {
-            var chunk: String? = null
+            var chunk: ByteArray? = null
             driver.executeQuery(
                 identifier = null,
                 // `column` is one of two fixed names chosen by this class, never input.
-                sql = "SELECT substr($column, ?, ?) FROM articles WHERE rowid = ?;",
+                sql = "SELECT substr(CAST($column AS BLOB), ?, ?) FROM articles WHERE rowid = ?;",
                 mapper = { cursor ->
-                    if (cursor.next().value) chunk = cursor.getString(0)
+                    if (cursor.next().value) chunk = cursor.getBytes(0)
                     QueryResult.Unit
                 },
                 parameters = 3,
             ) {
                 bindLong(0, start)
-                bindLong(1, chunkMaxChars)
+                bindLong(1, inlineBodyMaxBytes)
                 bindLong(2, rowid)
             }
-            val read = chunk ?: return if (builder.isEmpty()) null else builder.toString()
-            builder.append(read)
-            if (read.length < chunkMaxChars) return builder.toString()
-            start += chunkMaxChars
+            val read = chunk ?: return if (chunks.isEmpty()) null else concat(chunks)
+            chunks += read
+            if (read.size < inlineBodyMaxBytes) return concat(chunks)
+            start += inlineBodyMaxBytes
         }
+    }
+
+    private fun concat(chunks: List<ByteArray>): ByteArray {
+        val out = ByteArray(chunks.sumOf { it.size })
+        var offset = 0
+        for (c in chunks) {
+            c.copyInto(out, offset)
+            offset += c.size
+        }
+        return out
     }
 
     fun exists(): Boolean {
@@ -350,13 +363,10 @@ class FtsManager internal constructor(
         private const val PENDING_BATCH_SIZE = 200
 
         /**
-         * Longest body column, in bytes, read inline with its batch; a longer one is read in chunks
-         * ([readTextInChunks], of a quarter as many characters). A row with both columns at the limit is
-         * 1 MiB, well under Android's 2 MiB `CursorWindow`.
+         * Longest body column, in bytes, read inline with its batch; a longer one is read in chunks of
+         * this many bytes ([readBytesInChunks]). A row with both columns at the limit is 1 MiB, well
+         * under Android's 2 MiB `CursorWindow`.
          */
         const val INLINE_BODY_MAX_BYTES = 512L * 1024
-
-        /** The most bytes one character (code point) takes in UTF-8. */
-        private const val UTF8_MAX_BYTES_PER_CHAR = 4L
     }
 }
