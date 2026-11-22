@@ -18,6 +18,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -69,6 +70,33 @@ class AppleDatabaseTest {
 
         assertFailsWith<DatabaseTooNewException> { DatabaseDriverFactory().createDriver(dir, "newer.db") }
         assertEquals(99, RawSqliteConnection.userVersionOf(path("newer.db")))
+    }
+
+    @Test
+    fun textWithAnEmbeddedNulIsReadWholeLikeTheJvmDrivers() {
+        val expected = "abc\u0000def"
+        RawSqliteConnection.open(path("nul.db"), create = true).use { db ->
+            val sql = "SELECT 'abc' || char(0) || 'def' AS v"
+            assertEquals(listOf(listOf<String?>(expected)), db.queryRowsStrict(sql))
+            assertEquals(7, db.queryRowsStrict(sql).single().single()!!.length)
+            assertEquals(listOf(expected), db.queryFirstColumnStrict(sql))
+            assertEquals(listOf(expected), db.queryColumn(sql, "v"))
+        }
+    }
+
+    @Test
+    fun multibyteTextRoundTripsAndNullStaysNull() {
+        val text = "日本語🙂"
+        RawSqliteConnection.open(path("text.db"), create = true).use { db ->
+            val sql = "SELECT '$text' AS v, NULL AS n, '' AS e"
+            assertEquals(listOf(listOf(text, null, "")), db.queryRowsStrict(sql))
+            assertEquals(listOf(text), db.queryFirstColumnStrict(sql))
+            assertEquals(listOf(text), db.queryColumn(sql, "v"))
+            // queryFirstColumnStrict reads NULL as "", and queryColumn skips it.
+            assertEquals(listOf(""), db.queryFirstColumnStrict("SELECT NULL"))
+            assertEquals(emptyList(), db.queryColumn("SELECT NULL AS n", "n"))
+            assertNull(db.queryRowsStrict("SELECT NULL").single().single())
+        }
     }
 
     @Test

@@ -10,6 +10,7 @@ import co.touchlab.sqliter.sqlite3.SQLITE_OPEN_READWRITE
 import co.touchlab.sqliter.sqlite3.SQLITE_ROW
 import co.touchlab.sqliter.sqlite3.sqlite3_busy_timeout
 import co.touchlab.sqliter.sqlite3.sqlite3_close_v2
+import co.touchlab.sqliter.sqlite3.sqlite3_column_bytes
 import co.touchlab.sqliter.sqlite3.sqlite3_column_count
 import co.touchlab.sqliter.sqlite3.sqlite3_column_int64
 import co.touchlab.sqliter.sqlite3.sqlite3_column_name
@@ -32,6 +33,7 @@ import kotlinx.cinterop.alloc
 import kotlinx.cinterop.cstr
 import kotlinx.cinterop.memScoped
 import kotlinx.cinterop.ptr
+import kotlinx.cinterop.readBytes
 import kotlinx.cinterop.reinterpret
 import kotlinx.cinterop.toKString
 import kotlinx.cinterop.value
@@ -87,7 +89,7 @@ internal class RawSqliteConnection private constructor(private val db: CPointer<
         buildList {
             while (true) {
                 when (sqlite3_step(stmt)) {
-                    SQLITE_ROW -> add(sqlite3_column_text(stmt, 0)?.reinterpret<ByteVar>()?.toKString().orEmpty())
+                    SQLITE_ROW -> add(columnText(stmt, 0).orEmpty())
                     SQLITE_DONE -> break
                     else -> throw SqliteException(sqlite3_extended_errcode(db), sqlite3_errmsg(db)?.toKString().orEmpty())
                 }
@@ -105,7 +107,7 @@ internal class RawSqliteConnection private constructor(private val db: CPointer<
         buildList {
             while (true) {
                 when (sqlite3_step(stmt)) {
-                    SQLITE_ROW -> add(List(columns) { sqlite3_column_text(stmt, it)?.reinterpret<ByteVar>()?.toKString() })
+                    SQLITE_ROW -> add(List(columns) { columnText(stmt, it) })
                     SQLITE_DONE -> break
                     else -> throw SqliteException(sqlite3_extended_errcode(db), sqlite3_errmsg(db)?.toKString().orEmpty())
                 }
@@ -122,9 +124,21 @@ internal class RawSqliteConnection private constructor(private val db: CPointer<
             ?: return@query emptyList()
         buildList {
             while (sqlite3_step(stmt) == SQLITE_ROW) {
-                sqlite3_column_text(stmt, index)?.let { add(it.reinterpret<ByteVar>().toKString()) }
+                columnText(stmt, index)?.let { add(it) }
             }
         }
+    }
+
+    /**
+     * Column [index] of the current row as text, or `null` for SQL NULL. Reads exactly the value's
+     * byte length (`sqlite3_column_bytes`, called after `sqlite3_column_text` as SQLite documents)
+     * rather than stopping at the first NUL as a C-string read would, so a value with an embedded NUL
+     * comes back whole — as the JVM drivers on desktop and Android return it.
+     */
+    private fun columnText(stmt: CPointer<sqlite3_stmt>, index: Int): String? {
+        val text = sqlite3_column_text(stmt, index) ?: return null
+        val length = sqlite3_column_bytes(stmt, index)
+        return if (length == 0) "" else text.reinterpret<ByteVar>().readBytes(length).decodeToString()
     }
 
     private fun <T> query(sql: String, read: (CPointer<sqlite3_stmt>) -> T): T = memScoped {
