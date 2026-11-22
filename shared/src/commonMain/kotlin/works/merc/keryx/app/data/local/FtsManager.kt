@@ -32,12 +32,15 @@ import works.merc.keryx.app.core.runCatchingUnlessCancelled
  * @param inlineBodyMaxBytes Longest body column, in bytes, read inline with its pending batch
  * ([INLINE_BODY_MAX_BYTES] in production); a test seam so the chunked path can be reached with a
  * small body.
+ * @param pendingBatchMaxBytes Most body bytes read into one pending batch ([PENDING_BATCH_MAX_BYTES] in
+ * production); a test seam so a batch can be cut short by the budget with small bodies.
  */
 class FtsManager internal constructor(
     private val driver: SqlDriver,
     private val beforePendingWrite: suspend () -> Unit,
     private val toPlainText: (String) -> String,
     private val inlineBodyMaxBytes: Long = INLINE_BODY_MAX_BYTES,
+    private val pendingBatchMaxBytes: Long = PENDING_BATCH_MAX_BYTES,
 ) {
     constructor(driver: SqlDriver) : this(driver, beforePendingWrite = {}, toPlainText = HtmlText::toPlainText)
 
@@ -140,8 +143,11 @@ class FtsManager internal constructor(
 
     /**
      * Recomputes `articles.search_text` (`HtmlText.toPlainText` of `content`, else `summary`, else
-     * `''`) for every row in `ks_search_pending`, in batches of [PENDING_BATCH_SIZE], in one pass in
-     * rowid order — a row left pending is not revisited by the same call, so this always ends.
+     * `''`) for every row in `ks_search_pending`, in batches ([readPendingBatch]: at most
+     * [PENDING_BATCH_SIZE] rows and [PENDING_BATCH_MAX_BYTES] body bytes, or one larger row alone), in
+     * one pass in rowid order. The pass ends only when no pending row is left after the last one read —
+     * a batch cut short by the byte budget does not end it — and a row left pending is not revisited by
+     * the same call; every batch holds at least one row, so this always ends.
      *
      * Each batch is read outside any transaction, converted, then written in one transaction whose
      * statements are all writes (no read inside it has to upgrade to a write lock — see "A concurrent
@@ -196,7 +202,6 @@ class FtsManager internal constructor(
                     }
                 }
             }
-            if (batch.size < PENDING_BATCH_SIZE) return
         }
     }
 
@@ -209,72 +214,132 @@ class FtsManager internal constructor(
     }
 
     /**
-     * The batch read behind [readPendingBatch]. Parameters: 1–4 the inline bound in bytes, 5 the rowid
-     * to read after, 6 the batch size. Columns: pending rowid, whether the article exists, then per
-     * body column (content, summary) its bytes when at most the bound (else `NULL`) and whether it is
-     * over the bound.
+     * The per-row read behind [readPendingBatch]. Parameters: 1–2 the inline bound in bytes, 3 the
+     * remaining batch budget in bytes, 4 the article's rowid. Columns: the byte length of `content`, the
+     * byte length of `summary` (each `NULL` for a `NULL` column), then each column's bytes
+     * (`CAST(... AS BLOB)`) — both only when the row *fits*: each column at most the inline bound and
+     * their total (`NULL` counting as 0) at most the remaining budget; otherwise both are `NULL` — and
+     * last whether it fits (1/0). No row comes back when the article is gone.
      *
-     * The bound is measured in bytes (`length(CAST(... AS BLOB))`), not with `length()` on the text:
-     * for TEXT that counts only the characters before the first NUL, so a multi-MiB body with an
-     * early NUL would be read inline and overflow Android's `CursorWindow` on every call.
+     * The size check and the read are one statement, so a body grown by a concurrent write between
+     * them cannot slip past the bounds. Sizes are measured in bytes (`length(CAST(... AS BLOB))`), not
+     * with `length()` on the text: for TEXT that counts only the characters before the first NUL, so a
+     * multi-MiB body with an early NUL would be read inline and overflow Android's `CursorWindow` on
+     * every call.
      */
-    internal fun pendingBatchSql(): String = """
-        SELECT p.rowid, a.rowid IS NOT NULL,
-            CASE WHEN length(CAST(a.content AS BLOB)) <= ? THEN CAST(a.content AS BLOB) END,
-            length(CAST(a.content AS BLOB)) > ?,
-            CASE WHEN length(CAST(a.summary AS BLOB)) <= ? THEN CAST(a.summary AS BLOB) END,
-            length(CAST(a.summary AS BLOB)) > ?
-        FROM ks_search_pending p LEFT JOIN articles a ON a.rowid = p.rowid
-        WHERE p.rowid > ?
-        ORDER BY p.rowid
-        LIMIT ?;
+    internal fun pendingRowSql(): String = """
+        SELECT cl, sl,
+            CASE WHEN fits THEN c END,
+            CASE WHEN fits THEN s END,
+            fits
+        FROM (
+            SELECT cl, sl, c, s,
+                coalesce(cl, 0) <= ? AND coalesce(sl, 0) <= ? AND coalesce(cl, 0) + coalesce(sl, 0) <= ? AS fits
+            FROM (
+                SELECT length(CAST(content AS BLOB)) AS cl, length(CAST(summary AS BLOB)) AS sl,
+                    CAST(content AS BLOB) AS c, CAST(summary AS BLOB) AS s
+                FROM articles WHERE rowid = ?
+            )
+        );
     """.trimIndent()
 
     /**
-     * Reads the next [PENDING_BATCH_SIZE] pending rows after rowid [after] ([pendingBatchSql]). A body
-     * column longer than [inlineBodyMaxBytes] bytes is read separately, in chunks ([readBytesInChunks]),
-     * so no single cursor row outgrows Android's `CursorWindow`.
+     * Reads the next batch of pending rows after rowid [after]: at most [PENDING_BATCH_SIZE] rows whose
+     * bodies total at most [pendingBatchMaxBytes] bytes, so a run of large bodies cannot exhaust the heap.
+     * Empty only when no pending row is left after [after].
+     *
+     * The candidates are listed first without their bodies; each existing article's body is then read
+     * with [pendingRowSql] against the budget still left. A row that does not fit — its total over the
+     * remaining budget, or a column over [inlineBodyMaxBytes] — ends the batch before it, so it heads the
+     * next one; heading a batch, it is read alone, each column in chunks ([readBytesInChunks]) so no
+     * single cursor row outgrows Android's `CursorWindow`. Every non-empty batch therefore holds at least
+     * one row, and the caller's `after` strictly increases. A pending row whose article does not exist
+     * costs nothing and is included as such.
      */
     private fun readPendingBatch(after: Long): List<PendingRow> {
-        class Raw(val rowid: Long, val exists: Boolean, val content: ByteArray?, val contentLong: Boolean, val summary: ByteArray?, val summaryLong: Boolean)
-        val raws = mutableListOf<Raw>()
+        val candidates = mutableListOf<Pair<Long, Boolean>>()
         driver.executeQuery(
             identifier = null,
-            sql = pendingBatchSql(),
+            sql = """
+                SELECT p.rowid, a.rowid IS NOT NULL
+                FROM ks_search_pending p LEFT JOIN articles a ON a.rowid = p.rowid
+                WHERE p.rowid > ?
+                ORDER BY p.rowid
+                LIMIT ?;
+            """.trimIndent(),
             mapper = { cursor ->
-                while (cursor.next().value) {
-                    raws += Raw(
-                        rowid = cursor.getLong(0)!!,
-                        exists = cursor.getLong(1) == 1L,
+                while (cursor.next().value) candidates += cursor.getLong(0)!! to (cursor.getLong(1) == 1L)
+                QueryResult.Unit
+            },
+            parameters = 2,
+        ) {
+            bindLong(0, after)
+            bindLong(1, PENDING_BATCH_SIZE.toLong())
+        }
+        val batch = mutableListOf<PendingRow>()
+        var remaining = pendingBatchMaxBytes
+        for ((rowid, exists) in candidates) {
+            val read = if (exists) readPendingRow(rowid, remaining) else null
+            if (read == null) {
+                // No article (or it went away since the listing): the write step only drops the entry,
+                // and only if the article is still absent then.
+                batch += PendingRow(rowid, articleExists = false, content = null, summary = null)
+                continue
+            }
+            if (read.fits) {
+                batch += PendingRow(rowid, articleExists = true, content = read.content, summary = read.summary)
+                remaining -= read.totalBytes
+                continue
+            }
+            if (batch.isEmpty()) {
+                batch += PendingRow(
+                    rowid,
+                    articleExists = true,
+                    content = readBytesInChunks(rowid, "content"),
+                    summary = readBytesInChunks(rowid, "summary"),
+                )
+            }
+            break
+        }
+        return batch
+    }
+
+    /** One article's body as read by [pendingRowSql]; [content] and [summary] are `null` unless [fits]. */
+    private class PendingBody(val contentBytes: Long?, val summaryBytes: Long?, val content: ByteArray?, val summary: ByteArray?, val fits: Boolean) {
+        val totalBytes: Long get() = (contentBytes ?: 0L) + (summaryBytes ?: 0L)
+    }
+
+    /** Reads the article at [rowid] with [pendingRowSql] against [remaining] bytes; `null` when it is gone. */
+    private fun readPendingRow(rowid: Long, remaining: Long): PendingBody? {
+        var body: PendingBody? = null
+        driver.executeQuery(
+            identifier = null,
+            sql = pendingRowSql(),
+            mapper = { cursor ->
+                if (cursor.next().value) {
+                    body = PendingBody(
+                        contentBytes = cursor.getLong(0),
+                        summaryBytes = cursor.getLong(1),
                         content = cursor.getBytes(2),
-                        contentLong = cursor.getLong(3) == 1L,
-                        summary = cursor.getBytes(4),
-                        summaryLong = cursor.getLong(5) == 1L,
+                        summary = cursor.getBytes(3),
+                        fits = cursor.getLong(4) == 1L,
                     )
                 }
                 QueryResult.Unit
             },
-            parameters = 6,
+            parameters = 4,
         ) {
             bindLong(0, inlineBodyMaxBytes)
             bindLong(1, inlineBodyMaxBytes)
-            bindLong(2, inlineBodyMaxBytes)
-            bindLong(3, inlineBodyMaxBytes)
-            bindLong(4, after)
-            bindLong(5, PENDING_BATCH_SIZE.toLong())
+            bindLong(2, remaining)
+            bindLong(3, rowid)
         }
-        return raws.map { raw ->
-            PendingRow(
-                rowid = raw.rowid,
-                articleExists = raw.exists,
-                content = if (raw.contentLong) readBytesInChunks(raw.rowid, "content") else raw.content,
-                summary = if (raw.summaryLong) readBytesInChunks(raw.rowid, "summary") else raw.summary,
-            )
-        }
+        return body
     }
 
     /**
-     * Reads the stored bytes of one long body column of the article at [rowid], in chunks of
+     * Reads the stored bytes of one body column of the article at [rowid] (for a row too large to read
+     * inline with its batch — see [readPendingBatch]), in chunks of
      * [inlineBodyMaxBytes] bytes (`substr` over `CAST(... AS BLOB)`, so offsets and lengths count
      * bytes), concatenated; `null` when the column is `NULL` or the row is gone.
      *
@@ -388,8 +453,15 @@ class FtsManager internal constructor(
     internal companion object {
         private const val TAG = "FtsManager"
 
-        /** Pending rows read, converted and written per transaction by [recomputePendingSearchText]. */
+        /** Most pending rows read, converted and written per transaction by [recomputePendingSearchText]. */
         private const val PENDING_BATCH_SIZE = 200
+
+        /**
+         * Most body bytes (`content` + `summary`) read into one pending batch ([readPendingBatch]). Bodies
+         * have no size cap, so [PENDING_BATCH_SIZE] rows of multi-MiB bodies held at once — read, then
+         * converted — could exhaust a small heap; a row larger than this is read and written alone.
+         */
+        const val PENDING_BATCH_MAX_BYTES = 4L * 1024 * 1024
 
         /**
          * Longest body column, in bytes, read inline with its batch; a longer one is read in chunks of

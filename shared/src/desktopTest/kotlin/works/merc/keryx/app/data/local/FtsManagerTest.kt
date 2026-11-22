@@ -606,21 +606,25 @@ class FtsManagerTest {
             assertEquals(1L, driver.countOf("SELECT COUNT(*) FROM articles WHERE length(content) = 1"), "length() on the text stops at the NUL")
             val manager = smallBoundManager(driver)
 
+            var contentBytes: Long? = null
             var inlineContent: ByteArray? = ByteArray(0)
-            var contentLong: Long? = null
-            driver.executeQuery(null, manager.pendingBatchSql(), { cursor ->
+            var fits: Long? = null
+            driver.executeQuery(null, manager.pendingRowSql(), { cursor ->
                 assertTrue(cursor.next().value)
+                contentBytes = cursor.getLong(0)
                 inlineContent = cursor.getBytes(2)
-                contentLong = cursor.getLong(3)
+                fits = cursor.getLong(4)
                 QueryResult.Unit
-            }, 6) {
-                (0..3).forEach { bindLong(it, SMALL_INLINE_BOUND) }
-                bindLong(4, Long.MIN_VALUE)
-                bindLong(5, 200L)
+            }, 4) {
+                bindLong(0, SMALL_INLINE_BOUND)
+                bindLong(1, SMALL_INLINE_BOUND)
+                bindLong(2, Long.MAX_VALUE)
+                bindLong(3, driver.rowidOf("a1"))
             }
 
+            assertTrue((contentBytes ?: 0L) > SMALL_INLINE_BOUND, "the body must be measured in bytes, got $contentBytes")
             assertEquals(null, inlineContent, "a body over the bound in bytes must not be read inline")
-            assertEquals(1L, contentLong)
+            assertEquals(0L, fits)
         } finally {
             driver.close()
         }
@@ -735,6 +739,86 @@ class FtsManagerTest {
         }
     }
 
+    /**
+     * A batch holds at most the byte budget of bodies: three bodies each just over half the budget go
+     * in three batches, and none is left pending — a batch cut short by the budget does not end the
+     * pass. (With only the row-count limit, all three were read into one batch.)
+     */
+    @Test
+    fun aBatchIsCutShortByTheByteBudgetAndThePassContinues() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f1")
+            val contents = (1..3).map { i -> "<p>budgetling$i " + "x".repeat(580) + "</p>" }
+            contents.forEachIndexed { i, content ->
+                db.insertMergedArticle("a${i + 1}", "f1", "Title", content)
+                driver.registerPending("a${i + 1}")
+            }
+            var batches = 0
+            val manager = budgetManager(driver, maxBytes = 1000L, inlineBound = 1000L) { batches++ }
+            manager.createTable()
+
+            runBlocking { manager.indexMissing() }
+
+            assertEquals(3, batches)
+            assertEquals(0L, driver.countOf("SELECT COUNT(*) FROM ks_search_pending"))
+            contents.forEachIndexed { i, content ->
+                assertEquals(HtmlText.toPlainText(content), driver.searchTextOf("a${i + 1}"))
+                assertTrue(driver.isIndexed("a${i + 1}"))
+            }
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
+     * A body larger than the whole budget (but within the inline bound) is read alone, in a batch of
+     * its own, and the small rows around it still share batches.
+     */
+    @Test
+    fun aRowLargerThanTheBudgetIsProcessedInABatchOfItsOwn() {
+        assertOversizedRowIsProcessedAlone(inlineBound = 4096L)
+    }
+
+    /** The same, when the oversized body also exceeds the inline bound and takes the chunked read. */
+    @Test
+    fun aRowLargerThanTheBudgetAndTheInlineBoundIsProcessedAloneInChunks() {
+        assertOversizedRowIsProcessedAlone(inlineBound = SMALL_INLINE_BOUND)
+    }
+
+    private fun assertOversizedRowIsProcessedAlone(inlineBound: Long) {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f1")
+            val small1 = "<p>smallish one</p>"
+            val large = "<p>hugeling " + "\uD83D\uDE00 y".repeat(400) + "</p>"
+            val small2 = "<p>smallish two</p>"
+            db.insertMergedArticle("a1", "f1", "S1", small1)
+            db.insertMergedArticle("a2", "f1", "L", large)
+            db.insertMergedArticle("a3", "f1", "S2", small2)
+            listOf("a1", "a2", "a3").forEach(driver::registerPending)
+            // What is still pending as each batch is about to be written: each batch then removes
+            // exactly the rows it held.
+            val pendingBeforeEachBatch = mutableListOf<List<String>>()
+            val manager = budgetManager(driver, maxBytes = 1000L, inlineBound = inlineBound) {
+                pendingBeforeEachBatch += driver.pendingIds()
+            }
+            manager.createTable()
+
+            runBlocking { manager.indexMissing() }
+
+            // Batches: [a1] (cut short before a2), [a2] alone, [a3].
+            assertEquals(listOf(listOf("a1", "a2", "a3"), listOf("a2", "a3"), listOf("a3")), pendingBeforeEachBatch)
+            assertEquals(0L, driver.countOf("SELECT COUNT(*) FROM ks_search_pending"))
+            assertEquals(HtmlText.toPlainText(small1), driver.searchTextOf("a1"))
+            assertEquals(HtmlText.toPlainText(large), driver.searchTextOf("a2"))
+            assertEquals(HtmlText.toPlainText(small2), driver.searchTextOf("a3"))
+            assertEquals(listOf("a2"), FtsSearch(driver).search("hugeling", ArticleFilter.All).map { it.id })
+        } finally {
+            driver.close()
+        }
+    }
+
     @Test
     fun morePendingRowsThanOneBatchAreAllProcessedInOneCall() {
         val (driver, db) = inMemoryDb()
@@ -771,6 +855,33 @@ private fun smallBoundManager(driver: SqlDriver, bound: Long = SMALL_INLINE_BOUN
     toPlainText = HtmlText::toPlainText,
     inlineBodyMaxBytes = bound,
 )
+
+private fun budgetManager(driver: SqlDriver, maxBytes: Long, inlineBound: Long, beforeWrite: suspend () -> Unit) = FtsManager(
+    driver,
+    beforePendingWrite = beforeWrite,
+    toPlainText = HtmlText::toPlainText,
+    inlineBodyMaxBytes = inlineBound,
+    pendingBatchMaxBytes = maxBytes,
+)
+
+private fun SqlDriver.rowidOf(articleId: String): Long {
+    var rowid = 0L
+    executeQuery(null, "SELECT rowid FROM articles WHERE id = ?;", { cursor ->
+        if (cursor.next().value) rowid = cursor.getLong(0)!!
+        QueryResult.Unit
+    }, 1) { bindString(0, articleId) }
+    return rowid
+}
+
+/** Ids of the articles still pending, in rowid order. */
+private fun SqlDriver.pendingIds(): List<String> {
+    val ids = mutableListOf<String>()
+    executeQuery(null, "SELECT a.id FROM ks_search_pending p JOIN articles a ON a.rowid = p.rowid ORDER BY p.rowid;", { cursor ->
+        while (cursor.next().value) ids += cursor.getString(0)!!
+        QueryResult.Unit
+    }, 0)
+    return ids
+}
 
 /** Reads a single-row COUNT(*) query straight off the driver. */
 private fun SqlDriver.countOf(sql: String): Long {
