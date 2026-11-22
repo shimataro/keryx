@@ -29,11 +29,15 @@ import works.merc.keryx.app.core.runCatchingUnlessCancelled
  * into exactly that gap.
  * @param toPlainText The HTML → plain-text conversion behind `search_text`; a test seam so a
  * conversion failure can be forced.
+ * @param inlineBodyMaxBytes Longest body column, in bytes, read inline with its pending batch
+ * ([INLINE_BODY_MAX_BYTES] in production); a test seam so the chunked path can be reached with a
+ * small body.
  */
 class FtsManager internal constructor(
     private val driver: SqlDriver,
     private val beforePendingWrite: suspend () -> Unit,
     private val toPlainText: (String) -> String,
+    private val inlineBodyMaxBytes: Long = INLINE_BODY_MAX_BYTES,
 ) {
     constructor(driver: SqlDriver) : this(driver, beforePendingWrite = {}, toPlainText = HtmlText::toPlainText)
 
@@ -41,6 +45,13 @@ class FtsManager internal constructor(
      * Opens SQLDelight transactions on [driver]. A raw `BEGIN` would not do: the JVM
      * `JdbcSqliteDriver` uses a fresh connection per statement outside a transaction.
      */
+    /**
+     * Characters per chunk in [readTextInChunks]: a quarter of [inlineBodyMaxBytes], since a character
+     * is at most 4 bytes of UTF-8, so a chunk is never longer in bytes than an inline column
+     * (128K characters in production, as before).
+     */
+    private val chunkMaxChars: Long = (inlineBodyMaxBytes / UTF8_MAX_BYTES_PER_CHAR).coerceAtLeast(1L)
+
     private val transacter = object : TransacterImpl(driver) {}
 
     /**
@@ -123,8 +134,13 @@ class FtsManager internal constructor(
         )
     }
 
-    /** One `ks_search_pending` row as read, with its article's body (`null` columns when it has none). */
-    private class PendingRow(val rowid: Long, val articleExists: Boolean, val content: String?, val summary: String?)
+    /**
+     * One `ks_search_pending` row as read, with its article's body (`null` columns when it has none).
+     * [content] and [summary] are the columns' stored bytes (`CAST(... AS BLOB)`), kept as read so the
+     * conditional update compares exactly what was converted — whatever the text holds (a NUL, invalid
+     * UTF-8) and however the driver would decode it.
+     */
+    private class PendingRow(val rowid: Long, val articleExists: Boolean, val content: ByteArray?, val summary: ByteArray?)
 
     /**
      * Recomputes `articles.search_text` (`HtmlText.toPlainText` of `content`, else `summary`, else
@@ -134,7 +150,8 @@ class FtsManager internal constructor(
      * Each batch is read outside any transaction, converted, then written in one transaction whose
      * statements are all writes (no read inside it has to upgrade to a write lock — see "A concurrent
      * write can fail a read-then-write transaction" in `docs/known-issues.md`). A row's update is
-     * conditional on `content` and `summary` still being what was read, and the row leaves
+     * conditional on `content` and `summary` still holding the bytes that were read (compared as
+     * `CAST(... AS BLOB)`, so a NUL or invalid UTF-8 in the body compares exactly), and the row leaves
      * `ks_search_pending` only when that update matched: a body another writer (a refresh, a merge)
      * changed after the read stays pending, so neither a newer body nor a merge's re-registration is
      * ever discarded. A row whose conversion throws gets `''` (logged) rather than holding up the rest.
@@ -167,13 +184,14 @@ class FtsManager internal constructor(
                     }
                     val updated = driver.execute(
                         null,
-                        "UPDATE articles SET search_text = ? WHERE rowid = ? AND content IS ? AND summary IS ?;",
+                        "UPDATE articles SET search_text = ? WHERE rowid = ? " +
+                            "AND CAST(content AS BLOB) IS ? AND CAST(summary AS BLOB) IS ?;",
                         4,
                     ) {
                         bindString(0, text)
                         bindLong(1, row.rowid)
-                        bindString(2, row.content)
-                        bindString(3, row.summary)
+                        bindBytes(2, row.content)
+                        bindBytes(3, row.summary)
                     }.value
                     if (updated > 0L) {
                         driver.execute(null, "DELETE FROM ks_search_pending WHERE rowid = ?;", 1) {
@@ -187,7 +205,7 @@ class FtsManager internal constructor(
     }
 
     private fun plainTextOf(row: PendingRow): String {
-        val html = row.content ?: row.summary ?: return ""
+        val html = (row.content ?: row.summary ?: return "").decodeToString()
         return runCatchingUnlessCancelled { toPlainText(html) }.getOrElse { e ->
             Log.warn(TAG, "search_text conversion failed for article rowid ${row.rowid}; indexing it without body text", e)
             ""
@@ -195,32 +213,46 @@ class FtsManager internal constructor(
     }
 
     /**
-     * Reads the next [PENDING_BATCH_SIZE] pending rows after rowid [after]. A body column longer than
-     * [INLINE_TEXT_MAX_CHARS] is read separately, in chunks ([readTextInChunks]), so no single cursor
-     * row outgrows Android's `CursorWindow`.
+     * The batch read behind [readPendingBatch]. Parameters: 1–4 the inline bound in bytes, 5 the rowid
+     * to read after, 6 the batch size. Columns: pending rowid, whether the article exists, then per
+     * body column (content, summary) its bytes when at most the bound (else `NULL`) and whether it is
+     * over the bound.
+     *
+     * The bound is measured in bytes (`length(CAST(... AS BLOB))`), not with `length()` on the text:
+     * for TEXT that counts only the characters before the first NUL, so a multi-MiB body with an
+     * early NUL would be read inline and overflow Android's `CursorWindow` on every call.
+     */
+    internal fun pendingBatchSql(): String = """
+        SELECT p.rowid, a.rowid IS NOT NULL,
+            CASE WHEN length(CAST(a.content AS BLOB)) <= ? THEN CAST(a.content AS BLOB) END,
+            length(CAST(a.content AS BLOB)) > ?,
+            CASE WHEN length(CAST(a.summary AS BLOB)) <= ? THEN CAST(a.summary AS BLOB) END,
+            length(CAST(a.summary AS BLOB)) > ?
+        FROM ks_search_pending p LEFT JOIN articles a ON a.rowid = p.rowid
+        WHERE p.rowid > ?
+        ORDER BY p.rowid
+        LIMIT ?;
+    """.trimIndent()
+
+    /**
+     * Reads the next [PENDING_BATCH_SIZE] pending rows after rowid [after] ([pendingBatchSql]). A body
+     * column longer than [inlineBodyMaxBytes] bytes is read separately, in chunks ([readTextInChunks]),
+     * so no single cursor row outgrows Android's `CursorWindow`.
      */
     private fun readPendingBatch(after: Long): List<PendingRow> {
-        class Raw(val rowid: Long, val exists: Boolean, val content: String?, val contentLong: Boolean, val summary: String?, val summaryLong: Boolean)
+        class Raw(val rowid: Long, val exists: Boolean, val content: ByteArray?, val contentLong: Boolean, val summary: ByteArray?, val summaryLong: Boolean)
         val raws = mutableListOf<Raw>()
         driver.executeQuery(
             identifier = null,
-            sql = """
-                SELECT p.rowid, a.rowid IS NOT NULL,
-                    CASE WHEN length(a.content) <= ? THEN a.content END, length(a.content) > ?,
-                    CASE WHEN length(a.summary) <= ? THEN a.summary END, length(a.summary) > ?
-                FROM ks_search_pending p LEFT JOIN articles a ON a.rowid = p.rowid
-                WHERE p.rowid > ?
-                ORDER BY p.rowid
-                LIMIT ?;
-            """.trimIndent(),
+            sql = pendingBatchSql(),
             mapper = { cursor ->
                 while (cursor.next().value) {
                     raws += Raw(
                         rowid = cursor.getLong(0)!!,
                         exists = cursor.getLong(1) == 1L,
-                        content = cursor.getString(2),
+                        content = cursor.getBytes(2),
                         contentLong = cursor.getLong(3) == 1L,
-                        summary = cursor.getString(4),
+                        summary = cursor.getBytes(4),
                         summaryLong = cursor.getLong(5) == 1L,
                     )
                 }
@@ -228,10 +260,10 @@ class FtsManager internal constructor(
             },
             parameters = 6,
         ) {
-            bindLong(0, INLINE_TEXT_MAX_CHARS)
-            bindLong(1, INLINE_TEXT_MAX_CHARS)
-            bindLong(2, INLINE_TEXT_MAX_CHARS)
-            bindLong(3, INLINE_TEXT_MAX_CHARS)
+            bindLong(0, inlineBodyMaxBytes)
+            bindLong(1, inlineBodyMaxBytes)
+            bindLong(2, inlineBodyMaxBytes)
+            bindLong(3, inlineBodyMaxBytes)
             bindLong(4, after)
             bindLong(5, PENDING_BATCH_SIZE.toLong())
         }
@@ -239,15 +271,14 @@ class FtsManager internal constructor(
             PendingRow(
                 rowid = raw.rowid,
                 articleExists = raw.exists,
-                content = if (raw.contentLong) readTextInChunks(raw.rowid, "content") else raw.content,
-                summary = if (raw.summaryLong) readTextInChunks(raw.rowid, "summary") else raw.summary,
+                content = if (raw.contentLong) readTextInChunks(raw.rowid, "content")?.encodeToByteArray() else raw.content,
+                summary = if (raw.summaryLong) readTextInChunks(raw.rowid, "summary")?.encodeToByteArray() else raw.summary,
             )
         }
     }
 
     /**
-     * Reads one long body column of the article at [rowid] in chunks of [INLINE_TEXT_MAX_CHARS]
-     * characters. The chunks are separate statements, so a concurrent write can leave the result
+     * Reads one long body column of the article at [rowid] in chunks of [chunkMaxChars] characters. The chunks are separate statements, so a concurrent write can leave the result
      * mixed from two versions (or `null` when the row went away) — harmless, since the conditional
      * update in [recomputePendingSearchText] then matches nothing and the row stays pending.
      */
@@ -267,13 +298,13 @@ class FtsManager internal constructor(
                 parameters = 3,
             ) {
                 bindLong(0, start)
-                bindLong(1, INLINE_TEXT_MAX_CHARS)
+                bindLong(1, chunkMaxChars)
                 bindLong(2, rowid)
             }
             val read = chunk ?: return if (builder.isEmpty()) null else builder.toString()
             builder.append(read)
-            if (read.length < INLINE_TEXT_MAX_CHARS) return builder.toString()
-            start += INLINE_TEXT_MAX_CHARS
+            if (read.length < chunkMaxChars) return builder.toString()
+            start += chunkMaxChars
         }
     }
 
@@ -312,17 +343,20 @@ class FtsManager internal constructor(
         driver.execute(null, "INSERT INTO articles_fts(articles_fts) VALUES('rebuild');", 0)
     }
 
-    private companion object {
-        const val TAG = "FtsManager"
+    internal companion object {
+        private const val TAG = "FtsManager"
 
         /** Pending rows read, converted and written per transaction by [recomputePendingSearchText]. */
-        const val PENDING_BATCH_SIZE = 200
+        private const val PENDING_BATCH_SIZE = 200
 
         /**
-         * Longest body column, in characters, read inline with its batch; a longer one is read in
-         * chunks of this size. 128K characters is at most 512 KiB of UTF-8, so a row with both columns
-         * at the limit stays well under Android's 2 MiB `CursorWindow`.
+         * Longest body column, in bytes, read inline with its batch; a longer one is read in chunks
+         * ([readTextInChunks], of a quarter as many characters). A row with both columns at the limit is
+         * 1 MiB, well under Android's 2 MiB `CursorWindow`.
          */
-        const val INLINE_TEXT_MAX_CHARS = 128L * 1024
+        const val INLINE_BODY_MAX_BYTES = 512L * 1024
+
+        /** The most bytes one character (code point) takes in UTF-8. */
+        private const val UTF8_MAX_BYTES_PER_CHAR = 4L
     }
 }

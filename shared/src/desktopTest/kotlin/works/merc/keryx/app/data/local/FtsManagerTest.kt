@@ -514,6 +514,93 @@ class FtsManagerTest {
         }
     }
 
+    /**
+     * The inline-vs-chunked decision measures a body in bytes. `length()` on TEXT stops at the first
+     * NUL, so a long body with an early NUL used to be read inline — on Android, overflowing the
+     * `CursorWindow` on every call and leaving the row pending for good.
+     */
+    @Test
+    fun theBatchReadMeasuresABodyWithAnEarlyNulInBytes() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f1")
+            db.insertMergedArticle("a1", "f1", "Nul", "a" + "\u0000" + "x".repeat(SMALL_INLINE_BOUND.toInt() * 2))
+            driver.registerPending("a1")
+            assertEquals(1L, driver.countOf("SELECT COUNT(*) FROM articles WHERE length(content) = 1"), "length() on the text stops at the NUL")
+            val manager = smallBoundManager(driver)
+
+            var inlineContent: ByteArray? = ByteArray(0)
+            var contentLong: Long? = null
+            driver.executeQuery(null, manager.pendingBatchSql(), { cursor ->
+                assertTrue(cursor.next().value)
+                inlineContent = cursor.getBytes(2)
+                contentLong = cursor.getLong(3)
+                QueryResult.Unit
+            }, 6) {
+                (0..3).forEach { bindLong(it, SMALL_INLINE_BOUND) }
+                bindLong(4, Long.MIN_VALUE)
+                bindLong(5, 200L)
+            }
+
+            assertEquals(null, inlineContent, "a body over the bound in bytes must not be read inline")
+            assertEquals(1L, contentLong)
+        } finally {
+            driver.close()
+        }
+    }
+
+    /** A body over the inline bound in bytes goes through the chunked read and leaves the pending list. */
+    @Test
+    fun aBodyOverTheInlineBoundInBytesIsRecomputedAndLeavesPending() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f1")
+            val content = "<p>" + "ab \uD83D\uDE00 ".repeat(40) + "marmosetic</p>"
+            db.insertMergedArticle("a1", "f1", "Long", content)
+            driver.registerPending("a1")
+            val manager = smallBoundManager(driver)
+            manager.createTable()
+
+            runBlocking { manager.indexMissing() }
+
+            assertFalse(driver.isPending("a1"))
+            assertEquals(HtmlText.toPlainText(content), driver.searchTextOf("a1"))
+            assertEquals(listOf("a1"), FtsSearch(driver).search("marmosetic", ArticleFilter.All).map { it.id })
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
+     * A short body containing a NUL is read inline as bytes, and the conditional update compares
+     * those bytes, so the row is recomputed and leaves the pending list.
+     */
+    @Test
+    fun aShortBodyWithANulIsRecomputedAndLeavesPending() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f1")
+            val content = "<p>before\u0000after gecko</p>"
+            db.insertMergedArticle("a1", "f1", "Nul", content, summary = "s\u0000ummary")
+            driver.registerPending("a1")
+            assertEquals(
+                1L,
+                driver.countOf("SELECT COUNT(*) FROM articles WHERE length(CAST(content AS BLOB)) > length(content) AND length(CAST(summary AS BLOB)) > length(summary)"),
+                "the NULs must be stored, so the byte comparison is what is exercised",
+            )
+            val manager = ftsManager(driver)
+            manager.createTable()
+
+            runBlocking { manager.indexMissing() }
+
+            assertFalse(driver.isPending("a1"))
+            assertEquals(HtmlText.toPlainText(content), driver.searchTextOf("a1"))
+            assertTrue(driver.isIndexed("a1"))
+        } finally {
+            driver.close()
+        }
+    }
+
     @Test
     fun morePendingRowsThanOneBatchAreAllProcessedInOneCall() {
         val (driver, db) = inMemoryDb()
@@ -537,6 +624,16 @@ class FtsManagerTest {
         }
     }
 }
+
+/** An inline bound small enough for a test body to take the chunked path. */
+private const val SMALL_INLINE_BOUND = 64L
+
+private fun smallBoundManager(driver: SqlDriver) = FtsManager(
+    driver,
+    beforePendingWrite = {},
+    toPlainText = HtmlText::toPlainText,
+    inlineBodyMaxBytes = SMALL_INLINE_BOUND,
+)
 
 /** Reads a single-row COUNT(*) query straight off the driver. */
 private fun SqlDriver.countOf(sql: String): Long {
