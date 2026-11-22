@@ -16,12 +16,10 @@ import kotlinx.coroutines.runBlocking
 import works.merc.keryx.app.InMemoryFaviconMissStore
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.Clock
-import works.merc.keryx.app.core.CloudDataIncompatibleException
 import works.merc.keryx.app.core.CloudStorageException
 import works.merc.keryx.app.core.MILLIS_PER_DAY
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.core.SYNC_STATE_KS_ATTEMPT
-import works.merc.keryx.app.core.SchemaVersionException
 import works.merc.keryx.app.data.local.FtsSearch
 import works.merc.keryx.app.data.remote.FaviconResolver
 import works.merc.keryx.app.data.remote.FeedFetcher
@@ -170,11 +168,12 @@ class SyncSimulationTest {
     /** One sync of [device], possibly interrupted, failing transiently, or interleaved with another device's. */
     private suspend fun syncWithChaos(sim: Sim, device: Device, devices: List<Device>, where: String) {
         val r = sim.random
-        var injectedFailure = false
-        when (r.nextInt(20)) {
-            0 -> { sim.cloud.queueDownload(Result.Err(CloudStorageException("injected"))); injectedFailure = true }
-            1 -> { sim.cloud.queueCreate(Result.Err(CloudStorageException("injected"))); injectedFailure = true }
-            2 -> { sim.cloud.queueList(Result.Err(CloudStorageException("injected"))); injectedFailure = true }
+        val injected = CloudStorageException("injected")
+        val injectedFailure = when (r.nextInt(20)) {
+            0 -> injected.also { sim.cloud.queueDownload(Result.Err(it)) }
+            1 -> injected.also { sim.cloud.queueCreate(Result.Err(it)) }
+            2 -> injected.also { sim.cloud.queueList(Result.Err(it)) }
+            else -> null
         }
         val crashAt = if (r.nextInt(4) == 0) SyncHookPoint.entries[r.nextInt(SyncHookPoint.entries.size)] else null
         val other = devices.filter { it !== device }[r.nextInt(devices.size - 1)]
@@ -206,9 +205,11 @@ class SyncSimulationTest {
         }
     }
 
-    private fun checkTolerated(e: Exception, where: String, injected: Boolean) {
-        if (e is CloudDataIncompatibleException || e is SchemaVersionException) fail("$where: unexpected $e")
-        if (!injected) fail("$where: unexpected failure $e")
+    /** Only the very failure this round injected (or one caused by it) may end a sync. */
+    private fun checkTolerated(e: Exception, where: String, injected: Exception?) {
+        if (injected == null || generateSequence<Throwable>(e) { it.cause }.none { it === injected }) {
+            fail("$where: unexpected failure $e")
+        }
     }
 
     /** One random user action on [device]. */
