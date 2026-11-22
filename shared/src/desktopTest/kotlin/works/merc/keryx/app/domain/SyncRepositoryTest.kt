@@ -978,6 +978,41 @@ class SyncRepositoryTest {
     }
 
     @Test
+    fun prefetchingUnknownBasesStopsWhenTheNetworkStopsAllowingFolding() = runTest {
+        val cloud = FakeCloudStorage()
+        var allowed = false
+        val a = device("a", cloud, compactionAllowed = { allowed })
+        a.syncOk()
+        // b builds two bases a never looks at; the dominated first one is put back after b collects it.
+        val b = device("b", cloud)
+        b.syncOk()
+        b.churn("x", 5)
+        val firstOfB = basesOf(cloud).single()
+        assertEquals(b.deviceId(), firstOfB.device)
+        val firstBytes = checkNotNull(cloud.bytesOf(firstOfB.fileName))
+        b.churn("y", 5)
+        assertFalse(firstOfB in basesOf(cloud))
+        cloud.put(firstOfB.fileName, firstBytes)
+        a.syncOk() // receives b's deltas without folding
+        val basesBefore = basesOf(cloud)
+        val deltasBefore = deltasOf(cloud)
+        assertEquals(2, basesBefore.size)
+        assertTrue(basesBefore.all { it.device == b.deviceId() })
+
+        allowed = true
+        val downloadsBefore = cloud.downloadCount
+        val deletesBefore = cloud.deleteCount
+        cloud.downloadHook = { name -> if (TransportFileName.parse(name)?.kind == TransportFileKind.BASE) allowed = false }
+        a.syncOk()
+        cloud.downloadHook = null
+
+        assertEquals(downloadsBefore + 1, cloud.downloadCount, "no further unknown base is downloaded once folding is no longer allowed")
+        assertEquals(basesBefore, basesOf(cloud), "no base is uploaded or collected")
+        assertEquals(deltasBefore, deltasOf(cloud))
+        assertEquals(deletesBefore, cloud.deleteCount, "garbage collection does not run")
+    }
+
+    @Test
     fun aDeviceAwayLongerThanTheGracePeriodFetchesTheBasesForWhatWasCollected() = runTest {
         val cloud = FakeCloudStorage()
         val a = device("a", cloud)

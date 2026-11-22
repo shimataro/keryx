@@ -928,6 +928,8 @@ internal class DeltaSync(
             // Bases this device has never looked at may already cover those deltas.
             for (name in listing.bases.keys.filter { it.fileName !in cache }.sortedBy { it.fileName }) {
                 currentCoroutineContext().ensureActive()
+                // The network may stop allowing folding mid-way: stop the whole compaction, as [compact] does.
+                if (!compactionAllowed()) return Result.Ok(Unit)
                 // Gone meanwhile (garbage-collected by another device): nothing to learn from it.
                 cache[name.fileName] = fetch(cloud, name, downloads).valueOrElse { return it } ?: continue
             }
