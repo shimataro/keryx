@@ -134,10 +134,10 @@ Only the version numbers that are written out **with their patch component** nee
   version you changed.
 - **`THIRD-PARTY-LICENSES.md`** — update only when a shipped runtime dependency was **added
   or removed** (not for version bumps). See constraint #8 in `.claude/CLAUDE.md`.
-- **`docs/*.md` with their `.ja.md` twins** — these also spell out full versions:
+- **`docs/*.md` with their translations (`docs/*.<lang>.md`)** — these also spell out full versions:
   `external-spec.md` §11 (Gradle / Kotlin / Compose MP), and the Gradle version in `build.md`
   and `setup.md`. `grep -rn` the old version string across `docs/` and update every hit, the
-  English file and its `.ja.md` in the same step (`.claude/rules/docs-translation.md`).
+  English file and every translation in the same step (`.claude/rules/docs-translation.md`).
   `README.md` is user-facing only and must not cite dependency versions at all — don't add
   them there.
 

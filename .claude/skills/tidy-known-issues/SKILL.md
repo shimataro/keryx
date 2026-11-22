@@ -20,8 +20,7 @@ Never assume the translations are Japanese only. The set of translations is **wh
 `ls docs/known-issues.*.md` lists at the time of the run**; every step that edits `known-issues.md`
 edits every listed translation the same way, in the same item. Likewise, when another design doc is
 edited (a reason moved into it, a reference fixed), list `docs/<name>.*.md` and update all of them.
-This is `.claude/rules/docs-translation.md` applied to whatever locales exist — that rule names
-`.ja.md`, but this skill follows the listing.
+This is `.claude/rules/docs-translation.md`.
 
 ## Step 0 — Guard
 

@@ -25,7 +25,7 @@ from [`README.md`](../../README.md) / [`README.ja.md`](../../README.ja.md) and
 [`PRIVACY.md`](../../PRIVACY.md) / [`PRIVACY.ja.md`](../../PRIVACY.ja.md) — keep
 it in sync with those if the app's feature list or privacy claims change, the
 same way [`docs-translation.md`](../../.claude/rules/docs-translation.md) keeps
-`docs/*.md` and `docs/*.ja.md` in lockstep (this directory isn't covered by that
+`docs/*.md` and their translations in lockstep (this directory isn't covered by that
 rule, since it lives outside `docs/`, but the same discipline applies: update
 `en-US` and `ja-JP` together).
 
