@@ -712,6 +712,65 @@ in place of `ks_meta.created_at` for both rules. That closes the clock case; the
 every provider's listing to show a file within a bounded time of its creation, which Drive and OneDrive do not
 promise.
 
+## Delta sync: a base naming one copy of a `(device, seq)` stops implying the other copies
+
+**Status**: not fixed — no data is lost, and the extra work ends with the next fold. The simple way to close it
+would weaken the last defense against the clock case above.
+
+### Symptom
+
+`BaseCoverage.covers()` does not let a base's `ks_vector` imply a `(device, seq)` whose name the base's `ks_covered`
+lists for another copy. When a new base folds an input base that implies an old copy and also names a young copy of
+the same `(device, seq)` (a cloned database's duplicate, kept by `TransportFiles.finalizeBase` until its grace
+period ends), the new base no longer covers the old copy. While that old copy is still listed, a device joining
+from the new base downloads it, and the next fold takes it as an input. That fold lists both copies by name (two
+copies of one `(device, seq)` are always kept), after which both are covered and collected normally.
+
+### Diagnosis
+
+With correct clocks the rule is redundant: limiting the vector to deltas created before `vectorCutoff` already
+keeps it from implying a copy it never folded. A duplicate written under a clock running days behind (the first
+case of the entry above) looks old and passes that time limit; when the base names another copy of the same
+`(device, seq)`, this rule is what still keeps the vector from implying it.
+
+### Ruled out
+
+- **Dropping the rule** — removes the extra fetch and fold, but widens the "duplicate written under a clock off by
+  days" hole of the entry above.
+
+### What a real fix would need
+
+The same as the entry above: creation times the server assigns, read from every provider's listing in place of
+`ks_meta.created_at`. Once the writer's clock no longer decides a delta's age, the rule can be dropped safely.
+
+## Delta sync: a base built under a clock running behind cannot dominate a newer input base
+
+**Status**: not fixed — no data is lost, and it lasts only as long as the clock difference.
+
+### Symptom
+
+`BaseCoverage.dominates()` requires `createdAt >= other.createdAt`. A base folded on a device whose clock runs
+behind therefore cannot dominate an input base created later by another device's clock. Both stay, so garbage
+collection does not delete the input base, and every fold downloads it again as an input — until the slow clock
+passes that base's creation time, or a device with a correct clock builds the next base.
+
+### Diagnosis
+
+`vectorCutoff` is `createdAt − KS_DELTA_GRACE_MS`. A base may replace another only if it implies every delta the
+other implies, which needs a cutoff — so a creation time — at least as late.
+
+### Ruled out
+
+- **Giving a new base the latest creation time among its inputs** — an input base from a clock running ahead would
+  pass its future time on to every later base, whose vectors would then imply deltas that are still young, widening
+  the data-loss cases of the entry above.
+
+### What a real fix would need
+
+The same as the entry above: creation times the server assigns, used for bases too, so device clocks no longer
+enter the domination rule. Alternatively, a cutoff per vector component, which changes the transport format and
+the validation, folding, garbage-collection and domination rules.
+
 ## Linux/GNOME: the tray menu briefly shows the previous label when it opens
 
 **Status**: not fixed — external (GNOME Shell AppIndicator extension) design limitation, and not
