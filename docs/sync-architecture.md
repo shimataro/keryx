@@ -185,8 +185,9 @@ only the retries of a revision-checked write (the pointer, the stub); delta and 
 
 ### Sending
 
-1. **Build the delta** with `platform/DeltaExporter` (one `actual` per platform), which opens its own connection
-   and `ATTACH`es an empty transport file:
+1. **Build the delta** with `platform/DeltaExporter` (`commonMain`; the SQL is `domain/DeltaExportSql`, run over
+   `TransportConnections`' per-platform connection), which opens its own connection on a new, empty transport file
+   and `ATTACH`es the source database to it:
    - **Ordinary delta** — inside one read transaction: `S = MAX(sync_outbox.seq)`, then the **current** row for
      every key with an outbox entry `≤ S`, plus every row those rows reference (a feed's folder, an article's feed,
      a `feed_tags` row's tag and feed), so the receiving merge never finds a referenced row missing. An article

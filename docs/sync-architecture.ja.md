@@ -178,7 +178,8 @@ Depth 1 の `PROPFIND`。既にたどったページ指定（カーソル、ペ�
 
 ### 送信
 
-1. **差分を作る。** `platform/DeltaExporter`（プラットフォームごとに `actual`）が専用の接続を開き、空の転送ファイルを
+1. **差分を作る。** `platform/DeltaExporter`（`commonMain`。SQL は `domain/DeltaExportSql` で、`TransportConnections` の
+   プラットフォームごとの接続で実行する）が、新しい空の転送ファイルに専用の接続を開き、そこへ元のデータベースを
    `ATTACH` する:
    - **通常の差分**——1 つの読み取りトランザクションの中で: `S = MAX(sync_outbox.seq)` を読み、`≤ S` の outbox の
      記録を持つすべてのキーについて**現在の**行を書き出す。それらの行が参照する行（フィードのフォルダー、記事の
