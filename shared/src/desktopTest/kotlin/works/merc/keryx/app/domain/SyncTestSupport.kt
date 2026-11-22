@@ -31,8 +31,8 @@ import kotlin.uuid.Uuid
 
 /**
  * A hand-rolled [CloudStorage] over an in-memory map of basenames, modelling what the delta sync has
- * to tolerate from real providers: an eventually consistent listing (a new file appears only after
- * [listingDelay] further listings, a deleted one keeps being listed for [ghostListings] more),
+ * to tolerate from real providers: an eventually consistent listing (a new file is missing from the
+ * next [listingDelay] listings, a deleted one keeps being listed for [ghostListings] more),
  * duplicate names in a listing ([duplicateNames], as Google Drive can return), a 404 for a missing
  * file, a create-only write that refuses an existing name, and a revision-checked replace. One-shot
  * queued results let a test force any failure.
@@ -47,7 +47,7 @@ internal class FakeCloudStorage : CloudStorage {
     var listings = 0L
         private set
 
-    /** Further listings before a newly written file is listed. */
+    /** How many listings right after a write still miss the new file (0: the next listing shows it). */
     var listingDelay: () -> Long = { 0L }
 
     /** Further listings a deleted file is still listed for. */
@@ -132,7 +132,8 @@ internal class FakeCloudStorage : CloudStorage {
 
     private fun store(path: String, data: ByteArray): CloudFileMeta {
         val rev = "r${++revCounter}"
-        files[base(path)] = StoredFile(data, rev, listings + listingDelay())
+        // list() counts itself before filtering, so the next listing is number listings + 1.
+        files[base(path)] = StoredFile(data, rev, listings + listingDelay() + 1)
         ghosts.remove(base(path))
         uploadedBytes += data.size
         written += base(path)
