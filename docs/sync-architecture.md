@@ -283,9 +283,11 @@ device. The new base is named `ks-<gen>-b-<dev>-<n>-<createdAt>-<hash12>`, `n` o
 base. `ks_vector` combines the input bases' vectors and extends them over the folded deltas that continue them without a
 gap — **counting only deltas created at least `KS_DELTA_GRACE_MS` before the base's own creation time**
 (`ks_covered.created_at` against the base's `ks_meta.created_at` — the same cutoff a reader applies when it decides
-what the vector implies); `ks_covered` then keeps
-only the folded deltas the extended vector does not imply, plus every copy of a `(device, seq)` it folded more than
-one of (`TransportFiles.finalizeBase`). The age rule is what makes the vector safe to trust: a duplicate of an implied
+what the vector implies); `ks_covered` then drops a folded delta's name only when the extended vector implies it and
+the delta is known (`ks_covered.created_at`) to have been created by that cutoff — never a copy of a `(device, seq)` it
+folded more than one of — and keeps every other name (`TransportFiles.finalizeBase`). A younger name stays even where
+an input base's vector already reaches its `(device, seq)` (a clone's late duplicate, say): the new base's vector does
+not imply it, so without its name the base would cover a delta it folded by neither rule. The age rule is what makes the vector safe to trust: a duplicate of an implied
 `(device, seq)` created after the base's cutoff is not implied (see "Transport schema"), so to be implied without having
 been folded, a duplicate would have had to be created before that cutoff and stay invisible to every listing for the
 whole grace period — see "Delta sync measures a delta's age by the clock of the device that wrote it" in

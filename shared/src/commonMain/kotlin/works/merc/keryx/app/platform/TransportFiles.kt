@@ -274,9 +274,12 @@ object TransportFiles {
      *   deltas created at or before the impliable cutoff** — `KS_DELTA_GRACE_MS` before the base's own
      *   `ks_meta.created_at`, exactly [BaseCoverage.vectorCutoff] — by `ks_covered.created_at` (an
      *   unknown time never counts); see "Bases and Garbage Collection";
-     * - every covered name the extended vector now implies is removed from `ks_covered`, except where
-     *   two covered names share a `(device, seq)` (a cloned database): those stay listed, so a
-     *   duplicate this base never folded is not implied by its vector ([BaseCoverage.covers]);
+     * - a covered name is removed from `ks_covered` only when the extended vector implies it **and** it
+     *   was created at or before the impliable cutoff (a known `created_at`) — a younger one, such as a
+     *   clone's duplicate of a `(device, seq)` an input base already implied, is not implied by this
+     *   base's vector ([BaseCoverage.covers]), so dropping its name would leave it covered by nothing —
+     *   and never where two covered names share a `(device, seq)` (a cloned database): those stay
+     *   listed, so a duplicate this base never folded is not implied by its vector;
      * - tables a platform's connection adds to a file it opens for writing (requery's
      *   `android_metadata`) are dropped, as [DeltaExporter] does.
      *
@@ -304,12 +307,14 @@ object TransportFiles {
                             "ON CONFLICT(device) DO UPDATE SET seq = MAX(seq, excluded.seq)",
                     )
                 }
+                val createdAtByName = rows.mapNotNull { row -> row[0]?.let { it to row[1]?.toLongOrNull() } }.toMap()
                 val groups = covered.groupBy { it.device to it.number }
                 for (name in covered) {
                     val implied = name.number <= (extended[name.device] ?: 0L)
                     val duplicated = groups.getValue(name.device to name.number).size > 1
+                    val old = createdAtByName[name.fileName]?.let { it <= impliableCutoff } == true
                     // A parsed name: lowercase hex, digits, '-' and '.' only.
-                    if (implied && !duplicated) connection.exec("DELETE FROM main.ks_covered WHERE name = '${name.fileName}'")
+                    if (implied && !duplicated && old) connection.exec("DELETE FROM main.ks_covered WHERE name = '${name.fileName}'")
                 }
                 DeltaExportSql.platformCleanupStatements.forEach(connection::exec)
             }

@@ -374,6 +374,43 @@ class TransportFilesTest {
     }
 
     @Test
+    fun finalizeBaseKeepsAYoungCloneListedWhereAnInputBaseAlreadyImpliesItsSeq() {
+        val acc = TransportFixtures.accumulator(createdAt = 2_000 + KS_DELTA_GRACE_MS)
+        // Input base A implies delta 1 of DEV_A; another input names a young copy B of that same (device, seq).
+        val baseA = baseName(DEV_B, 1)
+        val fileA = transportFile(baseA, "INSERT INTO ks_vector (device, seq) VALUES ('$DEV_A', 1)")
+        val young = deltaName(DEV_A, 1, hash = "ba9876543210", createdAt = 5_000)
+        val other = baseName(DEV_B, 2)
+        val otherFile = transportFile(other, "INSERT INTO ks_covered (name, created_at) VALUES ('${young.fileName}', ${young.createdAt})")
+        TransportFiles.fold(acc.absolutePath, fileA.absolutePath, baseA, extendVector = false)
+        TransportFiles.fold(acc.absolutePath, otherFile.absolutePath, other, extendVector = false)
+
+        TransportFiles.finalizeBase(acc.absolutePath)
+
+        val coverage = TransportFixtures.dump(acc, coverage = true)
+        assertEquals(listOf("$DEV_A|1"), coverage.getValue("ks_vector"))
+        assertEquals(listOf("${young.fileName}|5000"), coverage.getValue("ks_covered"), "the vector does not imply a copy younger than the cutoff")
+        val base = TransportFiles.readCoverage(acc.absolutePath, baseName(DEV_A, 1, createdAt = 2_000 + KS_DELTA_GRACE_MS))
+        assertTrue(base.covers(young))
+    }
+
+    @Test
+    fun finalizeBaseKeepsANameOfUnknownAgeListed() {
+        val acc = TransportFixtures.accumulator(createdAt = 2_000 + KS_DELTA_GRACE_MS)
+        val baseA = baseName(DEV_B, 1)
+        val fileA = transportFile(baseA, "INSERT INTO ks_vector (device, seq) VALUES ('$DEV_A', 1)")
+        val unknown = deltaName(DEV_A, 1, hash = "ba9876543210")
+        val other = baseName(DEV_B, 2)
+        val otherFile = transportFile(other, "INSERT INTO ks_covered (name) VALUES ('${unknown.fileName}')")
+        TransportFiles.fold(acc.absolutePath, fileA.absolutePath, baseA, extendVector = false)
+        TransportFiles.fold(acc.absolutePath, otherFile.absolutePath, other, extendVector = false)
+
+        TransportFiles.finalizeBase(acc.absolutePath)
+
+        assertEquals(listOf("${unknown.fileName}|null"), TransportFixtures.dump(acc, coverage = true).getValue("ks_covered"))
+    }
+
+    @Test
     fun foldingRefusesAFileOfAnotherVersion() {
         val acc = TransportFixtures.accumulator()
         val input = transportFile(delta)
