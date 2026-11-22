@@ -1121,6 +1121,17 @@ class SyncRepositoryTest {
     }
 
     @Test
+    fun clearSyncFailureStateRemovesTheFileACommittedSendLeftBehind() = runTest {
+        val (a, _) = crashingSend(SyncHookPoint.AFTER_SEND_COMMIT)
+        assertNull(a.state(SYNC_STATE_KS_ATTEMPT), "no record names the leftover file any more")
+        assertTrue(a.pendingFile(2).exists())
+
+        a.repo.clearSyncFailureState()
+
+        assertTrue(a.dataDir.listFiles().orEmpty().none { it.name.matches(Regex("pending-\\d+\\.db\\.gz")) })
+    }
+
+    @Test
     fun clearSyncFailureStateIsNotUndoneByAnInFlightSync() = runTest {
         val cloud = FakeCloudStorage()
         val a = device("a", cloud)

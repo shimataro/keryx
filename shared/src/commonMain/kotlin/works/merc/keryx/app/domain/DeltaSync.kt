@@ -239,11 +239,11 @@ internal class DeltaSync(
     /**
      * Disconnect / switch: recording off, and everything tied to the connection gone — the `ks_*` keys,
      * the outbox, `sync_applied`, the cursors, the raw folder versions (`ks_feed_folder_raw`, which
-     * describe the old connection's files) and a saved send. `ks_search_pending` stays (it belongs to
-     * the local search index).
+     * describe the old connection's files) and every saved send file ([sweepPendingFiles] — including
+     * one a commit left behind, which no record names any more). `ks_search_pending` stays (it belongs
+     * to the local search index).
      */
     fun clearConnectionState() {
-        val attempt = SendAttempt.decode(state(SYNC_STATE_KS_ATTEMPT))
         db.transaction {
             db.sync_stateQueries.deleteConnectionKeys()
             db.sync_bookkeepingQueries.clearOutbox()
@@ -252,7 +252,7 @@ internal class DeltaSync(
             db.sync_bookkeepingQueries.clearFeedFolderRaw()
             db.sync_bookkeepingQueries.setCapture(enabled = 0, fullPending = 0)
         }
-        attempt?.let { FileIO.delete(pendingPath(it.number)) }
+        sweepPendingFiles()
     }
 
     /** Whether there is anything to send: an outbox entry or a full send due, while recording. */
@@ -1040,6 +1040,15 @@ internal class DeltaSync(
 
     private fun pendingPath(number: Long): String = FileIO.join(dataDir, "pending-$number.db.gz")
 
+    /** Deletes every saved send file in [dataDir], whether or not a record still names it. */
+    private fun sweepPendingFiles() {
+        val dir = Path(dataDir)
+        if (!SystemFileSystem.exists(dir)) return
+        for (path in SystemFileSystem.list(dir)) {
+            if (PENDING_FILE_NAME.matches(path.name)) SystemFileSystem.delete(path, mustExist = false)
+        }
+    }
+
     private fun state(key: String): String? = db.sync_stateQueries.get(key).executeAsOneOrNull()
 
     private fun setState(key: String, value: String) = db.sync_stateQueries.upsert(key, value)
@@ -1060,6 +1069,9 @@ internal class DeltaSync(
 
     private companion object {
         const val TAG = "Sync"
+
+        /** A saved send's file name ([pendingPath]). */
+        val PENDING_FILE_NAME = Regex("pending-\\d+\\.db\\.gz")
 
         /** The tables a merge writes. */
         val SYNCED_TABLES = arrayOf("folders", "feeds", "tags", "feed_tags", "articles", "global_settings")
