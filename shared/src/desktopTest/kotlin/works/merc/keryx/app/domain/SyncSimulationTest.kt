@@ -132,9 +132,11 @@ class SyncSimulationTest {
                 sim.cloud.put("keryx.db.gz", legacyDatabase(sim, readAt = null))
                 val first = devices[0].sync.repo.sync()
                 if (first is Result.Err) fail("seed $seed: the migration failed: ${first.exception}")
-                // The older build's database is a write like any device's own: what the first device
-                // holds right after migrating it, before any local operation, is exactly that write.
-                record(sim, groups(devices[0]))
+                // The older build's database is a write like any device's own. What the migration must
+                // bring in is derived from the fixture, never read back from the migrated database, so a
+                // migration that drops or alters a row fails here rather than becoming the expectation.
+                record(sim, legacyOracle())
+                checkOracle(sim, devices[0], seed)
             }
             val resetAt = operations / 2
             for (step in 0 until operations) {
@@ -212,6 +214,16 @@ class SyncSimulationTest {
             extraFeed?.let { PreDeltaFiles.feed(it, updatedAt = sim.now) },
         ).toTypedArray(),
     )
+
+    /**
+     * The stamped field groups the migration of [legacyDatabase] (with `readAt = null`) must produce,
+     * from [PreDeltaFiles.article]'s defaults: each article's body, stamped by the `body_updated_at`
+     * that `2.sqm` initializes from `updated_at` (1), with no summary. Every other group of those rows
+     * carries no stamp, and `lf1` itself is checked directly.
+     */
+    private fun legacyOracle(): List<Group> = listOf("la1", "la2").map { id ->
+        Group("article $id body", 1L, "<p>legacy body $id</p>|null")
+    }
 
     /** One sync of [device], possibly interrupted, failing transiently, or interleaved with another device's. */
     private suspend fun syncWithChaos(sim: Sim, device: Device, devices: List<Device>, where: String) {
