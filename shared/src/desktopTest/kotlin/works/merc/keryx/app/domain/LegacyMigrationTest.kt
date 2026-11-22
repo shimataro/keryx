@@ -222,6 +222,16 @@ class LegacyMigrationTest {
         assertEquals(1L, b.rows("SELECT COUNT(*) FROM articles WHERE id = 'oa'").single()[0]!!.toLong())
     }
 
+    /**
+     * Makes this device's stub preparation fail: the compressed stub's temporary path becomes a link
+     * into a directory that does not exist, so writing it fails the way a full disk would, while
+     * deleting it afterwards still succeeds. Returns the link, for the test to remove.
+     */
+    private fun SyncDevice.breakStubPreparation(): java.nio.file.Path = java.nio.file.Files.createSymbolicLink(
+        File(tempDir, "ks-legacy-stub.db.gz").toPath(),
+        File(tempDir, "missing-dir/stub.db.gz").toPath(),
+    )
+
     @Test
     fun theStubIsRetriedAtMostSyncMaxRetryTimesThenTheSyncFailsTransiently() = runTest {
         val (cloud, _) = legacyCloud()
@@ -242,6 +252,26 @@ class LegacyMigrationTest {
         a.syncOk()
         assertTrue(PreDeltaFiles.isStub(cloud.bytesOf(CLOUD_DB_GZ_PATH)))
         assertTrue(a.db.hasFeed("again"))
+    }
+
+    @Test
+    fun aStubThatCannotBePreparedFailsTheMigrationTransientlyAndTheNextSyncFinishes() = runTest {
+        val (cloud, original) = legacyCloud()
+        val a = device("a", cloud)
+        val link = a.breakStubPreparation()
+
+        val result = a.repo.sync()
+
+        assertIs<Result.Err>(result)
+        assertIs<works.merc.keryx.app.core.CloudStorageException>(result.exception)
+        assertContentEquals(original, cloud.bytesOf(CLOUD_DB_GZ_PATH), "the pre-delta file is left as it was")
+        assertNull(a.state(SYNC_STATE_KS_LEGACY_STUB_REV))
+        assertNotNull(a.repo.lastSyncError.value, "the failure is reported like any other sync failure")
+        java.nio.file.Files.deleteIfExists(link)
+
+        a.syncOk()
+
+        assertMigrated(cloud, original, a)
     }
 
     @Test
@@ -562,6 +592,25 @@ class LegacyMigrationTest {
         assertContentEquals(corrupt, cloud.bytesOf(CLOUD_DB_GZ_PATH), "never replaced unarchived")
         assertEquals(1, PreDeltaFiles.backups(cloud).size)
         cloud.downloadHook = null
+
+        a.resetOk()
+
+        assertArchivedAndStubbed(cloud, corrupt, a)
+    }
+
+    @Test
+    fun aResetThatCannotPrepareTheStubFailsTransientlyWithoutReplacingThePreDeltaFile() = runTest {
+        val corrupt = byteArrayOf(1, 2, 3)
+        val (cloud, a, _) = migratedThenOverwritten(corrupt)
+        val link = a.breakStubPreparation()
+
+        val result = a.repo.resetCloudData()
+
+        assertIs<Result.Err>(result)
+        assertIs<works.merc.keryx.app.core.CloudStorageException>(result.exception)
+        assertContentEquals(corrupt, cloud.bytesOf(CLOUD_DB_GZ_PATH), "the pre-delta file is left as it was")
+        assertNotNull(a.repo.lastSyncError.value, "the failure is reported like any other reset failure")
+        java.nio.file.Files.deleteIfExists(link)
 
         a.resetOk()
 

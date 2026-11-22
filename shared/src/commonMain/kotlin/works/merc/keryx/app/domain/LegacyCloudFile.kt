@@ -176,7 +176,8 @@ internal class LegacyCloudFile(
      * rename, which would let an older build's write between the check and the rename be archived
      * without being merged. On a mismatch the file is absorbed again (a stub ends it, a full
      * database is merged and the replacement retried), at most [SYNC_MAX_RETRY] times; running out
-     * is a transient failure, retried by the next sync. The stub's revision is recorded only after
+     * is a transient failure, retried by the next sync, as is a local failure preparing the stub
+     * ([prepareStub]). The stub's revision is recorded only after
      * the upload succeeded, so a crash in between makes the next sync download the stub and record it.
      */
     suspend fun finish(cloud: CloudStorage, merged: Absorbed?): Result<Unit> {
@@ -192,8 +193,7 @@ internal class LegacyCloudFile(
                 }
             }
             if (stubRev() == null) backup(cloud, current.gzPath).valueOrElse { return it }
-            TransportFiles.createLegacyStub(stub)
-            Gzip.compressFile(stub, stubGz)
+            prepareStub(stub, stubGz).valueOrElse { return it }
             repeat(SYNC_MAX_RETRY) {
                 val target = checkNotNull(current)
                 setPhase(SyncPhase.ARCHIVING)
@@ -241,7 +241,8 @@ internal class LegacyCloudFile(
      * archived, so a version written in between is never discarded unarchived: a mismatch reads the
      * file again and starts over, at most [SYNC_MAX_RETRY] times, after which the reset fails
      * transiently. A download that fails (other than the file being gone) fails the reset the same way
-     * rather than replacing a file it could not archive. Each step is decided again from the cloud, so
+     * rather than replacing a file it could not archive, and so does a local failure preparing the
+     * stub ([prepareStub]). Each step is decided again from the cloud, so
      * a crash anywhere converges on the next reset (or, after the stub's upload, on the next sync's
      * legacy watch, which downloads the stub and records it).
      */
@@ -272,8 +273,7 @@ internal class LegacyCloudFile(
                 }
                 backup(cloud, gz).valueOrElse { return it }
                 if (!stubReady) {
-                    TransportFiles.createLegacyStub(stub)
-                    Gzip.compressFile(stub, stubGz)
+                    prepareStub(stub, stubGz).valueOrElse { return it }
                     stubReady = true
                 }
                 setPhase(SyncPhase.ARCHIVING)
@@ -302,6 +302,22 @@ internal class LegacyCloudFile(
             deleteDb(stub)
             FileIO.delete(stubGz)
         }
+    }
+
+    /**
+     * Writes the stub to [stub] and its compressed copy to [stubGz]. A failure — a local one, such as
+     * a full disk — is never the cloud's fault and is a transient [CloudStorageException]: the cloud
+     * file is not touched yet, so the next sync (or reset) tries again.
+     */
+    private fun prepareStub(stub: String, stubGz: String): Result<Unit> = try {
+        TransportFiles.createLegacyStub(stub)
+        Gzip.compressFile(stub, stubGz)
+        Result.Ok(Unit)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Throwable) {
+        Log.error(TAG, "Preparing the pre-delta stub failed", e)
+        Result.Err(CloudStorageException("Preparing the pre-delta stub failed: ${e.message}"))
     }
 
     /**
