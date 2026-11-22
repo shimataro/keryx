@@ -902,12 +902,15 @@ class SyncRepositoryTest {
         val a = device("a", cloud)
         a.syncOk()
         val firstBase = basesOf(cloud).single()
+        val writtenBefore = cloud.written.size
 
         a.churn("x", 5)
 
         assertFalse(firstBase in basesOf(cloud), "the first base is dominated by a fold of it and deleted")
+        val churned = cloud.written.drop(writtenBefore).mapNotNull(TransportFileName::parse).filter { it.kind == TransportFileKind.DELTA }
+        assertEquals(5, churned.size)
         val deltasBefore = deltasOf(cloud)
-        assertTrue(deltasBefore.isNotEmpty(), "covered deltas stay for the grace period")
+        assertTrue(deltasBefore.containsAll(churned), "every covered delta stays for the grace period: $deltasBefore")
 
         now += KS_DELTA_GRACE_MS + MILLIS_PER_DAY
         a.churn("y", 1)
