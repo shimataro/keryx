@@ -98,6 +98,7 @@ Depth 1 の `PROPFIND`。既にたどったページ指定（カーソル、ペ�
 | `sync_applied(name)` | マージ済みのクラウドファイル（この端末自身のものを含む） |
 | `sync_cursor(device, seq)` | 端末ごとに、すべての差分をマージし終えている最大の `seq` |
 | `ks_search_pending(rowid)` | `search_text` の再計算が必要な記事（「FTS5 の扱い」参照） |
+| `ks_feed_folder_raw(feed_id, folder_updated_at, folder_id)` | フィードごとに、`feeds.folder_id` の解決後の値の元になった生のフォルダー版（勝ったファイルが持っていたままのもの）。スタンプがフィードの `folder_updated_at` と等しい間だけ有効（「マージ」参照） |
 | `feed_fetch_state(feed_id, etag, last_modified, error_count, last_error)` | この端末でのフィードの取得状態——同期しない |
 
 同期対象の 6 テーブルの**トリガー**（`AFTER INSERT` / `AFTER UPDATE`）が `sync_outbox` に追記する。条件は
@@ -227,7 +228,7 @@ Depth 1 の `PROPFIND`。既にたどったページ指定（カーソル、ペ�
 ### 参加・リセット・接続解除
 
 - **参加**（接続、プロバイダーの切り替え、世代の変化、複製の検出）: 新しい `ks_device_id` を発行し、カーソル、
-  `sync_applied`、outbox、`ks_attempt` を消し、同じトランザクションで `sync_capture = (enabled 1, full_pending 1)`
+  `sync_applied`、`ks_feed_folder_raw`、outbox、`ks_attempt` を消し、同じトランザクションで `sync_capture = (enabled 1, full_pending 1)`
   にするので、以後のすべての書き込みが記録される。そのうえですべてを受信し、全量送信を行う。結果は、差分同期以前の
   「マージしてからデータベース全体をアップロード」と同じになる。
 - **最初の端末**は新しい世代に参加し、全量送信を最初のベースとしてアップロードしてから、ポインタを作る（`create`）
@@ -239,8 +240,11 @@ Depth 1 の `PROPFIND`。既にたどったページ指定（カーソル、ペ�
   ほかのすべての端末は新しい世代を見て再参加し、自分の全状態を送るので、ほかの端末にしかなかったデータも戻って
   くる——以前、ほかの端末が作り直されたファイルをマージしていたのと同じである。
 - **接続解除・切り替え**（`clearSyncFailureState()`、同じ mutex の内側）: `sync_capture.enabled = 0`（ローカル
-  のみで使う間は何も記録しない）にし、`ks_*` キー、outbox、`sync_applied`、カーソル、保存中のファイルを消す。
-  `ks_search_pending` は残す——ローカルの検索索引のものだからである。
+  のみで使う間は何も記録しない）にし、`ks_*` キー、outbox、`sync_applied`、カーソル、`ks_feed_folder_raw`、
+  保存中のファイルを消す。`ks_search_pending` は残す——ローカルの検索索引のものだからである。
+  `ks_feed_folder_raw` を `sync_applied` と一緒に消すのは、これがこの端末がマージしたファイルのうちどの生の版が
+  各フィードのフォルダーで勝ったかを表すものであり、新しい世代のファイルは改めて比べる——この端末自身の全量送信が
+  持つ値（main の解決後の値）と比べる。ほかの端末の畳み込みが比べるのと同じである——からである。
 
 ### クラウドファイルの検証
 
@@ -454,7 +458,15 @@ SQLDelight コードの `getLong` がそれを読むときに例外を投げ、�
   `mergeFeedSortOrder`、`mergeFeedCustomTitle`、`mergeFeedDeletedAt`。`folder_id` は 4 分岐で解決する: クラウドが
   参照するフォルダーが `cloud.folders` で生きていなければ NULL、そのフォルダーが `main` で生きていればクラウドの
   `folder_id`、そうでなければ `main.folders` / `cloud.folders` を結合する同名検索（両方とも生きているもの）、それも
-  なければ NULL。フィードの取得状態（`feed_fetch_state`）は端末ローカルで、マージしない。
+  なければ NULL。
+  保存される `folder_id` は解決後の値——この端末の id で、勝ったファイルが持っていた id とは限らない——なので、
+  マージはクラウドの生の `folder_id` をそれと比べない: `folder_updated_at` が等しいとき、2 つの id は別々の id 空間に
+  属し、マージの順序が結果を決めてしまう（一方 `ReduceSql` の畳み込みは生の最大値を残す）。勝った生の版を
+  `ks_feed_folder_raw` に並べて保持し、フォルダーのマージは 3 つの文で行う: フィードの生の行が無いか、そのスタンプが
+  main のものでない（その後ローカルで移動した——ローカルのフォルダーの書き込みはすべて `MAX(now, previous + 1)` で
+  打刻するので、古くなった行が main のスタンプを持つことはない）ときは main 自身の値で置き直す。生の行より順位が
+  高いクラウドの版を、上の解決で適用する。同じ比較でクラウドの版を生の行に記録する。こうして、どのマージの順序でも
+  どの畳み込みでも、同じ生の勝者が選ばれる。フィードの取得状態（`feed_fetch_state`）は端末ローカルで、マージしない。
   feeds は **`id`** で照合する。id は `url` から **UUIDv5** で決定的に生成する（`IdGenerator.feedId`）ので、同じ
   フィードはどの端末でも同じ id になる。
 - **tags / folders: フィールドごとの後勝ち。** feeds と同じく、名前（`name_updated_at`）、色（`color_updated_at`、
@@ -487,10 +499,12 @@ SQLDelight コードの `getLong` がそれを読むときに例外を投げ、�
   `cloud.tags` を通じて名前で探す。どちらでも解決できない行は飛ばす。
 - `NOT EXISTS` / `EXISTS` のガードは、main と衝突する行（同じ URL で別の ID など）を飛ばすので、UNIQUE / FK 違反で
   トランザクション全体が失敗することはない。
-- `MergeSql.all` の順序: folders（名前、id、フィールドごとの文の順）、feeds、4 つの `mergeFeed*`、tags（名前、id、
+- `MergeSql.all` の順序: folders（名前、id、フィールドごとの文の順）、feeds、フォルダーのマージの 3 つの文と残り
+  3 つの `mergeFeed*`、tags（名前、id、
   フィールドごと）、articles、feed_tags、global_settings。folders は feeds より前（`feeds.folder_id` のため）、
   `mergeFeed*` はその両方の後。
-- 管理用の表（`sync_outbox`、`ks_search_pending`、`sync_merging` など）は制約を持たないので、後述の分類が前提とする
+- 管理用の表（`sync_outbox`、`ks_search_pending`、`ks_feed_folder_raw`、`sync_merging` など）は主キー以外の制約を
+  持たないので、後述の分類が前提とする
   「main が既存の状態で違反しうるのは FOREIGN KEY 制約だけ」は引き続き成り立つ。
 
 `ReduceSql` は、同じフィールドごとの規則と同着の決め方で、転送ファイルを 1 つに畳み込む。キーは主キーだけで、

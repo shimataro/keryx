@@ -61,6 +61,7 @@ internal object SnapshotSql {
         "sync_applied",
         "sync_cursor",
         "ks_search_pending",
+        "ks_feed_folder_raw",
     )
 
     /** The capture triggers (`sync_bookkeeping.sq`), which name `sync_capture` / `sync_outbox`. */

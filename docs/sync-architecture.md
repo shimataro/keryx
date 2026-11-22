@@ -101,6 +101,7 @@ Each file carries `PRAGMA user_version` and:
 | `sync_applied(name)` | Cloud files already merged (including this device's own) |
 | `sync_cursor(device, seq)` | Per device, the highest `seq` up to which every delta has been merged |
 | `ks_search_pending(rowid)` | Articles whose `search_text` must be recomputed (see "FTS5 Handling") |
+| `ks_feed_folder_raw(feed_id, folder_updated_at, folder_id)` | Per feed, the raw folder version (as the winning file carried it) that `feeds.folder_id`'s resolved value came from; valid only while its stamp equals the feed's `folder_updated_at` (see "Merge") |
 | `feed_fetch_state(feed_id, etag, last_modified, error_count, last_error)` | A feed's fetch state on this device — never synced |
 
 **Triggers** on the six synced tables append to `sync_outbox` (`AFTER INSERT` / `AFTER UPDATE`), guarded by
@@ -233,7 +234,7 @@ thresholds; deltas a base covers are not downloaded. That is at most about 1.25�
 ### Joining, Reset, Disconnect
 
 - **Joining** (connecting, switching provider, a generation change, a detected clone): issue a new `ks_device_id`
-  and clear the cursors, `sync_applied`, the outbox and `ks_attempt` — in the same transaction, set
+  and clear the cursors, `sync_applied`, `ks_feed_folder_raw`, the outbox and `ks_attempt` — in the same transaction, set
   `sync_capture = (enabled 1, full_pending 1)`, so every write from then on is recorded. Then receive everything and
   make the full send. The result is what the pre-delta "merge, then upload the whole database" produced.
 - **The first device** joins a new generation, uploads its full send as the first base, and only then creates the
@@ -245,8 +246,11 @@ thresholds; deltas a base covers are not downloaded. That is at most about 1.25�
   device sees the new generation and rejoins, sending its own full state — so data only another device held comes
   back, as it did when other devices merged the re-created file before.
 - **Disconnect / switch** (`clearSyncFailureState()`, under the same mutex): `sync_capture.enabled = 0` (nothing is
-  recorded while local-only), and the `ks_*` keys, the outbox, `sync_applied`, the cursors and any saved pending
-  file are cleared. `ks_search_pending` stays — it belongs to the local search index.
+  recorded while local-only), and the `ks_*` keys, the outbox, `sync_applied`, the cursors, `ks_feed_folder_raw`
+  and any saved pending file are cleared. `ks_search_pending` stays — it belongs to the local search index.
+  `ks_feed_folder_raw` goes with `sync_applied`: it describes which raw version, among the files this device has
+  merged, won each feed's folder, and the files of a new generation are compared afresh — against the value this
+  device's own full send carries (main's resolved one), as every other device's fold compares them.
 
 ### Validating Cloud Files
 
@@ -430,7 +434,15 @@ Merge SQL (`MergeSql`) key points:
   merged by dedicated statements using their own stamps: `mergeFeedFolderId` (`folder_id` / `folder_updated_at`),
   `mergeFeedSortOrder`, `mergeFeedCustomTitle`, `mergeFeedDeletedAt`. `folder_id` is resolved in four branches:
   NULL if the cloud's referenced folder isn't alive in `cloud.folders`; else the cloud's `folder_id` if that folder
-  is alive in `main`; else a same-name lookup joining `main.folders`/`cloud.folders` (both alive); else NULL. A
+  is alive in `main`; else a same-name lookup joining `main.folders`/`cloud.folders` (both alive); else NULL.
+  Because the stored `folder_id` is resolved — this device's id, not necessarily the one the winning file carried —
+  the merge never ranks the cloud's raw `folder_id` against it: on an equal `folder_updated_at` the two ids would be
+  from different id spaces, and the merge order would decide (while `ReduceSql`'s fold keeps the raw maximum). The
+  winning raw version is kept beside it in `ks_feed_folder_raw`, and the folder merge is three statements: refresh a
+  feed's raw row from main's own value when it is missing or its stamp is not main's (a local move happened since —
+  every local folder write stamps `MAX(now, previous + 1)`, so a stale row can never carry main's stamp); apply the
+  cloud version where it outranks the raw row, resolving as above; record the cloud version in the raw row under the
+  same comparison. Every merge order and every fold then picks the same raw winner. A
   feed's fetch state (`feed_fetch_state`) is device-local and never merged.
   feeds are matched by **`id`**, which is deterministically generated from `url` as **UUIDv5**
   (`IdGenerator.feedId`), so the same feed has the same id on every device.
@@ -466,10 +478,12 @@ Merge SQL (`MergeSql`) key points:
   main, else looked up by name through `cloud.tags`; a row whose tag resolves to neither is skipped.
 - `NOT EXISTS` / `EXISTS` guards skip rows colliding with main (same URL, different ID, etc.) so UNIQUE / FK
   violations do not fail the whole transaction.
-- `MergeSql.all` order: folders (by name, then by id, then the per-field statements), feeds, the four `mergeFeed*`,
+- `MergeSql.all` order: folders (by name, then by id, then the per-field statements), feeds, the folder merge's
+  three statements and the other three `mergeFeed*`,
   tags (by name, by id, per field), articles, feed_tags, global_settings. Folders precede feeds (for
   `feeds.folder_id`), and the `mergeFeed*` statements follow both.
-- The bookkeeping tables (`sync_outbox`, `ks_search_pending`, `sync_merging`, …) carry no constraints, so the
+- The bookkeeping tables (`sync_outbox`, `ks_search_pending`, `ks_feed_folder_raw`, `sync_merging`, …) carry no
+  constraints beyond their primary keys, so the
   classification below still holds that main can only already violate FOREIGN KEY constraints.
 
 `ReduceSql` folds transport files into one with the same per-field rules and tie-break, keyed by primary key only —

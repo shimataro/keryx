@@ -70,21 +70,26 @@ internal object TransportFixtures {
     fun fold(vararg inputs: Pair<File, TransportFileName>): File =
         accumulator().also { acc -> inputs.forEach { (file, name) -> TransportFiles.fold(acc.absolutePath, file.absolutePath, name) } }
 
-    /** Every synced column of every synced table (plus the coverage tables when [coverage]), ordered by key. */
-    fun dump(file: File, coverage: Boolean = false): Map<String, List<String>> = connect(file).use { conn ->
-        val tables = TransportSchema.SYNCED_TABLES_V1 + if (coverage) TransportSchema.META_TABLES.filter { it.name != "ks_meta" } else emptyList()
-        tables.associate { table ->
-            val sql = "SELECT ${table.columnNames.joinToString(", ")} FROM ${table.name} ORDER BY ${table.primaryKey.joinToString(", ")}"
-            table.name to conn.createStatement().use { st ->
-                st.executeQuery(sql).use { rs ->
-                    buildList {
-                        while (rs.next()) {
-                            add(table.columnNames.indices.joinToString("|") { "${rs.getObject(it + 1)}" })
-                        }
-                    }
+    /**
+     * Every synced column of every synced table (plus the coverage tables when [coverage]), ordered by
+     * key. With [local] (a local database only), also the merge's own state that later merges read:
+     * `ks_feed_folder_raw`, the raw folder version each feed's resolved folder came from.
+     */
+    fun dump(file: File, coverage: Boolean = false, local: Boolean = false): Map<String, List<String>> = connect(file).use { conn ->
+        fun rows(sql: String, columnCount: Int): List<String> = conn.createStatement().use { st ->
+            st.executeQuery(sql).use { rs ->
+                buildList {
+                    while (rs.next()) add((1..columnCount).joinToString("|") { "${rs.getObject(it)}" })
                 }
             }
         }
+        val tables = TransportSchema.SYNCED_TABLES_V1 + if (coverage) TransportSchema.META_TABLES.filter { it.name != "ks_meta" } else emptyList()
+        val synced = tables.associate { table ->
+            val sql = "SELECT ${table.columnNames.joinToString(", ")} FROM ${table.name} ORDER BY ${table.primaryKey.joinToString(", ")}"
+            table.name to rows(sql, table.columnNames.size)
+        }
+        if (!local) synced
+        else synced + ("ks_feed_folder_raw" to rows("SELECT feed_id, folder_updated_at, folder_id FROM ks_feed_folder_raw ORDER BY feed_id", 3))
     }
 
     /** Article ids registered in `ks_search_pending` of a local database. */

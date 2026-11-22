@@ -797,6 +797,61 @@ class SyncMergerTest {
         verifyDriver.close()
     }
 
+    /** `ks_feed_folder_raw`'s row for [feedId] in [file]: `folder_updated_at|folder_id`, or null. */
+    private fun folderRaw(file: java.io.File, feedId: String): String? =
+        java.sql.DriverManager.getConnection("jdbc:sqlite:${file.absolutePath}").use { conn ->
+            conn.prepareStatement("SELECT folder_updated_at, folder_id FROM ks_feed_folder_raw WHERE feed_id = ?").use { st ->
+                st.setString(1, feedId)
+                st.executeQuery().use { rs -> if (rs.next()) "${rs.getObject(1)}|${rs.getObject(2)}" else null }
+            }
+        }
+
+    @Test
+    fun aLocalMoveAfterAMergeInvalidatesTheRawFolderVersion() {
+        // The cloud's folder d-cloud resolves by name to the local d-local; the raw version (100, d-cloud)
+        // is kept beside it. A local move in the same millisecond stamps 101, so the raw row no longer
+        // describes the feed's folder: neither re-merging the same file nor a file carrying the stamp 101
+        // with a raw id below the local one (d-aaa < d-other) may undo the move.
+        val (cloudFile, cloudDriver, cloudDb) = fileDb()
+        cloudDb.insertFolder("d-cloud", "IT", now = 100)
+        cloudDb.insertFeed("f1", now = 100, folderId = "d-cloud") // folder_updated_at = 100
+        cloudDriver.close()
+
+        val (tieFile, tieDriver, tieDb) = fileDb()
+        tieDb.insertFolder("d-aaa", "Elsewhere", now = 100)
+        tieDb.insertFeed("f1", now = 101, folderId = "d-aaa") // folder_updated_at = 101
+        tieDriver.close()
+
+        val (localFile, localDriver, localDb) = fileDb()
+        localDb.insertFolder("d-local", "IT", now = 50)
+        localDb.insertFolder("d-other", "Other", now = 50)
+        localDb.insertFeed("f1", now = 50)
+        localDriver.close()
+
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+        reopen(localFile).let { (_, driver, db) ->
+            assertEquals("d-local", db.feedsQueries.getById("f1").executeAsOne().folder_id)
+            driver.close()
+        }
+        assertEquals("100|d-cloud", folderRaw(localFile, "f1"))
+
+        reopen(localFile).let { (_, driver, db) ->
+            db.feedsQueries.updateFolder("d-other", 100L, 100L, "f1") // stamps MAX(100, 100 + 1) = 101
+            driver.close()
+        }
+
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+        assertEquals("101|d-other", folderRaw(localFile, "f1"), "a stale raw row is refreshed from main's own value")
+        DatabaseMerger.merge(localFile.absolutePath, tieFile.absolutePath, 1L, MergeSql.all)
+
+        val (_, verifyDriver, verifyDb) = reopen(localFile)
+        val feed = verifyDb.feedsQueries.getById("f1").executeAsOne()
+        assertEquals("d-other", feed.folder_id)
+        assertEquals(101L, feed.folder_updated_at)
+        verifyDriver.close()
+        assertEquals("101|d-other", folderRaw(localFile, "f1"))
+    }
+
     @Test
     fun feedFolderRemovalPropagatesWhenCloudFolderUpdatedAtIsNewer() {
         // A removes a feed from its folder (folder_id -> NULL) with a newer folder_updated_at; B

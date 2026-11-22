@@ -67,6 +67,12 @@ CREATE TABLE ks_search_pending (
     rowid INTEGER NOT NULL PRIMARY KEY
 );
 
+CREATE TABLE ks_feed_folder_raw (
+    feed_id           TEXT NOT NULL PRIMARY KEY,
+    folder_updated_at INTEGER,
+    folder_id         TEXT
+);
+
 -- 4. Articles whose search_text still equals their raw content / summary (written before HTML
 --    stripping) get it recomputed.
 INSERT INTO ks_search_pending (rowid)

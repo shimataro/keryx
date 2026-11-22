@@ -86,7 +86,7 @@ class SyncAlgebraTest {
         val files = listOf(::fileA, ::fileB, ::fileC)
         val db = localDb(*local)
         order.forEach { merge(db, files[it]()) }
-        return dump(db)
+        return dump(db, local = true)
     }
 
     @Test
@@ -95,7 +95,7 @@ class SyncAlgebraTest {
             for (file in listOf(fileA(), fileB(), fileC())) {
                 val once = localDb(*local).also { merge(it, file) }
                 val twice = localDb(*local).also { merge(it, file); merge(it, file) }
-                assertEquals(dump(once), dump(twice))
+                assertEquals(dump(once, local = true), dump(twice, local = true))
             }
         }
     }
@@ -189,7 +189,7 @@ class SyncAlgebraTest {
         for (local in listOf(emptyArray(), seededLocal)) {
             val folded = fold(fileA() to nameA, fileB() to nameB, fileC() to nameC)
             val viaFold = localDb(*local).also { merge(it, folded) }
-            assertEquals(mergedSequentially(listOf(0, 1, 2), local), dump(viaFold))
+            assertEquals(mergedSequentially(listOf(0, 1, 2), local), dump(viaFold, local = true))
         }
     }
 
@@ -454,5 +454,53 @@ class SyncAlgebraTest {
         merge(local, high)
         assertTrue(dump(local).getValue("global_settings").single().startsWith("k|gamma|"))
         assertNotEquals(dump(local), dump(viaLowFirst))
+    }
+
+    /**
+     * Two files carry the same feed into different folders at the same `folder_updated_at`, and each
+     * file's folder resolves by name to a different local folder (`dz` "A" → `da`, `dm` "B" → `db`).
+     * The tie must be decided between the raw ids the files carry (as the fold does: `dz` > `dm`),
+     * never between a raw id and the resolved one stored locally — or the merge order would decide.
+     */
+    private fun assertFolderTieConverges(p: File, q: File, expected: String?) {
+        val names = listOf(nameA, nameB)
+        val local = arrayOf(
+            folder("da", "A", updatedAt = 50),
+            folder("db", "B", updatedAt = 50),
+            feed("f1", updatedAt = 100),
+        )
+        fun folderOf(db: File): String? = TransportFixtures.connect(db).use { conn ->
+            conn.createStatement().use { st ->
+                st.executeQuery("SELECT folder_id FROM feeds WHERE id = 'f1'").use { rs -> rs.next(); rs.getString(1) }
+            }
+        }
+        val results = listOf(
+            "P then Q" to localDb(*local).also { merge(it, p); merge(it, q) },
+            "Q then P" to localDb(*local).also { merge(it, q); merge(it, p) },
+            "fold(P, Q)" to localDb(*local).also { merge(it, fold(p to names[0], q to names[1])) },
+            "fold(Q, P)" to localDb(*local).also { merge(it, fold(q to names[1], p to names[0])) },
+        )
+        for ((label, db) in results) assertEquals(expected, folderOf(db), label)
+        val dumps = results.map { (_, db) -> dump(db, local = true) }
+        dumps.drop(1).forEach { assertEquals(dumps.first(), it) }
+    }
+
+    @Test
+    fun aFolderTieIsDecidedBetweenRawIdsWhateverTheMergeOrder() {
+        assertFolderTieConverges(
+            transportFile(nameA, folder("dz", "A", updatedAt = 50), feed("f1", folderId = "dz", folderAt = 500)),
+            transportFile(nameB, folder("dm", "B", updatedAt = 50), feed("f1", folderId = "dm", folderAt = 500)),
+            expected = "da",
+        )
+    }
+
+    @Test
+    fun aFolderTieWhoseWinnerResolvesToNoFolderConvergesToo() {
+        // dz is dead in its file, so the raw winner resolves to no folder.
+        assertFolderTieConverges(
+            transportFile(nameA, folder("dz", "A", updatedAt = 60, deletedAt = 60), feed("f1", folderId = "dz", folderAt = 500)),
+            transportFile(nameB, folder("dm", "B", updatedAt = 50), feed("f1", folderId = "dm", folderAt = 500)),
+            expected = null,
+        )
     }
 }
