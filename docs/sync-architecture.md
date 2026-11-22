@@ -18,6 +18,9 @@ Target: cloud sync (Dropbox / OneDrive / Google Drive / Nextcloud). Implementati
   arrive in does not matter) and **associative** (merging files one by one or after folding them together gives the
   same result). Duplicate files, files arriving out of order, and re-applying a file after a crash are therefore all
   harmless — the rest of this document relies on that.
+  Known exceptions, not yet closed, are recorded in [known-issues.md](known-issues.md): a tag or folder rename blocked
+  by a name another row holds, feeds sharing one URL under different ids, and folder assignments between same-name
+  folders that have different ids on different devices.
 - **Only local changes are sent.** A change that arrived through a merge is never re-sent, so changes do not echo
   back and forth between devices.
 - **No change is ever unreachable.** Every change is, at every moment, in at least one delta file or base in the
@@ -81,7 +84,8 @@ A delta or base holds the six synced tables (`feeds`, `articles`, `tags`, `feed_
 a base folds rows from several devices, and two devices can legitimately hold different ids for the same tag name.
 Each file carries `PRAGMA user_version` and:
 
-- `ks_meta(key, value)` — format, generation, writing device, creation time, kind (`delta`/`base`);
+- `ks_meta(key, value)` — `format`, `generation`, `device` (the writing device), `created_at`, `kind` (`delta`/`base`)
+  and `number` (the delta's `seq` or the base's `n`); generation, device, kind and number must match the file name;
 - `ks_vector(device, seq)` (bases only) — per device, the highest `seq` such that every delta `1..seq` is covered;
 - `ks_covered(name)` (bases only) — the delta files this base folded directly.
 
@@ -98,6 +102,7 @@ Each file carries `PRAGMA user_version` and:
 | `sync_applied(name)` | Cloud files already merged (including this device's own) |
 | `sync_cursor(device, seq)` | Per device, the highest `seq` up to which every delta has been merged |
 | `ks_search_pending(rowid)` | Articles whose `search_text` must be recomputed (see "FTS5 Handling") |
+| `ks_feed_folder_raw(feed_id, folder_updated_at, folder_id)` | Per feed, the raw folder version (as the winning file carried it) that `feeds.folder_id`'s resolved value came from; valid only while its stamp equals the feed's `folder_updated_at` (see "Merge") |
 | `feed_fetch_state(feed_id, etag, last_modified, error_count, last_error)` | A feed's fetch state on this device — never synced |
 
 **Triggers** on the six synced tables append to `sync_outbox` (`AFTER INSERT` / `AFTER UPDATE`), guarded by
@@ -105,8 +110,8 @@ Each file carries `PRAGMA user_version` and:
 records what it writes. An `UPDATE` is recorded only when a synced column actually changed (`OLD.x IS NOT NEW.x OR
 …`), so a refresh that rewrites an unchanged row records nothing. For articles:
 
-- a change to `content`, `summary`, `title`, `url`, `author`, `published_at` or `thumbnail_url` (or an insert) is
-  recorded with `heavy = 1` — the delta carries the article's body;
+- a change to `content`, `summary`, `title`, `url`, `author`, `published_at`, `thumbnail_url` or the body's stamp
+  `body_updated_at` (or an insert) is recorded with `heavy = 1` — the delta carries the article's body;
 - a change to the read, star or deletion columns alone is recorded with `heavy = 0` — the delta carries a *light*
   row, with `content` and `summary` left NULL;
 - `cached_at` is recorded only when its day (`cached_at / 86400000`) changes — a refresh bumps it on every article
@@ -173,8 +178,8 @@ only the retries of a revision-checked write (the pointer, the stub); delta and 
    `ks_search_pending` registrations, then `DELETE FROM sync_merging`. Merging and recording what was merged
    therefore commit together or not at all — a crash in between re-merges the same files next time, which the
    merge's idempotence makes harmless.
-5. After the commit: recompute `search_text` for `ks_search_pending` ("FTS5 Handling"), `ftsManager.indexMissing()`,
-   then `driver.notifyListeners(...)` for every synced table — the merge wrote through its own connection, so
+5. After the commit: `ftsManager.indexMissing()`, which first recomputes `search_text` for `ks_search_pending`
+   ("FTS5 Handling"), then `driver.notifyListeners(...)` for every synced table — the merge wrote through its own connection, so
    SQLDelight's flows must be re-triggered for the UI to reflect it.
 6. Names no longer listed are dropped from `sync_applied`; if one ever reappears, applying it again is harmless.
 
@@ -230,7 +235,7 @@ thresholds; deltas a base covers are not downloaded. That is at most about 1.25�
 ### Joining, Reset, Disconnect
 
 - **Joining** (connecting, switching provider, a generation change, a detected clone): issue a new `ks_device_id`
-  and clear the cursors, `sync_applied`, the outbox and `ks_attempt` — in the same transaction, set
+  and clear the cursors, `sync_applied`, `ks_feed_folder_raw`, the outbox and `ks_attempt` — in the same transaction, set
   `sync_capture = (enabled 1, full_pending 1)`, so every write from then on is recorded. Then receive everything and
   make the full send. The result is what the pre-delta "merge, then upload the whole database" produced.
 - **The first device** joins a new generation, uploads its full send as the first base, and only then creates the
@@ -242,8 +247,11 @@ thresholds; deltas a base covers are not downloaded. That is at most about 1.25�
   device sees the new generation and rejoins, sending its own full state — so data only another device held comes
   back, as it did when other devices merged the re-created file before.
 - **Disconnect / switch** (`clearSyncFailureState()`, under the same mutex): `sync_capture.enabled = 0` (nothing is
-  recorded while local-only), and the `ks_*` keys, the outbox, `sync_applied`, the cursors and any saved pending
-  file are cleared. `ks_search_pending` stays — it belongs to the local search index.
+  recorded while local-only), and the `ks_*` keys, the outbox, `sync_applied`, the cursors, `ks_feed_folder_raw`
+  and any saved pending file are cleared. `ks_search_pending` stays — it belongs to the local search index.
+  `ks_feed_folder_raw` goes with `sync_applied`: it describes which raw version, among the files this device has
+  merged, won each feed's folder, and the files of a new generation are compared afresh — against the value this
+  device's own full send carries (main's resolved one), as every other device's fold compares them.
 
 ### Validating Cloud Files
 
@@ -257,7 +265,7 @@ temporary file.
 | 2 | Download completes | Transient; retried next sync |
 | 3 | gzip decompresses (capped at `MAX_SYNC_DB_SIZE_BYTES`), the SQLite header, the hash in the name | Hash mismatch → downloaded once more in the same sync; still mismatched → corrupt |
 | 4 | `user_version` | Newer than this build → `SchemaVersionException` |
-| 5 | Expected tables and columns for that version (`TransportSchema`; `MergeSchema` for a pre-delta database) | Missing → corrupt. No expectation registered for the version → undetermined, treated as transient (never answered with a reset) |
+| 5 | Expected tables and columns for that version (`TransportSchema`; `MergeSchema` for a pre-delta database). A transport file's expected tables must have exactly the expected columns: a writer that adds a column bumps the transport version, so an extra column at the same version is a broken file, which a fold would otherwise drop without a word. A pre-delta database, a full local database with device-local columns of its own (`search_text`, say), is checked for missing columns only. Tables the expectation does not name are allowed | Missing (or, in a transport file, extra) → corrupt. No expectation registered for the version → undetermined, treated as transient (never answered with a reset) |
 | 6 | An older version is migrated up (`TransportSchema` migrations; `KeryxDatabase.Schema.migrate` for a pre-delta database) | An SQLite error while migrating → corrupt |
 | 7 | Types and value ranges, by a query generated from the expected schema: ids are non-empty text, stamps are integer or NULL, booleans are 0 or 1, NOT NULL columns hold no NULL | Any violating row → corrupt |
 | 8 | `ks_meta` (generation, kind, device, number) matches the file name; a base's `ks_vector`/`ks_covered` types | Corrupt |
@@ -400,7 +408,16 @@ Merge SQL (`MergeSql`) key points:
 - **Explicitly specify columns**, and only columns present both in the transport schema and in a pre-delta database
   migrated to the current schema, so one statement set serves deltas, bases and the migration.
 - **A tie is decided by value, in every statement.** When both sides carry the same stamp, the group whose
-  normalized values compare greater wins. The pre-delta rule ("a tie goes to the cloud") converged only because the
+  normalized values compare greater wins. Precisely (`SyncLww`), each version of a field group gets the rank row
+  value `(stamp IS NOT NULL, COALESCE(stamp, 0), c1 IS NOT NULL, COALESCE(c1, 0), c2 IS NOT NULL, COALESCE(c2, 0),
+  …)`, where `c1, c2, …` are every column of the group — its stamp column(s), then its values — and the two ranks are
+  compared with SQLite's row-value `>` (BINARY collation). A version replaces the other only when its rank is
+  strictly greater. So a stamped version beats an unstamped one (NULL means "no such event"), the greater stamp wins,
+  and at an equal stamp the values decide in column order: NULL lowest, then SQLite's own ordering (integers
+  numerically and below text, text byte by byte). Every element is non-NULL, so the comparison is never NULL, and
+  identical versions never replace each other. A group with two stamps (an article's retention group, below) ranks
+  by `any stamp IS NOT NULL, MAX(COALESCE(s1, 0), COALESCE(s2, 0))` in place of the first two elements; an article's
+  body group puts two elements in front of all of these (below). The pre-delta rule ("a tie goes to the cloud") converged only because the
   cloud held a single file; with deltas, devices merge files in different orders, and a side-based rule would let
   that order decide. A device's own write always stamps above what its row already holds (see "Design Philosophy"
   in [db-schema.md](db-schema.md)), so a tie only arises between writes made independently on two devices in the
@@ -418,7 +435,15 @@ Merge SQL (`MergeSql`) key points:
   merged by dedicated statements using their own stamps: `mergeFeedFolderId` (`folder_id` / `folder_updated_at`),
   `mergeFeedSortOrder`, `mergeFeedCustomTitle`, `mergeFeedDeletedAt`. `folder_id` is resolved in four branches:
   NULL if the cloud's referenced folder isn't alive in `cloud.folders`; else the cloud's `folder_id` if that folder
-  is alive in `main`; else a same-name lookup joining `main.folders`/`cloud.folders` (both alive); else NULL. A
+  is alive in `main`; else a same-name lookup joining `main.folders`/`cloud.folders` (both alive); else NULL.
+  Because the stored `folder_id` is resolved — this device's id, not necessarily the one the winning file carried —
+  the merge never ranks the cloud's raw `folder_id` against it: on an equal `folder_updated_at` the two ids would be
+  from different id spaces, and the merge order would decide (while `ReduceSql`'s fold keeps the raw maximum). The
+  winning raw version is kept beside it in `ks_feed_folder_raw`, and the folder merge is three statements: refresh a
+  feed's raw row from main's own value when it is missing or its stamp is not main's (a local move happened since —
+  every local folder write stamps `MAX(now, previous + 1)`, so a stale row can never carry main's stamp); apply the
+  cloud version where it outranks the raw row, resolving as above; record the cloud version in the raw row under the
+  same comparison. Every merge order and every fold then picks the same raw winner. A
   feed's fetch state (`feed_fetch_state`) is device-local and never merged.
   feeds are matched by **`id`**, which is deterministically generated from `url` as **UUIDv5**
   (`IdGenerator.feedId`), so the same feed has the same id on every device.
@@ -426,20 +451,40 @@ Merge SQL (`MergeSql`) key points:
   tags), sort order (`sort_order_updated_at`) each by its own stamp; `updated_at` stamps creation, deletion and
   reactivation. Two devices changing different fields of the same tag both keep their change. Rows are matched by
   id, else by name (two devices that created the same name independently, with different ids, converge on one).
-- articles: read (`read_at`) / star (`starred_at`) / deletion (`deleted_updated_at`) are last-write-wins; `content`
-  is OR-merged (`COALESCE(c.content, l.content)`); `summary` is dropped to NULL once either side has `content`;
-  `cached_at` takes the newer value. A star newer than the deletion revives the article. A light row (NULL
-  `content`/`summary`) therefore never erases a body. `search_text` is not merged: an article whose body the merge
+- articles, three groups:
+  - **Body** — `content`, `summary`, `title`, `url`, `author`, `published_at`, `thumbnail_url` (and `feed_id` /
+    `guid`, which the local merge never rewrites on an existing row), stamped by `body_updated_at`. A version with
+    `content` outranks one without, and one with any body (`content` or `summary`) outranks one with none, before the
+    stamp is compared; then `body_updated_at`, then the values. So `content` is effectively OR-merged, a summary
+    never replaces content, a light row (NULL `content`/`summary`) never erases a body, and the title, URL, author
+    and the rest always come from the same version as the body. `summary` is dropped to NULL once the article has
+    `content`. `body_updated_at` moves only when a body column changes (a refresh that rewrites an unchanged article
+    leaves it), never on a read, star or deletion — so a device that merely opened an article cannot make its older
+    body beat another device's newer one.
+  - **Read** — `is_read` by `read_at`.
+  - **Retention** — `is_starred`, `starred_at`, `deleted_at` and `deleted_updated_at` as one group, ranked by
+    `MAX(COALESCE(starred_at, 0), COALESCE(deleted_updated_at, 0))`: **the newer operation wins**, and the whole group
+    comes from the version that holds it. A star clears the deletion locally (`updateStarStatus`), and both a star
+    and a cleanup stamp above both stamps of their row, so the newest event always wins its group. (The earlier rule
+    — separate star and deletion groups, plus "a star newer than the deletion revives the article" — was not
+    commutative: a deletion, a later star and a still later unstar, merged in different orders, gave different
+    results.) As a consequence, an article revived by a star on another device and then unstarred stays visible
+    until the next cache cleanup deletes it again.
+
+  `cached_at` and `updated_at` take the newer value (`updated_at` is the row's generic stamp, no group's key), and
+  `created_at` the earlier. `search_text` is not merged: an article whose body the merge
   filled in or changed is registered in `ks_search_pending`, and a newly inserted article starts with `''` (see
   "FTS5 Handling"). Articles are matched by **`id`** (UUIDv5 of `(feed_id, guid)`, `IdGenerator.articleId`).
 - feed_tags: last-write-wins. Imported only if the feed exists in main. The tag is used as-is if it is alive in
   main, else looked up by name through `cloud.tags`; a row whose tag resolves to neither is skipped.
 - `NOT EXISTS` / `EXISTS` guards skip rows colliding with main (same URL, different ID, etc.) so UNIQUE / FK
   violations do not fail the whole transaction.
-- `MergeSql.all` order: folders (by name, then by id, then the per-field statements), feeds, the four `mergeFeed*`,
+- `MergeSql.all` order: folders (by name, then by id, then the per-field statements), feeds, the folder merge's
+  three statements and the other three `mergeFeed*`,
   tags (by name, by id, per field), articles, feed_tags, global_settings. Folders precede feeds (for
   `feeds.folder_id`), and the `mergeFeed*` statements follow both.
-- The bookkeeping tables (`sync_outbox`, `ks_search_pending`, `sync_merging`, …) carry no constraints, so the
+- The bookkeeping tables (`sync_outbox`, `ks_search_pending`, `ks_feed_folder_raw`, `sync_merging`, …) carry no
+  constraints beyond their primary keys, so the
   classification below still holds that main can only already violate FOREIGN KEY constraints.
 
 `ReduceSql` folds transport files into one with the same per-field rules and tie-break, keyed by primary key only —
@@ -474,7 +519,7 @@ Two versions are in play:
 
 - **The local schema** (`PRAGMA user_version` of `keryx.db`, currently 3). Version 3 (`2.sqm`) adds the sync
   bookkeeping tables and triggers, moves `feeds`' fetch state into `feed_fetch_state`, adds the tag/folder per-field
-  stamps (initialized from `updated_at`), and registers every article whose `search_text` still equals its raw
+  stamps and `articles.body_updated_at` (all initialized from `updated_at`), and registers every article whose `search_text` still equals its raw
   `content`/`summary` (rows written before HTML stripping) in `ks_search_pending`.
 - **The transport schema** (`user_version` of each delta/base). A file older than this build is migrated up with
   `TransportSchema`'s migrations before use; a newer one raises `SchemaVersionException`, which stops the sync
@@ -482,7 +527,8 @@ Two versions are in play:
 
 Adding a `.sqm` must update, together, the transport schema (DDL, expectations, migration), `MergeSchema`, and the
 column lists the capture triggers compare; a test fails when they disagree. Unknown columns are never ignored: an
-older device re-sending a row without them would overwrite the newer columns with NULL.
+older device re-sending a row without them would overwrite the newer columns with NULL. Likewise, a transport file carrying a column its version does not define is rejected as corrupt (check 5 of
+"Validating Cloud Files"), never merged or folded with the column dropped.
 
 `DatabaseMerger.validateSchema` / the transport validation return a **nullable** verdict: `null` when no expectation
 is registered for a version or the inspection itself fails. `null` is never treated as "incompatible" — it must not
@@ -499,11 +545,17 @@ Index maintenance is two-tier:
 - **Hot path (after feed refresh / sync merge)**: `FtsManager.indexMissing()` incrementally indexes only unindexed new articles (O(new rows), does not wipe index). Full rebuild (`'rebuild'`) is O(total indexed text) and heavy, and could reject running searches, so it is not used on hot paths. Indexes of existing articles with updated body text remain stale until the next rebuild (acceptable; they still match old tokens so searches do not regress to zero results).
 - **`search_text` after a merge.** `search_text` is not synced. The merge registers every article whose body it
   filled in or changed in `ks_search_pending` (in the merge transaction), and a newly inserted article starts with
-  `search_text = ''`. After the commit and **before** `indexMissing()`, `SyncRepository` recomputes `search_text`
-  with `HtmlText.toPlainText` in batches, each batch updating the rows and removing them from `ks_search_pending` in
-  one transaction; a row whose conversion throws gets `''` (and a log entry) rather than blocking the rest. The
-  pending table is committed state, so an interrupted pass resumes at the next sync or launch. `indexMissing()`
-  skips rows still in `ks_search_pending`, so a new article is indexed with its computed text, never with `''`. An
+  `search_text = ''`. `indexMissing()` itself recomputes `search_text` first — under its writer mutex, before it
+  indexes anything — so every caller (after a merge, a feed refresh, a subscription or an import, and at startup)
+  catches up. It goes through `ks_search_pending` once, in rowid order, in batches: a batch is read outside any
+  transaction, converted with `HtmlText.toPlainText`, then written in one transaction whose statements are all
+  writes, each row's update conditional on its `content` and `summary` still being what was read, and the row
+  removed from `ks_search_pending` only when that update matched. A body another writer changed in between stays
+  pending for the next call, so text computed from an older body is never stored. A row whose conversion throws gets
+  `''` (and a log entry) rather than blocking the rest; a body column too long to read in one cursor row (Android's
+  `CursorWindow`) is read in chunks. The pending table is committed state, so an interrupted pass resumes at the next
+  `indexMissing()`. `indexMissing()` skips rows still in `ks_search_pending`, so a new article is indexed with its
+  computed text, never with `''`. An
   article that was already indexed keeps its old tokens until the daily rebuild — the same accepted staleness as a
   body changed by a refresh.
 - **Healing full rebuild (`rebuildIndex()` = `'rebuild'`)**:
@@ -511,15 +563,25 @@ Index maintenance is two-tier:
   desktop and Android, gated by `local_settings.lastFtsRebuiltAt` 24h gate + `ActivityCenter` idle — no sync, no feed
   refresh, and no refresh-then-sync cycle (`refreshCycleRunning`, which also covers the gap between a cycle's refresh
   and its sync) in flight). Rebuilds stale
-  existing rows (body text updated since incremental indexing). `'rebuild'` is a single atomic statement (readers
-  see only before or after) + `busy_timeout` wait, so running searches do not regress to zero results either.
+  existing rows (body text updated since incremental indexing). `'rebuild'` indexes every article's current
+  `search_text`, so `rebuildIndex()` first recomputes the rows in `ks_search_pending`, as `indexMissing()` does —
+  otherwise an article left pending with `''` would be indexed with it, and `indexMissing()` would then recompute it
+  but skip it as already indexed. A row still pending after that (its body changed meanwhile) is taken back out of the
+  index (an external-content `'delete'`) in the same transaction as `'rebuild'`, where its values are exactly what
+  `'rebuild'` just indexed, and the next `indexMissing()` recomputes and indexes it. The transaction is atomic and
+  starts with a write (readers see only before or after), and searches wait on `busy_timeout`, so running searches
+  do not regress to zero results either — as long as the rebuild releases its write lock within `busy_timeout`. The
+  database runs in rollback-journal mode, so a search that waits longer fails with `SQLITE_BUSY`, and
+  `ArticleRepository.search` then returns no results (its documented best-effort fallback, see
+  [error-design.md](error-design.md)).
 
 The two index writers are **mutually exclusive**: `FtsManager` serializes `indexMissing()` and
 `rebuildIndex()` behind an internal mutex (both are therefore `suspend`). The daily pass's idle gate is a
 lock-free `ActivityCenter` check, so a refresh starting just after it passes would otherwise overlap the
 rebuild — always wasted work (a rebuild subsumes an incremental insert), and on a corpus whose rebuild
 outlasts `busy_timeout`, a raw `SQLiteException` no caller catches. Searches are deliberately **not**
-serialized: they still rely on `'rebuild'` being a single atomic statement plus the `busy_timeout` wait.
+serialized: they still rely on the rebuild being one atomic transaction plus the `busy_timeout` wait, which holds
+only while the rebuild finishes within `busy_timeout` (see above).
 
 On desktop startup, `FtsManager.ensureIndexed()` (initial creation + unindexed row incremental insert) is called
 from a `runBlocking` in `main.kt` — the window must not open on an absent index. The writer mutex is
@@ -930,7 +992,7 @@ Nextcloud is not reached through OAuth and has no app-only folder; everything ab
 
 Startup cache cleanup **soft-deletes** articles past the retention period (stamps `deleted_at` / `deleted_updated_at`)
 rather than physically removing them. The tombstones travel as light rows and propagate via the merge
-(last-write-wins on `deleted_updated_at`), so a device that missed the deletion converges instead of re-adding the
+(the retention group's last-write-wins), so a device that missed the deletion converges instead of re-adding the
 article. Tombstones are not physically reclaimed yet (future work).
 
 Cleanup decides by `cached_at`, the last time an article was seen in its feed. The merge still keeps the newest
@@ -969,7 +1031,7 @@ device's upload unnoticed" in [known-issues.md](known-issues.md).
 
 A pre-delta database holds columns the current schema no longer syncs: migrating it to schema 3 moves its fetch
 state into `feed_fetch_state` inside the temporary file only (never into the local database), initializes the
-per-field stamps from `updated_at`, and its articles' `search_text` is recomputed as for any merge.
+per-field stamps and `articles.body_updated_at` from `updated_at`, and its articles' `search_text` is recomputed as for any merge.
 
 Builds older than compression (reading only `/keryx.db`) are unaffected by the stub and keep the one-way divergence
 documented for them; that fallback, the legacy watch and this migration are all removed at v1.0.0.

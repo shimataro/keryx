@@ -146,8 +146,8 @@ class DatabaseMergerTest {
     }
 
     /**
-     * The real merge statements against a cloud DB whose own rows break this app's schema (two feeds
-     * sharing a url, which only the cloud file's laxer feeds table allowed) are still classified while
+     * The real merge statements against a cloud DB whose own rows break this app's schema (a feed with
+     * a NULL title, which only the cloud file's laxer feeds table allowed) are still classified while
      * main holds an unrelated FOREIGN KEY violation.
      */
     @Test
@@ -155,13 +155,7 @@ class DatabaseMergerTest {
         val cloudFile = soundDbFile { driver ->
             driver.execute(null, "DROP TABLE feeds", 0)
             driver.execute(null, LAX_FEEDS_TABLE, 0)
-            for (id in listOf("f-dup-1", "f-dup-2")) {
-                driver.execute(
-                    null,
-                    "INSERT INTO feeds (id, url, title, updated_at, created_at) VALUES ('$id', 'https://dup.example/feed', '$id', 0, 0)",
-                    0,
-                )
-            }
+            driver.execute(null, "INSERT INTO feeds (id, url, title, updated_at, created_at) VALUES ('f-null-title', 'https://lax.example/feed', NULL, 0, 0)", 0)
         }
         val localFile = soundDbFile { driver -> insertOrphanArticle(driver) }
 
@@ -418,7 +412,12 @@ class DatabaseMergerTest {
     /** A cloud file corrupt past its header is still classified: its own quick_check fails. */
     @Test
     fun corruptCloudFileIsCloudDataIncompatible() {
-        val cloudFile = soundDbFile { driver -> insertFeedRow(driver) }
+        // The article puts a row on the corrupted page (the articles table's root): an empty table
+        // whose index is intact is never read, so its corruption would go unnoticed.
+        val cloudFile = soundDbFile { driver ->
+            insertFeedRow(driver)
+            insertOrphanArticle(driver)
+        }
         corruptPastFirstPage(cloudFile, untilByte = 2 * ASSUMED_PAGE_SIZE)
         val localFile = soundDbFile()
 
@@ -555,10 +554,10 @@ class DatabaseMergerTest {
             "INSERT INTO main.articles (id, feed_id, guid, url, title, cached_at, updated_at, created_at) " +
                 "SELECT id, feed_id, guid, url, title, cached_at, updated_at, created_at FROM cloud.articles"
 
-        /** The app's feeds table without its UNIQUE(url), so a cloud file can hold a duplicate url. */
+        /** The app's feeds table without its UNIQUE(url) and with a nullable title, so a cloud file can hold rows the app's schema forbids. */
         const val LAX_FEEDS_TABLE =
             "CREATE TABLE feeds (id TEXT NOT NULL PRIMARY KEY, url TEXT NOT NULL, site_url TEXT, " +
-                "title TEXT NOT NULL, description TEXT, favicon_url TEXT, custom_title TEXT, folder_id TEXT, " +
+                "title TEXT, description TEXT, favicon_url TEXT, custom_title TEXT, folder_id TEXT, " +
                 "deleted_at INTEGER, updated_at INTEGER NOT NULL, created_at INTEGER NOT NULL, " +
                 "sort_order INTEGER NOT NULL DEFAULT 0, folder_updated_at INTEGER, " +
                 "sort_order_updated_at INTEGER, custom_title_updated_at INTEGER, deleted_updated_at INTEGER)"

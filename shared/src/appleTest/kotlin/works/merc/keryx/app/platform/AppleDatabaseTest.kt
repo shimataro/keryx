@@ -18,6 +18,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -69,6 +70,33 @@ class AppleDatabaseTest {
 
         assertFailsWith<DatabaseTooNewException> { DatabaseDriverFactory().createDriver(dir, "newer.db") }
         assertEquals(99, RawSqliteConnection.userVersionOf(path("newer.db")))
+    }
+
+    @Test
+    fun textWithAnEmbeddedNulIsReadWholeLikeTheJvmDrivers() {
+        val expected = "abc\u0000def"
+        RawSqliteConnection.open(path("nul.db"), create = true).use { db ->
+            val sql = "SELECT 'abc' || char(0) || 'def' AS v"
+            assertEquals(listOf(listOf<String?>(expected)), db.queryRowsStrict(sql))
+            assertEquals(7, db.queryRowsStrict(sql).single().single()!!.length)
+            assertEquals(listOf(expected), db.queryFirstColumnStrict(sql))
+            assertEquals(listOf(expected), db.queryColumn(sql, "v"))
+        }
+    }
+
+    @Test
+    fun multibyteTextRoundTripsAndNullStaysNull() {
+        val text = "日本語🙂"
+        RawSqliteConnection.open(path("text.db"), create = true).use { db ->
+            val sql = "SELECT '$text' AS v, NULL AS n, '' AS e"
+            assertEquals(listOf(listOf(text, null, "")), db.queryRowsStrict(sql))
+            assertEquals(listOf(text), db.queryFirstColumnStrict(sql))
+            assertEquals(listOf(text), db.queryColumn(sql, "v"))
+            // queryFirstColumnStrict reads NULL as "", and queryColumn skips it.
+            assertEquals(listOf(""), db.queryFirstColumnStrict("SELECT NULL"))
+            assertEquals(emptyList(), db.queryColumn("SELECT NULL AS n", "n"))
+            assertNull(db.queryRowsStrict("SELECT NULL").single().single())
+        }
     }
 
     @Test
@@ -155,6 +183,7 @@ class AppleDatabaseTest {
             listOf("name_updated_at", "sort_order_updated_at").forEach { db.exec("ALTER TABLE folders DROP COLUMN $it") }
             db.exec("ALTER TABLE articles DROP COLUMN deleted_at")
             db.exec("ALTER TABLE articles DROP COLUMN deleted_updated_at")
+            db.exec("ALTER TABLE articles DROP COLUMN body_updated_at")
             db.exec("PRAGMA user_version = 1")
         }
         assertEquals(1, RawSqliteConnection.userVersionOf(path(name)))
@@ -458,13 +487,11 @@ class AppleDatabaseTest {
             seedCloud = { db ->
                 db.exec("DROP TABLE feeds")
                 db.exec(LAX_FEEDS_TABLE)
-                for (id in listOf("f-dup-1", "f-dup-2")) {
-                    db.exec("INSERT INTO feeds (id, url, title, updated_at, created_at) VALUES ('$id', 'https://dup.example/feed', '$id', 0, 0)")
-                }
+                db.exec("INSERT INTO feeds (id, url, title, updated_at, created_at) VALUES ('f-null-title', 'https://lax.example/feed', NULL, 0, 0)")
             },
         )
 
-        // Two cloud feeds share a url, which only the cloud file's laxer feeds table allowed.
+        // A cloud feed has a NULL title, which only the cloud file's laxer feeds table allowed.
         assertFailsWith<works.merc.keryx.app.core.CloudDataIncompatibleException> {
             DatabaseMerger.merge(path("main.db"), path("cloud.db"), KeryxDatabase.Schema.version, MergeSql.all)
         }
@@ -496,10 +523,10 @@ class AppleDatabaseTest {
         /** Re-assigning the FK column makes SQLite check the (missing) parent of the orphan main holds. */
         const val ORPHAN_TOUCHING_UPDATE = "UPDATE main.articles SET feed_id = feed_id"
 
-        /** The app's feeds table without its UNIQUE(url), so a cloud file can hold a duplicate url. */
+        /** The app's feeds table without its UNIQUE(url) and with a nullable title, so a cloud file can hold rows the app's schema forbids. */
         const val LAX_FEEDS_TABLE =
             "CREATE TABLE feeds (id TEXT NOT NULL PRIMARY KEY, url TEXT NOT NULL, site_url TEXT, " +
-                "title TEXT NOT NULL, description TEXT, favicon_url TEXT, custom_title TEXT, folder_id TEXT, " +
+                "title TEXT, description TEXT, favicon_url TEXT, custom_title TEXT, folder_id TEXT, " +
                 "deleted_at INTEGER, updated_at INTEGER NOT NULL, created_at INTEGER NOT NULL, " +
                 "sort_order INTEGER NOT NULL DEFAULT 0, folder_updated_at INTEGER, " +
                 "sort_order_updated_at INTEGER, custom_title_updated_at INTEGER, deleted_updated_at INTEGER)"

@@ -154,8 +154,10 @@ class SyncCaptureTriggerTest {
         exec("UPDATE articles SET content = 'new body' WHERE id = 'a1'")
         exec("UPDATE articles SET title = 'New title', is_read = 0, read_at = 8 WHERE id = 'a1'")
         exec("UPDATE articles SET thumbnail_url = 'https://img' WHERE id = 'a1'")
+        // The body's stamp is part of the body group, so it travels with the body.
+        exec("UPDATE articles SET body_updated_at = 9 WHERE id = 'a1'")
 
-        assertEquals(listOf(0L, 0L, 0L, 1L, 1L, 1L), outbox().map { it.heavy })
+        assertEquals(listOf(0L, 0L, 0L, 1L, 1L, 1L, 1L), outbox().map { it.heavy })
     }
 
     @Test

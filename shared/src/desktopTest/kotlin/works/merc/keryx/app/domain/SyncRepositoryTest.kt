@@ -1,5 +1,6 @@
 package works.merc.keryx.app.domain
 
+import app.cash.sqldelight.db.QueryResult
 import app.cash.sqldelight.db.SqlDriver
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -14,6 +15,7 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.runBlocking
 import works.merc.keryx.app.core.AppNotificationAction
+import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.CLOUD_DB_GZ_PATH
 import works.merc.keryx.app.core.CLOUD_DB_PATH
@@ -38,12 +40,14 @@ import works.merc.keryx.app.data.cloud.CloudFileEntry
 import works.merc.keryx.app.data.cloud.CloudFileMeta
 import works.merc.keryx.app.data.cloud.CloudStorage
 import works.merc.keryx.app.data.local.FtsManager
+import works.merc.keryx.app.data.local.FtsSearch
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.platform.ExternalAppLaunch
 import works.merc.keryx.app.platform.FakeNetworkConditionMonitor
 import works.merc.keryx.app.platform.Gzip
 import works.merc.keryx.app.fileDb
 import works.merc.keryx.app.insertFeed
+import works.merc.keryx.app.insertFolder
 import java.io.File
 import java.nio.file.Files
 import java.sql.DriverManager
@@ -359,7 +363,7 @@ class SyncRepositoryTest {
                         read_at INTEGER, is_starred INTEGER NOT NULL DEFAULT 0, starred_at INTEGER,
                         cached_at INTEGER NOT NULL, search_text TEXT NOT NULL DEFAULT '',
                         updated_at INTEGER NOT NULL, created_at INTEGER NOT NULL,
-                        deleted_at INTEGER, deleted_updated_at INTEGER,
+                        deleted_at INTEGER, deleted_updated_at INTEGER, body_updated_at INTEGER,
                         UNIQUE (feed_id, guid)
                     )
                     """.trimIndent(),
@@ -383,7 +387,7 @@ class SyncRepositoryTest {
         return bytes
     }
 
-    /** Two cloud `feeds` rows sharing a `url` — invalid only because the cloud DB's own `feeds`
+    /** Two cloud `feeds` rows sharing a `url` — possible only because the cloud DB's own `feeds`
      *  table (unlike this app's) carries no `UNIQUE(url)`, so both rows coexist there. */
     private fun cloudDbWithDuplicateFeedUrls(): ByteArray = cloudDbWithRelaxedFeedsSchema(
         feedsTableSql = """
@@ -516,6 +520,38 @@ class SyncRepositoryTest {
 
         assertEquals(downloadsBefore + 1, cloud.downloadCount)
         assertEquals(uploadsBefore + 1, cloud.uploadCount)
+    }
+
+    @Test
+    fun clearSyncFailureStateDropsTheRawFolderVersionsOfTheOldConnection() = runTest {
+        // A raw folder version recorded from the old provider's files ("dz") ranks above the new
+        // provider's equal-stamped version ("dm"), so carrying it over would reject a folder move
+        // that reseeding from the feed's own folder ("da") accepts.
+        localDb.insertFolder("da", "A")
+        localDb.insertFolder("dm", "B")
+        localDb.insertFeed("f1", folderId = "da")
+        localDriver.execute(null, "UPDATE feeds SET folder_updated_at = 500 WHERE id = 'f1';", 0)
+        localDriver.execute(null, "INSERT INTO ks_feed_folder_raw (feed_id, folder_updated_at, folder_id) VALUES ('f1', 500, 'dz');", 0)
+
+        val (file, driver, db) = fileDb()
+        db.insertFolder("dm", "B")
+        db.insertFeed("f1", folderId = "dm")
+        driver.execute(null, "UPDATE feeds SET folder_updated_at = 500 WHERE id = 'f1';", 0)
+        driver.close()
+        val cloud = FakeCloudStorage()
+        cloud.put(CLOUD_DB_GZ_PATH, gzipOf(file.readBytes()), "r1")
+        file.delete()
+        val repo = newRepo(cloud)
+
+        repo.clearSyncFailureState()
+        val rawRows = localDriver.executeQuery(null, "SELECT COUNT(*) FROM ks_feed_folder_raw;", { c ->
+            c.next()
+            QueryResult.Value(c.getLong(0))
+        }, 0).value
+        assertEquals(0L, rawRows)
+        assertIs<Result.Ok<Unit>>(repo.sync())
+
+        assertEquals("dm", localDb.feedsQueries.getById("f1").executeAsOne().folder_id)
     }
 
     @Test
@@ -865,6 +901,36 @@ class SyncRepositoryTest {
         }
     }
 
+    /**
+     * `search_text` is never synced: a merged article starts with `''` and is listed in
+     * `ks_search_pending`, and the post-merge `indexMissing()` must recompute it before indexing —
+     * otherwise a term found only in the article's body is unsearchable until the daily rebuild.
+     */
+    @Test
+    fun aMergedArticleIsSearchableByATermOnlyInItsBody() = runTest {
+        val (cloudFile, cloudDriver, cloudDb) = fileDb()
+        cloudDb.insertFeed("f1", now = 0)
+        cloudDb.articlesQueries.insert(
+            id = "a-cloud", feed_id = "f1", guid = "a-cloud", url = "https://article/a-cloud", title = "Plain title",
+            summary = null, content = "<p>Only the body says <b>quintessentially</b></p>", author = null,
+            published_at = null, thumbnail_url = null, is_read = 0, read_at = null, is_starred = 0,
+            starred_at = null, cached_at = 0L, search_text = "stale text from the other device",
+            updated_at = 0L, created_at = 0L,
+        )
+        cloudDriver.close()
+        val cloudBytes = cloudFile.readBytes()
+        cloudFile.delete()
+        val cloud = FakeCloudStorage()
+        cloud.put(CLOUD_DB_GZ_PATH, gzipOf(cloudBytes), "r1")
+        val repo = newRepo(cloud)
+
+        assertIs<Result.Ok<Unit>>(repo.sync())
+
+        val hits = FtsSearch(localDriver).search("quintessentially", ArticleFilter.All).map { it.id }
+        assertEquals(listOf("a-cloud"), hits)
+        assertTrue(localDb.sync_bookkeepingQueries.searchPendingAll().executeAsList().isEmpty())
+    }
+
     @Test
     fun mergeNotifiesQueryListenersSoUiRefreshesWithoutRestart() = runTest {
         // The merge writes through DatabaseMerger's own JDBC connection (bypassing SQLDelight), so
@@ -1036,24 +1102,21 @@ class SyncRepositoryTest {
     }
 
     @Test
-    fun duplicateUrlsInCloudFeedsIsReportedAsIncompatible() = runTest {
-        // Two cloud feeds rows share a url — only possible because the cloud DB's own feeds table
-        // (unlike main's) has no UNIQUE(url). Merging both into main's UNIQUE(url) column must be
-        // classified as incompatible cloud data, not a transient/app-side failure.
+    fun duplicateUrlsInCloudFeedsMergeOnlyTheirWinner() = runTest {
+        // Two cloud feeds rows share a url — possible because the cloud DB's own feeds table (unlike
+        // main's) has no UNIQUE(url), as in a folded transport file. The merge considers only the
+        // winner among them (greatest updated_at, then greatest id), so it never hits main's
+        // UNIQUE(url) and the sync succeeds.
         val cloud = FakeCloudStorage()
         cloud.put(CLOUD_DB_GZ_PATH, gzipOf(cloudDbWithDuplicateFeedUrls()), "r1")
         val repo = newRepo(cloud)
 
         val result = repo.sync()
 
-        assertIs<Result.Err>(result)
-        assertIs<CloudDataIncompatibleException>(result.exception)
-        assertEquals(0, cloud.uploadCount)
-        assertFalse(tempCloudDbFile().exists())
-        assertFalse(tempSnapshotFile().exists())
-        val notes = notificationCenter.items.value
-        assertEquals(1, notes.size)
-        assertEquals(AppNotificationAction.ResetCloudData, notes.first().action)
+        assertIs<Result.Ok<Unit>>(result)
+        assertNotNull(localDb.feedsQueries.getById("f-dup-2").executeAsOneOrNull())
+        assertNull(localDb.feedsQueries.getById("f-dup-1").executeAsOneOrNull())
+        assertTrue(notificationCenter.items.value.isEmpty())
     }
 
     @Test

@@ -28,6 +28,11 @@ ALTER TABLE folders ADD COLUMN name_updated_at INTEGER;
 ALTER TABLE folders ADD COLUMN sort_order_updated_at INTEGER;
 UPDATE folders SET name_updated_at = updated_at, sort_order_updated_at = updated_at;
 
+-- 2b. The article body's own last-write-wins stamp, initialized from updated_at (the body group's
+--     stamp before version 3; from here on only a body change moves it, never a read/star/deletion).
+ALTER TABLE articles ADD COLUMN body_updated_at INTEGER;
+UPDATE articles SET body_updated_at = updated_at;
+
 -- 3. Sync bookkeeping tables (sync_bookkeeping.sq).
 CREATE TABLE sync_outbox (
     seq   INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -60,6 +65,12 @@ CREATE TABLE sync_cursor (
 
 CREATE TABLE ks_search_pending (
     rowid INTEGER NOT NULL PRIMARY KEY
+);
+
+CREATE TABLE ks_feed_folder_raw (
+    feed_id           TEXT NOT NULL PRIMARY KEY,
+    folder_updated_at INTEGER,
+    folder_id         TEXT
 );
 
 -- 4. Articles whose search_text still equals their raw content / summary (written before HTML
@@ -111,6 +122,7 @@ WHEN (SELECT enabled FROM sync_capture WHERE id = 1) = 1 AND NOT EXISTS (SELECT 
         OR old.author IS NOT new.author
         OR old.published_at IS NOT new.published_at
         OR old.thumbnail_url IS NOT new.thumbnail_url
+        OR old.body_updated_at IS NOT new.body_updated_at
         OR old.is_read IS NOT new.is_read
         OR old.read_at IS NOT new.read_at
         OR old.is_starred IS NOT new.is_starred
@@ -127,6 +139,7 @@ BEGIN
             OR old.author IS NOT new.author
             OR old.published_at IS NOT new.published_at
             OR old.thumbnail_url IS NOT new.thumbnail_url
+            OR old.body_updated_at IS NOT new.body_updated_at
         THEN 1 ELSE 0 END);
 END;
 

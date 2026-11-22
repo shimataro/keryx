@@ -885,6 +885,7 @@ private fun testArticle(
     created_at = 0L,
     deleted_at = null,
     deleted_updated_at = null,
+    body_updated_at = null,
 )
 
 private fun testFeed(id: String, faviconUrl: String? = null): Feeds = Feeds(

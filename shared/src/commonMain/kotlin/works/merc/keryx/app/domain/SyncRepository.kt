@@ -269,6 +269,11 @@ class SyncRepository(
      * weaker guarantee than "cannot", and a match here would skip a download that was never
      * merged. Reconnecting to the *same* provider re-establishes both on the first sync.
      *
+     * `ks_feed_folder_raw` goes too: the merge ranks an incoming folder version against the raw
+     * version recorded there, so a row left from the old provider's files could reject the next
+     * provider's version at an equal stamp. With it gone, the next merge reseeds each row from the
+     * feed's own folder.
+     *
      * Runs under [mutex] — the same lock [sync] holds across everything that writes these four
      * fields. Without it, a sync already past its upload would re-write the revision and digest
      * *after* this cleared them, handing the next connection markers describing the old provider's
@@ -281,6 +286,7 @@ class SyncRepository(
             _autoSyncSuspended.value = false
             setSyncState(SYNC_STATE_CLOUD_FILE_REV, "")
             setSyncState(SYNC_STATE_LAST_UPLOADED_DIGEST, "")
+            db.sync_bookkeepingQueries.clearFeedFolderRaw()
         }
         clearNetworkDeferral()
     }

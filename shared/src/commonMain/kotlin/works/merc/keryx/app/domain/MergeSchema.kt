@@ -1,80 +1,64 @@
 package works.merc.keryx.app.domain
 
+import works.merc.keryx.app.domain.ColumnKind.INTEGER
+import works.merc.keryx.app.domain.ColumnKind.TEXT
+
 /**
- * The tables and columns [MergeSql] needs, per schema version.
+ * The tables and columns of a pre-delta (full) database, per local schema version — what [MergeSql]
+ * needs from one, and what its values are checked against before it is merged ("Validating Cloud
+ * Files" in `docs/sync-architecture.md`).
  *
- * Pure data — no DB driver is involved, so every platform's
- * `DatabaseMerger.validateSchema` actual reads the same expectations and only the reflection
- * mechanism (`PRAGMA table_info`) stays platform-specific.
+ * Pure data — no DB driver is involved, so every platform's `DatabaseMerger.validateSchema` actual
+ * reads the same expectations and only the reflection mechanism (`PRAGMA table_info`) stays
+ * platform-specific.
  */
 object MergeSchema {
 
     /**
-     * Expected tables and columns for schema version 2.
-     * Keep in sync with [MergeSql] and the `.sq` schema files.
+     * Schema version 3's synced tables: transport version 1's tables plus `articles.search_text`.
+     * The device-local bookkeeping tables are not listed: an uploaded snapshot drops them
+     * ([SnapshotSql]). Keep in sync with [MergeSql] and the `.sq` schema files (a test compares
+     * this with a freshly created database).
      */
-    private val EXPECTED_SCHEMA_V2 = mapOf(
-        "folders" to setOf(
-            "id", "name", "sort_order", "deleted_at", "updated_at", "created_at",
-        ),
-        "feeds" to setOf(
-            "id", "url", "site_url", "title", "description", "favicon_url", "etag",
-            "last_modified", "error_count", "last_error", "custom_title", "folder_id",
-            "deleted_at", "updated_at", "created_at", "sort_order",
-            "folder_updated_at", "sort_order_updated_at", "custom_title_updated_at", "deleted_updated_at",
-        ),
-        "tags" to setOf(
-            "id", "name", "color", "sort_order", "deleted_at", "updated_at", "created_at",
-        ),
-        "articles" to setOf(
-            "id", "feed_id", "guid", "url", "title", "summary", "content", "author",
-            "published_at", "thumbnail_url", "is_read", "read_at", "is_starred",
-            "starred_at", "cached_at", "search_text", "updated_at", "created_at",
-            "deleted_at", "deleted_updated_at",
-        ),
-        "feed_tags" to setOf(
-            "feed_id", "tag_id", "deleted_at", "updated_at",
-        ),
-        "global_settings" to setOf(
-            "key", "value", "updated_at",
-        ),
+    private val EXPECTED_TABLES_V3: List<TableSpec> = TransportSchema.SYNCED_TABLES_V1.map { table ->
+        if (table.name == "articles") table.withColumnAfter("cached_at", req("search_text", TEXT)) else table
+    }
+
+    /**
+     * Schema version 2: `feeds` still carries its fetch state, `tags` / `folders` have no per-field
+     * stamps yet, and `articles` has no `body_updated_at`.
+     */
+    private val EXPECTED_TABLES_V2: List<TableSpec> = EXPECTED_TABLES_V3.map { table ->
+        when (table.name) {
+            "feeds" -> table.withColumnAfter("favicon_url", opt("etag", TEXT))
+                .withColumnAfter("etag", opt("last_modified", TEXT))
+                .withColumnAfter("last_modified", req("error_count", INTEGER))
+                .withColumnAfter("error_count", opt("last_error", TEXT))
+            "tags" -> table.without("name_updated_at", "color_updated_at", "sort_order_updated_at")
+            "folders" -> table.without("name_updated_at", "sort_order_updated_at")
+            "articles" -> table.without("body_updated_at")
+            else -> table
+        }
+    }
+
+    /**
+     * Registered expected tables (with column kinds and nullability) by
+     * [works.merc.keryx.app.data.local.db.KeryxDatabase.Schema.version]. A version missing here is
+     * undetermined, never "incompatible".
+     */
+    val EXPECTED_TABLES: Map<Long, List<TableSpec>> = mapOf(
+        2L to EXPECTED_TABLES_V2,
+        3L to EXPECTED_TABLES_V3,
     )
 
     /**
-     * Expected tables and columns for schema version 3: `feeds`' fetch state (`etag`,
-     * `last_modified`, `error_count`, `last_error`) moved to the device-local `feed_fetch_state`,
-     * and `tags` / `folders` gained their per-field stamps. The device-local bookkeeping tables are
-     * not listed: an uploaded snapshot drops them ([SnapshotSql]).
-     * Keep in sync with [MergeSql] and the `.sq` schema files.
+     * Registered expected schemas (table name to column names) by
+     * [works.merc.keryx.app.data.local.db.KeryxDatabase.Schema.version], derived from
+     * [EXPECTED_TABLES]. A version missing here makes `DatabaseMerger.validateSchema` return `null`
+     * (undetermined) rather than `false` — an unregistered version must never be treated as
+     * "definitely incompatible", which would offer a destructive cloud-data reset for what is really
+     * just a forgotten registration.
      */
-    private val EXPECTED_SCHEMA_V3 = mapOf(
-        "folders" to setOf(
-            "id", "name", "sort_order", "deleted_at", "updated_at", "created_at",
-            "name_updated_at", "sort_order_updated_at",
-        ),
-        "feeds" to setOf(
-            "id", "url", "site_url", "title", "description", "favicon_url", "custom_title", "folder_id",
-            "deleted_at", "updated_at", "created_at", "sort_order",
-            "folder_updated_at", "sort_order_updated_at", "custom_title_updated_at", "deleted_updated_at",
-        ),
-        "tags" to setOf(
-            "id", "name", "color", "sort_order", "deleted_at", "updated_at", "created_at",
-            "name_updated_at", "color_updated_at", "sort_order_updated_at",
-        ),
-        "articles" to EXPECTED_SCHEMA_V2.getValue("articles"),
-        "feed_tags" to EXPECTED_SCHEMA_V2.getValue("feed_tags"),
-        "global_settings" to EXPECTED_SCHEMA_V2.getValue("global_settings"),
-    )
-
-    /**
-     * Registered expected schemas by [works.merc.keryx.app.data.local.db.KeryxDatabase.Schema.version].
-     * A version missing here makes `DatabaseMerger.validateSchema` return `null` (undetermined)
-     * rather than `false` — an unregistered version must never be treated as "definitely
-     * incompatible", which would offer a destructive cloud-data reset for what is really just a
-     * forgotten registration.
-     */
-    val EXPECTED_SCHEMAS: Map<Long, Map<String, Set<String>>> = mapOf(
-        2L to EXPECTED_SCHEMA_V2,
-        3L to EXPECTED_SCHEMA_V3,
-    )
+    val EXPECTED_SCHEMAS: Map<Long, Map<String, Set<String>>> =
+        EXPECTED_TABLES.mapValues { (_, tables) -> tables.associate { it.name to it.columnNames.toSet() } }
 }
