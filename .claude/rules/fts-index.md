@@ -41,7 +41,12 @@ filled in or changed in `ks_search_pending` (a new one starts with `''`), and
 too and takes any row still pending back out of the index in the same transaction as
 `'rebuild'` (which indexes every row from its current `search_text`, pending or not). Callers —
 `DeltaSync`'s post-merge indexing, `maybeRebuildFtsIndex`, startup — therefore have no separate
-step to run. The pending list is committed state, so a pass that was interrupted is picked up by
+step to run. An article a merge inserts **without a body** (a light row whose body travels in
+another file) is recorded in `ks_search_awaiting_body`, and `indexMissing()` also skips it while
+it is still bodiless — indexed with `''`, it would never be revisited once its body arrived;
+`rebuildIndex()` indexes such rows anyway and clears that table in its transaction (the remaining
+gap is in `docs/known-issues.md`, "Delta sync: a row's search tokens are not replaced when its
+text changes"). The pending list is committed state, so a pass that was interrupted is picked up by
 the next `indexMissing()` (startup's `ensureIndexed()` included). Any new path that writes
 `articles_fts` without going through `indexMissing()` / `rebuildIndex()` must keep the same
 recompute-then-skip-pending order. On startup, `FtsManager.ensureIndexed()` creates the table on first
