@@ -522,6 +522,48 @@ both renames, and a device joining from it ends up with the order-independent re
 Even then, two devices renaming different rows to the same name at once leave one rename pending, and which
 one depends on the order; it resolves as soon as the row holding the name is renamed.
 
+## Feeds sharing one URL under different ids keep whichever arrived first
+
+**Status**: not fixed — closing it needs re-keying a feed and everything that references it onto a canonical id,
+a redesign outside the scope of the change that found it (see "What a real fix would need"). It breaks the
+merge's commutativity and associativity (see "Design Philosophy" in [sync-architecture.md](sync-architecture.md))
+for these feeds.
+
+### Symptom
+
+Two feeds with the same URL but different ids reach a device in separate files. Whichever is merged first is
+kept, together with its articles; the other, and every article and tag link that belongs to it, is skipped for
+good. Merged in the other order, the other feed is kept; merged after folding both files, the one with the
+greater `updated_at` (then id) is kept. Devices that received the files in different orders keep different
+feeds, and the articles read or starred under the dropped one stay missing on them.
+
+### Diagnosis
+
+A feed's id is `IdGenerator.feedId(url)` (UUIDv5) at subscription, but a 301/308 redirect updates the URL and
+keeps the id (`feeds.sq`'s `updateUrl`), so a redirected feed and a fresh subscription of its new URL share a
+URL under different ids. The merge's guard (`NOT EXISTS … l2.url = c.url AND l2.id <> c.id`) skips a cloud feed
+whose URL main already holds under another id, and `winnerAmong` picks among cloud duplicates by `updated_at`,
+which differs between the files and main — so the survivor depends on the order.
+
+The same cause — an identity taken from content that can change — makes matching tags and folders by name
+non-associative: a cloud row merged into a main row because they share a name is ignored once the fold also
+holds that main row's id, and is no longer matched after its name changes. `feedTags`' and
+`mergeFeedFolderId`'s lookups by name are affected the same way.
+
+### What a real fix would need
+
+- A canonical id per URL that does not depend on the order: the id equal to `IdGenerator.feedId(url)` if one
+  exists, else the greatest id.
+- Re-keying the losing feed onto it inside the merge, both in `main` and among the cloud rows: its articles
+  move to `IdGenerator.articleId(canonical, guid)`, which SQLite cannot compute, so a deterministic SQL function
+  would have to be registered on every merge connection (desktop JDBC, Android requery, Apple
+  `RawSqliteConnection`). Its `feed_tags`, `feed_fetch_state` and unsent `sync_outbox` entries, the search index,
+  and `local_settings.lastFilter` move with it, and the old feed row is physically deleted after its children
+  have moved.
+
+Even then, a loser whose URL changes again after the re-key comes back as a separate feed, and a pre-delta cloud
+file cannot be rewritten, so devices can still diverge in those cases.
+
 ## Google Drive: an upload can overwrite another device's upload unnoticed
 
 **Status**: not fixed — external (Google Drive API) limitation: Drive offers no conditional content
