@@ -1443,6 +1443,27 @@ class SyncRepositoryTest {
     }
 
     @Test
+    fun aFailingPendingCheckDoesNotEndDebouncedSyncing() = runTest {
+        val cloud = FakeCloudStorage()
+        val repo = syncedRepo(cloud)
+        repo.scheduleSync()
+        advanceTimeBy(SYNC_DEBOUNCE_MS / 2)
+        // A sync inside the window picks the change up, so the window's expiry has to ask the database.
+        assertIs<Result.Ok<Unit>>(repo.sync())
+        assertEquals(1, cloud.pointerChecks)
+        localDriver.execute(null, "ALTER TABLE sync_capture RENAME TO sync_capture_broken", 0)
+
+        advanceTimeBy(SYNC_DEBOUNCE_MS)
+        runCurrent() // the pending check throws
+
+        localDriver.execute(null, "ALTER TABLE sync_capture_broken RENAME TO sync_capture", 0)
+        repo.scheduleSync()
+        advanceTimeBy(SYNC_DEBOUNCE_MS * 2)
+        runCurrent()
+        assertEquals(2, cloud.pointerChecks, "the debounce consumer survived the failure")
+    }
+
+    @Test
     fun scheduleDeferredSyncWaitsForTheLongWindowAndAStructuralChangeShortensIt() = runTest {
         val cloud = FakeCloudStorage()
         val repo = syncedRepo(cloud)

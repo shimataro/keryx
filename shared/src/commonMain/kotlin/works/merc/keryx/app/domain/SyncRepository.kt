@@ -210,16 +210,17 @@ class SyncRepository(
                     // Another schedule call landed inside the window; restart it.
                 }
                 soonRequested.value = false
-                // A sync that ran meanwhile (a refresh cycle, a manual sync, a flush) already
-                // uploaded what this window was waiting for.
-                if (!hasPendingChanges()) continue
                 // This is the *only* consumer, so a throw escaping here would end debounced syncing
                 // for the rest of the process while scheduleSync() kept succeeding into a channel
-                // nobody reads. sync() is not exception-proof (a bare SQLDelight write in
-                // setSyncState, resource loading in emitErrorNotification), which is why its other
-                // call sites in main.kt guard the same way.
-                runCatchingUnlessCancelled { sync(SyncTrigger.AUTOMATIC) }
-                    .onFailure { e -> Log.error(TAG, "Debounced sync failed", e) }
+                // nobody reads. Neither the pending check (a DB read) nor sync() is exception-proof
+                // (a bare SQLDelight write in setSyncState, resource loading in
+                // emitErrorNotification), which is why sync()'s other call sites in main.kt guard the
+                // same way. A failure is logged, and the next signal is waited for.
+                runCatchingUnlessCancelled {
+                    // A sync that ran meanwhile (a refresh cycle, a manual sync, a flush) already
+                    // uploaded what this window was waiting for.
+                    if (hasPendingChanges()) sync(SyncTrigger.AUTOMATIC)
+                }.onFailure { e -> Log.error(TAG, "Debounced sync failed", e) }
             }
         }
     }
