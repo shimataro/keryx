@@ -177,8 +177,8 @@ only the retries of a revision-checked write (the pointer, the stub); delta and 
    `ks_search_pending` registrations, then `DELETE FROM sync_merging`. Merging and recording what was merged
    therefore commit together or not at all — a crash in between re-merges the same files next time, which the
    merge's idempotence makes harmless.
-5. After the commit: recompute `search_text` for `ks_search_pending` ("FTS5 Handling"), `ftsManager.indexMissing()`,
-   then `driver.notifyListeners(...)` for every synced table — the merge wrote through its own connection, so
+5. After the commit: `ftsManager.indexMissing()`, which first recomputes `search_text` for `ks_search_pending`
+   ("FTS5 Handling"), then `driver.notifyListeners(...)` for every synced table — the merge wrote through its own connection, so
    SQLDelight's flows must be re-triggered for the UI to reflect it.
 6. Names no longer listed are dropped from `sync_applied`; if one ever reappears, applying it again is harmless.
 
@@ -543,11 +543,17 @@ Index maintenance is two-tier:
 - **Hot path (after feed refresh / sync merge)**: `FtsManager.indexMissing()` incrementally indexes only unindexed new articles (O(new rows), does not wipe index). Full rebuild (`'rebuild'`) is O(total indexed text) and heavy, and could reject running searches, so it is not used on hot paths. Indexes of existing articles with updated body text remain stale until the next rebuild (acceptable; they still match old tokens so searches do not regress to zero results).
 - **`search_text` after a merge.** `search_text` is not synced. The merge registers every article whose body it
   filled in or changed in `ks_search_pending` (in the merge transaction), and a newly inserted article starts with
-  `search_text = ''`. After the commit and **before** `indexMissing()`, `SyncRepository` recomputes `search_text`
-  with `HtmlText.toPlainText` in batches, each batch updating the rows and removing them from `ks_search_pending` in
-  one transaction; a row whose conversion throws gets `''` (and a log entry) rather than blocking the rest. The
-  pending table is committed state, so an interrupted pass resumes at the next sync or launch. `indexMissing()`
-  skips rows still in `ks_search_pending`, so a new article is indexed with its computed text, never with `''`. An
+  `search_text = ''`. `indexMissing()` itself recomputes `search_text` first — under its writer mutex, before it
+  indexes anything — so every caller (after a merge, a feed refresh, a subscription or an import, and at startup)
+  catches up. It goes through `ks_search_pending` once, in rowid order, in batches: a batch is read outside any
+  transaction, converted with `HtmlText.toPlainText`, then written in one transaction whose statements are all
+  writes, each row's update conditional on its `content` and `summary` still being what was read, and the row
+  removed from `ks_search_pending` only when that update matched. A body another writer changed in between stays
+  pending for the next call, so text computed from an older body is never stored. A row whose conversion throws gets
+  `''` (and a log entry) rather than blocking the rest; a body column too long to read in one cursor row (Android's
+  `CursorWindow`) is read in chunks. The pending table is committed state, so an interrupted pass resumes at the next
+  `indexMissing()`. `indexMissing()` skips rows still in `ks_search_pending`, so a new article is indexed with its
+  computed text, never with `''`. An
   article that was already indexed keeps its old tokens until the daily rebuild — the same accepted staleness as a
   body changed by a refresh.
 - **Healing full rebuild (`rebuildIndex()` = `'rebuild'`)**:

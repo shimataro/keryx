@@ -3,6 +3,7 @@ package works.merc.keryx.app.data.local
 import app.cash.sqldelight.db.QueryResult
 import app.cash.sqldelight.db.SqlDriver
 import works.merc.keryx.app.core.ArticleFilter
+import works.merc.keryx.app.core.HtmlText
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.fileDb
 import works.merc.keryx.app.ftsManager
@@ -28,6 +29,40 @@ private fun KeryxDatabase.insertArticle(id: String, feedId: String, title: Strin
         cached_at = 0L, search_text = content ?: "", updated_at = 0L, created_at = 0L,
     )
 }
+
+/**
+ * Inserts an article the way a sync merge leaves a new one: `search_text = ''` and the row listed in
+ * `ks_search_pending`.
+ */
+private fun KeryxDatabase.insertMergedArticle(id: String, feedId: String, title: String, content: String?, summary: String? = null) {
+    articlesQueries.insert(
+        id = id, feed_id = feedId, guid = id, url = "https://article/$id", title = title,
+        summary = summary, content = content, author = null, published_at = null,
+        thumbnail_url = null, is_read = 0, read_at = null, is_starred = 0, starred_at = null,
+        cached_at = 0L, search_text = "", updated_at = 0L, created_at = 0L,
+    )
+}
+
+private fun SqlDriver.registerPending(articleId: String) {
+    execute(null, "INSERT INTO ks_search_pending (rowid) SELECT rowid FROM articles WHERE id = ?;", 1) {
+        bindString(0, articleId)
+    }
+}
+
+private fun SqlDriver.searchTextOf(articleId: String): String? {
+    var text: String? = null
+    executeQuery(null, "SELECT search_text FROM articles WHERE id = ?;", { cursor ->
+        if (cursor.next().value) text = cursor.getString(0)
+        QueryResult.Unit
+    }, 1) { bindString(0, articleId) }
+    return text
+}
+
+private fun SqlDriver.isPending(articleId: String): Boolean =
+    countOf("SELECT COUNT(*) FROM ks_search_pending p JOIN articles a ON a.rowid = p.rowid WHERE a.id = '$articleId'") > 0
+
+private fun SqlDriver.isIndexed(articleId: String): Boolean =
+    countOf("SELECT COUNT(*) FROM articles_fts_docsize d JOIN articles a ON a.rowid = d.id WHERE a.id = '$articleId'") > 0
 
 /**
  * Holds `indexMissing`'s statement open on a latch and records whether the `'rebuild'` statement is
@@ -312,6 +347,191 @@ class FtsManagerTest {
             assertEquals(2L, driver.countOf("SELECT COUNT(*) FROM articles_fts_docsize"))
             assertEquals(listOf("a1"), FtsSearch(driver).search("Kotlin", ArticleFilter.All).map { it.id })
             assertEquals(listOf("a2"), FtsSearch(driver).search("Serialization", ArticleFilter.All).map { it.id })
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun indexMissingRecomputesPendingSearchTextBeforeIndexing() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f1")
+            db.insertMergedArticle("a1", "f1", "First", "<p>Hello <b>zephyrine</b></p>")
+            db.insertMergedArticle("a2", "f1", "Second", content = null, summary = "<i>quokkasaurus</i>")
+            db.insertMergedArticle("a3", "f1", "Third", content = null)
+            listOf("a1", "a2", "a3").forEach(driver::registerPending)
+            val manager = ftsManager(driver)
+            manager.createTable()
+
+            runBlocking { manager.indexMissing() }
+
+            assertEquals("Hello zephyrine", driver.searchTextOf("a1"))
+            assertEquals("quokkasaurus", driver.searchTextOf("a2"))
+            assertEquals("", driver.searchTextOf("a3"))
+            assertEquals(0L, driver.countOf("SELECT COUNT(*) FROM ks_search_pending"))
+            assertEquals(3L, driver.countOf("SELECT COUNT(*) FROM articles_fts_docsize"))
+            val search = FtsSearch(driver)
+            assertEquals(listOf("a1"), search.search("zephyrine", ArticleFilter.All).map { it.id })
+            assertEquals(listOf("a2"), search.search("quokkasaurus", ArticleFilter.All).map { it.id })
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun aRowWhoseConversionFailsGetsEmptyTextAndTheOthersStillProceed() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f1")
+            db.insertMergedArticle("a1", "f1", "Broken article", "<p>boom</p>")
+            db.insertMergedArticle("a2", "f1", "Fine article", "<p>fine wombatish</p>")
+            listOf("a1", "a2").forEach(driver::registerPending)
+            val manager = FtsManager(
+                driver,
+                beforePendingWrite = {},
+                toPlainText = { html -> if ("boom" in html) error("conversion failure") else HtmlText.toPlainText(html) },
+            )
+            manager.createTable()
+
+            runBlocking { manager.indexMissing() }
+
+            assertEquals("", driver.searchTextOf("a1"))
+            assertFalse(driver.isPending("a1"))
+            assertTrue(driver.isIndexed("a1"), "a row whose conversion failed is still indexed (by its title)")
+            assertEquals("fine wombatish", driver.searchTextOf("a2"))
+            assertFalse(driver.isPending("a2"))
+            assertEquals(listOf("a2"), FtsSearch(driver).search("wombatish", ArticleFilter.All).map { it.id })
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
+     * A body changed by another writer between the batch's read and its write must not be
+     * overwritten with text computed from the old body, nor leave the pending list: the row stays
+     * pending, is not indexed (it would be indexed with its `''`), and the next call processes it.
+     * Runs on a file DB, so the concurrent write goes through a connection of its own.
+     */
+    @Test
+    fun aBodyChangedBetweenReadAndWriteStaysPendingAndIsNotIndexedUntilTheNextCall() {
+        val (file, driver, db) = fileDb()
+        try {
+            db.insertFeed("f1")
+            db.insertMergedArticle("a1", "f1", "Changing", "<p>older ocelot</p>")
+            db.insertMergedArticle("a2", "f1", "Steady", "<p>steady stoat</p>")
+            listOf("a1", "a2").forEach(driver::registerPending)
+            var interleaved = false
+            val manager = FtsManager(
+                driver,
+                beforePendingWrite = {
+                    if (!interleaved) {
+                        interleaved = true
+                        driver.execute(null, "UPDATE articles SET content = '<p>newer narwhal</p>' WHERE id = 'a1';", 0)
+                    }
+                },
+                toPlainText = HtmlText::toPlainText,
+            )
+            manager.createTable()
+
+            runBlocking { manager.indexMissing() }
+
+            assertTrue(interleaved)
+            assertEquals("", driver.searchTextOf("a1"), "stale text must not be written over a newer body")
+            assertTrue(driver.isPending("a1"))
+            assertFalse(driver.isIndexed("a1"), "a row still pending must not be indexed with ''")
+            assertEquals("steady stoat", driver.searchTextOf("a2"))
+            assertTrue(driver.isIndexed("a2"))
+
+            runBlocking { manager.indexMissing() }
+
+            assertEquals("newer narwhal", driver.searchTextOf("a1"))
+            assertFalse(driver.isPending("a1"))
+            assertEquals(listOf("a1"), FtsSearch(driver).search("narwhal", ArticleFilter.All).map { it.id })
+            assertTrue(FtsSearch(driver).search("ocelot", ArticleFilter.All).isEmpty())
+        } finally {
+            driver.close()
+            file.delete()
+        }
+    }
+
+    @Test
+    fun recomputingSearchTextRecordsNothingInTheOutbox() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f1")
+            db.insertMergedArticle("a1", "f1", "Captured", "<p>outbox octopus</p>")
+            driver.registerPending("a1")
+            db.sync_bookkeepingQueries.setCaptureEnabled(1L)
+            val manager = ftsManager(driver)
+            manager.createTable()
+
+            runBlocking { manager.indexMissing() }
+
+            assertEquals("outbox octopus", driver.searchTextOf("a1"))
+            assertTrue(db.sync_bookkeepingQueries.outboxAll().executeAsList().isEmpty())
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun aPendingRowWithNoArticleIsDropped() {
+        val (driver, _) = inMemoryDb()
+        try {
+            driver.execute(null, "INSERT INTO ks_search_pending (rowid) VALUES (9999);", 0)
+            val manager = ftsManager(driver)
+            manager.createTable()
+
+            runBlocking { manager.indexMissing() }
+
+            assertEquals(0L, driver.countOf("SELECT COUNT(*) FROM ks_search_pending"))
+        } finally {
+            driver.close()
+        }
+    }
+
+    /** A body longer than one inline read is read in chunks, and the chunks join back exactly. */
+    @Test
+    fun aLongBodyIsReadInChunksAndRecomputedExactly() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f1")
+            // Over 300K characters, with supplementary-plane characters across the chunk boundaries.
+            val content = "<p>" + "ab \uD83D\uDE00 ".repeat(60_000) + "xylophonics</p>"
+            db.insertMergedArticle("a1", "f1", "Long", content)
+            driver.registerPending("a1")
+            val manager = ftsManager(driver)
+            manager.createTable()
+
+            runBlocking { manager.indexMissing() }
+
+            assertFalse(driver.isPending("a1"))
+            assertEquals(HtmlText.toPlainText(content), driver.searchTextOf("a1"))
+            assertEquals(listOf("a1"), FtsSearch(driver).search("xylophonics", ArticleFilter.All).map { it.id })
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun morePendingRowsThanOneBatchAreAllProcessedInOneCall() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f1")
+            val ids = (1..450).map { "a$it" }
+            ids.forEach { id ->
+                db.insertMergedArticle(id, "f1", "Title $id", "<p>body batchling $id</p>")
+                driver.registerPending(id)
+            }
+            val manager = ftsManager(driver)
+            manager.createTable()
+
+            runBlocking { manager.indexMissing() }
+
+            assertEquals(0L, driver.countOf("SELECT COUNT(*) FROM ks_search_pending"))
+            assertEquals(450L, driver.countOf("SELECT COUNT(*) FROM articles_fts_docsize"))
+            assertEquals(450, FtsSearch(driver).search("batchling", ArticleFilter.All).size)
         } finally {
             driver.close()
         }

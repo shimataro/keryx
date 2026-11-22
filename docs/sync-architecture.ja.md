@@ -171,7 +171,7 @@ Depth 1 の `PROPFIND`。既にたどったページ指定（カーソル、ペ�
    `ks_search_pending` の登録、最後に `DELETE FROM sync_merging`。マージと、何をマージしたかの記録は一緒に
    コミットされるか、どちらもされないかのどちらかである——その間でクラッシュすれば次回に同じファイルを再マージ
    するが、マージの冪等性によって無害である。
-5. コミット後: `ks_search_pending` の `search_text` を再計算し（「FTS5 の扱い」）、`ftsManager.indexMissing()`、
+5. コミット後: `ftsManager.indexMissing()`（まず `ks_search_pending` の `search_text` を再計算する。「FTS5 の扱い」）、
    続いて同期対象の全テーブルについて `driver.notifyListeners(...)` を呼ぶ——マージは専用の接続で書くので、UI に
    反映するには SQLDelight のフローを再発火させる必要がある。
 6. 一覧から消えた名前は `sync_applied` から外す。再び現れても、もう一度適用するのは無害である。
@@ -610,10 +610,15 @@ ATTACH する前に、Apple の `migrateCloudIfOlder` は古いクラウドフ�
   （許容。記事はなお旧トークンでヒットするので検索が 0 件に退行しない）。
 - **マージ後の `search_text`。** `search_text` は同期しない。マージは、本文を埋めた、または変えたすべての記事を
   （マージのトランザクションの中で）`ks_search_pending` に登録し、新しく挿入された記事は `search_text = ''` から
-  始まる。コミット後、`indexMissing()` の**前に**、`SyncRepository` が `HtmlText.toPlainText` で `search_text` を
-  バッチごとに再計算する。各バッチは、行の更新と `ks_search_pending` からの削除を 1 つのトランザクションで行う。変換で
-  例外が出た行は、残りを止めずに `''` にする（ログにも残す）。保留の表はコミット済みの状態なので、中断した処理は次の
-  同期か起動時に再開する。`indexMissing()` は `ks_search_pending` に残っている行を飛ばすので、新しい記事は計算後の
+  始まる。`search_text` の再計算は `indexMissing()` 自身が、書き込み用の mutex の中で、索引を作る前に行う。
+  そのため、どの呼び出し元（マージ後、フィード更新・購読・インポート後、起動時）でも追いつく。`ks_search_pending` を
+  rowid 順に 1 回だけ、バッチごとにたどる: バッチはトランザクションの外で読み、`HtmlText.toPlainText` で変換し、
+  すべての文が書き込みである 1 つのトランザクションで書く。各行の更新は `content` と `summary` が読んだときのままで
+  あることを条件とし、その更新が一致したときだけ行を `ks_search_pending` から外す。その間に別の書き手が本文を
+  変えた行は次の呼び出しまで保留のまま残るので、古い本文から計算したテキストが保存されることはない。変換で
+  例外が出た行は、残りを止めずに `''` にする（ログにも残す）。1 つのカーソル行で読むには長すぎる本文の列
+  （Android の `CursorWindow`）は分割して読む。保留の表はコミット済みの状態なので、中断した処理は次の
+  `indexMissing()` で再開する。`indexMissing()` は `ks_search_pending` に残っている行を飛ばすので、新しい記事は計算後の
   テキストで索引され、`''` で索引されることはない。すでに索引済みの記事は、日次の rebuild まで古いトークンのまま
   になる——フィード更新で本文が変わった場合と同じ、許容済みの古さである。
 - **healing 用の全再構築（`rebuildIndex()` = `'rebuild'`）**:

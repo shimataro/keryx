@@ -14,6 +14,7 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.runBlocking
 import works.merc.keryx.app.core.AppNotificationAction
+import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.CLOUD_DB_GZ_PATH
 import works.merc.keryx.app.core.CLOUD_DB_PATH
@@ -38,6 +39,7 @@ import works.merc.keryx.app.data.cloud.CloudFileEntry
 import works.merc.keryx.app.data.cloud.CloudFileMeta
 import works.merc.keryx.app.data.cloud.CloudStorage
 import works.merc.keryx.app.data.local.FtsManager
+import works.merc.keryx.app.data.local.FtsSearch
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.platform.ExternalAppLaunch
 import works.merc.keryx.app.platform.FakeNetworkConditionMonitor
@@ -863,6 +865,36 @@ class SyncRepositoryTest {
                 assertEquals(KeryxDatabase.Schema.version, userVersion)
             }
         }
+    }
+
+    /**
+     * `search_text` is never synced: a merged article starts with `''` and is listed in
+     * `ks_search_pending`, and the post-merge `indexMissing()` must recompute it before indexing —
+     * otherwise a term found only in the article's body is unsearchable until the daily rebuild.
+     */
+    @Test
+    fun aMergedArticleIsSearchableByATermOnlyInItsBody() = runTest {
+        val (cloudFile, cloudDriver, cloudDb) = fileDb()
+        cloudDb.insertFeed("f1", now = 0)
+        cloudDb.articlesQueries.insert(
+            id = "a-cloud", feed_id = "f1", guid = "a-cloud", url = "https://article/a-cloud", title = "Plain title",
+            summary = null, content = "<p>Only the body says <b>quintessentially</b></p>", author = null,
+            published_at = null, thumbnail_url = null, is_read = 0, read_at = null, is_starred = 0,
+            starred_at = null, cached_at = 0L, search_text = "stale text from the other device",
+            updated_at = 0L, created_at = 0L,
+        )
+        cloudDriver.close()
+        val cloudBytes = cloudFile.readBytes()
+        cloudFile.delete()
+        val cloud = FakeCloudStorage()
+        cloud.put(CLOUD_DB_GZ_PATH, gzipOf(cloudBytes), "r1")
+        val repo = newRepo(cloud)
+
+        assertIs<Result.Ok<Unit>>(repo.sync())
+
+        val hits = FtsSearch(localDriver).search("quintessentially", ArticleFilter.All).map { it.id }
+        assertEquals(listOf("a-cloud"), hits)
+        assertTrue(localDb.sync_bookkeepingQueries.searchPendingAll().executeAsList().isEmpty())
     }
 
     @Test

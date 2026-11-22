@@ -128,9 +128,9 @@
   プレースホルダーを表示する（外部ブラウザーで開くリンク／ボタン付き）。自動で何かが開くことはない。
 - `search_text` ＝ `content`（無ければ `summary`）の HTML タグを除去した平文。両方 NULL なら `""`。
   挿入・更新時に計算する（`ArticleRepository`、`HtmlText.toPlainText`）。**端末ローカル**で、派生データなので
-  同期しない。同期マージが本文を埋めた、または変えた記事は `ks_search_pending` に登録し、マージの直後に
-  `search_text` を再計算する（新しく挿入された記事は `""` から始まる）。それまで `FtsManager.indexMissing()` は
-  登録された行を飛ばす。
+  同期しない。同期マージが本文を埋めた、または変えた記事は `ks_search_pending` に登録し、次の
+  `FtsManager.indexMissing()` が索引を作る前に `search_text` を再計算する（新しく挿入された記事は `""` から始まる）。
+  `indexMissing()` は登録されたままの行を飛ばす。
 - `deleted_at`（NULL = 生存）で論理削除する。削除を**ローカルで発生させる**のはキャッシュ削除
   （`softDeleteExpired`）のみで、スター付き記事は削除しない（同期マージも `deleted_at` を書き込み、
   他デバイスでの削除を伝播する。後述）。`deleted_updated_at` は削除/復活イベントの

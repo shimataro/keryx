@@ -1,9 +1,13 @@
 package works.merc.keryx.app.data.local
 
+import app.cash.sqldelight.TransacterImpl
 import app.cash.sqldelight.db.QueryResult
 import app.cash.sqldelight.db.SqlDriver
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import works.merc.keryx.app.core.HtmlText
+import works.merc.keryx.app.core.Log
+import works.merc.keryx.app.core.runCatchingUnlessCancelled
 
 /**
  * Manages the `articles_fts` FTS5 virtual table with raw SQL, deliberately
@@ -15,8 +19,29 @@ import kotlinx.coroutines.sync.withLock
  * read from `articles.search_text` via rowid. New rows are indexed incrementally
  * ([indexMissing], after feed refresh / sync merge); the whole index is only
  * rebuilt in the rare healing passes ([rebuildIndex], daily idle).
+ *
+ * `articles.search_text` is device-local and never synced: an article whose body a sync merge
+ * filled in or changed is listed in `ks_search_pending` (a newly merged one starts with `''`), and
+ * [indexMissing] recomputes those rows' `search_text` before it indexes anything.
+ *
+ * @param beforePendingWrite Test seam: runs after a batch of `ks_search_pending` rows has been read
+ * and converted, before that batch's write transaction — so a test can force a concurrent write
+ * into exactly that gap.
+ * @param toPlainText The HTML → plain-text conversion behind `search_text`; a test seam so a
+ * conversion failure can be forced.
  */
-class FtsManager(private val driver: SqlDriver) {
+class FtsManager internal constructor(
+    private val driver: SqlDriver,
+    private val beforePendingWrite: suspend () -> Unit,
+    private val toPlainText: (String) -> String,
+) {
+    constructor(driver: SqlDriver) : this(driver, beforePendingWrite = {}, toPlainText = HtmlText::toPlainText)
+
+    /**
+     * Opens SQLDelight transactions on [driver]. A raw `BEGIN` would not do: the JVM
+     * `JdbcSqliteDriver` uses a fresh connection per statement outside a transaction.
+     */
+    private val transacter = object : TransacterImpl(driver) {}
 
     /**
      * Serializes the two index writers against each other. Without it, the daily idle
@@ -72,21 +97,184 @@ class FtsManager(private val driver: SqlDriver) {
      * simply become searchable once inserted. Requires the table to already exist (it always does
      * after startup [ensureIndexed]).
      *
-     * Content edits to *existing* rows (e.g. a feed re-publishing edited text, or a sync OR-merge
-     * filling in content) are not re-indexed here — that row keeps its old tokens until the next full
-     * [rebuildIndex] (the daily healing pass). This is the accepted "temporarily stale"
-     * trade-off; the row still matches its previous tokens, so search never regresses to zero hits.
+     * First, still under the writer mutex, it recomputes `search_text` for the rows listed in
+     * `ks_search_pending` ([recomputePendingSearchText]); a row still listed afterwards (its body
+     * changed while it was being converted) is not indexed by this call, so an article is never
+     * indexed with the `''` a merge gave it. The pending list is committed state, so work an earlier
+     * call left undone — interrupted, or skipped for a concurrent change — is picked up by the next.
+     *
+     * Content edits to *existing* rows (e.g. a feed re-publishing edited text, or a sync merge
+     * changing a body — whose `search_text` is recomputed here) are not re-indexed — that row keeps
+     * its old tokens until the next full [rebuildIndex] (the daily healing pass). This is the
+     * accepted "temporarily stale" trade-off; the row still matches its previous tokens, so search
+     * never regresses to zero hits.
      */
     suspend fun indexMissing(): Unit = indexWriteMutex.withLock {
+        recomputePendingSearchText()
         driver.execute(
             null,
             """
                 INSERT INTO articles_fts(rowid, title, search_text)
                 SELECT a.rowid, a.title, a.search_text FROM articles a
-                WHERE a.rowid NOT IN (SELECT id FROM articles_fts_docsize);
+                WHERE a.rowid NOT IN (SELECT id FROM articles_fts_docsize)
+                  AND a.rowid NOT IN (SELECT rowid FROM ks_search_pending);
             """.trimIndent(),
             0,
         )
+    }
+
+    /** One `ks_search_pending` row as read, with its article's body (`null` columns when it has none). */
+    private class PendingRow(val rowid: Long, val articleExists: Boolean, val content: String?, val summary: String?)
+
+    /**
+     * Recomputes `articles.search_text` (`HtmlText.toPlainText` of `content`, else `summary`, else
+     * `''`) for every row in `ks_search_pending`, in batches of [PENDING_BATCH_SIZE], in one pass in
+     * rowid order — a row left pending is not revisited by the same call, so this always ends.
+     *
+     * Each batch is read outside any transaction, converted, then written in one transaction whose
+     * statements are all writes (no read inside it has to upgrade to a write lock — see "A concurrent
+     * write can fail a read-then-write transaction" in `docs/known-issues.md`). A row's update is
+     * conditional on `content` and `summary` still being what was read, and the row leaves
+     * `ks_search_pending` only when that update matched: a body another writer (a refresh, a merge)
+     * changed after the read stays pending, so neither a newer body nor a merge's re-registration is
+     * ever discarded. A row whose conversion throws gets `''` (logged) rather than holding up the rest.
+     * A pending row whose article no longer exists is just removed from the list.
+     *
+     * `search_text` is not one of the columns the capture trigger watches, so this records nothing
+     * in `sync_outbox`.
+     */
+    private suspend fun recomputePendingSearchText() {
+        var after = Long.MIN_VALUE
+        while (true) {
+            val batch = readPendingBatch(after)
+            if (batch.isEmpty()) return
+            after = batch.last().rowid
+            val texts = batch.map { row -> if (row.articleExists) plainTextOf(row) else null }
+            beforePendingWrite()
+            transacter.transaction {
+                batch.forEachIndexed { index, row ->
+                    val text = texts[index]
+                    if (text == null) {
+                        driver.execute(
+                            null,
+                            "DELETE FROM ks_search_pending WHERE rowid = ? AND NOT EXISTS (SELECT 1 FROM articles WHERE rowid = ?);",
+                            2,
+                        ) {
+                            bindLong(0, row.rowid)
+                            bindLong(1, row.rowid)
+                        }
+                        return@forEachIndexed
+                    }
+                    val updated = driver.execute(
+                        null,
+                        "UPDATE articles SET search_text = ? WHERE rowid = ? AND content IS ? AND summary IS ?;",
+                        4,
+                    ) {
+                        bindString(0, text)
+                        bindLong(1, row.rowid)
+                        bindString(2, row.content)
+                        bindString(3, row.summary)
+                    }.value
+                    if (updated > 0L) {
+                        driver.execute(null, "DELETE FROM ks_search_pending WHERE rowid = ?;", 1) {
+                            bindLong(0, row.rowid)
+                        }
+                    }
+                }
+            }
+            if (batch.size < PENDING_BATCH_SIZE) return
+        }
+    }
+
+    private fun plainTextOf(row: PendingRow): String {
+        val html = row.content ?: row.summary ?: return ""
+        return runCatchingUnlessCancelled { toPlainText(html) }.getOrElse { e ->
+            Log.warn(TAG, "search_text conversion failed for article rowid ${row.rowid}; indexing it without body text", e)
+            ""
+        }
+    }
+
+    /**
+     * Reads the next [PENDING_BATCH_SIZE] pending rows after rowid [after]. A body column longer than
+     * [INLINE_TEXT_MAX_CHARS] is read separately, in chunks ([readTextInChunks]), so no single cursor
+     * row outgrows Android's `CursorWindow`.
+     */
+    private fun readPendingBatch(after: Long): List<PendingRow> {
+        class Raw(val rowid: Long, val exists: Boolean, val content: String?, val contentLong: Boolean, val summary: String?, val summaryLong: Boolean)
+        val raws = mutableListOf<Raw>()
+        driver.executeQuery(
+            identifier = null,
+            sql = """
+                SELECT p.rowid, a.rowid IS NOT NULL,
+                    CASE WHEN length(a.content) <= ? THEN a.content END, length(a.content) > ?,
+                    CASE WHEN length(a.summary) <= ? THEN a.summary END, length(a.summary) > ?
+                FROM ks_search_pending p LEFT JOIN articles a ON a.rowid = p.rowid
+                WHERE p.rowid > ?
+                ORDER BY p.rowid
+                LIMIT ?;
+            """.trimIndent(),
+            mapper = { cursor ->
+                while (cursor.next().value) {
+                    raws += Raw(
+                        rowid = cursor.getLong(0)!!,
+                        exists = cursor.getLong(1) == 1L,
+                        content = cursor.getString(2),
+                        contentLong = cursor.getLong(3) == 1L,
+                        summary = cursor.getString(4),
+                        summaryLong = cursor.getLong(5) == 1L,
+                    )
+                }
+                QueryResult.Unit
+            },
+            parameters = 6,
+        ) {
+            bindLong(0, INLINE_TEXT_MAX_CHARS)
+            bindLong(1, INLINE_TEXT_MAX_CHARS)
+            bindLong(2, INLINE_TEXT_MAX_CHARS)
+            bindLong(3, INLINE_TEXT_MAX_CHARS)
+            bindLong(4, after)
+            bindLong(5, PENDING_BATCH_SIZE.toLong())
+        }
+        return raws.map { raw ->
+            PendingRow(
+                rowid = raw.rowid,
+                articleExists = raw.exists,
+                content = if (raw.contentLong) readTextInChunks(raw.rowid, "content") else raw.content,
+                summary = if (raw.summaryLong) readTextInChunks(raw.rowid, "summary") else raw.summary,
+            )
+        }
+    }
+
+    /**
+     * Reads one long body column of the article at [rowid] in chunks of [INLINE_TEXT_MAX_CHARS]
+     * characters. The chunks are separate statements, so a concurrent write can leave the result
+     * mixed from two versions (or `null` when the row went away) — harmless, since the conditional
+     * update in [recomputePendingSearchText] then matches nothing and the row stays pending.
+     */
+    private fun readTextInChunks(rowid: Long, column: String): String? {
+        val builder = StringBuilder()
+        var start = 1L
+        while (true) {
+            var chunk: String? = null
+            driver.executeQuery(
+                identifier = null,
+                // `column` is one of two fixed names chosen by this class, never input.
+                sql = "SELECT substr($column, ?, ?) FROM articles WHERE rowid = ?;",
+                mapper = { cursor ->
+                    if (cursor.next().value) chunk = cursor.getString(0)
+                    QueryResult.Unit
+                },
+                parameters = 3,
+            ) {
+                bindLong(0, start)
+                bindLong(1, INLINE_TEXT_MAX_CHARS)
+                bindLong(2, rowid)
+            }
+            val read = chunk ?: return if (builder.isEmpty()) null else builder.toString()
+            builder.append(read)
+            if (read.length < INLINE_TEXT_MAX_CHARS) return builder.toString()
+            start += INLINE_TEXT_MAX_CHARS
+        }
     }
 
     fun exists(): Boolean {
@@ -122,5 +310,19 @@ class FtsManager(private val driver: SqlDriver) {
      */
     suspend fun rebuildIndex(): Unit = indexWriteMutex.withLock {
         driver.execute(null, "INSERT INTO articles_fts(articles_fts) VALUES('rebuild');", 0)
+    }
+
+    private companion object {
+        const val TAG = "FtsManager"
+
+        /** Pending rows read, converted and written per transaction by [recomputePendingSearchText]. */
+        const val PENDING_BATCH_SIZE = 200
+
+        /**
+         * Longest body column, in characters, read inline with its batch; a longer one is read in
+         * chunks of this size. 128K characters is at most 512 KiB of UTF-8, so a row with both columns
+         * at the limit stays well under Android's 2 MiB `CursorWindow`.
+         */
+        const val INLINE_TEXT_MAX_CHARS = 128L * 1024
     }
 }
