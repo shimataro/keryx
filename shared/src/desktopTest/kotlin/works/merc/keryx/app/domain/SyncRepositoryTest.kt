@@ -32,6 +32,7 @@ import works.merc.keryx.app.core.NotificationText
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.core.SYNC_DEBOUNCE_MS
 import works.merc.keryx.app.core.SYNC_POINTER_PATH
+import works.merc.keryx.app.core.SYNC_STATE_INDEX_PENDING
 import works.merc.keryx.app.core.SYNC_STATE_KS_ATTEMPT
 import works.merc.keryx.app.core.SYNC_STATE_KS_BASES
 import works.merc.keryx.app.core.SYNC_STATE_KS_DEVICE_ID
@@ -609,6 +610,42 @@ class SyncRepositoryTest {
         assertIs<CloudStorageException>(result.exception)
         assertTrue(a.db.hasFeed("fy"), "the merge itself committed")
         assertEquals(AppNotificationAction.ShowSettingsTab("cloud_sync"), a.notificationCenter.items.value.single().action)
+    }
+
+    @Test
+    fun aFailedIndexingAfterTheMergeNotifiesListenersAndIsRetriedByTheNextSync() = runTest {
+        val cloud = FakeCloudStorage()
+        val (a, gen) = seeded(cloud)
+        val (name, bytes) = SyncFiles.transportFile(
+            TransportMeta(gen, TransportFileKind.DELTA, ids(), 1, now),
+            feedRow("fy"),
+            "INSERT INTO articles (id, feed_id, guid, url, title, content, is_read, is_starred, cached_at, updated_at, created_at, body_updated_at) " +
+                "VALUES ('merged', 'fy', 'g', 'https://a', 'Merged', '<p>multiplatform <b>body</b></p>', 0, 0, 1, 1, 1, 1)",
+        )
+        cloud.put(name.fileName, bytes)
+        var feedsNotified = false
+        val listener = app.cash.sqldelight.Query.Listener { feedsNotified = true }
+        a.driver.addListener("feeds", listener = listener)
+        // Writing to the search index fails once.
+        a.driver.execute(null, "DROP TABLE articles_fts", 0)
+
+        val first = a.repo.sync()
+
+        assertIs<Result.Err>(first)
+        assertIs<CloudStorageException>(first.exception)
+        assertTrue(a.db.hasFeed("fy"), "the merge itself committed")
+        assertTrue(name.fileName in a.db.sync_bookkeepingQueries.appliedAll().executeAsList())
+        assertTrue(feedsNotified, "the UI hears of a committed merge even when its indexing fails")
+        a.driver.removeListener("feeds", listener = listener)
+        assertEquals("1", a.state(SYNC_STATE_INDEX_PENDING))
+
+        a.fts.createTable() // the index is writable again, and empty
+        assertTrue(FtsSearch(a.driver).search("multiplatform", ArticleFilter.All).isEmpty())
+
+        a.syncOk() // nothing left to merge: only the indexing is retried
+
+        assertEquals(listOf("merged"), FtsSearch(a.driver).search("multiplatform", ArticleFilter.All).map { it.id })
+        assertNull(a.state(SYNC_STATE_INDEX_PENDING))
     }
 
     // ---- Sending: interruptions at every step ----

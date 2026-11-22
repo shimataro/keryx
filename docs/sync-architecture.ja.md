@@ -130,7 +130,9 @@ Depth 1 の `PROPFIND`。既にたどったページ指定（カーソル、ペ�
 ファイルの番号・名前・outbox の上限・全量送信かどうか）、`ks_pointer_rev`（世代が `ks_generation` であるポインタの
 リビジョン）、`ks_received_at`（この端末が最後に受信を終えた時刻。この端末の時計で）、`ks_bases`（この端末が自分の
 世代のベースについて知っていること——それぞれのベクトル、`ks_covered`、作成時刻——で、ダウンロードせずにベースが
-何を覆うかを判断するためのもの）、`ks_legacy_stub_rev`。`sync_state` と上の表は端末ローカルで、
+何を覆うかを判断するためのもの）、`ks_legacy_stub_rev`、`sync_index_pending`（マージのコミットから、検索インデックスが
+それに追いつくまで存在する——「受信」参照。その作業はローカルの検索インデックスのものであり、接続を解除しても残すので、
+`ks_` 接頭辞を付けない）。`sync_state` と上の表は端末ローカルで、
 端末の外に出ることはない。
 
 ## 同期フロー（`SyncRepository.sync()`）
@@ -199,13 +201,16 @@ Depth 1 の `PROPFIND`。既にたどったページ指定（カーソル、ペ�
    持たない）で 1 つの一時転送 DB に**畳み込む**ので、何個のファイルが届いてもマージは 1 回で済む。
 4. `DatabaseMerger.mergeTransport` で、1 つのトランザクションとして**マージ**する（「マージ」参照）: 最初に
    `INSERT INTO sync_merging`、次に `MergeSql.all`、マージした全ファイルの `sync_applied` / `sync_cursor` の更新と
-   `ks_search_pending` の登録、最後に `DELETE FROM sync_merging`。`sync_applied` に記録する名前には、マージした
+   `ks_search_pending` と `sync_index_pending` の登録、最後に `DELETE FROM sync_merging`。`sync_applied` に記録する名前には、マージした
    ベースが名前で挙げるものを、一覧にあるかどうか（その間にガベージコレクションされたか）によらずすべて含める。マージと、何をマージしたかの記録は一緒に
    コミットされるか、どちらもされないかのどちらかである——その間でクラッシュすれば次回に同じファイルを再マージ
    するが、マージの冪等性によって無害である。
-5. コミット後: `ftsManager.indexMissing()`（まず `ks_search_pending` の `search_text` を再計算する。「FTS5 の扱い」）、
-   続いて同期対象の全テーブルについて `driver.notifyListeners(...)` を呼ぶ——マージは専用の接続で書くので、UI に
-   反映するには SQLDelight のフローを再発火させる必要がある。
+5. コミットの直後: 同期対象の全テーブルについて `driver.notifyListeners(...)` を呼ぶ——マージは専用の接続で書くので、
+   この後に何が起きても UI に反映するには、SQLDelight のフローを再発火させる必要がある。続いて
+   `ftsManager.indexMissing()`（まず `ks_search_pending` の `search_text` を再計算する。「FTS5 の扱い」）を呼び、
+   `articles` のリスナーにもう一度通知し（表示中の検索が、マージした行を索引済みの状態で見つける）、
+   `sync_index_pending` を消す。索引付けが失敗すると、同期は一時的なエラーで失敗し、キーは残る: 次の同期は——マージ
+   するものが無くても——`indexMissing()` をもう一度実行し、通知して、キーを消す。
 6. 一覧から消えた名前は `sync_applied` から外す。再び現れても、もう一度適用するのは無害である。一覧上の既知の
    ベースが名前で挙げる名前は残す——外すと、手順 1 がそれを足りないものとみなし、同期のたびにそのベースを取得し
    直すことになる。この端末自身の差分は、既知のベースが覆うまで残す——送ったばかりの差分がまだ一覧に出ていなくても、

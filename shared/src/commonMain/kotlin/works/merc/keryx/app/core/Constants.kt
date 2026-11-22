@@ -260,6 +260,14 @@ const val SYNC_STATE_KS_RECEIVED_AT = "ks_received_at"
 /** What this device knows of the bases of its generation (JSON; see `domain/SyncBaseCache`). */
 const val SYNC_STATE_KS_BASES = "ks_bases"
 
+/**
+ * Present (`"1"`) from a merge's commit — written in the merge's own transaction — until the search
+ * index has caught up with it (`FtsManager.indexMissing()`), so an indexing failure after the commit is
+ * retried by the next sync even when it has nothing to merge. No `ks_` prefix: the work belongs to the
+ * local search index and survives a disconnect.
+ */
+const val SYNC_STATE_INDEX_PENDING = "sync_index_pending"
+
 // --- Window / pane sizing (desktop) ---
 const val WINDOW_DEFAULT_WIDTH = 1280
 const val WINDOW_DEFAULT_HEIGHT = 800

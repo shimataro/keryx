@@ -185,8 +185,9 @@
 `key`(PK), `value`。既知キー: `last_synced_at`（Unix ミリ秒）, `ks_device_id`（現在の世代でのこの端末の同期 ID）,
 `ks_generation`, `ks_last_seq`（この端末が最後に確定した差分）, `ks_attempt`（送信中のファイル: 番号・名前・outbox の
 上限・全量送信かどうか）, `ks_pointer_rev`, `ks_received_at`（この端末が最後に受信を終えた時刻）, `ks_bases`（JSON:
-この端末が自分の世代のベースについて知っていること）, `ks_legacy_stub_rev`。端末ローカルで、クラウドとの接続を解除・切り替えると
-（`last_synced_at` 以外）消す。
+この端末が自分の世代のベースについて知っていること）, `ks_legacy_stub_rev`, `sync_index_pending`（同期のマージのコミットから、
+検索インデックスがそれに追いつくまで存在し、索引付けの失敗を次の同期で再試行させる）。端末ローカルで、クラウドとの接続を
+解除・切り替えると（`last_synced_at` と `sync_index_pending` 以外）消す。
 
 ### 同期の管理情報（端末ローカル、非同期）
 

@@ -21,6 +21,7 @@ import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.core.SYNC_MAX_RETRY
 import works.merc.keryx.app.core.SYNC_POINTER_MAX_BYTES
 import works.merc.keryx.app.core.SYNC_POINTER_PATH
+import works.merc.keryx.app.core.SYNC_STATE_INDEX_PENDING
 import works.merc.keryx.app.core.SYNC_STATE_KS_ATTEMPT
 import works.merc.keryx.app.core.SYNC_STATE_KS_BASES
 import works.merc.keryx.app.core.SYNC_STATE_KS_DEVICE_ID
@@ -565,6 +566,9 @@ internal class DeltaSync(
                     seq
                 }.filter { (device, seq) -> seq > (cursor[device] ?: 0L) }
                 mergeFolded(accumulator, merged, cursorUpdates).valueOrElse { return it }
+            } else if (state(SYNC_STATE_INDEX_PENDING) != null) {
+                // An earlier merge committed but its indexing failed: retry it now.
+                finishIndexing().valueOrElse { return it }
             }
             dropUnlisted(listing, self, cache.values)
             saveBases(cache.values)
@@ -648,8 +652,8 @@ internal class DeltaSync(
 
     /**
      * Step 4 of "Receiving": one [DatabaseMerger.mergeTransport] transaction that marks itself as a
-     * merge (so the capture triggers record nothing), merges, and records what it merged — then the
-     * post-commit steps.
+     * merge (so the capture triggers record nothing), merges, records what it merged and marks the
+     * search index as behind ([SYNC_STATE_INDEX_PENDING]) — then the post-commit steps (step 5).
      */
     private suspend fun mergeFolded(accumulator: String, merged: List<String>, cursorUpdates: Map<String, Long>): Result<Unit> {
         val statements = buildList {
@@ -667,18 +671,12 @@ internal class DeltaSync(
                         "ON CONFLICT(device) DO UPDATE SET seq = MAX(seq, excluded.seq)",
                 )
             }
+            add("INSERT OR REPLACE INTO main.sync_state (key, value) VALUES ('$SYNC_STATE_INDEX_PENDING', '1')")
             add("DELETE FROM main.sync_merging")
         }
         setPhase(SyncPhase.MERGING)
         try {
             DatabaseMerger.mergeTransport(localDbPath = localDbPath, transportPath = accumulator, mergeStatements = statements)
-            setPhase(SyncPhase.INDEXING)
-            // indexMissing() recomputes the search_text of the rows the merge registered in
-            // ks_search_pending before it indexes anything, so they are indexed with their real text.
-            ftsManager.indexMissing()
-            // The merge wrote through its own connection, bypassing SQLDelight's listeners.
-            driver.notifyListeners("folders", "feeds", "tags", "feed_tags", "articles", "global_settings")
-            return Result.Ok(Unit)
         } catch (e: KeryxException) {
             if (e is SchemaVersionException) {
                 Log.warn(TAG, "Merge aborted: cloud version ${e.cloudVersion} is newer than ${e.localVersion}")
@@ -689,11 +687,37 @@ internal class DeltaSync(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Throwable) {
-            // DatabaseMerger classifies an unusable cloud file itself; anything else — including a
-            // post-commit failure of the search index — is never the cloud's fault.
+            // DatabaseMerger classifies an unusable cloud file itself; anything else is never the
+            // cloud's fault.
             Log.error(TAG, "Merge failed", e)
             return Result.Err(CloudStorageException("Merge failed: ${e.message}"))
         }
+        // Committed. The merge wrote through its own connection, bypassing SQLDelight's listeners, so
+        // the UI is told at once — whatever happens to the indexing after it.
+        driver.notifyListeners(*SYNCED_TABLES)
+        return finishIndexing()
+    }
+
+    /**
+     * Step 5's indexing: `indexMissing()` recomputes the search_text of the rows a merge registered in
+     * `ks_search_pending` before it indexes anything, so they are indexed with their real text. Only
+     * once it succeeds is [SYNC_STATE_INDEX_PENDING] cleared; a failure — never the cloud's fault —
+     * leaves it for the next sync to retry.
+     */
+    private suspend fun finishIndexing(): Result<Unit> {
+        setPhase(SyncPhase.INDEXING)
+        try {
+            ftsManager.indexMissing()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            Log.error(TAG, "Indexing merged articles failed; the next sync retries it", e)
+            return Result.Err(CloudStorageException("Indexing merged articles failed: ${e.message}"))
+        }
+        // A search showing re-runs on an `articles` change: now it finds the merged rows indexed.
+        driver.notifyListeners("articles")
+        deleteState(SYNC_STATE_INDEX_PENDING)
+        return Result.Ok(Unit)
     }
 
     /**
@@ -1024,6 +1048,9 @@ internal class DeltaSync(
 
     private companion object {
         const val TAG = "Sync"
+
+        /** The tables a merge writes. */
+        val SYNCED_TABLES = arrayOf("folders", "feeds", "tags", "feed_tags", "articles", "global_settings")
 
         fun deleteDb(path: String) {
             FileIO.delete(path)

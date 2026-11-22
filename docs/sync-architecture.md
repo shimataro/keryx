@@ -135,7 +135,9 @@ triggers.
 sent: its number, name, outbox high-water mark, and whether it is the full send), `ks_pointer_rev` (the pointer
 revision whose generation is `ks_generation`), `ks_received_at` (when this device last completed a receive, by its own
 clock), `ks_bases` (what this device knows of its generation's bases — each one's vector, `ks_covered` and creation
-time — so it can tell what a base covers without downloading it), `ks_legacy_stub_rev`. `sync_state` and the tables
+time — so it can tell what a base covers without downloading it), `ks_legacy_stub_rev`, `sync_index_pending` (present
+from a merge's commit until the search index has caught up with it — see "Receiving"; without the `ks_` prefix, since
+that work belongs to the local search index and survives a disconnect). `sync_state` and the tables
 above are device-local and never leave the device.
 
 ## Sync Flow (`SyncRepository.sync()`)
@@ -208,13 +210,16 @@ only the retries of a revision-checked write (the pointer, the stub); delta and 
    files arrived.
 4. **Merge** with `DatabaseMerger.mergeTransport` in a single transaction (see "Merge"): `INSERT INTO sync_merging` first,
    then `MergeSql.all`, then the `sync_applied`/`sync_cursor` updates for every file merged and the
-   `ks_search_pending` registrations, then `DELETE FROM sync_merging`. The names `sync_applied` records include every
+   `ks_search_pending` registrations and `sync_index_pending`, then `DELETE FROM sync_merging`. The names `sync_applied` records include every
    name a merged base lists explicitly, whether listed or not (garbage-collected meanwhile). Merging and recording what was merged
    therefore commit together or not at all — a crash in between re-merges the same files next time, which the
    merge's idempotence makes harmless.
-5. After the commit: `ftsManager.indexMissing()`, which first recomputes `search_text` for `ks_search_pending`
-   ("FTS5 Handling"), then `driver.notifyListeners(...)` for every synced table — the merge wrote through its own connection, so
-   SQLDelight's flows must be re-triggered for the UI to reflect it.
+5. Right after the commit: `driver.notifyListeners(...)` for every synced table — the merge wrote through its own
+   connection, so SQLDelight's flows must be re-triggered for the UI to reflect it, whatever happens next. Then
+   `ftsManager.indexMissing()`, which first recomputes `search_text` for `ks_search_pending` ("FTS5 Handling"),
+   `articles`' listeners once more (a search showing then finds the merged rows indexed), and `sync_index_pending` is
+   deleted. If indexing fails, the sync fails with a transient error and the key stays: the next sync — even one with
+   nothing to merge — runs `indexMissing()` again, notifies, and deletes the key.
 6. Names no longer listed are dropped from `sync_applied`; if one ever reappears, applying it again is harmless.
    A name a known listed base lists explicitly stays — step 1 would otherwise take it as missing and fetch that base
    again on every sync. This device's own deltas stay until a known base covers them, so a listing that does not show
