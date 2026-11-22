@@ -298,9 +298,15 @@ class SyncSimulationTest {
         for (r in rows("SELECT feed_id, tag_id, updated_at, deleted_at IS NULL FROM feed_tags")) {
             add(Group("feed_tag ${r[0]}/${r[1]}", r[2]?.toLong(), r[3]!!))
         }
-        for (r in rows("SELECT id, read_at, is_read, MAX(COALESCE(starred_at, 0), COALESCE(deleted_updated_at, 0)), is_starred || '/' || (deleted_at IS NULL) FROM articles")) {
+        for (
+            r in rows(
+                "SELECT id, read_at, is_read, MAX(COALESCE(starred_at, 0), COALESCE(deleted_updated_at, 0)), " +
+                    "is_starred || '/' || (deleted_at IS NULL), body_updated_at, content, summary FROM articles",
+            )
+        ) {
             add(Group("article ${r[0]} read", r[1]?.toLong(), r[2]!!))
             add(Group("article ${r[0]} retention", r[3]?.toLong()?.takeIf { it > 0 }, r[4]!!))
+            add(Group("article ${r[0]} body", r[5]?.toLong(), "${r[6]}|${r[7]}"))
         }
         for (r in rows("SELECT key, updated_at, value FROM global_settings")) {
             add(Group("setting ${r[0]}", r[1]?.toLong(), r[2]!!))
@@ -324,7 +330,7 @@ class SyncSimulationTest {
                 "SELECT ft.feed_id, ft.tag_id FROM feed_tags ft JOIN tags t ON t.id = ft.tag_id " +
                     "WHERE ft.deleted_at IS NULL AND t.deleted_at IS NULL",
             ),
-            "articles" to rows("SELECT id, feed_id, guid, title, content IS NOT NULL OR summary IS NOT NULL, is_read, is_starred, deleted_at IS NULL FROM articles"),
+            "articles" to rows("SELECT id, feed_id, guid, title, content, summary, is_read, is_starred, deleted_at IS NULL FROM articles"),
             "global_settings" to rows("SELECT key, value FROM global_settings"),
             "search" to device.articles.search("Body", ArticleFilter.All).map { it.article.id }.sorted(),
         )
@@ -355,7 +361,7 @@ class SyncSimulationTest {
     }
 
     private companion object {
-        const val COLUMNS = 8
+        const val COLUMNS = 9
 
         /** RFC 822 weekday names, starting from 2024-01-01 (a Monday). */
         val WEEKDAYS = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
