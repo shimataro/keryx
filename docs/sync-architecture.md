@@ -18,6 +18,8 @@ Target: cloud sync (Dropbox / OneDrive / Google Drive / Nextcloud). Implementati
   arrive in does not matter) and **associative** (merging files one by one or after folding them together gives the
   same result). Duplicate files, files arriving out of order, and re-applying a file after a crash are therefore all
   harmless — the rest of this document relies on that.
+  Known exceptions, not yet closed, are recorded in [known-issues.md](known-issues.md): a tag or folder rename blocked
+  by a name another row holds.
 - **Only local changes are sent.** A change that arrived through a merge is never re-sent, so changes do not echo
   back and forth between devices.
 - **No change is ever unreachable.** Every change is, at every moment, in at least one delta file or base in the

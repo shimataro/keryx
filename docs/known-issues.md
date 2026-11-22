@@ -487,6 +487,41 @@ Classification" in [sync-architecture.md](sync-architecture.md) — including th
 in-transaction checks — and the FTS rule that the merge is followed by the `search_text` recomputation and
 `indexMissing()`.
 
+## A tag or folder rename blocked by a name another row holds is lost
+
+**Status**: not fixed — closing it needs device-local merge state and a swap-safe rename pass, a redesign
+outside the scope of the change that found it (see "What a real fix would need"). It breaks the merge's
+commutativity (see "Design Philosophy" in [sync-architecture.md](sync-architecture.md)) for tag and folder
+names only.
+
+### Symptom
+
+Main holds tags `a` = "Old" and `b` = "Taken". One file renames `a` to "Taken", another renames `b` to "Free",
+both with newer name stamps, and they arrive in separate syncs. Merged in that order, `a` stays "Old" for
+good; merged in the other order, both renames apply. Two devices that received the files in different orders
+keep different names. Folders behave the same way.
+
+### Diagnosis
+
+`MergeSql.perFieldStatements` applies a name change only while no other main row holds that name
+(`NOT EXISTS … m2.name = c.name AND m2.id <> …`), so a merge can never violate `UNIQUE(name)`. A winning
+version that guard rejects is kept nowhere: the file is recorded as applied, and no later merge or local
+write looks at it again. The fold (`ReduceSql`) has no such guard, so a base built from both files holds
+both renames, and a device joining from it ends up with the order-independent result the other devices miss.
+
+### What a real fix would need
+
+- A device-local table holding, per row, the name version that wins last-write-wins whenever main could not
+  apply it yet.
+- A rename pass, run at the end of every merge and inside every local rename's transaction, that applies
+  every pending name whose target is free or freed by another pending name — through a placeholder name
+  first, so swaps and longer cycles apply too.
+- Local name stamps that rise above the pending stamp, so a user's rename outranks a pending winner it has
+  already seen instead of being reverted by it later.
+
+Even then, two devices renaming different rows to the same name at once leave one rename pending, and which
+one depends on the order; it resolves as soon as the row holding the name is renamed.
+
 ## Google Drive: an upload can overwrite another device's upload unnoticed
 
 **Status**: not fixed — external (Google Drive API) limitation: Drive offers no conditional content
