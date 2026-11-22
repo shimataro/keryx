@@ -3,8 +3,7 @@ paths:
   - "**/Fts*.kt"                   # FtsManager / FtsSearch (+ their tests)
   - "**/DatabaseDriverFactory*.kt" # busy_timeout is set here
   - "**/DeltaExport*.kt"           # transport files from synced tables only; full send's VACUUM INTO copy is read-only
-  - "**/DeltaSync.kt"              # search_text backfill, then indexMissing(), after each merge
-  - "**/SearchTextBackfill.kt"     # recomputes ks_search_pending rows before they are indexed
+  - "**/DeltaSync.kt"              # indexMissing() (which recomputes ks_search_pending first) after each merge
   - "**/FeedRepository.kt"         # indexMissing() after refresh
   - "**/StartupTasks.kt"           # desktop startup orchestration (maybeRebuildFtsIndex via runStartupMaintenance)
   - "**/BackgroundRefreshLoop.kt"  # calls maybeRebuildFtsIndex on each background cycle
@@ -37,11 +36,15 @@ which re-indexes content that incremental indexing left stale.
 `search_text` is device-local and not merged: a merge registers every article whose body it
 filled in or changed in `ks_search_pending` (a new one starts with `''`), and
 `indexMissing()` **skips rows still listed there**, so an article is never indexed with
-`''`. `SearchTextBackfill.recomputePending()` must therefore run **before** `indexMissing()`
-after every merge (`DeltaSync.mergeAndRefresh`), and before the daily `rebuildIndex()`
-(`maybeRebuildFtsIndex`), since `'rebuild'` indexes every row from its current
-`search_text`, pending or not. Startup maintenance resumes an interrupted pass
-(`recomputePendingAndIndex`). On startup, `FtsManager.ensureIndexed()` creates the table on first
+`''`. The recompute lives inside `FtsManager` itself (`recomputePendingSearchText()`):
+`indexMissing()` runs it first under the index writer mutex, and `rebuildIndex()` runs it first
+too and takes any row still pending back out of the index in the same transaction as
+`'rebuild'` (which indexes every row from its current `search_text`, pending or not). Callers —
+`DeltaSync`'s post-merge indexing, `maybeRebuildFtsIndex`, startup — therefore have no separate
+step to run. The pending list is committed state, so a pass that was interrupted is picked up by
+the next `indexMissing()` (startup's `ensureIndexed()` included). Any new path that writes
+`articles_fts` without going through `indexMissing()` / `rebuildIndex()` must keep the same
+recompute-then-skip-pending order. On startup, `FtsManager.ensureIndexed()` creates the table on first
 run and backfills any missing rows. The Apple SDK's `KeryxSdk.start` creates the table (best effort, logged on
 failure) so it exists even when the scene never becomes active, and `prepareSearchIndex()` backfills the rows
 once it is. Android's `KeryxApplication.onCreate` calls the

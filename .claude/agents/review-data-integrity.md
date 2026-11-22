@@ -38,8 +38,9 @@ cloud file format.
   Flag random-UUID use for new feeds/articles.
 - Are the storage conventions upheld — booleans as 0/1 `Long`, timestamps as
   Unix-millis `Long`, and `search_text` recomputed from content/summary on every
-  insert/update path (after a merge, through `ks_search_pending` and
-  `SearchTextBackfill`)? A stale `search_text` silently breaks search.
+  insert/update path (after a merge, through `ks_search_pending`, recomputed by
+  `FtsManager.indexMissing()` / `rebuildIndex()` before they index)? A stale
+  `search_text` silently breaks search.
 - Are per-field edit timestamps protected from content refresh? A feed refresh
   (`upsert`) must not touch the user-edited columns (folder, sort order, custom
   title, subscription state) or their per-field `*_updated_at` — otherwise a

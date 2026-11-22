@@ -51,8 +51,9 @@ delta. Do not drop the marker, move it outside the merge transaction, or add it 
 Classifying "the cloud file is permanently unusable" vs. "this was transient / our bug" is done
 inside `DatabaseMerger` from SQLite's **error codes** (`SQLiteException.resultCode`), and is
 surfaced as `CloudDataIncompatibleException`. Do NOT reintroduce message-string matching in
-`DeltaSync` / `SyncRepository`: `DeltaSync.mergeAndRefresh` also covers the `search_text` backfill,
-`ftsManager.indexMissing()` and `driver.notifyListeners()`, which run **after** the merge has
+`DeltaSync` / `SyncRepository`: `DeltaSync.mergeAndRefresh` also covers
+`driver.notifyListeners()` and then the post-commit indexing (`finishIndexing` →
+`ftsManager.indexMissing()`, which recomputes `search_text` first), which run **after** the merge has
 committed — classifying those as "the cloud is corrupt" would offer the user a reset for a
 local/app-side fault.
 
