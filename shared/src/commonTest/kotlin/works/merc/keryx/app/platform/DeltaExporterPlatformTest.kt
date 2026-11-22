@@ -48,7 +48,7 @@ class DeltaExporterPlatformTest {
         "INSERT INTO sync_outbox (tbl, pk, heavy) VALUES ('articles', 'a1', 0)",
     )
 
-    private fun meta(kind: TransportFileKind) = TransportMeta(gen, kind, dev, 1, 1)
+    private fun meta(kind: TransportFileKind) = TransportMeta(gen, kind, dev, 1, 1_000)
 
     private fun query(path: String, sql: String) =
         TransportConnections.open(path, TransportOpenMode.READ_ONLY).use { it.queryRows(sql) }
@@ -60,7 +60,7 @@ class DeltaExporterPlatformTest {
         val export = assertNotNull(DeltaExporter.exportDelta(live, dest, meta(TransportFileKind.DELTA)))
         assertEquals(1L, export.highWaterSeq)
         assertEquals(1L, export.rowCounts["feeds"])
-        val name = TransportFileName(gen, TransportFileKind.DELTA, dev, 1, "0123456789ab")
+        val name = TransportFileName(gen, TransportFileKind.DELTA, dev, 1, 1_000, "0123456789ab")
         assertEquals(TransportValidation.Valid, TransportFiles.validate(dest, ValidationTarget.Transport(name)))
         assertEquals(listOf(listOf("a1", null, "1")), query(dest, "SELECT id, content, is_read FROM articles"))
     }
@@ -81,7 +81,7 @@ class DeltaExporterPlatformTest {
         val dest = newPath("ks-full-")
         val export = DeltaExporter.exportFull(copy, dest, meta(TransportFileKind.BASE), exceptPath = null)
         assertEquals(1L, export.highWaterSeq)
-        val name = TransportFileName(gen, TransportFileKind.BASE, dev, 1, "0123456789ab")
+        val name = TransportFileName(gen, TransportFileKind.BASE, dev, 1, 1_000, "0123456789ab")
         assertEquals(TransportValidation.Valid, TransportFiles.validate(dest, ValidationTarget.Transport(name)))
         assertEquals(listOf(listOf("a1", "body")), query(dest, "SELECT id, content FROM articles"))
     }

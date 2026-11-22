@@ -1,7 +1,6 @@
 package works.merc.keryx.app.domain
 
 import app.cash.sqldelight.db.SqlDriver
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
@@ -19,53 +18,37 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.AppNotificationLevel
-import works.merc.keryx.app.core.CLOUD_DB_GZ_PATH
-import works.merc.keryx.app.core.CLOUD_DB_PATH
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.CloudAuthException
 import works.merc.keryx.app.core.CloudDataIncompatibleException
 import works.merc.keryx.app.core.CloudStorageException
 import works.merc.keryx.app.core.DEFERRED_SYNC_DEBOUNCE_MS
 import works.merc.keryx.app.core.ErrorKind
-import works.merc.keryx.app.core.LOCAL_WRITES_FLUSH_WAIT_MS
 import works.merc.keryx.app.core.FeedDiscoveryException
 import works.merc.keryx.app.core.FeedFetchException
 import works.merc.keryx.app.core.FeedNotFoundException
 import works.merc.keryx.app.core.FeedParseException
 import works.merc.keryx.app.core.FeedTimeoutException
+import works.merc.keryx.app.core.KeryxException
+import works.merc.keryx.app.core.LOCAL_WRITES_FLUSH_WAIT_MS
+import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.NextcloudServerException
 import works.merc.keryx.app.core.NotificationText
+import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.core.SETTINGS_TAB_CLOUD_SYNC
 import works.merc.keryx.app.core.SETTINGS_TAB_UPDATES
-import works.merc.keryx.app.core.cloudBackupPath
-import works.merc.keryx.app.core.looksLikeSqliteFile
-import works.merc.keryx.app.core.KeryxException
-import works.merc.keryx.app.core.Log
-import works.merc.keryx.app.core.runCatchingUnlessCancelled
-import works.merc.keryx.app.core.MAX_SYNC_DB_SIZE_BYTES
-import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.core.SYNC_DEBOUNCE_MS
-import works.merc.keryx.app.core.SYNC_MAX_RETRY
-import works.merc.keryx.app.core.SYNC_STATE_CLOUD_FILE_REV
 import works.merc.keryx.app.core.SYNC_STATE_LAST_SYNCED_AT
-import works.merc.keryx.app.core.SYNC_STATE_LAST_UPLOADED_DIGEST
 import works.merc.keryx.app.core.SchemaVersionException
 import works.merc.keryx.app.core.SyncConflictException
 import works.merc.keryx.app.core.UpdateException
-import works.merc.keryx.app.core.onErr
+import works.merc.keryx.app.core.runCatchingUnlessCancelled
 import works.merc.keryx.app.core.syncErrorKind
-import works.merc.keryx.app.core.valueOrElse
-import works.merc.keryx.app.data.cloud.CloudFileMeta
 import works.merc.keryx.app.data.cloud.CloudStorage
 import works.merc.keryx.app.data.local.FtsManager
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.platform.AppDirs
-import works.merc.keryx.app.platform.ContentDigest
-import works.merc.keryx.app.platform.DatabaseMerger
 import works.merc.keryx.app.platform.ExternalAppLaunch
-import works.merc.keryx.app.platform.Gzip
-import works.merc.keryx.app.platform.DatabaseSnapshot
-import works.merc.keryx.app.platform.FileIO
 import works.merc.keryx.app.platform.databaseFilePath
 
 /**
@@ -87,11 +70,11 @@ enum class SyncTrigger { MANUAL, AUTOMATIC }
 enum class SyncPhase { IDLE, CHECKING, DOWNLOADING, MERGING, INDEXING, PREPARING, UPLOADING, ARCHIVING }
 
 /**
- * Cloud sync via the "upload the whole SQLite file" strategy. Downloads the
- * cloud DB, merges it into the local DB with [MergeSql] (ATTACH DATABASE), then
- * re-uploads with a rev guard. The FTS5 index is excluded from the uploaded file
- * on a throwaway [DatabaseSnapshot] copy — the live index is never dropped — and
- * merged-in articles are indexed incrementally ([FtsManager.indexMissing]).
+ * Cloud sync. Each device appends only the changes it made itself to the cloud, as small immutable
+ * delta files, merges everyone else's, and now and then folds them into a base — the flow in
+ * "Sync Flow" of `docs/sync-architecture.md`, run by [DeltaSync]. This class owns what surrounds it:
+ * the [mutex] every sync, reset and disconnect holds, the automatic-sync gates, the debounce, and the
+ * user-facing state ([lastSyncError], [syncPhase], the notification center).
  *
  * Also acts as the [SyncScheduler] for the rest of the app (debounced sync).
  */
@@ -107,6 +90,11 @@ class SyncRepository(
     private val localDbPath: String = databaseFilePath(),
     private val tempDir: String = AppDirs.tempDir(),
     /**
+     * Where a send's file is saved until it is committed ("Sending"): durable storage, since a
+     * crash between recording a send and committing it must find the file again.
+     */
+    private val dataDir: String = AppDirs.appDataDir(),
+    /**
      * Whether an [SyncTrigger.AUTOMATIC] sync may use the current network
      * ([NetworkUsagePolicy.automaticSyncAllowed]), as a flow so a deferred sync can wait for the
      * moment it becomes true. A lambda, like [cloudProvider], because what it reads
@@ -120,9 +108,37 @@ class SyncRepository(
      * `SettingsRepository` and `HomeViewModel` in production.
      */
     private val pendingLocalWrites: PendingLocalWrites = PendingLocalWrites(),
+    /**
+     * Whether a sync may fold deltas into a base now ([NetworkUsagePolicy.compactionAllowed]) — never on
+     * a metered network, whatever the trigger. The default (always) is for tests.
+     */
+    private val compactionAllowedFlow: () -> Flow<Boolean> = { flowOf(true) },
+    /** Issues generation and device ids; [IdGenerator.newId] in production, deterministic in tests. */
+    newId: () -> String = IdGenerator::newId,
 ) : SyncScheduler {
 
     private val mutex = Mutex()
+    private val _syncPhase = MutableStateFlow(SyncPhase.IDLE)
+
+    private val engine = DeltaSync(
+        driver = driver,
+        db = db,
+        ftsManager = ftsManager,
+        clock = clock,
+        localDbPath = localDbPath,
+        tempDir = tempDir,
+        dataDir = dataDir,
+        newId = newId,
+        compactionAllowed = { compactionAllowedFlow().first() },
+        setPhase = { _syncPhase.value = it },
+    )
+
+    /** Interrupts or observes a sync at a [SyncHookPoint]; for tests only. */
+    internal var testHook: (suspend (SyncHookPoint, String) -> Unit)?
+        get() = engine.testHook
+        set(value) {
+            engine.testHook = value
+        }
     private val _lastSyncError = MutableStateFlow<ErrorKind?>(null)
 
     /**
@@ -137,7 +153,6 @@ class SyncRepository(
      */
     private val _lastSyncAuthFailed = MutableStateFlow(false)
     private val _autoSyncSuspended = MutableStateFlow(false)
-    private val _syncPhase = MutableStateFlow(SyncPhase.IDLE)
     private val _syncDeferredForNetwork = MutableStateFlow(false)
 
     /** Guards [deferredSyncWaiter], [deferralGeneration] (and their pairing with [_syncDeferredForNetwork]). */
@@ -157,11 +172,10 @@ class SyncRepository(
      * edits), from `HomeViewModel`'s single-threaded write dispatcher (every mark-as-read / star) and
      * from `Dispatchers.Default` (once per feed in a refresh). Cancelling and reassigning a shared
      * `Job` field from three dispatchers can drop a reference, leaving a pending debounce that
-     * nothing can cancel — so a write burst fires duplicate full
-     * download → merge → `VACUUM INTO` → upload cycles. (Integrity is never at risk: [sync] holds
-     * [mutex] and the upload is rev-checked. The cost is the duplicated work.) A conflated channel
-     * with the single consumer below keeps the same trailing-debounce semantics with no shared
-     * mutable state, mirroring how `SettingsRepository` coalesces its own disk write.
+     * nothing can cancel — so a write burst would fire duplicate syncs, each writing a delta.
+     * (Integrity is never at risk: [sync] holds [mutex]. The cost is the duplicated work.) A
+     * conflated channel with the single consumer below keeps the same trailing-debounce semantics
+     * with no shared mutable state, mirroring how `SettingsRepository` coalesces its own disk write.
      *
      * A signal carries no payload: which window applies is read from [soonRequested] each time the
      * window is (re-)armed, since a conflated channel would let a later deferred signal overwrite an
@@ -171,10 +185,10 @@ class SyncRepository(
 
     /**
      * Local changes exist that no sync has picked up yet. Set by [scheduleSync] and
-     * [scheduleDeferredSync], cleared when a sync starts (its snapshot will include them), and
-     * restored if that sync does not succeed. [flushPendingSync] and an expiring debounce window
-     * both sync only while this is set, so a window outlived by a refresh cycle's own sync costs
-     * nothing.
+     * [scheduleDeferredSync], cleared when a sync starts (its delta will include them), and restored
+     * if that sync does not succeed. [flushPendingSync] and an expiring debounce window both sync
+     * only while something is pending ([hasPendingChanges]: this flag, or an outbox entry or a full
+     * send still unsent), so a window outlived by a refresh cycle's own sync costs nothing.
      *
      * Neither this nor [soonRequested] is ever collected: a `MutableStateFlow` is used only as a
      * thread-safe flag with an atomic [getAndUpdate], since commonMain has no stable atomic type.
@@ -196,16 +210,17 @@ class SyncRepository(
                     // Another schedule call landed inside the window; restart it.
                 }
                 soonRequested.value = false
-                // A sync that ran meanwhile (a refresh cycle, a manual sync, a flush) already
-                // uploaded what this window was waiting for.
-                if (!unsyncedChanges.value) continue
                 // This is the *only* consumer, so a throw escaping here would end debounced syncing
                 // for the rest of the process while scheduleSync() kept succeeding into a channel
-                // nobody reads. sync() is not exception-proof (a bare SQLDelight write in
-                // setSyncState, resource loading in emitErrorNotification), which is why its other
-                // call sites in main.kt guard the same way.
-                runCatchingUnlessCancelled { sync(SyncTrigger.AUTOMATIC) }
-                    .onFailure { e -> Log.error(TAG, "Debounced sync failed", e) }
+                // nobody reads. Neither the pending check (a DB read) nor sync() is exception-proof
+                // (a bare SQLDelight write in setSyncState, resource loading in
+                // emitErrorNotification), which is why sync()'s other call sites in main.kt guard the
+                // same way. A failure is logged, and the next signal is waited for.
+                runCatchingUnlessCancelled {
+                    // A sync that ran meanwhile (a refresh cycle, a manual sync, a flush) already
+                    // uploaded what this window was waiting for.
+                    if (hasPendingChanges()) sync(SyncTrigger.AUTOMATIC)
+                }.onFailure { e -> Log.error(TAG, "Debounced sync failed", e) }
             }
         }
     }
@@ -248,9 +263,8 @@ class SyncRepository(
      * deferred sync to a `WorkManager` job constrained to an unmetered network, so it also happens
      * with the app closed.
      *
-     * Deliberately in-memory, like [autoSyncSuspended]: the uploaded snapshot is the whole database,
-     * so the next sync that is allowed carries every change made in the meantime, and there is no
-     * queue of pending changes to remember. Also cleared by a successful sync (a manual one included) unless
+     * Deliberately in-memory, like [autoSyncSuspended]: the pending changes themselves are persisted
+     * in `sync_outbox`, so the next sync that is allowed sends every change made in the meantime. Also cleared by a successful sync (a manual one included) unless
      * another sync was deferred while it ran, when automatic syncing becomes suspended, and by
      * [clearSyncFailureState]. A sync that fails after the network allowed it reports through
      * [lastSyncError] instead, so the flag never claims a wait that nothing is performing.
@@ -259,37 +273,32 @@ class SyncRepository(
 
     /**
      * Clears everything tied to the current cloud connection — the mirrored failure reason, the
-     * automatic-sync pause, and the "what we last saw / last uploaded" markers — e.g. when the
-     * connection that produced them is being torn down so a subsequently-connected provider does
-     * not inherit any of it.
-     *
-     * The revision and digest are dropped for the same reason as the failure state: they describe
-     * one provider's file. Each provider's revision is an opaque string in its own format, so a
-     * stale one would in practice never match the next provider's — but "would never match" is a
-     * weaker guarantee than "cannot", and a match here would skip a download that was never
-     * merged. Reconnecting to the *same* provider re-establishes both on the first sync.
+     * automatic-sync pause, and the delta sync's bookkeeping (recording off; the `ks_*` keys, the
+     * outbox, the applied names, the cursors and a saved send gone — see "Joining, Reset,
+     * Disconnect" in sync-architecture.md) — when the connection is being torn down, so a
+     * subsequently-connected provider does not inherit any of it. Its first sync joins afresh.
      *
      * `ks_feed_folder_raw` goes too: the merge ranks an incoming folder version against the raw
      * version recorded there, so a row left from the old provider's files could reject the next
      * provider's version at an equal stamp. With it gone, the next merge reseeds each row from the
      * feed's own folder.
      *
-     * Runs under [mutex] — the same lock [sync] holds across everything that writes these four
-     * fields. Without it, a sync already past its upload would re-write the revision and digest
-     * *after* this cleared them, handing the next connection markers describing the old provider's
-     * file: the very skipped-download-that-was-never-merged this method exists to prevent.
+     * Runs under [mutex], the same lock [sync] holds: without it, a sync already past its commit
+     * could re-write the bookkeeping *after* this cleared it, handing the next connection the old
+     * provider's identity and cursors — or turn recording back on while local-only.
      */
     suspend fun clearSyncFailureState() {
         mutex.withLock {
             _lastSyncError.value = null
             _lastSyncAuthFailed.value = false
             _autoSyncSuspended.value = false
-            setSyncState(SYNC_STATE_CLOUD_FILE_REV, "")
-            setSyncState(SYNC_STATE_LAST_UPLOADED_DIGEST, "")
-            db.sync_bookkeepingQueries.clearFeedFolderRaw()
+            engine.clearConnectionState()
         }
         clearNetworkDeferral()
     }
+
+    /** Whether anything is waiting to be sent — see [unsyncedChanges]. */
+    private fun hasPendingChanges(): Boolean = unsyncedChanges.value || engine.hasPendingChanges()
 
     private fun debounceWindowMs(): Long = if (soonRequested.value) SYNC_DEBOUNCE_MS else DEFERRED_SYNC_DEBOUNCE_MS
 
@@ -312,7 +321,7 @@ class SyncRepository(
     /**
      * [flushPendingSync] for a mobile app leaving the foreground, except when it left only because it
      * sent the user to another app itself (opening an article in the browser — see
-     * [ExternalAppLaunch]): that would upload the whole database once per article read that way. The
+     * [ExternalAppLaunch]): that would write one delta per article read that way. The
      * changes stay pending for the long window, the next sync, or the next real exit.
      */
     suspend fun flushOnLeavingForeground() {
@@ -339,7 +348,7 @@ class SyncRepository(
     suspend fun flushPendingSync() {
         withTimeoutOrNull(LOCAL_WRITES_FLUSH_WAIT_MS) { pendingLocalWrites.awaitIdle() }
         mutex.withLock { }
-        if (!unsyncedChanges.value) return
+        if (!hasPendingChanges()) return
         sync(SyncTrigger.AUTOMATIC)
     }
 
@@ -375,7 +384,7 @@ class SyncRepository(
         // disconnect can never be undone by a sync that was already in flight.
         return activityCenter.trackSync {
             mutex.withLock {
-                // Cleared before the snapshot is taken, so a change made during this sync re-arms
+                // Cleared before the delta is built, so a change made during this sync re-arms
                 // it; restored on every exit but success (an error result, a throw, a cancellation)
                 // so a sync that uploaded nothing doesn't drop pending changes.
                 val hadUnsyncedChanges = unsyncedChanges.getAndUpdate { false }
@@ -462,15 +471,13 @@ class SyncRepository(
     }
 
     /**
-     * Archives the current cloud database under a timestamped name and replaces it with a fresh
-     * snapshot of the local database — the recovery path for a cloud DB this app cannot use.
+     * Resets the cloud sync data — the recovery path for cloud data this app cannot use (see
+     * "Resetting (Archiving) Cloud Data" in sync-architecture.md). Deletes nothing: this device joins
+     * a new generation, uploads its full state as that generation's base, and replaces the pointer
+     * with a revision check; the previous generation's files stay in place, unread, as the archive.
+     * Every other device then rejoins with its own full send.
      *
-     * The old file is renamed rather than deleted so a mistaken reset (or a merge bug that only
-     * *looked* like corruption) is still recoverable by hand from the provider's app folder.
-     * Archives are never pruned automatically.
-     *
-     * @return A successful result when the cloud database is recreated; otherwise, the archive or
-     * creation failure.
+     * @return A successful result when the new generation is in place; otherwise the failure.
      */
     suspend fun resetCloudData(): Result<Unit> {
         val cloud = cloudProvider() ?: return Result.Ok(Unit)
@@ -478,48 +485,12 @@ class SyncRepository(
         return activityCenter.trackSync {
             mutex.withLock {
                 try {
-                    _syncPhase.value = SyncPhase.ARCHIVING
-                    val result = when (val archived = archiveCloudDb(cloud)) {
-                        is Result.Err -> archived
-                        // The old file is out of the way (archived or deleted), so re-create it.
-                        is Result.Ok -> createFresh(cloud)
-                    }
+                    val result = engine.reset(cloud)
                     updateAutoSyncGate(result)
                     emitErrorNotification(result)
                     result
                 } finally {
                     _syncPhase.value = SyncPhase.IDLE
-                }
-            }
-        }
-    }
-
-    /**
-     * Moves the cloud DB aside so [createFresh] can recreate it.
-     *
-     * Only ever targets [CLOUD_DB_GZ_PATH] — the legacy [CLOUD_DB_PATH] is a read-only fallback
-     * and is deliberately never touched by a reset, so it stays available as a rollback path.
-     * [createFresh] then writes a fresh, valid [CLOUD_DB_GZ_PATH], which self-heals even a reset
-     * whose real cause was corruption in the legacy file: the next sync finds the fresh compressed
-     * file and never looks at the legacy one again.
-     *
-     * Falls back to deleting it when the rename fails for a storage reason (an occupied archive
-     * name, a provider that rejected the move): reset is the only way out of an unusable cloud DB,
-     * so it must never become impossible. An auth failure is not retried as a delete — the same
-     * missing credentials would fail it identically, so the error is surfaced as-is.
-     */
-    private suspend fun archiveCloudDb(cloud: CloudStorage): Result<Unit> {
-        val backupPath = cloudBackupPath(clock.nowMillis())
-        return when (val renamed = cloud.rename(CLOUD_DB_GZ_PATH, backupPath)) {
-            is Result.Ok -> renamed
-            is Result.Err -> {
-                if (renamed.exception is CloudAuthException) {
-                    Log.error(TAG, "Reset: archive failed (not authenticated)")
-                    return renamed
-                }
-                Log.warn(TAG, "Reset: archive to $backupPath failed (${renamed.exception.message}); deleting instead")
-                cloud.delete(CLOUD_DB_GZ_PATH).onErr { e ->
-                    Log.error(TAG, "Reset: delete fallback failed: ${e.message}")
                 }
             }
         }
@@ -571,335 +542,15 @@ class SyncRepository(
     }
 
     /**
-     * Synchronizes the local database with the cloud database.
-     *
-     * Creates the cloud database when it does not exist, or merges and uploads changes
-     * using revision checks to handle concurrent updates.
-     *
-     * @return A successful result when synchronization completes, or an error result
-     * when synchronization fails.
+     * Synchronizes the local database with the cloud database — the delta flow ("Sync Flow" in
+     * sync-architecture.md), run by [engine].
      */
     private suspend fun syncLocked(): Result<Unit> {
         val cloud = cloudProvider() ?: run {
             Log.info(TAG, "Sync skipped: no cloud provider connected")
             return Result.Ok(Unit)
         }
-
-        repeat(SYNC_MAX_RETRY) {
-            // The compressed file is authoritative. Its metadata request answers both "does it
-            // exist" and "is it still the revision we last merged" in one round trip, same as
-            // before compression — every provider already returns the revision from this same
-            // request. The legacy CLOUD_DB_PATH is consulted only when this comes back absent; see
-            // "Compressed Upload / Legacy Fallback" in sync-architecture.md.
-            _syncPhase.value = SyncPhase.CHECKING
-            val gzMeta = cloud.metadata(CLOUD_DB_GZ_PATH).valueOrElse {
-                Log.error(TAG, "Sync: metadata() failed: ${it.exception.message}")
-                return it
-            }
-
-            // `mergedRemote` records whether a download+merge happened this cycle, because a merge
-            // can leave the local DB holding rows the cloud lacks (anything local that won
-            // last-write-wins), which must still be uploaded even if nothing else changed locally.
-            // `expectedRev` is what the upload guards on — `null` means "no compressed file exists
-            // remotely yet", which selects create-only below instead of a rev-guarded update.
-            val mergedRemote: Boolean
-            val expectedRev: String?
-            if (gzMeta != null) {
-                val changed = gzMeta.rev != getSyncState(SYNC_STATE_CLOUD_FILE_REV)
-                if (changed) {
-                    val merged = downloadAndMerge(cloud, CLOUD_DB_GZ_PATH, compressed = true).valueOrElse { return it }
-                    setSyncState(SYNC_STATE_CLOUD_FILE_REV, merged.rev)
-                }
-                mergedRemote = changed
-                expectedRev = gzMeta.rev
-            } else {
-                val legacyMeta = cloud.metadata(CLOUD_DB_PATH).valueOrElse {
-                    Log.error(TAG, "Sync: legacy metadata() failed: ${it.exception.message}")
-                    return it
-                }
-                if (legacyMeta == null) {
-                    // Nothing in the cloud at all: first sync ever. If the file actually already
-                    // exists (a wrong "absent" reading, a scope/account mismatch, or a concurrent
-                    // creator), `createFresh` returns SyncConflictException and we retry — the next
-                    // attempt finds it and takes the gzMeta-present branch above instead of
-                    // clobbering the other device's data.
-                    when (val created = createFresh(cloud)) {
-                        is Result.Ok -> return Result.Ok(Unit)
-                        is Result.Err -> {
-                            if (created.exception !is SyncConflictException) return created
-                            return@repeat
-                        }
-                    }
-                }
-                // Legacy-only cloud: a device (this one, or another) has not written the
-                // compressed file yet. Migrate by merging the legacy content once, then always
-                // write a fresh compressed file below — there is no compressed revision or digest
-                // yet to compare against, so the upload-skip check below is bypassed by
-                // `mergedRemote = true`, and `expectedRev = null` selects create-only (guarding
-                // against a device racing to migrate at the same time).
-                // Its revision belongs to the legacy file, so there is nothing to store.
-                downloadAndMerge(cloud, CLOUD_DB_PATH, compressed = false).valueOrElse { return it }
-                mergedRemote = true
-                expectedRev = null
-            }
-
-            // Both temp files stay files for their whole life: hashed and compressed from disk,
-            // streamed to the cloud from disk, deleted afterwards. The snapshot is the largest
-            // thing this app handles, and nothing here needs it as a contiguous array.
-            _syncPhase.value = SyncPhase.PREPARING
-            val digest = prepareCompressedUpload().valueOrElse { return it }
-            try {
-                // Skip the upload when the snapshot is byte-identical to the one already in the
-                // cloud. The comparison is over the *uncompressed* snapshot's own content
-                // (`sync_state` is excluded from it, so it does not drift on its own, and gzip's
-                // own output is not byte-stable across otherwise-identical input) — see "Skipping
-                // Unchanged Transfers" in sync-architecture.md. Comparing content is what makes
-                // skipping safe: a local change cannot hash to the previous digest, so no edit is
-                // ever silently dropped. The opposite misjudgement only costs an upload that would
-                // have happened anyway — which is also what an unreadable snapshot (null digest) gets.
-                if (!mergedRemote && digest != null && digest == getSyncState(SYNC_STATE_LAST_UPLOADED_DIGEST)) {
-                    Log.info(TAG, "Sync: nothing changed locally or remotely; skipping transfer")
-                    setSyncState(SYNC_STATE_LAST_SYNCED_AT, clock.nowMillis().toString())
-                    return Result.Ok(Unit)
-                }
-
-                _syncPhase.value = SyncPhase.UPLOADING
-                val upload = if (expectedRev == null) {
-                    cloud.create(CLOUD_DB_GZ_PATH, snapshotGzPath)
-                } else {
-                    cloud.upload(CLOUD_DB_GZ_PATH, snapshotGzPath, expectedRev = expectedRev)
-                }
-                when (upload) {
-                    is Result.Ok -> {
-                        // Record the revision this write produced, so the next sync recognises its
-                        // own upload and skips downloading it back. It comes from the write's own
-                        // response (never a follow-up metadata call, which could return another
-                        // device's newer write and make the next sync skip a download it never
-                        // merged).
-                        recordUploaded(upload.value.rev, digest)
-                        return Result.Ok(Unit)
-                    }
-                    is Result.Err ->
-                        if (upload.exception is SyncConflictException) {
-                            return@repeat
-                        } else {
-                            Log.error(TAG, "Sync: upload failed: ${upload.exception.message}")
-                            return upload
-                        }
-                }
-            } finally {
-                deleteSnapshotFiles()
-            }
-        }
-        Log.warn(TAG, "Sync failed after $SYNC_MAX_RETRY retries (rev conflict never resolved)")
-        return Result.Err(CloudStorageException("Sync failed after $SYNC_MAX_RETRY retries"))
-    }
-
-    /**
-     * Creates the initial cloud database without overwriting an existing file.
-     *
-     * @return A successful result when the database is created, or an error result when creation fails,
-     * including a conflict if the cloud file already exists.
-     */
-    private suspend fun createFresh(cloud: CloudStorage): Result<Unit> {
-        _syncPhase.value = SyncPhase.PREPARING
-        val digest = prepareCompressedUpload().valueOrElse { return it }
-        return try {
-            _syncPhase.value = SyncPhase.UPLOADING
-            when (val r = cloud.create(CLOUD_DB_GZ_PATH, snapshotGzPath)) {
-                is Result.Ok -> {
-                    // Same bookkeeping as a successful upload: the file we just created is, by
-                    // definition, already merged here, so the next sync can skip downloading it.
-                    recordUploaded(r.value.rev, digest)
-                    Result.Ok(Unit)
-                }
-                is Result.Err -> r
-            }
-        } finally {
-            deleteSnapshotFiles()
-        }
-    }
-
-    /**
-     * Streams [path] to a temp file and merges it, returning the revision that was downloaded.
-     *
-     * Owns the temp file's whole lifetime (both of them, when [compressed]), so a failed download,
-     * a failed decompression, or a failed merge cannot leave a partial database behind for the
-     * next cycle to trip over.
-     *
-     * @param compressed Whether [path] is gzip-compressed ([works.merc.keryx.app.core.CLOUD_DB_GZ_PATH])
-     * and must be decompressed before the merger opens it, or the legacy plain-SQLite fallback
-     * ([works.merc.keryx.app.core.CLOUD_DB_PATH]).
-     */
-    private suspend fun downloadAndMerge(cloud: CloudStorage, path: String, compressed: Boolean): Result<CloudFileMeta> {
-        val downloadPath = if (compressed) cloudTempGzPath else cloudTempPath
-        try {
-            _syncPhase.value = SyncPhase.DOWNLOADING
-            val meta = cloud.download(path, downloadPath).valueOrElse {
-                Log.error(TAG, "Sync: download failed: ${it.exception.message}")
-                return it
-            }
-            _syncPhase.value = SyncPhase.MERGING
-            val mergeTarget = if (compressed) {
-                try {
-                    Gzip.decompressFile(downloadPath, cloudTempPath, MAX_SYNC_DB_SIZE_BYTES)
-                } catch (e: Exception) {
-                    // Symmetric with mergeCloud's own SQLite-header check below: a foreign/corrupt
-                    // cloud file is the cloud's fault, not a transient/app-side failure, so it is
-                    // classified immediately rather than reaching the merger with a decompressed
-                    // garbage file.
-                    Log.warn(TAG, "Cloud DB is not a valid gzip file: ${e.message}")
-                    return Result.Err(CloudDataIncompatibleException("Cloud DB is not a valid gzip file"))
-                }
-                cloudTempPath
-            } else {
-                downloadPath
-            }
-            return when (val merged = mergeCloud(mergeTarget)) {
-                is Result.Ok -> Result.Ok(meta)
-                is Result.Err -> merged
-            }
-        } finally {
-            FileIO.delete(downloadPath)
-            if (compressed) FileIO.delete(cloudTempPath)
-        }
-    }
-
-    /**
-     * Merges downloaded cloud database data into the local database and updates affected search and query listeners.
-     *
-     * @param cloudDbPath The path to the downloaded cloud database file.
-     * @return A successful result when the merge completes, or an error describing why it failed.
-     * @throws CancellationException If the coroutine is cancelled during the merge.
-     */
-    private suspend fun mergeCloud(cloudDbPath: String): Result<Unit> {
-        // Symmetric with prepareSnapshot(): reject a payload that is definitely not a SQLite file
-        // before the merger opens it. A 0-byte file is a *valid* empty SQLite DB as far as the
-        // engine is concerned, so it would otherwise attach cleanly and only fail deep inside the
-        // merge statements with an ambiguous "no such table: cloud.folders" — this catches the
-        // cheaper, unambiguous case (truncated download, HTML error page, wrong file) up front.
-        // Unlike the upload-side check (CloudStorageException, a local guard against sending bad
-        // data), this is CloudDataIncompatibleException: the cloud itself is what's broken here,
-        // so the user is offered the reset action. Reads only the file's first 16 bytes — the
-        // payload is deliberately never loaded whole.
-        if (!looksLikeSqliteFile(cloudDbPath)) {
-            Log.warn(TAG, "Cloud DB is not a SQLite file")
-            return Result.Err(CloudDataIncompatibleException("Cloud DB is not a SQLite file"))
-        }
-        try {
-            DatabaseMerger.merge(
-                localDbPath = localDbPath,
-                cloudDbPath = cloudDbPath,
-                localSchemaVersion = KeryxDatabase.Schema.version,
-                mergeStatements = MergeSql.all,
-            )
-            _syncPhase.value = SyncPhase.INDEXING
-            // Index the articles the merge brought in (incremental — the live index is never wiped),
-            // before notifying listeners so the reactive search re-run sees the new rows.
-            ftsManager.indexMissing()
-            // The merge writes through DatabaseMerger's own JDBC connection, bypassing the
-            // SQLDelight driver, so watchAll() flows aren't notified. Poke the listeners for
-            // every table the merge touches so the UI reflects synced changes without a restart.
-            driver.notifyListeners("folders", "feeds", "tags", "feed_tags", "articles", "global_settings")
-            return Result.Ok(Unit)
-        } catch (e: KeryxException) {
-            // The merge-abort path (e.g. an incompatible/newer cloud schema) is otherwise silent:
-            // the notification is the only signal. Log it so it's recoverable after release.
-            if (e is SchemaVersionException) {
-                Log.warn(TAG, "Cloud DB merge aborted: cloud schema v${e.cloudVersion} is incompatible with local v${e.localVersion}")
-            } else {
-                Log.warn(TAG, "Cloud DB merge aborted: ${e.message}")
-            }
-            return Result.Err(e)
-        } catch (e: CancellationException) {
-            // `indexMissing()` suspends on the FTS index-writer mutex inside this `try`, so the
-            // catch-all below would otherwise turn a cancellation into a "merge failed" result —
-            // and swallow it after the merge had already committed, skipping the notifyListeners
-            // that surfaces those writes to the SQLDelight query flows.
-            throw e
-        } catch (e: Throwable) {
-            // DatabaseMerger.merge() already classifies a permanently-unusable cloud DB as
-            // CloudDataIncompatibleException (a KeryxException, caught above) using SQLite's error
-            // code. Anything reaching this catch-all — including a post-commit failure in
-            // indexMissing()/notifyListeners(), which run after the merge has already succeeded —
-            // is therefore never the cloud's fault, and must not offer the destructive reset action.
-            Log.error(TAG, "Cloud DB merge failed", e)
-            return Result.Err(CloudStorageException("Merge failed: ${e.message}"))
-        }
-    }
-
-    /**
-     * Writes the file to upload at [snapshotPath]: an FTS-free, consistent snapshot of the local
-     * DB. The live DB and its `articles_fts` index are untouched (see [DatabaseSnapshot]), so a
-     * concurrent search never sees a missing index.
-     *
-     * Returns [Result.Err] rather than leaving a partial/empty payload for the caller to send: an
-     * export failure or a truncated / non-SQLite snapshot must never be uploaded over good cloud
-     * data. Deletes the file itself on failure; on success the caller owns it (and deletes it once
-     * the upload is done or skipped), because the upload streams straight from it.
-     */
-    private fun prepareSnapshot(): Result<Unit> = try {
-        DatabaseSnapshot.exportForUpload(localDbPath, snapshotPath)
-        if (looksLikeSqliteFile(snapshotPath)) {
-            Result.Ok(Unit)
-        } else {
-            FileIO.delete(snapshotPath)
-            Result.Err(CloudStorageException("Snapshot missing or not a valid SQLite file"))
-        }
-    } catch (e: Throwable) {
-        Log.error(TAG, "Snapshot export failed", e)
-        FileIO.delete(snapshotPath)
-        Result.Err(CloudStorageException("Snapshot export failed: ${e.message}"))
-    }
-
-    /**
-     * Builds the file to upload: [prepareSnapshot]'s plain export, gzip-compressed. Returns the
-     * plain snapshot's own content digest — the upload-skip check compares on the *uncompressed*
-     * content (see [syncLocked]) — or `null` when it could not be hashed.
-     *
-     * On success the caller owns both [snapshotPath] and [snapshotGzPath] and deletes them once
-     * the upload is done or skipped, because the upload streams straight from the compressed file.
-     * Both are already cleaned up on failure.
-     */
-    private fun prepareCompressedUpload(): Result<String?> {
-        prepareSnapshot().valueOrElse { return it }
-        return try {
-            val digest = ContentDigest.sha256File(snapshotPath)
-            Gzip.compressFile(snapshotPath, snapshotGzPath)
-            Result.Ok(digest)
-        } catch (e: Throwable) {
-            Log.error(TAG, "Snapshot compression failed", e)
-            deleteSnapshotFiles()
-            Result.Err(CloudStorageException("Snapshot compression failed: ${e.message}"))
-        }
-    }
-
-    /** Temp file the (plain, legacy) cloud DB is streamed into before the merge attaches it. */
-    private val cloudTempPath: String get() = FileIO.join(tempDir, "cloud_keryx.db")
-
-    /** Temp file the compressed cloud DB is streamed into before being decompressed to [cloudTempPath]. */
-    private val cloudTempGzPath: String get() = FileIO.join(tempDir, "cloud_keryx.db.gz")
-
-    /** Temp file the upload snapshot is written to (plain) before being compressed to [snapshotGzPath]. */
-    private val snapshotPath: String get() = FileIO.join(tempDir, "upload_keryx.db")
-
-    /** Temp file the compressed upload snapshot is written to and streamed from. */
-    private val snapshotGzPath: String get() = FileIO.join(tempDir, "upload_keryx.db.gz")
-
-    /** Deletes both upload snapshot temp files ([snapshotPath], [snapshotGzPath]). */
-    private fun deleteSnapshotFiles() {
-        FileIO.delete(snapshotPath)
-        FileIO.delete(snapshotGzPath)
-    }
-
-    /**
-     * The bookkeeping after a successful upload or create: the revision the write itself produced,
-     * the uploaded snapshot's (uncompressed) [digest] when one was computed, and the sync time.
-     */
-    private fun recordUploaded(rev: String, digest: String?) {
-        setSyncState(SYNC_STATE_CLOUD_FILE_REV, rev)
-        if (digest != null) setSyncState(SYNC_STATE_LAST_UPLOADED_DIGEST, digest)
-        setSyncState(SYNC_STATE_LAST_SYNCED_AT, clock.nowMillis().toString())
+        return engine.sync(cloud)
     }
 
     private fun setSyncState(key: String, value: String) {

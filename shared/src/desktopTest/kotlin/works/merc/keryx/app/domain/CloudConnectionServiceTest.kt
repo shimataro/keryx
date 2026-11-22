@@ -15,7 +15,7 @@ import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.CloudAuthException
 import works.merc.keryx.app.core.CloudStorageType
 import works.merc.keryx.app.core.Result
-import works.merc.keryx.app.core.SYNC_STATE_CLOUD_FILE_REV
+import works.merc.keryx.app.core.SYNC_STATE_KS_DEVICE_ID
 import works.merc.keryx.app.data.cloud.CloudFileEntry
 import works.merc.keryx.app.data.cloud.CloudFileMeta
 import works.merc.keryx.app.data.cloud.CloudStorage
@@ -129,11 +129,12 @@ class CloudConnectionServiceTest {
         val session = cloudSession(tokenStorage, settings)
         val sync = syncRepository(AuthFailingCloudStorage())
         val service = CloudConnectionService(session, settings, sync)
-        // Leave behind what a failing connection accumulates: an auth failure and a stale revision.
+        // Leave behind what a failing connection accumulates: an auth failure and a sync identity.
         assertIs<Result.Err>(sync.sync())
         assertTrue(sync.lastSyncAuthFailed.value)
         assertNotNull(sync.lastSyncError.value)
-        db.sync_stateQueries.upsert(SYNC_STATE_CLOUD_FILE_REV, "rev-1")
+        db.sync_stateQueries.upsert(SYNC_STATE_KS_DEVICE_ID, "0f0f0f0f-0000-4000-8000-000000000001")
+        db.sync_bookkeepingQueries.setCapture(enabled = 1, fullPending = 1)
 
         service.tearDown(CloudStorageType.DROPBOX)
 
@@ -141,7 +142,8 @@ class CloudConnectionServiceTest {
         assertNull(session.connectedType())
         assertFalse(sync.lastSyncAuthFailed.value)
         assertNull(sync.lastSyncError.value)
-        assertEquals("", db.sync_stateQueries.get(SYNC_STATE_CLOUD_FILE_REV).executeAsOneOrNull())
+        assertNull(db.sync_stateQueries.get(SYNC_STATE_KS_DEVICE_ID).executeAsOneOrNull())
+        assertEquals(0L, db.sync_bookkeepingQueries.captureState().executeAsOne().enabled)
         assertNull(settings.getLocalSettings().cloudStorageType)
     }
 }

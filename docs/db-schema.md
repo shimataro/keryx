@@ -165,9 +165,12 @@ Indexes: `feed_id`, `is_read`, `is_starred`, and a composite `(published_at DESC
 ### sync_state (KVS, non-sync)
 
 `key`(PK), `value`. Known keys: `last_synced_at` (Unix millis), `ks_device_id` (this device's sync identity in the
-current generation), `ks_generation`, `ks_last_seq` (the last delta this device committed), `ks_attempt` (the delta
-being sent: number, name, outbox high-water mark), `ks_pointer_rev`, `ks_legacy_stub_rev`. Device-local; cleared
-(all but `last_synced_at`) when the cloud connection is disconnected or switched.
+current generation), `ks_generation`, `ks_last_seq` (the last delta this device committed), `ks_attempt` (the file
+being sent: number, name, outbox high-water mark, whether it is the full send), `ks_pointer_rev`, `ks_received_at`
+(when this device last completed a receive), `ks_bases` (JSON: what this device knows of its generation's bases),
+`ks_legacy_stub_rev`, `sync_index_pending` (present from a sync merge's commit until the search index has caught up
+with it, so a failed indexing is retried by the next sync). Device-local; cleared (all but `last_synced_at` and
+`sync_index_pending`) when the cloud connection is disconnected or switched.
 
 ### Sync bookkeeping (device-local, non-sync)
 

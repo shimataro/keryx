@@ -2,10 +2,11 @@
 
 [日本語](sync-architecture.ja.md)
 
-Target: cloud sync (Dropbox / OneDrive / Google Drive / Nextcloud). Implementation is in `domain/SyncRepository.kt`,
-`domain/MergeSql.kt`, `domain/ReduceSql.kt`, `domain/TransportSchema.kt`, `domain/MergeFailureClassifier.kt`,
-`domain/MergeSchema.kt`, `domain/SnapshotSql.kt`, `platform/DatabaseMerger`, `platform/DeltaExporter`,
-`platform/DatabaseSnapshot`.
+Target: cloud sync (Dropbox / OneDrive / Google Drive / Nextcloud). Implementation is in `domain/SyncRepository.kt`
+(scheduling, gates, user-facing state), `domain/DeltaSync.kt` (the flow below), `domain/SyncPointer.kt`,
+`domain/TransportCoverage.kt` (what a base covers, the base cache, the recorded send), `domain/MergeSql.kt`,
+`domain/ReduceSql.kt`, `domain/TransportSchema.kt`, `domain/MergeFailureClassifier.kt`, `domain/MergeSchema.kt`,
+`domain/SnapshotSql.kt`, `platform/DatabaseMerger`, `platform/DeltaExporter`, `platform/TransportFiles`.
 
 ## Design Philosophy
 
@@ -40,17 +41,20 @@ Names are flat: Google Drive, OneDrive and Nextcloud address files by basename o
 encoded in its name rather than in a folder.
 
 ```bash
-/keryx-sync.json                         ← pointer: {"format":3,"generation":"<genId>"}; updated with a revision check
-/ks-<gen>-b-<dev>-<n>-<hash12>.db.gz     ← base: every synced row folded together (immutable)
-/ks-<gen>-d-<dev>-<seq>-<hash12>.db.gz   ← delta: device <dev>'s <seq>-th batch of changes (immutable)
-/keryx.db.gz                             ← after migration: a stub whose user_version is 1000 (see "Migration")
-/keryx-YYYYMMDD-HHMMSS.db.gz.bak         ← archive of the pre-delta file (never pruned)
+/keryx-sync.json                                     ← pointer: {"format":3,"generation":"<genId>"}; updated with a revision check
+/ks-<gen>-b-<dev>-<n>-<createdAt>-<hash12>.db.gz     ← base: every synced row folded together (immutable)
+/ks-<gen>-d-<dev>-<seq>-<createdAt>-<hash12>.db.gz   ← delta: device <dev>'s <seq>-th batch of changes (immutable)
+/keryx.db.gz                                         ← after migration: a stub whose user_version is 1000 (see "Migration")
+/keryx-YYYYMMDD-HHMMSS.db.gz.bak                     ← archive of the pre-delta file (never pruned)
 ```
 
 - `<gen>` is the current **generation**, named by the pointer. A cloud-data reset starts a new generation; files of
   older generations are left in place as an archive and never read again.
 - `<dev>` is the writing device's sync identity (`sync_state.ks_device_id`), issued afresh every time the device
   joins a generation.
+- `<createdAt>` is the file's creation time (Unix milliseconds, in decimal), the same value as its
+  `ks_meta.created_at`. It puts a delta's age in its name, so whether a base's vector may imply that delta is decided
+  from the listing alone (see "Transport schema").
 - `<hash12>` is the first 12 hex digits of the SHA-256 of the *uncompressed* file. Two files with the same name
   therefore always have the same content, which is what lets every write be a plain `create` whose atomicity does
   not matter (Google Drive's is not atomic): a second `create` of the same name is the same file, and two different
@@ -85,9 +89,23 @@ a base folds rows from several devices, and two devices can legitimately hold di
 Each file carries `PRAGMA user_version` and:
 
 - `ks_meta(key, value)` — `format`, `generation`, `device` (the writing device), `created_at`, `kind` (`delta`/`base`)
-  and `number` (the delta's `seq` or the base's `n`); generation, device, kind and number must match the file name;
+  and `number` (the delta's `seq` or the base's `n`); generation, device, kind, number and creation time must match
+  the file name;
 - `ks_vector(device, seq)` (bases only) — per device, the highest `seq` such that every delta `1..seq` is covered;
-- `ks_covered(name)` (bases only) — the delta files this base folded directly.
+- `ks_covered(name, created_at)` (bases only) — the delta files this base folded that its vector does **not** imply,
+  each with the delta's own creation time (its `ks_meta.created_at`; NULL when unknown).
+
+A base covers a delta `(device, seq)` either by its vector (`seq ≤ ks_vector[device]`) or by name (`ks_covered`). The
+vector implies a delta only if the delta was created at least `KS_DELTA_GRACE_MS` before the base itself (the
+creation times in the two names; `BaseCoverage.vectorCutoff`), and only while `ks_covered` names no delta of the
+same `(device, seq)`. Both rules keep a file the base never folded from being implied when two different files share
+one `(device, seq)` — written by a cloned database, or by a send uploaded long after it was built. A copy created
+after the base's cutoff is never implied, so it is received, folded and kept like any delta no base covers; and of
+copies the base did fold, it lists every one, so a copy it never saw is not implied either. The vector still counts
+for the `(device, seq)` itself — the receiving cursor and the gap search go by sequence, not by file. `ks_covered`
+therefore stays small — the deltas of the last `KS_DELTA_GRACE_MS`, deltas past a gap, and clone
+copies — rather than growing with every delta ever folded (see "Bases and Garbage Collection" for when the vector may
+extend).
 
 `TransportSchema` holds the DDL, the expected tables/columns/types per version, and the transport migrations.
 `KeryxDatabase.Schema.migrate` is never run on a transport file (it would add the device-local tables and triggers).
@@ -122,25 +140,40 @@ records what it writes. An `UPDATE` is recorded only when a synced column actual
 No row of a synced table is ever physically deleted (every delete is a tombstone), so there are no `DELETE`
 triggers.
 
-`sync_state` keys: `last_synced_at`, `ks_device_id`, `ks_generation`, `ks_last_seq`, `ks_attempt` (the delta being
-sent: its number, name and outbox high-water mark), `ks_pointer_rev`, `ks_legacy_stub_rev`. `sync_state` and the
-tables above are device-local and never leave the device.
+`sync_state` keys: `last_synced_at`, `ks_device_id`, `ks_generation`, `ks_last_seq`, `ks_attempt` (the file being
+sent: its number, name, outbox high-water mark, and whether it is the full send), `ks_pointer_rev` (the pointer
+revision whose generation is `ks_generation`), `ks_received_at` (when this device last completed a receive, by its own
+clock), `ks_bases` (what this device knows of its generation's bases — each one's vector, `ks_covered` and creation
+time — so it can tell what a base covers without downloading it), `ks_legacy_stub_rev`, `sync_index_pending` (present
+from a merge's commit until the search index has caught up with it — see "Receiving"; without the `ks_` prefix, since
+that work belongs to the local search index and survives a disconnect). `sync_state` and the tables
+above are device-local and never leave the device.
 
 ## Sync Flow (`SyncRepository.sync()`)
 
 Everything below runs under `SyncRepository`'s `mutex`.
 
-0. **Resume an interrupted send.** If `ks_attempt` is set, the delta it names was written locally (and perhaps
-   uploaded) but never committed. Its saved file is decompressed and checked against the hash in its name; if it
-   matches, it is uploaded again under the same name and committed (step 4 of "Sending"). If the file is missing or
-   its hash does not match, the device takes a **new sync identity** (new `ks_device_id`, `ks_last_seq = 0`): the
-   outbox entries the attempt covered were never deleted, so they are sent again under the new identity, and the
-   old identity's file — whether or not it reached the cloud — can only ever be applied harmlessly. A disk-corrupted
-   file is never uploaded. If the generation has changed since, the attempt is simply dropped (the rejoin's full
-   send covers it).
+0. **Resume an interrupted send** (once step 1 has named the generation). If `ks_attempt` is set, the file it names
+   was written locally (and perhaps uploaded) but never committed. If it was created at most `KS_RESUME_MAX_AGE_MS`
+   (12 hours) ago by the creation time in its name, its saved file is decompressed and checked against the hash in its
+   name; if it matches, it is uploaded again under the same name and committed (step 4 of "Sending").
+   If the send is older than that (or dated in this device's future), the file is missing, its hash does not match, or
+   the record itself cannot be read, the device takes a **new sync identity** (new `ks_device_id`, `ks_last_seq = 0`): the outbox entries the attempt covered were never deleted,
+   so they are sent again under the new identity, and the old identity's file — whether or not it reached the cloud —
+   can only ever be applied harmlessly. A disk-corrupted file is never uploaded, and neither is an old one: uploaded
+   late under its old creation time, it would look old enough to garbage-collect at once, before a device that syncs
+   occasionally had listed it, and could be implied by a vector without having been folded. Resent under the new
+   identity, the same changes carry a fresh creation time. (The limit is below `KS_RECEIVE_STALE_MARGIN_MS`.) If the generation has changed since,
+   the attempt is simply dropped (the rejoin's full send covers it). With no attempt recorded, every saved file in the
+   data directory (`pending-<n>.db.gz`) is left over — by a crash between a commit and its deletion, or between clearing
+   a record and deleting its file — and is swept away; so are they whenever a new identity is taken, on joining and on
+   disconnecting. The sweep is best effort: a file that cannot be deleted is logged and left for the next sweep, and
+   never stops the step around it (only a recorded send is ever uploaded).
 1. **Read the pointer.** `metadata(keryx-sync.json)`; the file is downloaded only when its revision differs from
    `ks_pointer_rev`.
-   - Neither the pointer nor `keryx.db.gz` exists → this is the first device ("Joining").
+   - Neither the pointer nor `keryx.db.gz` exists → this is the first device ("Joining") — unless this device has
+     already sent into its own generation (`ks_last_seq ≥ 1`: a first device interrupted before creating the
+     pointer), which then creates the pointer for that generation.
    - No pointer, but `keryx.db.gz` exists → migrate from the pre-delta format ("Migration").
    - Its generation differs from `ks_generation` → rejoin ("Joining") — another device reset the cloud data.
    - It cannot be parsed or lacks a field → `CloudDataIncompatibleException` (a reset rewrites it).
@@ -150,38 +183,63 @@ Everything below runs under `SyncRepository`'s `mutex`.
 2. **List** `ks-<gen>-*` (`CloudStorage.list`, every page). A file carrying this device's own `<dev>` that it did not
    write — a `seq ≤ ks_last_seq` whose name is not in `sync_applied`, or a `seq > ks_last_seq` that is not the
    `ks_attempt` name — means the database was cloned (restored from a backup, or copied to another machine) and both
-   copies are writing as the same device: this device rejoins under a new identity. Nothing is lost meanwhile —
-   the hash in the name keeps the two copies' files apart, and receivers apply both.
+   copies are writing as the same device: this device rejoins under a new identity. A delta of its own that a known
+   base covers is not counted (it may have been garbage-collected and still be listed for a while). After receiving,
+   a known base covering a delta of this device's identity above `ks_last_seq` means the same — a copy restored from a
+   backup older than the grace period sees the original's newer deltas only through the bases — and the device rejoins
+   before sending. Nothing is lost meanwhile — the hash in the name keeps the two copies' files apart, and receivers
+   apply both.
 3. **Receive** (see "Receiving").
 4. **Send** (see "Sending").
 5. **Fold and collect garbage**, when the thresholds are met (see "Bases and Garbage Collection").
 6. Record `last_synced_at`.
 
-A sync with nothing to do costs three requests (two `metadata` calls and one listing page) and no payload. The
-`keryx.db.gz` watch goes away with the rest of the pre-delta compatibility at v1.0.0. `SYNC_MAX_RETRY` now bounds
+A sync with nothing to do costs three requests (two `metadata` calls and one listing page) and no payload — two until
+the legacy watch of step 1 is in place (the migration step). The `keryx.db.gz` watch goes away with the rest of the
+pre-delta compatibility at v1.0.0. `SYNC_MAX_RETRY` now bounds
 only the retries of a revision-checked write (the pointer, the stub); delta and base names never collide.
 
 ### Receiving
 
 1. **What to fetch.** Every listed delta whose name is not in `sync_applied`. Then, per device D, look for a `seq`
    above `sync_cursor[D]` that is neither applied nor listed — a delta that was already garbage-collected. If a base
-   covers it (`ks_vector[D] ≥ seq`), that base is fetched too, and its `ks_covered` names count as applied. If no
-   base covers it, the gap is taken as the provider's listing not having caught up yet (Drive's and OneDrive's
-   listings are eventually consistent): the cursor stops below it, every other file is still merged (the merge is
-   commutative), and the next sync looks again. When joining, every base that no other base dominates is fetched.
+   covers it, that base is fetched too, and the listed deltas it covers count as applied. What a base covers is read
+   from `ks_bases`; a listed base this device has never looked at is downloaded to find out. If no base covers it, the
+   gap is taken as the provider's listing not having caught up yet (Drive's and OneDrive's listings are eventually
+   consistent): the cursor stops below it, every other file is still merged (the merge is commutative), and the next
+   sync looks again. A known base that covers something this device lacks is fetched as well. A delta a base names
+   explicitly (`ks_covered`) counts as merged only when its own name is in `sync_applied`: the cursor proves only that
+   some file of each `(device, seq)` was merged, and a clone's duplicate of a `seq` below the cursor is a different
+   file, whose changes may be nowhere else.
+   - **Joining, or away too long.** When joining — and whenever `ks_received_at` is older than `KS_DELTA_GRACE_MS`
+     minus `KS_RECEIVE_STALE_MARGIN_MS` (one day, for listing delay and clock differences) — every listed base this
+     device does not know is fetched. A delta is garbage-collected only once it is that old (see below), so a device
+     that received within that time has seen every delta that can have gone; one that has not may have missed deltas
+     that left no gap behind (the last deltas of an identity that went quiet), which only the bases still hold.
+     `ks_received_at` is recorded only by a receive that left no gap, missed no file, and saw at least one base it
+     knows — so a joining device whose listing does not show the generation's base yet keeps looking for it.
+   - **Gone meanwhile.** A listed file whose download fails while `metadata` finds it absent (garbage-collected, the
+     listing not caught up) counts as not listed: nothing is merged from it and the cursor stops below it.
 2. **Validate** every file ("Validating Cloud Files"). If any file fails, nothing is merged.
 3. **Fold** the files into one temporary transport database with `ReduceSql` (per primary key, per field group,
    last-write-wins — the same rules as the merge, without its local guards), so the merge runs once however many
    files arrived.
-4. **Merge** with `DatabaseMerger.merge` in a single transaction (see "Merge"): `INSERT INTO sync_merging` first,
+4. **Merge** with `DatabaseMerger.mergeTransport` in a single transaction (see "Merge"): `INSERT INTO sync_merging` first,
    then `MergeSql.all`, then the `sync_applied`/`sync_cursor` updates for every file merged and the
-   `ks_search_pending` registrations, then `DELETE FROM sync_merging`. Merging and recording what was merged
+   `ks_search_pending` registrations and `sync_index_pending`, then `DELETE FROM sync_merging`. The names `sync_applied` records include every
+   name a merged base lists explicitly, whether listed or not (garbage-collected meanwhile). Merging and recording what was merged
    therefore commit together or not at all — a crash in between re-merges the same files next time, which the
    merge's idempotence makes harmless.
-5. After the commit: `ftsManager.indexMissing()`, which first recomputes `search_text` for `ks_search_pending`
-   ("FTS5 Handling"), then `driver.notifyListeners(...)` for every synced table — the merge wrote through its own connection, so
-   SQLDelight's flows must be re-triggered for the UI to reflect it.
+5. Right after the commit: `driver.notifyListeners(...)` for every synced table — the merge wrote through its own
+   connection, so SQLDelight's flows must be re-triggered for the UI to reflect it, whatever happens next. Then
+   `ftsManager.indexMissing()`, which first recomputes `search_text` for `ks_search_pending` ("FTS5 Handling"),
+   `articles`' listeners once more (a search showing then finds the merged rows indexed), and `sync_index_pending` is
+   deleted. If indexing fails, the sync fails with a transient error and the key stays: the next sync — even one with
+   nothing to merge — runs `indexMissing()` again, notifies, and deletes the key.
 6. Names no longer listed are dropped from `sync_applied`; if one ever reappears, applying it again is harmless.
+   A name a known listed base lists explicitly stays — step 1 would otherwise take it as missing and fetch that base
+   again on every sync. This device's own deltas stay until a known base covers them, so a listing that does not show
+   a just-sent delta yet never makes it look like a clone's (step 2).
 
 ### Sending
 
@@ -199,8 +257,11 @@ only the retries of a revision-checked write (the pointer, the stub); delta and 
      filtering, the rows the kept rows reference are added back (the feed of every kept article, the folder of
      every kept feed, the tag and feed of every kept `feed_tags` row), so the file passes validation check 9 even
      when a kept article's feed is identical to the merged base.
-2. **Record before uploading**: the compressed file is written to the app's data directory as `pending-<n>.db.gz`,
-   and, in one transaction, `ks_attempt = (n = ks_last_seq + 1, name, S)`.
+2. **Record before uploading**: the file is named by the hash of the exporter's own output (never opened for writing
+   again — on Android that would add `android_metadata` and change its bytes), written compressed to the app's data
+   directory as `pending-<n>.db.gz`, and `ks_attempt = (n = ks_last_seq + 1, name, S, full)` is recorded. A file with no
+   rows at all — a full send whose every row the cloud already holds — is not uploaded: the outbox entries it covered
+   are deleted and `full_pending` cleared at once.
 3. **Upload** with `create(name)`. An "already exists" answer means the same file is there (same name, same
    content), which counts as success.
 4. **Commit**, in one transaction: `DELETE FROM sync_outbox WHERE seq ≤ S`, `ks_last_seq = n`, add the name to
@@ -211,24 +272,45 @@ did reach the cloud is re-sent under the same name before the commit (step 0 of 
 
 ### Bases and Garbage Collection
 
-**When.** Once the deltas not yet folded into a base reach `KS_COMPACT_MIN_DELTAS` (100) files or
-`KS_COMPACT_MAX_DELTA_RATIO` (25%) of the latest base's size. Any device may fold; two folding at once is safe.
-Folding is skipped on a metered network (even for a manual sync) and may be cancelled at any point.
+**When.** After sending, once the listed deltas no known base covers reach `KS_COMPACT_MIN_DELTAS` (100) files or
+`KS_COMPACT_MAX_DELTA_RATIO` (25%) of the largest listed base's size. Bases this device does not know are downloaded
+first — they may cover those deltas already — and the thresholds checked again. Any device may fold; two folding at
+once is safe. Folding is skipped on a metered network or under Data Saver / Low Data Mode, even for a manual sync
+(`NetworkUsagePolicy.compactionAllowed`), and may be cancelled at any point. Nothing waits for a fold: a transient
+failure is logged and left to a later sync, while a corrupt or too-new input is reported like any other cloud file.
 
 **How.** Every base that no other base dominates, plus every listed delta none of them covers, is validated and
 folded with `ReduceSql` into a new base. A base is **never built from the local database**: the local merge skips
 rows its guards reject (a name collision, say), and a base built from it would silently drop them for every other
-device. `ks_vector` extends the input bases' vector over the deltas that continue it without a gap; `ks_covered`
-lists the deltas folded. The new base is uploaded with `create`; if any input fails validation, no base is built.
+device. The new base is named `ks-<gen>-b-<dev>-<n>-<createdAt>-<hash12>`, `n` one above this device's highest listed
+base. `ks_vector` combines the input bases' vectors and extends them over the folded deltas that continue them without a
+gap — **counting only deltas created at least `KS_DELTA_GRACE_MS` before the base's own creation time**
+(`ks_covered.created_at` against the base's `ks_meta.created_at` — the same cutoff a reader applies when it decides
+what the vector implies); `ks_covered` then drops a folded delta's name only when the extended vector implies it and
+the delta is known (`ks_covered.created_at`) to have been created by that cutoff — never a copy of a `(device, seq)` it
+folded more than one of — and keeps every other name (`TransportFiles.finalizeBase`). A younger name stays even where
+an input base's vector already reaches its `(device, seq)` (a clone's late duplicate, say): the new base's vector does
+not imply it, so without its name the base would cover a delta it folded by neither rule. The age rule is what makes the vector safe to trust: a duplicate of an implied
+`(device, seq)` created after the base's cutoff is not implied (see "Transport schema"), so to be implied without having
+been folded, a duplicate would have had to be created before that cutoff and stay invisible to every listing for the
+whole grace period — see "Delta sync measures a delta's age by the clock of the device that wrote it" in
+[known-issues.md](known-issues.md). The first base of a generation (`b-<dev>-1`, "Joining"), whose vector `{dev: 1}` is written directly rather than
+extended, is read by the same rule: it implies no delta file of that number created after its cutoff. The new base is uploaded with `create`; if any input fails validation, no base is built.
 
 **Garbage collection** keeps "no change is ever unreachable" true:
 
-- A delta may be deleted only once a base whose `ks_covered` names it exists (confirmed with `metadata` just before)
-  and was created at least `KS_DELTA_GRACE_MS` (7 days) ago — so a device that syncs within a week catches up from
-  deltas alone, without downloading a base.
-- A base may be deleted only while another base strictly dominates it: a vector at least as high in every component
-  and a superset of its covered names. Equal vectors are ordered by name, so two devices can never delete each
-  other's bases.
+- A delta may be deleted only once a base covering it exists (confirmed with `metadata` just before) and the delta
+  itself was created at least `KS_DELTA_GRACE_MS` (7 days) ago — its `ks_covered.created_at`, or for a delta the
+  vector implies, the creation time in its name (`BaseCoverage.coveredBefore`) — so a device that syncs within a week catches
+  up from deltas alone, without downloading a base. (The delta's own age, not the base's: bases are rebuilt more often
+  than weekly on an active account, and a rule on the base's age would never let a delta go.)
+- A base may be deleted only while another base strictly dominates it (confirmed with `metadata` just before): created
+  no earlier (so the other's vector implies everything this one's does), a vector at least as high in every component,
+  every delta it names explicitly covered by the other too — a clone copy it lists must be listed by the other, not
+  merely implied —, no `(device, seq)` named by the other that this one's vector implies unless this one names it too
+  (naming a seq stops a base's vector implying any other copy of it, so the copy this one implies there would lose its
+  cover), and then more coverage, or for equal coverage a later creation time, or for an equal time too a greater
+  name. So two devices can never delete each other's bases.
 
 **Cost of a new device.** One base (about the size of the pre-delta database file) plus at most the deltas below the
 thresholds; deltas a base covers are not downloaded. That is at most about 1.25× what joining cost before.
@@ -240,16 +322,18 @@ thresholds; deltas a base covers are not downloaded. That is at most about 1.25�
   `sync_capture = (enabled 1, full_pending 1)`, so every write from then on is recorded. Then receive everything and
   make the full send. The result is what the pre-delta "merge, then upload the whole database" produced.
 - **The first device** joins a new generation, uploads its full send as the first base, and only then creates the
-  pointer (`create`) — so whenever a pointer is visible, its base exists. A device that loses a concurrent pointer
-  creation sees a different generation on its next sync and rejoins.
+  pointer (`create`) — so whenever a pointer is visible, its base exists. That base, `b-<dev>-1`, covers the device's
+  own delta `1` through its vector (`ks_vector = {dev: 1}`) without a delta file of that number ever existing, so every
+  base is still the fold of the deltas it covers. A device that loses a concurrent pointer creation sees a different
+  generation on its next sync and rejoins; the base it sent is never pointed at.
 - **Reset** (`resetCloudData()`, the recovery for unusable cloud data): join a new generation, upload the local
-  full state as its base, then replace the pointer with a revision check. A revision mismatch (another device reset
+  full state as its base (as the first device does), then replace the pointer with a revision check. A revision mismatch (another device reset
   first) aborts and re-reads the pointer. The old generation's files are left in place as an archive. Every other
   device sees the new generation and rejoins, sending its own full state — so data only another device held comes
   back, as it did when other devices merged the re-created file before.
 - **Disconnect / switch** (`clearSyncFailureState()`, under the same mutex): `sync_capture.enabled = 0` (nothing is
   recorded while local-only), and the `ks_*` keys, the outbox, `sync_applied`, the cursors, `ks_feed_folder_raw`
-  and any saved pending file are cleared. `ks_search_pending` stays — it belongs to the local search index.
+  and every saved pending file (the best-effort sweep of step 0) are cleared. `ks_search_pending` stays — it belongs to the local search index.
   `ks_feed_folder_raw` goes with `sync_applied`: it describes which raw version, among the files this device has
   merged, won each feed's folder, and the files of a new generation are compared afresh — against the value this
   device's own full send carries (main's resolved one), as every other device's fold compares them.
@@ -264,12 +348,12 @@ temporary file.
 | --- | --- | --- |
 | 1 | Name matches the pattern | Not ours — ignored |
 | 2 | Download completes | Transient; retried next sync |
-| 3 | gzip decompresses (capped at `MAX_SYNC_DB_SIZE_BYTES`), the SQLite header, the hash in the name | Hash mismatch → downloaded once more in the same sync; still mismatched → corrupt |
+| 3 | gzip decompresses (capped at `MAX_SYNC_DB_SIZE_BYTES`), the SQLite header, the hash in the name | Any of these failing → downloaded once more in the same sync; failing again → corrupt |
 | 4 | `user_version` | Newer than this build → `SchemaVersionException` |
 | 5 | Expected tables and columns for that version (`TransportSchema`; `MergeSchema` for a pre-delta database). A transport file's expected tables must have exactly the expected columns: a writer that adds a column bumps the transport version, so an extra column at the same version is a broken file, which a fold would otherwise drop without a word. A pre-delta database, a full local database with device-local columns of its own (`search_text`, say), is checked for missing columns only. Tables the expectation does not name are allowed | Missing (or, in a transport file, extra) → corrupt. No expectation registered for the version → undetermined, treated as transient (never answered with a reset) |
 | 6 | An older version is migrated up (`TransportSchema` migrations; `KeryxDatabase.Schema.migrate` for a pre-delta database) | An SQLite error while migrating → corrupt |
 | 7 | Types and value ranges, by a query generated from the expected schema: ids are non-empty text, stamps are integer or NULL, booleans are 0 or 1, NOT NULL columns hold no NULL | Any violating row → corrupt |
-| 8 | `ks_meta` (generation, kind, device, number) matches the file name; a base's `ks_vector`/`ks_covered` types | Corrupt |
+| 8 | `ks_meta` (generation, kind, device, number, creation time) matches the file name; a base's `ks_vector`/`ks_covered` types | Corrupt |
 | 9 | References are closed: every feed's folder, every article's feed, every `feed_tags` row's tag and feed is in the same file | Corrupt |
 
 "Corrupt" is `CloudDataIncompatibleException`, handled as before: automatic syncing is suspended, and the
@@ -400,6 +484,10 @@ stops it.
 ## Merge (`DatabaseMerger` + `MergeSql`)
 
 The folded transport file (or a validated pre-delta database) is attached as `cloud` and merged table by table.
+A transport file goes through `DatabaseMerger.mergeTransport`: `KeryxDatabase.Schema.migrate` is never run on it, its
+`user_version` is checked against `TransportSchema.VERSION` (an older one is migrated by `TransportFiles.prepareForMerge`),
+and the ambiguous `SQLITE_ERROR` case of the classification below is checked against the transport schema
+(`TransportFiles.schemaMatches`) instead of `MergeSchema`. `merge` keeps the pre-delta mode for the migration.
 
 > [!IMPORTANT]
 > SQLDelight's JVM `JdbcSqliteDriver` opens a new connection per statement for file DBs. Therefore, executing `ATTACH` through the driver makes it invisible to subsequent merge statements (`no such table: cloud.*`). The merge is done on a **single dedicated connection** in `platform/DatabaseMerger`: attach → version check → merge (transaction) → detach.
@@ -508,7 +596,7 @@ Before attaching, the Apple `migrateCloudIfOlder` brings an older cloud file up 
 | `SQLITE_ERROR` (`no such table`, `no such column`) | **Ambiguous** — this is what a foreign/legacy cloud schema looks like, but also what a broken *local* schema (an unrelated app bug) looks like. Resolved by calling `validateSchema` against the downloaded cloud file: `false` → `CloudDataIncompatibleException`; `true` or `null` (undetermined) → rethrown unchanged, since neither confidently pins the failure on the cloud. |
 | Anything else (`SQLITE_CANTOPEN`, `SQLITE_IOERR`, `SQLITE_FULL`, `SQLITE_BUSY`, `SQLITE_LOCKED`, `SQLITE_READONLY`, no `SQLiteException` found, …) | **Transient / app-side** — rethrown unchanged. |
 
-Because classification lives entirely inside `DatabaseMerger.merge` (which only wraps `mergeUnclassified`, not anything the caller does afterward), it structurally cannot see `SyncRepository.mergeCloud`'s post-commit steps — `ftsManager.indexMissing()` and `driver.notifyListeners(...)`, both of which run *after* the merge has already committed. A failure there (e.g. a dropped local `articles_fts` table, itself `SQLITE_ERROR`) reaches `SyncRepository`'s own catch-all unclassified and is reported as `CloudStorageException`, never `CloudDataIncompatibleException` — the merge already succeeded, so offering a destructive cloud-data reset for it would be wrong.
+Because classification lives entirely inside `DatabaseMerger.merge` (which only wraps `mergeUnclassified`, not anything the caller does afterward), it structurally cannot see `DeltaSync.mergeFolded`'s post-commit steps — `ftsManager.indexMissing()` and `driver.notifyListeners(...)`, both of which run *after* the merge has already committed. A failure there (e.g. a dropped local `articles_fts` table, itself `SQLITE_ERROR`) reaches `SyncRepository`'s own catch-all unclassified and is reported as `CloudStorageException`, never `CloudDataIncompatibleException` — the merge already succeeded, so offering a destructive cloud-data reset for it would be wrong.
 
 How each `actual` knows the merge transaction is still open differs, since the obvious flags only record what was asked for, not a rollback SQLite performed by itself: desktop registers a rollback listener (`sqlite3_rollback_hook`, via sqlite-jdbc's `SQLiteCommitListener`) on the merge transaction, Apple asks `sqlite3_get_autocommit`, and Android opens a `SAVEPOINT` with the transaction and treats a successful `RELEASE` as proof that it is still inside it — once before the re-run (followed by a fresh `SAVEPOINT`, so nothing re-runs if the transaction has ended) and once after. A re-run starts only once the transaction is proven open, so no statement can ever run outside it and commit into main. The verdict is carried to the classification step for that exact failure only (`MainRuledOutVerdict`), and a failure of the check itself is attached as suppressed, never replacing the original.
 

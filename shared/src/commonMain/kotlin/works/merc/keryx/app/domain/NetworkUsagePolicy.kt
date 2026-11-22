@@ -3,6 +3,7 @@ package works.merc.keryx.app.domain
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import works.merc.keryx.app.core.NetworkCondition
 
 /**
@@ -15,6 +16,7 @@ import works.merc.keryx.app.core.NetworkCondition
  * | --- | --- | --- | --- |
  * | Automatic sync | runs | runs only if [syncOnMetered] | deferred |
  * | Automatic feed refresh | runs | runs | skipped |
+ * | Folding deltas into a base (any sync) | runs | skipped | skipped |
  */
 object NetworkUsagePolicy {
     /**
@@ -50,4 +52,16 @@ object NetworkUsagePolicy {
      * small, so a metered network alone does not stop them — only the OS's data-saving mode does.
      */
     fun automaticRefreshAllowed(condition: NetworkCondition): Boolean = !condition.dataSaver
+
+    /**
+     * Whether a sync may fold deltas into a new base ("Bases and Garbage Collection" in
+     * sync-architecture.md). A fold downloads and uploads a whole base, which nothing is waiting for —
+     * any later sync on another network can do it — so it is skipped on a metered network even for a
+     * manual sync and even with [syncOnMetered] on.
+     */
+    fun compactionAllowed(condition: NetworkCondition): Boolean = !condition.metered && !condition.dataSaver
+
+    /** [compactionAllowed] as a flow over the live network condition. */
+    fun compactionAllowedFlow(condition: Flow<NetworkCondition>): Flow<Boolean> =
+        condition.map(::compactionAllowed).distinctUntilChanged()
 }

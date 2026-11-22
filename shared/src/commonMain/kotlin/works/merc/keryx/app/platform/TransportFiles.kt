@@ -1,5 +1,9 @@
 package works.merc.keryx.app.platform
 
+import works.merc.keryx.app.core.KS_DELTA_GRACE_MS
+import works.merc.keryx.app.core.SchemaVersionException
+import works.merc.keryx.app.domain.BaseCoverage
+import works.merc.keryx.app.domain.DeltaExportSql
 import works.merc.keryx.app.domain.MergeSchema
 import works.merc.keryx.app.domain.ReduceSql
 import works.merc.keryx.app.domain.SqliteFailureCategory
@@ -213,10 +217,14 @@ object TransportFiles {
      * its own name to `ks_covered`; a base contributes its vector and covered names), and the vector
      * extended over the deltas that continue it ([TransportVector.extend]).
      *
+     * @param extendVector whether to extend the vector over the covered deltas right away. A new base
+     * passes `false` and calls [finalizeBase] once every input is folded, which extends it only over
+     * deltas old enough to be implied; a receive's accumulator, whose coverage is never read, passes
+     * `false` too.
      * @throws IllegalStateException when either file is not of [TransportSchema.VERSION] (an input
      * must have been validated, and so migrated, first).
      */
-    fun fold(accumulatorPath: String, inputPath: String, inputName: TransportFileName) {
+    fun fold(accumulatorPath: String, inputPath: String, inputName: TransportFileName, extendVector: Boolean = true) {
         TransportConnections.open(accumulatorPath, TransportOpenMode.READ_WRITE).use { connection ->
             check(connection.userVersion() == TransportSchema.VERSION) { "The accumulator is not a current transport file" }
             // ATTACH must run outside a transaction.
@@ -229,9 +237,13 @@ object TransportFiles {
                     ReduceSql.combineCoverage.forEach(connection::exec)
                     if (inputName.kind == TransportFileKind.DELTA) {
                         // A parsed name: lowercase hex, digits, '-' and '.' only.
-                        connection.exec("INSERT OR IGNORE INTO main.ks_covered (name) VALUES ('${inputName.fileName}')")
+                        connection.exec(
+                            "INSERT INTO main.ks_covered (name, created_at) VALUES ('${inputName.fileName}', " +
+                                "(SELECT CAST(value AS INTEGER) FROM src.ks_meta WHERE key = '${TransportSchema.MetaKeys.CREATED_AT}')) " +
+                                "ON CONFLICT(name) DO UPDATE SET created_at = ${ReduceSql.EARLIEST_KNOWN_COVERED_AT}",
+                        )
                     }
-                    extendVector(connection)
+                    if (extendVector) extendVector(connection)
                 }
             } finally {
                 runCatching { connection.exec("DETACH DATABASE src") }
@@ -254,6 +266,115 @@ object TransportFiles {
             )
         }
     }
+
+    /**
+     * Completes a base folded with `extendVector = false`, in one transaction on one connection:
+     *
+     * - the vector is extended over the covered deltas that continue it without a gap, **counting only
+     *   deltas created at or before the impliable cutoff** — `KS_DELTA_GRACE_MS` before the base's own
+     *   `ks_meta.created_at`, exactly [BaseCoverage.vectorCutoff] — by `ks_covered.created_at` (an
+     *   unknown time never counts); see "Bases and Garbage Collection";
+     * - a covered name is removed from `ks_covered` only when the extended vector implies it **and** it
+     *   was created at or before the impliable cutoff (a known `created_at`) — a younger one, such as a
+     *   clone's duplicate of a `(device, seq)` an input base already implied, is not implied by this
+     *   base's vector ([BaseCoverage.covers]), so dropping its name would leave it covered by nothing —
+     *   and never where two covered names share a `(device, seq)` (a cloned database): those stay
+     *   listed, so a duplicate this base never folded is not implied by its vector;
+     * - tables a platform's connection adds to a file it opens for writing (requery's
+     *   `android_metadata`) are dropped, as [DeltaExporter] does.
+     *
+     * The file is complete afterwards: hash it as it is and never open it for writing again (on
+     * Android that would add `android_metadata` back and change its bytes).
+     */
+    fun finalizeBase(path: String) {
+        TransportConnections.open(path, TransportOpenMode.READ_WRITE).use { connection ->
+            check(connection.userVersion() == TransportSchema.VERSION) { "The base is not a current transport file" }
+            connection.transaction {
+                val createdAt = checkNotNull(connection.createdAt()) { "The base has no creation time" }
+                val impliableCutoff = createdAt - KS_DELTA_GRACE_MS
+                val vector = connection.queryRows("SELECT device, seq FROM main.ks_vector")
+                    .associate { it[0].orEmpty() to (it[1]?.toLongOrNull() ?: 0L) }
+                val rows = connection.queryRows("SELECT name, created_at FROM main.ks_covered")
+                val covered = rows.mapNotNull { it[0]?.let(TransportFileName::parse) }
+                val impliable = rows.filter { (it[1]?.toLongOrNull() ?: Long.MAX_VALUE) <= impliableCutoff }
+                    .mapNotNull { it[0]?.let(TransportFileName::parse) }
+                val extended = TransportVector.extend(vector, impliable)
+                for ((device, seq) in extended) {
+                    if (vector[device] == seq) continue
+                    check(TransportFileName.isSyncId(device)) { "Malformed device in ks_vector" }
+                    connection.exec(
+                        "INSERT INTO main.ks_vector (device, seq) VALUES ('$device', $seq) " +
+                            "ON CONFLICT(device) DO UPDATE SET seq = MAX(seq, excluded.seq)",
+                    )
+                }
+                val createdAtByName = rows.mapNotNull { row -> row[0]?.let { it to row[1]?.toLongOrNull() } }.toMap()
+                val groups = covered.groupBy { it.device to it.number }
+                for (name in covered) {
+                    val implied = name.number <= (extended[name.device] ?: 0L)
+                    val duplicated = groups.getValue(name.device to name.number).size > 1
+                    val old = createdAtByName[name.fileName]?.let { it <= impliableCutoff } == true
+                    // A parsed name: lowercase hex, digits, '-' and '.' only.
+                    if (implied && !duplicated && old) connection.exec("DELETE FROM main.ks_covered WHERE name = '${name.fileName}'")
+                }
+                DeltaExportSql.platformCleanupStatements.forEach(connection::exec)
+            }
+        }
+    }
+
+    /**
+     * The coverage and creation time of the validated transport file at [path], named [name]. Read-only.
+     */
+    fun readCoverage(path: String, name: TransportFileName): BaseCoverage =
+        TransportConnections.open(path, TransportOpenMode.READ_ONLY).use { connection ->
+            val createdAt = connection.createdAt() ?: 0L
+            val vector = connection.queryRows("SELECT device, seq FROM ks_vector")
+                .associate { it[0].orEmpty() to (it[1]?.toLongOrNull() ?: 0L) }
+            val covered = connection.queryRows("SELECT name, created_at FROM ks_covered")
+                .mapNotNull { row -> row[0]?.let { it to row[1]?.toLongOrNull() } }.toMap()
+            BaseCoverage(name.fileName, vector, covered, createdAt)
+        }
+
+    /**
+     * Brings the transport file at [path] to [TransportSchema.VERSION] before [DatabaseMerger.mergeTransport]
+     * attaches it: a newer file throws [SchemaVersionException], an older one is migrated in place
+     * ([TransportSchema.migrationPath]; the platform's SQLite exception propagates on failure, and an
+     * older version with no migration path is an [IllegalStateException] — unclassified, so never
+     * answered with a reset). Touches only that file.
+     */
+    fun prepareForMerge(path: String) {
+        val version = TransportConnections.open(path, TransportOpenMode.READ_ONLY).use { it.userVersion() }
+        if (version > TransportSchema.VERSION) {
+            throw SchemaVersionException(localVersion = TransportSchema.VERSION, cloudVersion = version)
+        }
+        if (version == TransportSchema.VERSION) return
+        val migrations = checkNotNull(TransportSchema.migrationPath(version)) { "No transport migration from version $version" }
+        TransportConnections.open(path, TransportOpenMode.READ_WRITE).use { connection ->
+            connection.transaction {
+                for (migration in migrations) {
+                    migration.statements.forEach(connection::exec)
+                    connection.exec("PRAGMA user_version = ${migration.to}")
+                }
+            }
+        }
+    }
+
+    /**
+     * Whether the transport file at [path] has exactly the tables' columns of [TransportSchema.VERSION]
+     * (every expected column, none beyond them — validation's check 5 for a transport file) —
+     * [DatabaseMerger.mergeTransport]'s schema check for the ambiguous `SQLITE_ERROR` case. `null`
+     * when the inspection itself fails (undetermined, never a reset).
+     */
+    fun schemaMatches(path: String): Boolean? = try {
+        val expected = TransportSchema.EXPECTED_TABLES.getValue(TransportSchema.VERSION)
+        TransportConnections.open(path, TransportOpenMode.READ_ONLY).use { connection ->
+            SyncValidationSql.columnsProblem(expected, connection.columnsOf(expected), rejectExtra = true) == null
+        }
+    } catch (_: Exception) {
+        null
+    }
+
+    private fun TransportConnection.createdAt(): Long? =
+        queryRows("SELECT value FROM ks_meta WHERE key = '${TransportSchema.MetaKeys.CREATED_AT}'").firstOrNull()?.firstOrNull()?.toLongOrNull()
 
     private fun TransportConnection.userVersion(): Long =
         queryRows("PRAGMA user_version").firstOrNull()?.firstOrNull()?.toLongOrNull() ?: 0L

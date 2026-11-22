@@ -17,6 +17,8 @@ class TagRepository(
     private val syncScheduler: SyncScheduler,
     private val clock: Clock,
     private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
+    /** Issues the id of a newly created row (a test passes a deterministic source). */
+    private val newId: () -> String = IdGenerator::newId,
 ) {
     private val tags get() = db.tagsQueries
     private val feedTags get() = db.feed_tagsQueries
@@ -98,7 +100,7 @@ class TagRepository(
      * transaction never reads before it writes (the lock upgrade `docs/known-issues.md` describes).
      */
     private fun upsertTagByName(name: String, color: String?, now: Long): String {
-        tags.upsertByName(id = IdGenerator.newId(), name = name, color = color, now = now)
+        tags.upsertByName(id = newId(), name = name, color = color, now = now)
         return tags.getByName(name).executeAsOne().id
     }
 

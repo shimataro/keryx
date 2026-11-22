@@ -124,6 +124,9 @@ fun sharedModule(): Module = module {
                     syncOnMetered = get<SettingsRepository>().localSettings.map { it.syncOnMeteredNetwork },
                 )
             },
+            compactionAllowedFlow = {
+                NetworkUsagePolicy.compactionAllowedFlow(get<NetworkConditionMonitor>().condition)
+            },
             pendingLocalWrites = get(),
         )
     }

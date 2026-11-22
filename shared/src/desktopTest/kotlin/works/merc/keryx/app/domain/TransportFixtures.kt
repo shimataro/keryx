@@ -16,22 +16,22 @@ internal object TransportFixtures {
     const val DEV_B = "b1b2c3d4-e5f6-4789-8abc-def012345678"
     const val DEV_C = "c1b2c3d4-e5f6-4789-8abc-def012345678"
 
-    fun deltaName(device: String, seq: Long, hash: String = "0123456789ab") =
-        TransportFileName(GEN, TransportFileKind.DELTA, device, seq, hash)
+    fun deltaName(device: String, seq: Long, hash: String = "0123456789ab", createdAt: Long = 1_000) =
+        TransportFileName(GEN, TransportFileKind.DELTA, device, seq, createdAt, hash)
 
-    fun baseName(device: String, n: Long, hash: String = "0123456789ab") =
-        TransportFileName(GEN, TransportFileKind.BASE, device, n, hash)
+    fun baseName(device: String, n: Long, hash: String = "0123456789ab", createdAt: Long = 1_000) =
+        TransportFileName(GEN, TransportFileKind.BASE, device, n, createdAt, hash)
 
-    /** A new transport file named [name] holding [rows] (INSERT statements). */
+    /** A new transport file named [name] (its `ks_meta.created_at` the name's) holding [rows] (INSERT statements). */
     fun transportFile(name: TransportFileName, vararg rows: String): File {
         val file = File.createTempFile("ks-transport-", ".db").apply { delete(); deleteOnExit() }
-        TransportFiles.createEmpty(file.absolutePath, TransportMeta(name.generation, name.kind, name.device, name.number, 1_000))
+        TransportFiles.createEmpty(file.absolutePath, TransportMeta(name.generation, name.kind, name.device, name.number, name.createdAt))
         exec(file, *rows)
         return file
     }
 
-    /** An empty base accumulator. */
-    fun accumulator(): File = transportFile(baseName(DEV_A, 1))
+    /** An empty base accumulator created at [createdAt]. */
+    fun accumulator(createdAt: Long = 1_000): File = transportFile(baseName(DEV_A, 1, createdAt = createdAt))
 
     /** A fresh local database of the current schema, its SQLDelight driver already closed. */
     fun localDb(vararg rows: String): File {

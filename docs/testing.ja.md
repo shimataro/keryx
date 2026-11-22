@@ -117,10 +117,12 @@
   違反するデータを保持できる）、バイトを改変した破損ファイル、ローカルより新しい `PRAGMA user_version`）
   に対して `merge` を直接呼び、投げられる例外の型を検証する。`UNIQUE(url)` を外した `feeds` テーブルは、もう
   違反のケースではない: 畳み込んだ転送ファイルはそうした重複を正当に持ちうるので、
-  `duplicateUniqueKeysInsideCloudMergeOnlyTheirWinner`（と `SyncRepositoryTest.duplicateUrlsInCloudFeedsMergeOnlyTheirWinner`）
+  `duplicateUniqueKeysInsideCloudMergeOnlyTheirWinner`
   が、その勝者だけがマージされることを検証する。手作りのファイルは現行スキーマのすべての列（`articles.body_updated_at`
-  を含む）を持たなければならない。そうでないと、検証したいケースに届く前に、検証で破損と判定される。`SyncRepositoryTest.kt` は同じ分類を
-  `sync()` 経由でエンドツーエンドに検証する。判定そのものは純粋関数で、commonTest の `MergeFailureClassifierTest`
+  を含む）を持たなければならない。そうでないと、検証したいケースに届く前に、検証で破損と判定される。`SyncRepositoryTest.kt` はクラウドファイルの分類を
+  `sync()` 経由でエンドツーエンドに、`DatabaseMergerTest` は転送モード（`mergeTransport`: ファイルにローカルの
+  マイグレーションを行わないこと、新しい `user_version` が `SchemaVersionException` になること、転送用の表が欠けて
+  いれば非互換になること）を検証する。判定そのものは純粋関数で、commonTest の `MergeFailureClassifierTest`
   が検証する（カテゴリごとの判定と、`mainRuledOut` の V0／遅延再実行／V1 の各ケース）。各プラットフォームの
   `actual`（トランザクション内の外部キーチェック、失敗した文からの遅延再実行、生存確認、クラウドファイルの
   `quick_check`）は、それぞれの SQLite に対して `DatabaseMergerTest`（desktop）、`AppleDatabaseTest`（Apple）、
@@ -282,25 +284,55 @@ AGP の `build` ライフサイクルは `androidTest` ソースセットに対�
 - `LazyNativePopupTest`（最初の右クリックまでネイティブなものは何も構築されない。`LocalNativeWindow` が null になる Compose UI テストでは観測できない。あわせて、クリックは呼び出し側のその後の項目ではなく、メニューを最後に表示したときの項目で解決されること）
 - `WindowGeometryTest`（ダイアログウインドウのジオメトリ: オーナー中心配置と画面境界クランプ、自動フィットの計算 `fitWindowSize`/`sizeMatches`、`nextDialogFit` のドリフト補正ステートマシン——フィットが確定した**後**に Compose の関知しないところでサイズが適用される回帰ケースも依然として補正されること、拒否するウインドウマネージャがガードを無限に回さないための試行回数上限、フィットが着地するまでダイアログを不可視に保つ `presentable` フラグ——その上限を使い切った時点での解放を含め、ジオメトリを拒否するウインドウマネージャがダイアログを不可視のままにし続けることは決してない）
 - マージと畳み込みの代数（`SyncAlgebraTest`。`TransportFixtures` で手作りした転送ファイルを使う）：`MergeSql` と `ReduceSql` が冪等で、3 つのファイルのどの順序でも可換で、畳み込みの畳み込みについて結合的で、畳み込んだものをマージした結果が入力を 1 つずつマージした結果と等しいこと。各フィールドグループがそれぞれの勝者に従い、同着を値で決めること。記事の本文グループが `body_updated_at` で順位を付けるので、もう一方が既読やスターをどうしていても新しい本文が勝ち、軽い行が本文を消さないこと。保持グループ（スター＋削除）が、削除、それより新しいスター、さらに新しいスター解除について、どのマージ順・畳み込み順でも最も新しい操作に収束すること。`SyncMergerTest` はマージに対するローカルの書き込みを検証する: 同じミリ秒のスタンプ、マージした削除の後のスター（またはマージしたスター解除の後のキャッシュ削除）が保持グループに勝つこと、`body_updated_at` が本文の列が変わったときだけ進む（既読・スター・削除では進まない）こと。`SchemaV3MigrationTest` は `2.sqm` が `body_updated_at` を `updated_at` で初期化することを、`SyncCaptureTriggerTest` は `body_updated_at` の変更が heavy として記録されることを検証する
-- クラウドデータの破損／非互換からの復旧（`SyncRepositoryTest.kt`／`SyncMergerTest.kt`：制約違反するクラウドデータ——NOT NULL 違反の NULL をクラウド DB 自身の（より緩い）スキーマだけが許していた——を、破損ファイルや外部スキーマと同様に `CloudDataIncompatibleException` として分類すること、`SyncMergerTest.mergeDoesNotClassifyABrokenLocalSchemaAsCloudDataIncompatible` がその逆（ローカル側の破損は誤分類しない）を担保すること、`SyncRepositoryTest.postMergeIndexFailureIsNotClassifiedAsCloudDataIncompatible` がマージ commit 後の `FtsManager.indexMissing()` の失敗——壊れたクラウドスキーマと同じ曖昧な SQLite エラーコードを共有する——を誤って分類しないことを担保すること。`core/SqliteFileTest.kt`＝アップロード側と対称なダウンロードバイト列の SQLite ヘッダ検証）
-- 削除ではなく退避するようになったクラウドデータのリセット（`core/CloudBackupPathTest.kt`＝決定的で UTC 整形された退避パス、`CloudStorage.rename` は `DropboxStorageTest.kt`／`GoogleDriveStorageTest.kt`／`OneDriveStorageTest.kt` でプロバイダごとに（退避先の衝突・退避元の不在ケースを含めて）検証、`SyncRepositoryTest.kt` の `resetCloudData*` 系がリネームしてから作り直すフローとその削除フォールバックを検証）
+- クラウドデータの破損／非互換からの復旧（`SyncRepositoryTest.kt`／`SyncMergerTest.kt`：制約違反するクラウドデータ——NOT NULL 違反の NULL をクラウド DB 自身の（より緩い）スキーマだけが許していた——を、破損ファイルや外部スキーマと同様に `CloudDataIncompatibleException` として分類すること、`SyncMergerTest.mergeDoesNotClassifyABrokenLocalSchemaAsCloudDataIncompatible` がその逆（ローカル側の破損は誤分類しない）を担保すること、`SyncRepositoryTest.aFailureAfterTheMergeCommittedIsNeverBlamedOnTheCloud` がマージ commit 後の `FtsManager.indexMissing()` の失敗——壊れたクラウドスキーマと同じ曖昧な SQLite エラーコードを共有する——を誤って分類しないことを担保すること。`core/SqliteFileTest.kt`＝アップロード側と対称なダウンロードバイト列の SQLite ヘッダ検証）
+- プロバイダごとの `CloudStorage.rename`（`DropboxStorageTest.kt`／`GoogleDriveStorageTest.kt`／`OneDriveStorageTest.kt`。退避先の衝突・退避元の不在ケースを含む）と、差分同期以前からの移行が使う、決定的で UTC 整形された退避名の `core/CloudBackupPathTest.kt`
 - クラウド転送のファイルストリーミング（`CloudFileTransferTest.kt`：レスポンスボディが複数チャンクにまたがっても宛先ファイルへそのまま書かれること、短いペイロードが既存の宛先ファイルに追記されず置き換わること、`FileUploadContent` がファイルをストリームし——Drive の `multipart/related` 封筒を可能にする prefix/suffix で包む場合も含めて——正しい `contentLength` を報告すること。`ContentDigestTest.kt`：アップロードのスキップ判定に使うチャンク単位 SHA-256——最終チャンクの変更も検出されること、ファイルが無い場合は誤一致ではなくダイジェスト無しを返すことを含む。`SqliteFileTest.kt`：パス版のヘッダ検証が、どのバッファよりも大きなファイルでも先頭16バイトだけで判定すること）
 - Nextcloud プロバイダー（`data/cloud/nextcloud/`）：`NextcloudUrlTest`（アドレスの正規化を表駆動で。スキームの付加、ブラウザの URL をベースまで切り詰めること、`http://` やその他のスキームを HTTPS 必須とすること、認証情報・クエリ・フラグメント・不正なホストを拒否すること）。`NextcloudServerProbeTest`（`installed: true` の `status.php`、3xx を追わずに Nextcloud ではないとすること、応答なしを到達不能とすること）。`NextcloudStorageTest`（`MockEngine` で `CloudStorage` の全メソッド：各リクエストの Basic 認証と User-Agent、`If-Match` がそのまま渡ること、412/423 が競合になること、`create` の `MKCOL` → 一時名への `PUT` → `MOVE Overwrite: F` と、412 やアップロード失敗時に一時ファイルを消すこと、`rename` の 412 がストレージエラーになること、ETag がない場合、401 が認証エラーになること、キャンセル、アプリパスワード以外や HTTPS でない認証情報をリクエストなしで拒否すること、名前空間の接頭辞に関係なく `PROPFIND` を読めること）。`CloudStorageResponseTest`（`headerRevOrConflictOr`）。`NextcloudLoginFlowTest`（404 → 200 のポーリング、約 1 秒ごとのポーリング、仮想時間での 20 分のタイムアウト——`MockEngine` をテストのスケジューラで動かすので、処理中のリクエストが仮想時間をタイムアウトまで飛ばすことはない——、成功・失敗・キャンセルのいずれでも `LoginPageLauncher.close()` が呼ばれること、HTTPS でないエンドポイント・ページ・許可されたサーバーの拒否、OCS からのユーザー ID の取得と、完了できなかったアプリパスワードの失効）。`NextcloudServerControllerTest`。そして登録まわりの `CloudSessionTest`（Static の revoke が `DELETE core/apppassword` を呼ぶこと、`serverUrlOf`）、`CloudSyncControllerTest`/`SetupControllerTest`（`CloudConnectRequest` がフローに届くこと、`reconnectServerUrl`）、`CloudStorageAvailabilityTest`（Nextcloud が最後に並び、キーなしで提供されること）、`TokenBackupExclusionTest`、`CloudProviderRowTest`/`NextcloudServerDialogContentTest`、`StringCatalogParityTest`（`InfoPlist.xcstrings`）、`KeryxSdkTest`（`openLoginPage`/`closeLoginPage`、`newNextcloudServerController`）
-- 変更がないときの転送スキップ（`SyncRepositoryTest.kt`）:
-  - 双方とも変更が無い2回目の同期がペイロードを1バイトも転送せずメタデータ取得1回だけで済むこと、
-    そのスキップの後にローカルを変更したら確実にアップロードされること、リモートの変更は従来どおり
-    ダウンロードしてマージすること、アップロード自身のレスポンスからリビジョンを記録するので自分の
-    書き込みを再ダウンロードしないこと、`sync_state` がアップロード用スナップショットから除外されて
-    おりダイジェストが独りでに変化しないこと、`clearSyncFailureState()` が実行中の同期に取り消され
-    ないこと——共有ミューテックスの保証を2本のテストで半分ずつ検証する。リビジョン／ダイジェストの
-    マーカーを書き戻すのは**成功した**同期であり、`lastSyncError` を書き戻すのは**失敗した**同期
-    なので、1本では両方を検証できないため。
-  - 圧縮アップロード／レガシーフォールバックの分岐: レガシーのみのクラウドがマージされてから `.gz`
-    へ移行すること（リビジョンガード付きの更新ではなく create-only で）、レガシーファイル自体が
-    バイト単位でそのまま生き残ること、一度移行したデバイスは（レガシーファイルがその後壊れていても）
-    二度とレガシーを読まないこと、移行中の壊れたレガシーファイルと不正な（gzip ではない）`.gz`
-    ペイロードのどちらも `CloudDataIncompatibleException` に分類されること、リセットが `.gz` のみを
-    リネーム・再作成しレガシーファイルには一切触れないこと。
+- 差分同期（`SyncRepositoryTest.kt`。`SyncTestSupport.kt` の `FakeCloudStorage`——遅れる一覧、名前の重複、削除済み
+  ファイルが出続ける一覧、存在しないファイルへの 404、create-only とリビジョンチェック付きの書き込み——と、端末ごとに
+  ファイル DB とリポジトリを持つ `SyncDevice` を使う。[sync-architecture.ja.md](sync-architecture.ja.md) の「同期フロー」参照）:
+  - 各手順: 最初の端末がポインタを作る前にベースをアップロードすること、何もすることのない同期がペイロードを
+    運ばないこと（`metadata` 1 回）、ローカルの変更が次の差分として送られ outbox の記録が消えること、差分の送信中の
+    書き込みが次の差分に入ること、参加する端末がクラウドをマージしてクラウドに無い行だけを送ること（新しいものが
+    無ければ何も送らない）、世代の変化で端末が再参加すること。
+  - 分類: 壊れたポインタ、壊れた・ハッシュの合わない・型の誤った差分が `CloudDataIncompatibleException` になり、
+    その同期では何もマージされないこと（壊れたファイルは先に 2 回ダウンロードする）、新しい形式のポインタや差分が
+    カーソルを進めずに `SchemaVersionException` になること、一時的なダウンロード失敗が次の同期で再試行されること、
+    ポインタの無い差分同期以前のデータに触れず一時的な失敗とすること（移行の担当）、マージのコミット後の失敗を
+    クラウドのせいにしないこと。
+  - 受信: 差分が一度だけマージ・記録されること（二度とダウンロードしない）、一覧の隙間でカーソルが止まっても後の
+    差分はマージされること、重複した名前を一度だけ取得すること、一覧にあってダウンロード時に消えていたファイルを
+    まだ一覧に無いものとして扱うこと、他人のファイルを無視すること、マージした記事の `search_text` と索引、リスナー
+    への通知。
+  - 送信の各手順での中断（テストのフックが例外を投げ、同じ DB の上でリポジトリを作り直す）: アップロード前（同じ名前で
+    再開）、アップロード後（再開時に確定し、2 つ目のファイルを作らない）、確定後（残った保存ファイルを片付け、何も
+    送り直さない）、壊れた保存ファイル（新しい ID になり、変更を送り直す）、失敗したアップロード（試行を残す）。
+  - 複製: 元の端末の新しい差分を見た復元コピーが、送信の前に再参加すること。互いに見えないまま同じ `seq` を書いた
+    2 つのコピーが、どちらも再参加し何も失わないこと。
+  - 畳み込みとガベージコレクション: 畳み込みが最初のベースを支配して置き換え、覆われた差分は猶予期間より古く
+    なってから消え、新しい端末が残ったものから収束すること。ベースがベクトルの含意しないものだけを列挙すること。
+    回線が許さない間は畳み込まないこと。猶予期間より長く離れていた端末が、隙間を残さなかった差分のためにベースを
+    取得すること。支配するベースを確認できない間は支配されたベースを残すこと。同時に畳み込む 2 台（片方の畳み込みの
+    中で強制する）が互いのベースを消さずに収束すること。
+  - リセット（すべての端末が再参加する新しい世代になり、古い世代は退避として残る。別の端末のリセットに負けたら
+    その世代に参加する。使えないデータから回復すると自動同期が再開する）と接続解除（記録を止め、接続の管理情報と
+    保存中の送信を消し、`ks_search_pending` は残し、実行中の同期——成功でも失敗でも——に取り消されず、再接続は
+    ローカルのみの間に書いたものを持って新たに参加すること）。
+- 複数端末のシミュレーション（`SyncSimulationTest`）: 自分の DB を持つ 3 台が、一覧が遅れ、名前が重複し、削除済み
+  ファイルが出続ける 1 つの `FakeCloudStorage` を共有する。シード付きの乱数による操作（`MockEngine` のフィードに対する
+  `FeedRepository` での購読・購読解除、名前の変更、フォルダー、タグ、既読・未読、スターの付け外し、キャッシュ削除、
+  グローバル設定）が、ランダムな順の同期、すべてのフック地点での同期の中断（その後に再起動）、注入した一時的な
+  クラウドの失敗、畳み込みやガベージコレクションの削除の中で走らせる別の端末の同期、数日単位の時計の進み、1 回の
+  リセットと入り混じる。何も変わらない一巡まで全員が同期した後、すべての端末が同じ観測可能な状態を示し、誰かが
+  書いたすべてのフィールドグループが最新の書き込みを保ち（毎手順の後に全端末の行から作るオラクル——つまり失われた
+  変更が無いこと）、送り残しが無いことを確かめる。中断、割り込み、畳み込み、削除、2 つの世代を実際に通ったことも
+  確かめるので、空振りで通ることはない。
+- 純粋な規則（commonTest の `TransportCoverageTest`）: ベースがベクトルや名前で何を覆うか（複製の重複は含意しない）、
+  覆われた差分がいつ回収してよい古さになるか、厳密な順序としての支配（列挙された複製のコピーはベクトルだけでは
+  満たせない）、ベースのキャッシュ、ポインタの解析（新しい形式は `SchemaVersionException`、使えないものは
+  `CloudDataIncompatibleException`）、記録した送信の符号化、`NetworkUsagePolicy.compactionAllowed`。`TransportFilesTest`
+  は、畳み込みが覆った差分ごとに既知で最も早い作成時刻を保つことと、`finalizeBase` が古い差分だけでベクトルを伸ばし
+  複製のコピーを列挙したまま残すことを検証する。
 - 読書状態の遅延同期（`SyncRepositoryTest.kt`）：`scheduleDeferredSync` は長い窓を待ち、`scheduleSync` は短い窓を使い満了後に短い窓へ戻ること、構成の変更が保留中の遅延窓を縮めて 1 回の同期にまとめること、`flushPendingSync` は保留があるときだけ同期し実行中の同期を待つこと、キューに残るローカル書き込み（`PendingLocalWrites`。成功・失敗・破棄のいずれでも数え終わることを `SettingsRepositoryTest`・`SerialWriteQueueTest` で確認。既読・スターの書き込みは `HomeViewModelTest`）を上限付きで待つこと、`flushOnLeavingForeground` がアプリ自身の起動の印をスキップすること（`ExternalAppLaunchTest`）、未同期フラグがエラー結果・例外・キャンセルを越えて残り同期中の変更で立て直されること。`SyncSchedulerTest` は既定の `scheduleDeferredSync` の委譲。`ArticleRepositoryTest` は状態が変わらない既読・スターの書き込みが打刻も同期予約もしないこと。`RefreshCycleRunnerTest` は起動時サイクルの更新後の `scheduleSync`
 - ローカル書き込みの失敗（`error-design.ja.md` の「ローカル書き込みの失敗」参照）：`LocalWriteFailureDesktopTest`（実際の JDBC ドライバの例外——書き込みロックの取り合いに負けた、`max_page_count` を使い切った、読み取り専用の接続——から BUSY / DISK_FULL / OTHER に分類されること。包まれた原因と SQLite 以外の失敗も）、`LocalWriteFailureAppleTest`（拡張コードを含むリザルトコードの対応）、`LocalWriteFailureDeviceTest`（androidDeviceTest。`MergeFailureClassificationDeviceTest` と同じく `android.database.sqlite` の例外を直接作って確認）。`LocalWriteFailureReporterTest`（分類ごとの通知のレベル・文言・`ShowInfoDialog` のアクション、同じ分類は 1 件にまとまること、`runLocalWrite` の戻り値と、キャンセルは通知せずに伝わること）。`NotificationTextsTest`（行の文言とダイアログ本文の解決）。`SerialWriteQueueTest`（失敗した書き込みは `onFailure` だけを実行し、次の書き込みは実行され、uncaught 例外が出ず、保留数が 0 に戻ること）。`HomeViewModelWriteFailureTest`（未読にする・選択・本文読み込み中の選択・Starred でのスター解除・すべて既読のそれぞれで、ピン・選択・intent が DB の値に戻り、通知が 1 件出ること。元に戻す前にした新しいスター操作が上書きされないこと。取り消し処理が読み直してから適用するまでの間に完了した、絞り込み全体の「すべて既読」も上書きされないこと）。`FeedListActionsTest`・`HomeViewModelTest`（フォルダ・タグの削除は、書き込みが成功してから絞り込み・選択している行・折りたたみ・展開の状態を変えること。失敗したときはどれも変えず、通知されること。購読解除も同様で、失敗したときは開いている記事もそのまま残ること）。`TagRepositoryTest`・`FolderRepositoryTest`（`createTagAndAttach`・`createFolderAndMoveFeed` は割り当てに失敗すると何も残さないこと、新しいフォルダではフィードが先頭に、再有効化したフォルダでは残っていたフィードの後ろに置かれること）。`SettingsRepositoryTest`・`PreferencesControllerTest`（グローバル設定の書き込みの失敗が通知され `onFailed` だけが実行されること、表示が保存済みの値に戻ること——読み直しも失敗したときは、読めるようになった時点で戻ること——、同じ設定へのより新しい変更は上書きされず、繰り返し中の読み直しもそこで止まること）
 - 名前によるフォルダ・タグの作成（`FolderRepositoryTest` / `TagRepositoryTest`）：呼び出しの途中で別の書き込み元——同期マージや、同時に走る別の作成——が入れた同名の行（`testing/` の `SameNameInsertingDriver`。名前による最初の検索の直後に、`MergeSql` と同じ名前の重複チェック付きで挿入する）を、`UNIQUE(name)` 違反で失敗せずに再利用すること。`createFolder` / `createTag` と、作成と割り当てをまとめた版のそれぞれで確認する。あわせて作成が保つ値：新しいフォルダは末尾に追加されること、生きているフォルダと同じ名前で作ると末尾に移ること、有効化したタグは並び順と `created_at` を保つこと、色を指定すれば置き換わり、指定しなければ元の色のままであること

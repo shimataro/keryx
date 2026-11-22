@@ -652,6 +652,131 @@ the content, so two files with one name are the same file.
 A server-side precondition on Drive's content update (an `If-Match` on `files.update`, or equivalent).
 With it, `upload` would pass `expectedRev` to the write itself, as the OneDrive and Nextcloud storages do.
 
+## Delta sync measures a delta's age by the clock of the device that wrote it
+
+**Status**: not fixed — closing it needs a time source the devices share, which the providers do not offer
+in a form every one of them supports (a redesign outside delta sync's scope). With ordinary clocks nothing
+happens; a clock far behind delays another device's convergence, and in one case (a cloned database writing under a
+shared identity) can leave a change unreachable for devices that join later. That case is also reachable with
+correct clocks, through a provider listing that lags for about the grace period.
+
+### Symptom
+
+Two rules of "Bases and Garbage Collection" in [sync-architecture.md](sync-architecture.md) compare a delta's
+creation time — `ks_meta.created_at`, also in its name, from the writing device's clock — with another device's clock:
+
+- a delta is garbage-collected once it is `KS_DELTA_GRACE_MS` old by the collecting device's clock, and
+- a base's `ks_vector` implies only deltas created at least `KS_DELTA_GRACE_MS` before the base itself, by the base's
+  own creation time — the folding device's clock (so a duplicate of an implied `(device, seq)`, written by a cloned
+  database, is not taken as folded when it was not).
+
+A device whose clock runs far behind writes deltas that look old at once. Its delta can then be collected as
+soon as a base covers it, before a device that last received less than a week ago lists it. That device sees no
+gap when the writer has gone quiet, and merges the change only when its own last receive becomes older than
+`KS_DELTA_GRACE_MS − KS_RECEIVE_STALE_MARGIN_MS` and it fetches the bases — up to six days late.
+
+Two cases can leave a change unreachable:
+
+- **A duplicate written under a clock off by days.** If the slow writer is a cloned copy of another device, a
+  duplicate it writes under the shared identity, of a `(device, seq)` a base already implies, carries a creation time
+  days in the past. It can then fall before that base's cutoff and be implied without having been folded: no device
+  folds it, receivers that know the base skip it, and once it is collected a device joining afterwards does not get
+  it (the devices that merged it while it was listed keep it).
+- **A listing lag lasting about the grace period.** With correct clocks, a duplicate created before a base's cutoff
+  but missing from every listing until that base was built — at least `KS_DELTA_GRACE_MS` later — is implied the same
+  way. Ordinary listing delays are far shorter.
+
+A send resumed after an interruption is not a third case: it is uploaded under its recorded name only within
+`KS_RESUME_MAX_AGE_MS` of its creation, and otherwise resent with a fresh creation time (step 0 of "Sync Flow").
+
+### Diagnosis
+
+The providers' listings carry no reliable server-side creation time across all four providers, so the age has to
+come from inside the file. `KS_RECEIVE_STALE_MARGIN_MS` (one day) absorbs ordinary clock differences and listing
+delay; only a clock off by more than that reaches the cases above. A receive time in this device's future (its
+clock set back since) is treated as stale, so a device's own clock jump never stops it from fetching the bases.
+
+### Ruled out
+
+- **The base's creation time instead of the delta's** — an active account rebuilds its base more often than
+  weekly, and a dominated base is deleted, so no base would ever reach the grace period and no delta would ever
+  be collected.
+- **Listing every folded delta in `ks_covered`** (no vector implication) — closes the clone case, but the list
+  grows with every delta ever written, which is what the vector exists to avoid.
+
+### What a real fix would need
+
+A creation time the server assigns, read from the listing of every provider (Dropbox's `server_modified`, Drive's
+`createdTime`, OneDrive's `createdDateTime`, Nextcloud's `getlastmodified`), carried into `CloudFileEntry` and used
+in place of `ks_meta.created_at` for both rules. That closes the clock case; the listing-lag case would also need
+every provider's listing to show a file within a bounded time of its creation, which Drive and OneDrive do not
+promise.
+
+## Delta sync: a base naming one copy of a `(device, seq)` stops implying the other copies
+
+**Status**: not fixed — no data is lost, and the extra work ends with the next fold. The simple way to close it
+would weaken the last defense against the clock case above.
+
+### Symptom
+
+`BaseCoverage.covers()` does not let a base's `ks_vector` imply a `(device, seq)` whose name the base's `ks_covered`
+lists for another copy. When a new base folds an input base that implies an old copy and also names a young copy of
+the same `(device, seq)` (a cloned database's duplicate, kept by `TransportFiles.finalizeBase` until its grace
+period ends), the new base no longer covers the old copy. While that old copy is still listed, a device joining
+from the new base downloads it, and the next fold takes it as an input. That fold lists both copies by name (two
+copies of one `(device, seq)` are always kept), after which both are covered and collected normally. The input base
+that implied the old copy is likewise no longer dominated by the new base (`BaseCoverage.dominates()` refuses a base
+that names a `(device, seq)` the other's vector implies), so it stays — and every fold downloads it as an input —
+until the young name ages past the grace period and is pruned, or a later fold also names the old copy.
+
+### Diagnosis
+
+With correct clocks the rule is redundant: limiting the vector to deltas created before `vectorCutoff` already
+keeps it from implying a copy it never folded. A duplicate written under a clock running days behind (the first
+case of the entry above) looks old and passes that time limit; when the base names another copy of the same
+`(device, seq)`, this rule is what still keeps the vector from implying it. The same holds with correct clocks for a
+duplicate missing from every listing until after a base's cutoff (the second case of the entry above): when the base
+names another copy of that `(device, seq)`, this rule keeps the vector from implying it.
+
+### Ruled out
+
+- **Dropping the rule** — removes the extra fetch and fold, but widens both holes of the entry above: the
+  "duplicate written under a clock off by days" and the "listing lag lasting about the grace period".
+
+### What a real fix would need
+
+The same as the entry above: creation times the server assigns, read from every provider's listing in place of
+`ks_meta.created_at`. Once the writer's clock no longer decides a delta's age, and every provider's listing shows a
+file within a bounded time of its creation, the rule can be dropped safely.
+
+## Delta sync: a base built under a clock running behind cannot dominate a newer input base
+
+**Status**: not fixed — no data is lost, and it lasts only as long as the clock difference.
+
+### Symptom
+
+`BaseCoverage.dominates()` requires `createdAt >= other.createdAt`. A base folded on a device whose clock runs
+behind therefore cannot dominate an input base created later by another device's clock. Both stay, so garbage
+collection does not delete the input base, and every fold downloads it again as an input — until the slow clock
+passes that base's creation time, or a device with a correct clock builds the next base.
+
+### Diagnosis
+
+`vectorCutoff` is `createdAt − KS_DELTA_GRACE_MS`. A base may replace another only if it implies every delta the
+other implies, which needs a cutoff — so a creation time — at least as late.
+
+### Ruled out
+
+- **Giving a new base the latest creation time among its inputs** — an input base from a clock running ahead would
+  pass its future time on to every later base, whose vectors would then imply deltas that are still young, widening
+  the data-loss cases of the entry above.
+
+### What a real fix would need
+
+The same as the entry above: creation times the server assigns, used for bases too, so device clocks no longer
+enter the domination rule. Alternatively, a cutoff per vector component, which changes the transport format and
+the validation, folding, garbage-collection and domination rules.
+
 ## Linux/GNOME: the tray menu briefly shows the previous label when it opens
 
 **Status**: not fixed — external (GNOME Shell AppIndicator extension) design limitation, and not
