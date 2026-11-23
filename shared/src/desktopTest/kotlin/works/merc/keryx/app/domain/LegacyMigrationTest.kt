@@ -2,6 +2,7 @@ package works.merc.keryx.app.domain
 
 import app.cash.sqldelight.db.QueryResult
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.test.TestResult
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import works.merc.keryx.app.core.CLOUD_DB_GZ_PATH
@@ -28,6 +29,7 @@ import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.minutes
 
 /** Thrown by a test hook to stand in for the process dying at that point. */
 private class LegacyCrash : RuntimeException("simulated crash")
@@ -45,6 +47,13 @@ class LegacyMigrationTest {
     private var now = 1_700_000_000_000L
     private val clock = Clock { now }
     private val ids = idSource(Random(7))
+
+    /**
+     * [runTest] with room for these file-database tests: a crash-point loop opens and merges many
+     * SQLite files, which takes a few seconds on Linux/macOS but close to a minute on a Windows CI
+     * runner — past `runTest`'s default one-minute timeout, which is meant to catch a hang.
+     */
+    private fun slowTest(body: suspend TestScope.() -> Unit): TestResult = runTest(timeout = 5.minutes, testBody = body)
 
     @AfterTest
     fun tearDown() {
@@ -101,7 +110,7 @@ class LegacyMigrationTest {
     // ---- The migration ----
 
     @Test
-    fun aDeviceMigratesAPreDeltaCloud() = runTest {
+    fun aDeviceMigratesAPreDeltaCloud() = slowTest {
         val (cloud, original) = legacyCloud()
         val a = device("a", cloud)
         a.db.insertFeed("fa", now = 1)
@@ -142,7 +151,7 @@ class LegacyMigrationTest {
     }
 
     @Test
-    fun aPointerCreatedMeanwhileTurnsTheMigrationIntoAnOrdinaryJoin() = runTest {
+    fun aPointerCreatedMeanwhileTurnsTheMigrationIntoAnOrdinaryJoin() = slowTest {
         val (cloud, original) = legacyCloud()
         val a = device("a", cloud)
         a.db.insertFeed("fa", now = 1)
@@ -170,7 +179,7 @@ class LegacyMigrationTest {
     }
 
     @Test
-    fun aStubPlacedByAnotherDeviceFirstIsRecorded() = runTest {
+    fun aStubPlacedByAnotherDeviceFirstIsRecorded() = slowTest {
         val (cloud, original) = legacyCloud()
         val a = device("a", cloud)
         var planted = false
@@ -189,7 +198,7 @@ class LegacyMigrationTest {
     }
 
     @Test
-    fun anOlderBuildWritingBeforeTheStubIsMergedWithCaptureAndReachesOtherDevices() = runTest {
+    fun anOlderBuildWritingBeforeTheStubIsMergedWithCaptureAndReachesOtherDevices() = slowTest {
         val (cloud, _) = legacyCloud()
         val a = device("a", cloud)
         var written = false
@@ -235,7 +244,7 @@ class LegacyMigrationTest {
     }
 
     @Test
-    fun theStubIsRetriedAtMostSyncMaxRetryTimesThenTheSyncFailsTransiently() = runTest {
+    fun theStubIsRetriedAtMostSyncMaxRetryTimesThenTheSyncFailsTransiently() = slowTest {
         val (cloud, _) = legacyCloud()
         val a = device("a", cloud)
         a.repo.testHook = { point, _ ->
@@ -257,7 +266,7 @@ class LegacyMigrationTest {
     }
 
     @Test
-    fun aStubThatCannotBePreparedFailsTheMigrationTransientlyAndTheNextSyncFinishes() = runTest {
+    fun aStubThatCannotBePreparedFailsTheMigrationTransientlyAndTheNextSyncFinishes() = slowTest {
         val (cloud, original) = legacyCloud()
         val a = device("a", cloud)
         a.breakStubPreparation()
@@ -277,7 +286,7 @@ class LegacyMigrationTest {
     }
 
     @Test
-    fun aCrashAfterAnyMigrationStepConvergesOnTheNextSync() = runTest {
+    fun aCrashAfterAnyMigrationStepConvergesOnTheNextSync() = slowTest {
         val points = listOf(
             SyncHookPoint.AFTER_LEGACY_MERGE,
             SyncHookPoint.BEFORE_SEND_UPLOAD,
@@ -320,7 +329,7 @@ class LegacyMigrationTest {
     // ---- The legacy watch ----
 
     @Test
-    fun theLegacyWatchAbsorbsAFullDatabaseWrittenOverTheStubAndPutsTheStubBack() = runTest {
+    fun theLegacyWatchAbsorbsAFullDatabaseWrittenOverTheStubAndPutsTheStubBack() = slowTest {
         val (cloud, _) = legacyCloud()
         val a = device("a", cloud)
         a.syncOk()
@@ -341,7 +350,7 @@ class LegacyMigrationTest {
     }
 
     @Test
-    fun aStubWithoutAPointerIsRecordedAndTheDeviceStartsAsTheFirstOne() = runTest {
+    fun aStubWithoutAPointerIsRecordedAndTheDeviceStartsAsTheFirstOne() = slowTest {
         val cloud = FakeCloudStorage()
         cloud.put(CLOUD_DB_GZ_PATH, PreDeltaFiles.stub(), rev = "stub-1")
         val a = device("a", cloud)
@@ -374,7 +383,7 @@ class LegacyMigrationTest {
     }
 
     @Test
-    fun aCorruptPreDeltaFileIsIncompatibleAndNothingIsMerged() = runTest {
+    fun aCorruptPreDeltaFileIsIncompatibleAndNothingIsMerged() = slowTest {
         assertRejectedBeforeAnyChange(byteArrayOf(1, 2, 3), CloudDataIncompatibleException::class)
         // A well-formed database whose stamp holds text (check 7) is just as unusable.
         assertRejectedBeforeAnyChange(
@@ -386,7 +395,7 @@ class LegacyMigrationTest {
     }
 
     @Test
-    fun aCorruptPreDeltaFileIsDownloadedTwiceBeforeItIsJudgedCorrupt() = runTest {
+    fun aCorruptPreDeltaFileIsDownloadedTwiceBeforeItIsJudgedCorrupt() = slowTest {
         val cloud = FakeCloudStorage()
         cloud.put(CLOUD_DB_GZ_PATH, byteArrayOf(9, 9, 9))
         val a = device("a", cloud)
@@ -395,7 +404,7 @@ class LegacyMigrationTest {
     }
 
     @Test
-    fun aNewerPreDeltaDatabaseAsksForAnUpdate() = runTest {
+    fun aNewerPreDeltaDatabaseAsksForAnUpdate() = slowTest {
         assertRejectedBeforeAnyChange(PreDeltaFiles.database(PreDeltaFiles.feed("lf1"), userVersion = 7), SchemaVersionException::class)
         // user_version 1000 makes a stub only when the file is empty.
         assertRejectedBeforeAnyChange(PreDeltaFiles.database(PreDeltaFiles.feed("lf1"), userVersion = 1000), SchemaVersionException::class)
@@ -433,7 +442,7 @@ class LegacyMigrationTest {
     }
 
     @Test
-    fun aResetUnblocksSyncingFromACorruptPreDeltaFile() = runTest {
+    fun aResetUnblocksSyncingFromACorruptPreDeltaFile() = slowTest {
         val corrupt = byteArrayOf(1, 2, 3)
         val (cloud, a, b) = migratedThenOverwritten(corrupt)
         val blocked = a.repo.sync()
@@ -452,7 +461,7 @@ class LegacyMigrationTest {
     }
 
     @Test
-    fun aResetArchivesAnUnusableFullDatabaseWithoutMergingIt() = runTest {
+    fun aResetArchivesAnUnusableFullDatabaseWithoutMergingIt() = slowTest {
         // A dangling reference fails validation (check 9), so the legacy watch cannot absorb it.
         val unusable = PreDeltaFiles.database(PreDeltaFiles.feed("never"), PreDeltaFiles.article("orphan", "nofeed"))
         val (cloud, a, b) = migratedThenOverwritten(unusable)
@@ -468,7 +477,7 @@ class LegacyMigrationTest {
     }
 
     @Test
-    fun aResetLeavesAValidStubInPlaceAndRecordsIt() = runTest {
+    fun aResetLeavesAValidStubInPlaceAndRecordsIt() = slowTest {
         val (cloud, original) = legacyCloud()
         val a = device("a", cloud)
         a.syncOk()
@@ -490,7 +499,7 @@ class LegacyMigrationTest {
     }
 
     @Test
-    fun aResetWithNoPreDeltaFileWritesNone() = runTest {
+    fun aResetWithNoPreDeltaFileWritesNone() = slowTest {
         val cloud = FakeCloudStorage()
         val a = device("a", cloud)
         a.db.insertFeed("fa", now = 1)
@@ -505,7 +514,7 @@ class LegacyMigrationTest {
     }
 
     @Test
-    fun aPreDeltaFileChangingBeforeTheResetsStubIsArchivedAgain() = runTest {
+    fun aPreDeltaFileChangingBeforeTheResetsStubIsArchivedAgain() = slowTest {
         val corrupt = byteArrayOf(1, 2, 3)
         val rewritten = byteArrayOf(4, 5, 6, 7)
         val (cloud, a, _) = migratedThenOverwritten(corrupt)
@@ -528,7 +537,7 @@ class LegacyMigrationTest {
     }
 
     @Test
-    fun aPreDeltaFileChangingWithinTheSameSecondIsStillArchivedUnderTheNextFreeName() = runTest {
+    fun aPreDeltaFileChangingWithinTheSameSecondIsStillArchivedUnderTheNextFreeName() = slowTest {
         val corrupt = byteArrayOf(1, 2, 3)
         val rewritten = byteArrayOf(4, 5, 6, 7)
         val (cloud, a, _) = migratedThenOverwritten(corrupt)
@@ -550,7 +559,7 @@ class LegacyMigrationTest {
     }
 
     @Test
-    fun aPreDeltaFileThatKeepsChangingFailsTheResetTransientlyAndTheNextResetFinishes() = runTest {
+    fun aPreDeltaFileThatKeepsChangingFailsTheResetTransientlyAndTheNextResetFinishes() = slowTest {
         val corrupt = byteArrayOf(1, 2, 3)
         val (cloud, a, _) = migratedThenOverwritten(corrupt)
         val stubRevBefore = a.state(SYNC_STATE_KS_LEGACY_STUB_REV)
@@ -580,7 +589,7 @@ class LegacyMigrationTest {
     }
 
     @Test
-    fun aResetThatCannotDownloadThePreDeltaFileFailsWithoutReplacingIt() = runTest {
+    fun aResetThatCannotDownloadThePreDeltaFileFailsWithoutReplacingIt() = slowTest {
         val corrupt = byteArrayOf(1, 2, 3)
         val (cloud, a, _) = migratedThenOverwritten(corrupt)
         cloud.downloadHook = { name ->
@@ -601,7 +610,7 @@ class LegacyMigrationTest {
     }
 
     @Test
-    fun aResetThatCannotPrepareTheStubFailsTransientlyWithoutReplacingThePreDeltaFile() = runTest {
+    fun aResetThatCannotPrepareTheStubFailsTransientlyWithoutReplacingThePreDeltaFile() = slowTest {
         val corrupt = byteArrayOf(1, 2, 3)
         val (cloud, a, _) = migratedThenOverwritten(corrupt)
         a.breakStubPreparation()
@@ -620,7 +629,7 @@ class LegacyMigrationTest {
     }
 
     @Test
-    fun aCrashDuringTheResetsPreDeltaStepConvergesOnTheNextResetOrSync() = runTest {
+    fun aCrashDuringTheResetsPreDeltaStepConvergesOnTheNextResetOrSync() = slowTest {
         val points = listOf(SyncHookPoint.BEFORE_LEGACY_BACKUP, SyncHookPoint.BEFORE_STUB_UPLOAD, SyncHookPoint.AFTER_STUB_UPLOAD)
         for (point in points) {
             val corrupt = byteArrayOf(1, 2, 3)
