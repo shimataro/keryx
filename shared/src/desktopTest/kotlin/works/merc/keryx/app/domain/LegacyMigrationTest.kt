@@ -222,15 +222,17 @@ class LegacyMigrationTest {
         assertEquals(1L, b.rows("SELECT COUNT(*) FROM articles WHERE id = 'oa'").single()[0]!!.toLong())
     }
 
+    /** Where this device writes the compressed stub before uploading it. */
+    private val SyncDevice.stubGz get() = File(tempDir, "ks-legacy-stub.db.gz")
+
     /**
-     * Makes this device's stub preparation fail: the compressed stub's temporary path becomes a link
-     * into a directory that does not exist, so writing it fails the way a full disk would, while
-     * deleting it afterwards still succeeds. Returns the link, for the test to remove.
+     * Makes this device's stub preparation fail: an empty directory takes the compressed stub's
+     * temporary path, so writing it fails the way a full disk would (on every OS, with no privilege
+     * a symbolic link would need on Windows), while the cleanup can still delete it.
      */
-    private fun SyncDevice.breakStubPreparation(): java.nio.file.Path = java.nio.file.Files.createSymbolicLink(
-        File(tempDir, "ks-legacy-stub.db.gz").toPath(),
-        File(tempDir, "missing-dir/stub.db.gz").toPath(),
-    )
+    private fun SyncDevice.breakStubPreparation() {
+        assertTrue(stubGz.mkdirs(), "the obstacle is in place")
+    }
 
     @Test
     fun theStubIsRetriedAtMostSyncMaxRetryTimesThenTheSyncFailsTransiently() = runTest {
@@ -258,7 +260,7 @@ class LegacyMigrationTest {
     fun aStubThatCannotBePreparedFailsTheMigrationTransientlyAndTheNextSyncFinishes() = runTest {
         val (cloud, original) = legacyCloud()
         val a = device("a", cloud)
-        val link = a.breakStubPreparation()
+        a.breakStubPreparation()
 
         val result = a.repo.sync()
 
@@ -267,7 +269,7 @@ class LegacyMigrationTest {
         assertContentEquals(original, cloud.bytesOf(CLOUD_DB_GZ_PATH), "the pre-delta file is left as it was")
         assertNull(a.state(SYNC_STATE_KS_LEGACY_STUB_REV))
         assertNotNull(a.repo.lastSyncError.value, "the failure is reported like any other sync failure")
-        java.nio.file.Files.deleteIfExists(link)
+        assertFalse(a.stubGz.exists(), "the failed attempt cleaned up after itself")
 
         a.syncOk()
 
@@ -602,7 +604,7 @@ class LegacyMigrationTest {
     fun aResetThatCannotPrepareTheStubFailsTransientlyWithoutReplacingThePreDeltaFile() = runTest {
         val corrupt = byteArrayOf(1, 2, 3)
         val (cloud, a, _) = migratedThenOverwritten(corrupt)
-        val link = a.breakStubPreparation()
+        a.breakStubPreparation()
 
         val result = a.repo.resetCloudData()
 
@@ -610,7 +612,7 @@ class LegacyMigrationTest {
         assertIs<works.merc.keryx.app.core.CloudStorageException>(result.exception)
         assertContentEquals(corrupt, cloud.bytesOf(CLOUD_DB_GZ_PATH), "the pre-delta file is left as it was")
         assertNotNull(a.repo.lastSyncError.value, "the failure is reported like any other reset failure")
-        java.nio.file.Files.deleteIfExists(link)
+        assertFalse(a.stubGz.exists(), "the failed attempt cleaned up after itself")
 
         a.resetOk()
 
