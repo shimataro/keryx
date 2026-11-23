@@ -443,6 +443,99 @@ class TagRepositoryTest {
         }
     }
 
+    // --- Names are not unique: the canonical row is reused, and a rename may cross any name ---
+
+    @Test
+    fun createTagReusesTheEarliestCreatedAliveRowOfTheName() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertTag("t-late", "Kotlin", now = 20L)
+            db.insertTag("t-early", "Kotlin", now = 10L)
+            val repo = newRepo(db, clock = Clock { 100L })
+
+            val id = repo.createTag("Kotlin")
+
+            assertEquals("t-early", id)
+            assertEquals(2, db.tagsQueries.watchAll().executeAsList().size)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun createTagPrefersAnAliveSameNamedRowOverAnEarlierDeletedOne() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertTag("t-deleted", "Kotlin", now = 5L, deletedAt = 6L)
+            db.insertTag("t-alive", "Kotlin", now = 10L)
+            val repo = newRepo(db, clock = Clock { 100L })
+
+            val id = repo.createTag("Kotlin")
+
+            assertEquals("t-alive", id)
+            // The earlier deleted twin stays deleted; no row was created.
+            assertNotNull(db.tagsQueries.getById("t-deleted").executeAsOne().deleted_at)
+            assertEquals(listOf("t-alive"), db.tagsQueries.watchAll().executeAsList().map { it.id })
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun createTagOnOnlyDeletedSameNamedRowsReactivatesTheEarliest() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertTag("t-late", "Kotlin", now = 20L, deletedAt = 21L)
+            db.insertTag("t-early", "Kotlin", now = 10L, deletedAt = 11L)
+            val repo = newRepo(db, clock = Clock { 100L })
+
+            val id = repo.createTag("Kotlin")
+
+            assertEquals("t-early", id)
+            assertNull(db.tagsQueries.getById("t-early").executeAsOneOrNull()?.deleted_at)
+            // The later twin stays deleted.
+            assertNotNull(db.tagsQueries.getById("t-late").executeAsOne().deleted_at)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun updateTagMayRenameOntoANameAnAliveRowHolds() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertTag("t1", "Old", now = 10L)
+            db.insertTag("t2", "New", now = 10L)
+            val repo = newRepo(db, clock = Clock { 200L })
+
+            repo.updateTag("t1", "New", null)
+
+            // No UNIQUE(name) blocks it: both rows keep their ids under the shared name, and the UI
+            // numbers them.
+            assertEquals("New", db.tagsQueries.getById("t1").executeAsOne().name)
+            assertEquals("New", db.tagsQueries.getById("t2").executeAsOne().name)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun updateTagMayRenameOntoANameADeletedRowHolds() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertTag("t1", "Old", now = 10L)
+            db.insertTag("t2", "New", now = 10L, deletedAt = 20L)
+            val repo = newRepo(db, clock = Clock { 200L })
+
+            repo.updateTag("t1", "New", null)
+
+            assertEquals("New", db.tagsQueries.getById("t1").executeAsOne().name)
+            assertNotNull(db.tagsQueries.getById("t2").executeAsOne().deleted_at)
+        } finally {
+            driver.close()
+        }
+    }
+
     // --- A same-named tag another writer inserts mid-call (a sync merge, a concurrent create) ---
 
     @Test

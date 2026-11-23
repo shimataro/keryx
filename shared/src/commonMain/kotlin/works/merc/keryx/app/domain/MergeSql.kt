@@ -23,9 +23,10 @@ package works.merc.keryx.app.domain
  * Columns are listed explicitly (avoiding `SELECT *`, which breaks on any schema drift).
  *
  * Guards keep a merge from ever aborting on main's own constraints: NOT-EXISTS guards skip rows that
- * would collide with main (same URL / guid / name under a different id) or reference a row main lacks,
- * and **duplicates inside `cloud`** (a folded file can hold two rows with the same unique key from
- * different devices) are resolved first: a statement that matches by `feeds.url`,
+ * would collide with main (a feed's URL or an article's `(feed_id, guid)` under a different id — tag
+ * and folder names are not unique any more, so same-named rows are allowed through) or reference a
+ * row main lacks, and **duplicates inside `cloud`** (a folded file can hold two rows with the same
+ * unique key from different devices) are resolved first: a statement that matches by `feeds.url`,
  * `articles(feed_id, guid)` or a tag/folder name considers only the winner among the cloud rows
  * sharing that key — greatest `updated_at`, then greatest id ([winnerAmong]). Statements resolving a
  * reference by id (`mergeFeedFolderId`, `feedTags`) still see every cloud row.
@@ -62,20 +63,30 @@ object MergeSql {
         "updated_at", "created_at", "deleted_at", "deleted_updated_at", "body_updated_at",
     )
 
-    // ---- tags / folders: per-field last-write-wins, matched by id, else by name ----
+    // ---- tags / folders: per-field last-write-wins, matched by id, else by name on the canonical row ----
+
+    /**
+     * The canonical row of a name in [table]: an alive row over a deleted one, then the earliest
+     * `created_at`, then the smallest id — the same rule the local `getByName` uses, so creation,
+     * reactivation and this merge all land on the same row of a name.
+     */
+    private fun canonicalRow(table: String): String =
+        "(SELECT m.id FROM main.$table m WHERE m.name = c.name " +
+            "ORDER BY m.deleted_at IS NOT NULL, m.created_at, m.id LIMIT 1)"
 
     /**
      * The per-field statements of a tags/folders-shaped [table], in order: one UPDATE per group, then
      * the INSERT of rows main does not have.
      *
-     * A main row is matched to the cloud row with its id; failing that, to the winning cloud row of
-     * its name whose id main does not have (two devices that created the same name independently
-     * converge on this device's row). The two ways never match the same pair twice, and each name is
-     * matched by at most one cloud row, so no main row is updated from two cloud rows.
+     * A main row is matched to the cloud row with its id; failing that, the winning cloud row of its
+     * name matches the one canonical main row of that name (two devices that created the same name
+     * independently converge on this device's canonical row). The two ways never match the same pair
+     * twice, and each name is matched by at most one cloud row, so no main row is updated from two
+     * cloud rows.
      *
-     * A name change is applied only from the winner of its name and only while no other main row holds
-     * that name, so it can never violate `UNIQUE(name)`; the insert likewise skips a name main already
-     * holds (and runs last, after renames may have freed one).
+     * Names are not unique any more, so a name change is applied from the winner of its name without
+     * a guard, and the insert skips only rows whose id main already holds — a name main holds under
+     * another id is allowed through, so same-named rows can coexist (the UI numbers them).
      */
     private fun perFieldStatements(table: String, columns: List<String>, nameGroup: LwwGroup, otherGroups: List<LwwGroup>): List<String> {
         val cloud = winnerAmong(table, columns, "name")
@@ -83,6 +94,7 @@ object MergeSql {
         val matched = """
             (c.id = $target.id
              OR (c.$RANK = 1 AND c.name = $target.name
+                 AND $target.id = ${canonicalRow(table)}
                  AND NOT EXISTS (SELECT 1 FROM main.$table m WHERE m.id = c.id)
                  AND NOT EXISTS (SELECT 1 FROM cloud.$table c3 WHERE c3.id = $target.id)))
         """.trimIndent()
@@ -95,18 +107,13 @@ object MergeSql {
               AND ${SyncLww.wins("c", target, group)}$extraCondition;
         """.trimIndent()
 
-        val nameUpdate = update(
-            nameGroup,
-            "\n  AND c.$RANK = 1" +
-                "\n  AND NOT EXISTS (SELECT 1 FROM main.$table m2 WHERE m2.name = c.name AND m2.id <> $target.id)",
-        )
+        val nameUpdate = update(nameGroup, "\n  AND c.$RANK = 1")
         val insert = """
             INSERT INTO $target (${columns.joinToString(", ")})
             SELECT ${columns.joinToString(", ") { "c.$it" }}
             FROM $cloud c
             WHERE c.$RANK = 1
-              AND NOT EXISTS (SELECT 1 FROM main.$table l WHERE l.id = c.id)
-              AND NOT EXISTS (SELECT 1 FROM main.$table l2 WHERE l2.name = c.name);
+              AND NOT EXISTS (SELECT 1 FROM main.$table l WHERE l.id = c.id);
         """.trimIndent()
         val earliestCreatedAt = """
             UPDATE $target
@@ -213,10 +220,11 @@ object MergeSql {
                         THEN c.folder_id
                     WHEN c.folder_id IS NOT NULL THEN (
                         SELECT mf.id FROM main.folders mf
-                        INNER JOIN cloud.folders cf ON cf.name = mf.name
-                        WHERE cf.id = c.folder_id
+                        INNER JOIN cloud.folders cf ON cf.id = c.folder_id
+                        WHERE cf.name = mf.name
                           AND cf.deleted_at IS NULL
                           AND mf.deleted_at IS NULL
+                        ORDER BY mf.deleted_at IS NOT NULL, mf.created_at, mf.id
                         LIMIT 1
                     )
                     ELSE NULL
@@ -373,9 +381,10 @@ object MergeSql {
 
     /**
      * A link is imported only if its feed exists in main. Its tag is used as-is if it is alive in main,
-     * else looked up by name through `cloud.tags` (by id, so every cloud tag row is seen); a link whose
-     * tag resolves to neither is skipped. Two cloud links resolving to the same local pair are settled
-     * by the ON CONFLICT against the live row, so the result does not depend on their order.
+     * else resolved to the canonical main tag of the same name (by id against `cloud.tags`, so every
+     * cloud tag row is seen; alive rows first, as `getByName` orders them); a link whose tag resolves
+     * to neither is skipped. Two cloud links resolving to the same local pair are settled by the ON
+     * CONFLICT against the live row, so the result does not depend on their order.
      */
     private val feedTags = """
         INSERT INTO main.feed_tags (feed_id, tag_id, deleted_at, updated_at)
@@ -385,10 +394,11 @@ object MergeSql {
                    CASE
                        WHEN EXISTS (SELECT 1 FROM main.tags mt WHERE mt.id = c.tag_id AND mt.deleted_at IS NULL)
                            THEN c.tag_id
-                       WHEN EXISTS (SELECT 1 FROM cloud.tags ct WHERE ct.id = c.tag_id) THEN (
+                       WHEN c.tag_id IS NOT NULL THEN (
                            SELECT mt.id FROM main.tags mt
-                           INNER JOIN cloud.tags ct ON ct.name = mt.name
-                           WHERE ct.id = c.tag_id
+                           INNER JOIN cloud.tags ct ON ct.id = c.tag_id
+                           WHERE ct.name = mt.name
+                           ORDER BY mt.deleted_at IS NOT NULL, mt.created_at, mt.id
                            LIMIT 1
                        )
                        ELSE NULL

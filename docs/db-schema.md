@@ -48,9 +48,13 @@ through it rather than composing `AppDirs.appDataDir()` with the filename themse
   `onCreate`/`onUpgrade` callbacks. Version 2 adds `articles.deleted_at` / `deleted_updated_at` via `1.sqm`.
   Version 3 (`2.sqm`) adds the sync bookkeeping (`sync_outbox`, `sync_capture`, `sync_merging`, `sync_applied`,
   `sync_cursor`, `ks_search_pending`, `ks_search_awaiting_body`, `ks_feed_folder_raw`, and the capture triggers), moves `feeds`' `etag` / `last_modified` /
-  `error_count` / `last_error` into `feed_fetch_state` (`ALTER TABLE … DROP COLUMN`, SQLite 3.35+), adds the
-  per-field stamps of `tags` / `folders` and `articles.body_updated_at` (all initialized from `updated_at`), and
-  registers in `ks_search_pending` every
+  `error_count` / `last_error` into `feed_fetch_state` (`ALTER TABLE … DROP COLUMN`, SQLite 3.35+), **rebuilds
+  `tags` / `folders`** — adding their per-field stamps (initialized from `updated_at`) and dropping `UNIQUE(name)` in
+  one table swap, with the children evacuated and restored around it (foreign keys stay on: `feeds.folder_id` is
+  saved and NULLed only where its folder exists, the `feed_tags` rows whose tag exists move to a work table, and a
+  child whose parent was never there survives untouched, so no new `foreign_key_check` violation appears; a link
+  whose feed is gone cannot be restored and is dropped) —, adds `articles.body_updated_at` (initialized from
+  `updated_at`), and registers in `ks_search_pending` every
   article whose `search_text` still equals its raw `content` / `summary` (written before HTML stripping).
   (SQLDelight derives the version from the highest migration file + 1.) When the schema changes, add a `.sqm` file
   (`<from-version>.sqm`) and the version bumps automatically; `domain/MergeSchema.EXPECTED_SCHEMAS` (which
@@ -134,9 +138,15 @@ Indexes: `feed_id`, `is_read`, `is_starred`, and a composite `(published_at DESC
 
 ### tags / feed_tags
 
-`tags`: `id`(PK), `name`(UNIQUE), `color`, `sort_order`, `deleted_at`, `updated_at`, `created_at`,
+`tags`: `id`(PK), `name`, `color`, `sort_order`, `deleted_at`, `updated_at`, `created_at`,
 `name_updated_at`, `color_updated_at`, `sort_order_updated_at`.
 
+- `name` is **not** UNIQUE (schema version 3 dropped the constraint): same-named tags are allowed — a rename on one
+  device can cross a same-named creation on another — and the UI tells them apart with an ordinal. A non-unique index
+  `tags_name` backs the by-name lookups. Every path that resolves a tag by name (creation, reactivation, the sync
+  merge's name resolution) lands on the one **canonical row** of the name: an alive row over a deleted one, then the
+  earliest `created_at`, then the smallest id (`tags.getByName`). The UI still warns the user about duplicates among
+  live rows (`NameValidation`), so a second same-named row is created by a sync merge, not by a create dialog.
 - Name, color and sort order are each last-write-wins by their own stamp (like the user-edited fields of `feeds`),
   so two devices changing different fields of the same tag both keep their change. `updated_at` stamps creation,
   deletion and reactivation.
@@ -144,9 +154,12 @@ Indexes: `feed_id`, `is_read`, `is_starred`, and a composite `(published_at DESC
 
 ### folders
 
-`id`(PK), `name`(UNIQUE), `sort_order`, `deleted_at`, `updated_at`, `created_at`, `name_updated_at`,
+`id`(PK), `name`, `sort_order`, `deleted_at`, `updated_at`, `created_at`, `name_updated_at`,
 `sort_order_updated_at`.
 
+- `name` is **not** UNIQUE (schema version 3 dropped the constraint), for the same reason as `tags.name`: same-named
+  folders are allowed and shown with an ordinal, backed by the non-unique index `folders_name`, and every by-name
+  lookup lands on the canonical row of the name (see `tags` above and `folders.getByName`).
 - Name and sort order are each last-write-wins by their own stamp; `updated_at` stamps creation, deletion and
   reactivation, as for `tags`.
 - Independent classification axis from tags. Since 1 feed = max 1 folder (`feeds.folder_id`, not many-to-many), there is no junction table like `feed_tags`.

@@ -158,6 +158,99 @@ class SchemaV3MigrationTest {
         }
     }
 
+    /**
+     * The v2 -> v3 rebuild of tags and folders: UNIQUE(name) is dropped (same-named rows are allowed
+     * from here on), the per-field stamps arrive with the rebuild, and the children are re-attached.
+     * A child whose parent was never there (written before foreign keys were enforced) survives
+     * untouched — it was already a violation, and nothing here deletes a row it points at — while a
+     * link whose feed is gone is the only row lost: it cannot be restored, because feeds is not
+     * rebuilt. Seeded with foreign keys off (as the v2 app left them) and migrated through the
+     * production factory, whose connections enforce them.
+     */
+    @Test
+    fun theRebuildDropsNameUniquenessKeepsTheChildrenAndLeavesTheOrphansAlone() {
+        val file = tempFile()
+        val driver = JdbcSqliteDriver("jdbc:sqlite:${file.absolutePath}")
+        try {
+            driver.createSchemaV2()
+            listOf(
+                "INSERT INTO folders (id, name, sort_order, updated_at, created_at) VALUES ('d1', 'D', 0, 10, 1)",
+                "INSERT INTO folders (id, name, sort_order, updated_at, created_at, deleted_at) VALUES ('d2', 'Gone', 1, 20, 2, 20)",
+                "INSERT INTO feeds (id, url, title, folder_id, updated_at, created_at) VALUES ('f1', 'https://a', 'A', 'd1', 10, 1)",
+                // An orphan: d-orphan does not exist (data from before foreign keys were enforced).
+                "INSERT INTO feeds (id, url, title, folder_id, updated_at, created_at) VALUES ('f2', 'https://b', 'B', 'd-orphan', 10, 1)",
+                "INSERT INTO feeds (id, url, title, updated_at, created_at) VALUES ('f3', 'https://c', 'C', 10, 1)",
+                "INSERT INTO tags (id, name, updated_at, created_at) VALUES ('t1', 'T', 10, 1)",
+                "INSERT INTO tags (id, name, updated_at, created_at, deleted_at) VALUES ('t2', 'Gone', 20, 2, 20)",
+                "INSERT INTO feed_tags (feed_id, tag_id, updated_at) VALUES ('f1', 't1', 10)",
+                "INSERT INTO feed_tags (feed_id, tag_id, updated_at) VALUES ('f1', 't2', 10)",
+                // A link whose feed does not exist: evacuated with the valid ones, not restorable.
+                "INSERT INTO feed_tags (feed_id, tag_id, updated_at) VALUES ('f-missing', 't1', 10)",
+                // A link whose tag does not exist: never evacuated, stays as it was.
+                "INSERT INTO feed_tags (feed_id, tag_id, updated_at) VALUES ('f1', 't-orphan', 10)",
+            ).forEach { driver.execute(null, it, 0) }
+        } finally {
+            driver.close()
+        }
+
+        fun violations(): List<List<Any?>> = withConnection(file) { conn ->
+            conn.rows("SELECT \"table\", parent FROM pragma_foreign_key_check ORDER BY \"table\", parent")
+        }
+        val violationsBefore = violations()
+
+        DatabaseDriverFactory().createDriver(file).close()
+
+        withConnection(file) { conn ->
+            // The valid folder assignment is re-attached, the orphan one survives untouched.
+            assertEquals(
+                listOf(
+                    listOf<Any?>("f1", "d1"),
+                    listOf<Any?>("f2", "d-orphan"),
+                    listOf<Any?>("f3", null),
+                ),
+                conn.rows("SELECT id, folder_id FROM feeds ORDER BY id"),
+            )
+            // The valid links are back; the feed-less one is gone; the tag-orphan one survived.
+            assertEquals(
+                listOf(
+                    listOf<Any?>("f1", "t-orphan"),
+                    listOf<Any?>("f1", "t1"),
+                    listOf<Any?>("f1", "t2"),
+                ),
+                conn.rows("SELECT feed_id, tag_id FROM feed_tags ORDER BY feed_id, tag_id"),
+            )
+            // UNIQUE(name) is gone: a second row of a name inserts fine, on both tables.
+            conn.createStatement().use { st ->
+                st.execute("INSERT INTO tags (id, name, updated_at, created_at) VALUES ('t3', 'T', 30, 3)")
+                st.execute("INSERT INTO folders (id, name, updated_at, created_at) VALUES ('d3', 'D', 30, 3)")
+            }
+            // The name indexes are there, and not unique ("unique" = 0; a UNIQUE(name) autoindex
+            // would fail both queries).
+            assertEquals(
+                listOf(listOf<Any?>("tags_name")),
+                conn.rows("SELECT name FROM pragma_index_list('tags') WHERE name = 'tags_name' AND \"unique\" = 0"),
+            )
+            assertEquals(
+                listOf(listOf<Any?>("folders_name")),
+                conn.rows("SELECT name FROM pragma_index_list('folders') WHERE name = 'folders_name' AND \"unique\" = 0"),
+            )
+            // The orphans were violations before and still are; the only violation that went away is
+            // the dropped feed-less link. Nothing new appeared.
+            assertEquals(
+                listOf(
+                    listOf<Any?>("feed_tags", "feeds"),
+                    listOf<Any?>("feed_tags", "tags"),
+                    listOf<Any?>("feeds", "folders"),
+                ),
+                violationsBefore,
+            )
+            assertEquals(
+                listOf(listOf<Any?>("feed_tags", "tags"), listOf<Any?>("feeds", "folders")),
+                violations(),
+            )
+        }
+    }
+
     @Test
     fun migrationInitializesEachArticlesBodyStampFromItsUpdatedAt() {
         val file = migratedDb(

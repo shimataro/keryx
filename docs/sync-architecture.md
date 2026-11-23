@@ -20,9 +20,10 @@ pre-delta migration and the legacy watch), `domain/MergeSql.kt`,
   arrive in does not matter) and **associative** (merging files one by one or after folding them together gives the
   same result). Duplicate files, files arriving out of order, and re-applying a file after a crash are therefore all
   harmless — the rest of this document relies on that.
-  Known exceptions, not yet closed, are recorded in [known-issues.md](known-issues.md): a tag or folder rename blocked
-  by a name another row holds, feeds sharing one URL under different ids, and folder assignments between same-name
-  folders that have different ids on different devices.
+  Known exceptions, not yet closed, are recorded in [known-issues.md](known-issues.md): feeds sharing one URL under
+  different ids, and rows that share a name under different ids (a feed can be left pointing at a folder across the
+  folder's deletion and revival, and a rename inside a folded file whose row loses the winner selection among the
+  same-named cloud rows) — both until the tag and folder ids become name-derived.
 - **Only local changes are sent.** A change that arrived through a merge is never re-sent, so changes do not echo
   back and forth between devices.
 - **No change is ever unreachable.** Every change is, at every moment, in at least one delta file or base in the
@@ -514,8 +515,8 @@ Merge SQL (`MergeSql`) key points:
   that order decide. A device's own write always stamps above what its row already holds (see "Design Philosophy"
   in [db-schema.md](db-schema.md)), so a tie only arises between writes made independently on two devices in the
   same millisecond.
-- **Duplicates inside `cloud` are resolved deterministically.** A folded file can hold two rows with the same unique
-  key (`feeds.url`, `articles(feed_id, guid)`, a tag or folder name) from different devices. Statements that match
+- **Duplicates inside `cloud` are resolved deterministically.** A folded file can hold two rows with the same key
+  (`feeds.url`, `articles(feed_id, guid)`, a tag or folder name) from different devices. Statements that match
   by such a key consider only the winner among them — greatest `updated_at`, then greatest id. Statements that
   resolve a reference by id (`mergeFeedFolderId`, `feedTags`) still see every row.
 - **Rows absent from `cloud` mean nothing.** A delta holds only some rows; the statements whose outcome depends on a
@@ -527,7 +528,8 @@ Merge SQL (`MergeSql`) key points:
   merged by dedicated statements using their own stamps: `mergeFeedFolderId` (`folder_id` / `folder_updated_at`),
   `mergeFeedSortOrder`, `mergeFeedCustomTitle`, `mergeFeedDeletedAt`. `folder_id` is resolved in four branches:
   NULL if the cloud's referenced folder isn't alive in `cloud.folders`; else the cloud's `folder_id` if that folder
-  is alive in `main`; else a same-name lookup joining `main.folders`/`cloud.folders` (both alive); else NULL.
+  is alive in `main`; else a same-name lookup joining `main.folders`/`cloud.folders` (both alive), which lands on the
+  canonical alive `main` folder of the name (earliest `created_at`, then smallest id); else NULL.
   Because the stored `folder_id` is resolved — this device's id, not necessarily the one the winning file carried —
   the merge never ranks the cloud's raw `folder_id` against it: on an equal `folder_updated_at` the two ids would be
   from different id spaces, and the merge order would decide (while `ReduceSql`'s fold keeps the raw maximum). The
@@ -541,8 +543,15 @@ Merge SQL (`MergeSql`) key points:
   (`IdGenerator.feedId`), so the same feed has the same id on every device.
 - **tags / folders: per-field last-write-wins**, like feeds: name (`name_updated_at`), color (`color_updated_at`,
   tags), sort order (`sort_order_updated_at`) each by its own stamp; `updated_at` stamps creation, deletion and
-  reactivation. Two devices changing different fields of the same tag both keep their change. Rows are matched by
-  id, else by name (two devices that created the same name independently, with different ids, converge on one).
+  reactivation. Two devices changing different fields of the same tag both keep their change. `name` is not unique
+  any more, so rows are matched by id, else by name — a cloud row of a name matches only the one **canonical** main
+  row of that name (an alive row over a deleted one, then the earliest `created_at`, then the smallest id; the row
+  the local `getByName` returns), so a name is never applied to two main rows. A name change is applied from the
+  winner of its name whenever it wins on its stamp — no `UNIQUE(name)` guard rejects it any more — and the insert
+  skips only rows whose id main already holds, so same-named rows under different ids coexist (each device's
+  canonical row also takes the winner's values through the by-name match). Until the ids become name-derived, a
+  rename inside a folded file whose row loses the winner selection among the same-named cloud rows is still not
+  applied by the merge of that fold, so devices can disagree on the name — see [known-issues.md](known-issues.md).
 - articles, three groups:
   - **Body** — `content`, `summary`, `title`, `url`, `author`, `published_at`, `thumbnail_url` (and `feed_id` /
     `guid`, which the local merge never rewrites on an existing row), stamped by `body_updated_at`. A version with
@@ -569,9 +578,12 @@ Merge SQL (`MergeSql`) key points:
   without a body is recorded in `ks_search_awaiting_body` (see
   "FTS5 Handling"). Articles are matched by **`id`** (UUIDv5 of `(feed_id, guid)`, `IdGenerator.articleId`).
 - feed_tags: last-write-wins. Imported only if the feed exists in main. The tag is used as-is if it is alive in
-  main, else looked up by name through `cloud.tags`; a row whose tag resolves to neither is skipped.
-- `NOT EXISTS` / `EXISTS` guards skip rows colliding with main (same URL, different ID, etc.) so UNIQUE / FK
-  violations do not fail the whole transaction.
+  main, else resolved to the canonical main tag of the same name through `cloud.tags` (by id, so every cloud tag row
+  is seen; alive rows first, as `getByName` orders them); a row whose tag resolves to neither is skipped.
+- `NOT EXISTS` / `EXISTS` guards skip rows colliding with main (a feed's URL or an article's `(feed_id, guid)` under
+  a different id, a referenced row main lacks) so UNIQUE / FK violations do not fail the whole transaction. Tag and
+  folder names are guarded no longer: a name main holds under another id is allowed through, and same-named rows
+  coexist.
 - `MergeSql.all` order: folders (by name, then by id, then the per-field statements), feeds, the folder merge's
   three statements and the other three `mergeFeed*`,
   tags (by name, by id, per field), articles, feed_tags, global_settings. Folders precede feeds (for
@@ -611,8 +623,9 @@ How each `actual` knows the merge transaction is still open differs, since the o
 Two versions are in play:
 
 - **The local schema** (`PRAGMA user_version` of `keryx.db`, currently 3). Version 3 (`2.sqm`) adds the sync
-  bookkeeping tables and triggers, moves `feeds`' fetch state into `feed_fetch_state`, adds the tag/folder per-field
-  stamps and `articles.body_updated_at` (all initialized from `updated_at`), and registers every article whose `search_text` still equals its raw
+  bookkeeping tables and triggers, moves `feeds`' fetch state into `feed_fetch_state`, rebuilds `tags` / `folders`
+  (adding their per-field stamps and dropping `UNIQUE(name)`, with the children evacuated and restored around the
+  swap and foreign keys left on), adds `articles.body_updated_at` (all initialized from `updated_at`), and registers every article whose `search_text` still equals its raw
   `content`/`summary` (rows written before HTML stripping) in `ks_search_pending`.
 - **The transport schema** (`user_version` of each delta/base). A file older than this build is migrated up with
   `TransportSchema`'s migrations before use; a newer one raises `SchemaVersionException`, which stops the sync
@@ -1162,8 +1175,9 @@ that one write of the older build can be lost — the same cause as "Google Driv
 device's upload unnoticed" in [known-issues.md](known-issues.md).
 
 A pre-delta database holds columns the current schema no longer syncs: migrating it to schema 3 moves its fetch
-state into `feed_fetch_state` inside the temporary file only (never into the local database), initializes the
-per-field stamps and `articles.body_updated_at` from `updated_at`, and its articles' `search_text` is recomputed as for any merge.
+state into `feed_fetch_state` inside the temporary file only (never into the local database), rebuilds its `tags` /
+`folders` the same way `2.sqm` does (per-field stamps initialized from `updated_at`, `UNIQUE(name)` dropped, the
+children evacuated and restored), initializes `articles.body_updated_at` from `updated_at`, and its articles' `search_text` is recomputed as for any merge.
 
 Builds older than compression (reading only `/keryx.db`) are unaffected by the stub and keep the one-way divergence
 documented for them: this version neither reads nor writes `/keryx.db`. The legacy watch and this migration are

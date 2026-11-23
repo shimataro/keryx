@@ -586,6 +586,99 @@ class FolderRepositoryTest {
         }
     }
 
+    // --- Names are not unique: the canonical row is reused, and a rename may cross any name ---
+
+    @Test
+    fun createFolderReusesTheEarliestCreatedAliveRowOfTheName() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFolder("d-late", "Kotlin", now = 20L)
+            db.insertFolder("d-early", "Kotlin", now = 10L)
+            val repo = newRepo(db, driver, clock = Clock { 100L })
+
+            val id = repo.createFolder("Kotlin")
+
+            assertEquals("d-early", id)
+            assertEquals(2, db.foldersQueries.watchAll().executeAsList().size)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun createFolderPrefersAnAliveSameNamedRowOverAnEarlierDeletedOne() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFolder("d-deleted", "Kotlin", now = 5L, deletedAt = 6L)
+            db.insertFolder("d-alive", "Kotlin", now = 10L)
+            val repo = newRepo(db, driver, clock = Clock { 100L })
+
+            val id = repo.createFolder("Kotlin")
+
+            assertEquals("d-alive", id)
+            // The earlier deleted twin stays deleted; no row was created.
+            assertNotNull(db.foldersQueries.getById("d-deleted").executeAsOne().deleted_at)
+            assertEquals(listOf("d-alive"), db.foldersQueries.watchAll().executeAsList().map { it.id })
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun createFolderOnOnlyDeletedSameNamedRowsReactivatesTheEarliest() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFolder("d-late", "Kotlin", now = 20L, deletedAt = 21L)
+            db.insertFolder("d-early", "Kotlin", now = 10L, deletedAt = 11L)
+            val repo = newRepo(db, driver, clock = Clock { 100L })
+
+            val id = repo.createFolder("Kotlin")
+
+            assertEquals("d-early", id)
+            assertNull(db.foldersQueries.getById("d-early").executeAsOneOrNull()?.deleted_at)
+            // The later twin stays deleted.
+            assertNotNull(db.foldersQueries.getById("d-late").executeAsOne().deleted_at)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun updateFolderMayRenameOntoANameAnAliveRowHolds() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFolder("d1", "Old", now = 10L)
+            db.insertFolder("d2", "New", now = 10L)
+            val repo = newRepo(db, driver, clock = Clock { 200L })
+
+            repo.updateFolder("d1", "New")
+
+            // No UNIQUE(name) blocks it: both rows keep their ids under the shared name, and the UI
+            // numbers them.
+            assertEquals("New", db.foldersQueries.getById("d1").executeAsOne().name)
+            assertEquals("New", db.foldersQueries.getById("d2").executeAsOne().name)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun updateFolderMayRenameOntoANameADeletedRowHolds() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFolder("d1", "Old", now = 10L)
+            db.insertFolder("d2", "New", now = 10L, deletedAt = 20L)
+            val repo = newRepo(db, driver, clock = Clock { 200L })
+
+            repo.updateFolder("d1", "New")
+
+            assertEquals("New", db.foldersQueries.getById("d1").executeAsOne().name)
+            assertNotNull(db.foldersQueries.getById("d2").executeAsOne().deleted_at)
+        } finally {
+            driver.close()
+        }
+    }
+
     // --- A same-named folder another writer inserts mid-call (a sync merge, a concurrent create) ---
 
     @Test

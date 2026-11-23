@@ -93,14 +93,18 @@ class TagRepository(
     }
 
     /**
-     * Creates the tag named [name], or reactivates the existing one in place, and returns its id —
-     * to be called inside a transaction. The statement itself resolves a name conflict (`upsertByName`),
-     * so a same-named row another writer (a sync merge, a concurrent create) inserted just before is
-     * reused rather than failing `UNIQUE(name)`. The id is read only after that write, so the
-     * transaction never reads before it writes (the lock upgrade `docs/known-issues.md` describes).
+     * Creates the tag named [name], or reactivates the canonical one of that name in place, and
+     * returns its id — to be called inside a transaction. The two statements (`reactivateByName`,
+     * then `insertIfNameAbsent`) resolve the name themselves, so a same-named row another writer (a
+     * sync merge, a concurrent create) inserted just before is reused rather than doubled; names are
+     * not unique, so the canonical row (an alive one over a deleted one, then the earliest
+     * `created_at`, then the smallest id — the row `getByName` returns) is the one reused. The id is
+     * read only after that write, so the transaction never reads before it writes (the lock upgrade
+     * `docs/known-issues.md` describes).
      */
     private fun upsertTagByName(name: String, color: String?, now: Long): String {
-        tags.upsertByName(id = newId(), name = name, color = color, now = now)
+        tags.reactivateByName(now = now, color = color, name = name)
+        tags.insertIfNameAbsent(id = newId(), name = name, color = color, now = now)
         return tags.getByName(name).executeAsOne().id
     }
 

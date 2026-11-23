@@ -45,8 +45,12 @@
   内部的に駆動する。バージョン 2 は `1.sqm` で `articles.deleted_at` / `deleted_updated_at` を追加する。バージョン 3
   （`2.sqm`）は、同期の管理情報（`sync_outbox`、`sync_capture`、`sync_merging`、`sync_applied`、`sync_cursor`、
   `ks_search_pending`、`ks_search_awaiting_body`、`ks_feed_folder_raw` と記録用トリガー）を追加し、`feeds` の `etag` / `last_modified` / `error_count` / `last_error` を
-  `feed_fetch_state` に移し（`ALTER TABLE … DROP COLUMN`、SQLite 3.35 以上）、`tags` / `folders` のフィールドごとの
-  スタンプと `articles.body_updated_at` を追加し（初期値はいずれも `updated_at`）、`search_text` が生の `content` / `summary` と同じままの記事（HTML 除去の
+  `feed_fetch_state` に移し（`ALTER TABLE … DROP COLUMN`、SQLite 3.35 以上）、**`tags` / `folders` を作り直す**——
+  フィールドごとのスタンプの追加（初期値は `updated_at`）と `UNIQUE(name)` の廃止を 1 回のテーブル差し替えで行い、
+  その間に子を退避・復帰させる（外部キーは有効のまま: `feeds.folder_id` は参照先のフォルダーが存在するときだけ
+  退避して NULL にし、タグが存在する `feed_tags` 行を作業表へ移す。親がもともと存在しない子は触らずに残るので、
+  `foreign_key_check` に新しい違反は現れない。フィードが存在しないリンクは復帰できないため捨てられる）——、
+  `articles.body_updated_at` を追加し（初期値は `updated_at`）、`search_text` が生の `content` / `summary` と同じままの記事（HTML 除去の
   導入前に書かれた行）を `ks_search_pending` に登録する。（SQLDelight は最大のマイグレーションファイル + 1 で
   バージョンを導出。）スキーマを変える場合は `.sqm` ファイル（`<移行元バージョン>.sqm`）を追加すればバージョンは自動で
   上がる。あわせて `domain/MergeSchema.EXPECTED_SCHEMAS`（`DatabaseMerger.validateSchema` が参照する期待スキーマ）、
@@ -149,18 +153,27 @@
 
 ### tags / feed_tags
 
-`tags`: `id`(PK), `name`(UNIQUE), `color`, `sort_order`, `deleted_at`, `updated_at`, `created_at`,
+`tags`: `id`(PK), `name`, `color`, `sort_order`, `deleted_at`, `updated_at`, `created_at`,
 `name_updated_at`, `color_updated_at`, `sort_order_updated_at`。
 
+- `name` は **UNIQUE ではない**（スキーマバージョン 3 で制約を廃止）: 同名のタグが複数存在できる——片方の端末での
+  リネームが、別の端末での同名作成と交差しうるため——で、UI は序数で区別する。名前による検索は非一意インデックス
+  `tags_name` が支える。名前でタグを解決するすべての経路（作成・再有効化・同期マージの名前解決）は、その名前の
+  1 つの**正規の行**（正規の行 = 生きている行を優先し、次に `created_at`、最後に `id` の順で最初の行。
+  `tags.getByName`）に着地する。UI は生きている行どうしの重複を引き続き警告する（`NameValidation`）ので、
+  2 つ目の同名行は同期マージによって作られるのであって、作成ダイアログによってではない。
 - 名前・色・並び順は、それぞれ自分のスタンプで後勝ちにする（`feeds` の利用者が編集するフィールドと同じ）ので、
   2 台が同じタグの別々のフィールドを変えれば、両方の変更が残る。`updated_at` は作成・削除・再有効化を打刻する。
 `feed_tags`: `feed_id` + `tag_id`（複合 PK）, `deleted_at`, `updated_at`。タグの付け外しは `deleted_at` で表現。
 
 ### folders
 
-`id`(PK), `name`(UNIQUE), `sort_order`, `deleted_at`, `updated_at`, `created_at`, `name_updated_at`,
+`id`(PK), `name`, `sort_order`, `deleted_at`, `updated_at`, `created_at`, `name_updated_at`,
 `sort_order_updated_at`。
 
+- `name` は **UNIQUE ではない**（スキーマバージョン 3 で制約を廃止）。理由は `tags.name` と同じ: 同名のフォルダーが
+  複数存在でき、序数で表示される。非一意インデックス `folders_name` が名前による検索を支え、名前による検索は
+  その名前の正規の行に着地する（上の `tags` と `folders.getByName` を参照）。
 - 名前と並び順は、それぞれ自分のスタンプで後勝ちにする。`updated_at` は `tags` と同じく作成・削除・再有効化を打刻する。
 - タグとは独立した分類軸。1フィード = 最大1フォルダー（`feeds.folder_id`、多対多ではない）ため、
   `feed_tags` のような中間テーブルは持たない。

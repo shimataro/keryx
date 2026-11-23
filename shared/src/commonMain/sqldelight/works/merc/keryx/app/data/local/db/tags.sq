@@ -1,8 +1,11 @@
 -- Tags for organizing feeds. Soft-deleted (deleted_at). Timestamp-last-wins sync.
+-- name is not UNIQUE: same-named tags are allowed (a rename on one device can cross a same-named
+-- creation on another), and the UI tells them apart with an ordinal (NameOrdinals). Every path that
+-- resolves a tag by name reuses one canonical row (see getByName).
 
 CREATE TABLE tags (
     id         TEXT    NOT NULL PRIMARY KEY,
-    name       TEXT    NOT NULL UNIQUE,
+    name       TEXT    NOT NULL,
     color      TEXT,
     sort_order INTEGER NOT NULL DEFAULT 0,
     deleted_at INTEGER,
@@ -13,14 +16,20 @@ CREATE TABLE tags (
     sort_order_updated_at INTEGER
 );
 
+CREATE INDEX tags_name ON tags(name);
+
 watchAll:
 SELECT * FROM tags WHERE deleted_at IS NULL ORDER BY sort_order ASC, name COLLATE NOCASE ASC;
 
 getById:
 SELECT * FROM tags WHERE id = ?;
 
+-- The canonical tag of :name: an alive row over a deleted one, then the earliest created_at, then
+-- the smallest id. Same-named rows may exist, so every by-name lookup (creation, reactivation and
+-- the sync merge's name resolution) must land on this same row — keep the order in step with
+-- reactivateByName below.
 getByName:
-SELECT * FROM tags WHERE name = ?;
+SELECT * FROM tags WHERE name = ? ORDER BY deleted_at IS NOT NULL, created_at ASC, id ASC LIMIT 1;
 
 -- Every local write to a tag row stamps updated_at as MAX(now, previous + 1): never at or before the
 -- stamp the row already has. A delete and a recreation within one millisecond already move it ahead
@@ -59,23 +68,44 @@ ON CONFLICT(id) DO UPDATE SET
     sort_order_updated_at = CASE WHEN sort_order IS NOT excluded.sort_order
         THEN MAX(excluded.updated_at, COALESCE(sort_order_updated_at, 0) + 1) ELSE sort_order_updated_at END;
 
--- Creates the tag named :name, or reactivates the existing one of that name in place (same id,
--- sort_order and created_at kept; a null :color keeps its color). The name conflict is resolved by
--- the statement itself rather than by a lookup before it, so a row of the same name that another
--- writer (a sync merge, a concurrent create) inserted in between is reused instead of failing
--- UNIQUE(name). :id is used only when no row has the name. A reactivation's updated_at moves forward
--- like every local write (see upsert). A new row stamps every per-field stamp with :now; a
+-- The two halves of a create-by-name (the repository runs them in one transaction, reactivate first):
+--
+-- reactivateByName reactivates the canonical tag named :name in place (same id, sort_order and
+-- created_at kept; a null :color keeps its color) when one exists, alive or soft-deleted — with no
+-- UNIQUE(name) there may be several same-named rows, and this UPDATE lands on exactly the one
+-- getByName returns. It matches nothing when no row has the name.
+--
+-- insertIfNameAbsent then inserts a new tag when no row of the name exists at all. The guard is in
+-- the statement rather than in a lookup before it, so a same-named row another writer (a sync merge,
+-- a concurrent create) inserted before this statement in the same transaction is reused rather than
+-- doubled; :id is used only here.
+--
+-- Exactly one of the two writes: a row of the name exists -> reactivateByName (whose updated_at
+-- always moves forward, so it always writes) and insertIfNameAbsent no-ops; none exists ->
+-- reactivateByName matches nothing and insertIfNameAbsent writes. The transaction therefore always
+-- writes before the repository reads the id back. A reactivation's updated_at moves forward like
+-- every local write (see upsert); a new row stamps every per-field stamp with :now, and a
 -- reactivation moves color_updated_at only when it actually changes the color (see upsert).
-upsertByName:
+reactivateByName:
+UPDATE tags SET
+    deleted_at = NULL,
+    updated_at = MAX(:now, updated_at + 1),
+    color = COALESCE(:color, color),
+    color_updated_at = CASE WHEN color IS NOT COALESCE(:color, color)
+        THEN MAX(:now, COALESCE(color_updated_at, 0) + 1) ELSE color_updated_at END
+WHERE id = (
+    SELECT id FROM tags WHERE name = :name
+    ORDER BY deleted_at IS NOT NULL, created_at ASC, id ASC
+    LIMIT 1
+);
+
+insertIfNameAbsent:
 INSERT INTO tags (
     id, name, color, sort_order, deleted_at, updated_at, created_at,
     name_updated_at, color_updated_at, sort_order_updated_at
 )
-VALUES (:id, :name, :color, 0, NULL, :now, :now, :now, :now, :now)
-ON CONFLICT(name) DO UPDATE SET
-    color = COALESCE(excluded.color, color), deleted_at = NULL, updated_at = MAX(excluded.updated_at, updated_at + 1),
-    color_updated_at = CASE WHEN color IS NOT COALESCE(excluded.color, color)
-        THEN MAX(excluded.updated_at, COALESCE(color_updated_at, 0) + 1) ELSE color_updated_at END;
+SELECT :id, :name, :color, 0, NULL, :now, :now, :now, :now, :now
+WHERE NOT EXISTS (SELECT 1 FROM tags WHERE name = :name);
 
 -- updated_at moves forward like every local write (see upsert).
 softDelete:

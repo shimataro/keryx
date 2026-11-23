@@ -19,14 +19,78 @@ ALTER TABLE feeds DROP COLUMN last_modified;
 ALTER TABLE feeds DROP COLUMN error_count;
 ALTER TABLE feeds DROP COLUMN last_error;
 
--- 2. Per-field last-write-wins stamps for tags and folders, initialized from updated_at.
-ALTER TABLE tags ADD COLUMN name_updated_at INTEGER;
-ALTER TABLE tags ADD COLUMN color_updated_at INTEGER;
-ALTER TABLE tags ADD COLUMN sort_order_updated_at INTEGER;
-UPDATE tags SET name_updated_at = updated_at, color_updated_at = updated_at, sort_order_updated_at = updated_at;
-ALTER TABLE folders ADD COLUMN name_updated_at INTEGER;
-ALTER TABLE folders ADD COLUMN sort_order_updated_at INTEGER;
-UPDATE folders SET name_updated_at = updated_at, sort_order_updated_at = updated_at;
+-- 2. tags and folders are rebuilt: the per-field last-write-wins stamps are added (initialized from
+--    updated_at) and UNIQUE(name) is dropped — same-named rows are allowed from here on, so the
+--    non-unique tags_name / folders_name indexes (created after the swap) replace the implicit
+--    UNIQUE ones. Each child is evacuated first, so dropping the parent cannot violate its foreign
+--    key: feeds.folder_id is saved and NULLed where it references a folder that exists, and the
+--    feed_tags rows whose tag exists move to a work table. A child whose parent was never there
+--    (written before foreign keys were enforced) is left untouched — it was already a violation, and
+--    no statement here deletes a row it points at, so `PRAGMA foreign_key_check` reports it before
+--    and after alike. The work table keeps every evacuated link; the restore puts back the ones
+--    whose feed still exists and drops the rest — a link whose feed is gone (also an FK violation
+--    from the start, and never displayed) cannot be restored, because feeds is not rebuilt.
+CREATE TABLE migration_feed_folder (feed_id TEXT NOT NULL PRIMARY KEY, folder_id TEXT NOT NULL);
+INSERT INTO migration_feed_folder (feed_id, folder_id)
+SELECT id, folder_id FROM feeds
+WHERE folder_id IS NOT NULL AND EXISTS (SELECT 1 FROM folders f WHERE f.id = feeds.folder_id);
+UPDATE feeds SET folder_id = NULL
+WHERE EXISTS (SELECT 1 FROM folders f WHERE f.id = feeds.folder_id);
+
+CREATE TABLE migration_feed_tags (
+    feed_id    TEXT    NOT NULL,
+    tag_id     TEXT    NOT NULL,
+    deleted_at INTEGER,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (feed_id, tag_id)
+);
+INSERT INTO migration_feed_tags (feed_id, tag_id, deleted_at, updated_at)
+SELECT feed_id, tag_id, deleted_at, updated_at FROM feed_tags
+WHERE EXISTS (SELECT 1 FROM tags t WHERE t.id = feed_tags.tag_id);
+DELETE FROM feed_tags WHERE EXISTS (SELECT 1 FROM tags t WHERE t.id = feed_tags.tag_id);
+
+CREATE TABLE folders_new (
+    id         TEXT    NOT NULL PRIMARY KEY,
+    name       TEXT    NOT NULL,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    deleted_at INTEGER,
+    updated_at INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    name_updated_at       INTEGER,
+    sort_order_updated_at INTEGER
+);
+INSERT INTO folders_new (id, name, sort_order, deleted_at, updated_at, created_at, name_updated_at, sort_order_updated_at)
+SELECT id, name, sort_order, deleted_at, updated_at, created_at, updated_at, updated_at FROM folders;
+DROP TABLE folders;
+ALTER TABLE folders_new RENAME TO folders;
+
+CREATE TABLE tags_new (
+    id         TEXT    NOT NULL PRIMARY KEY,
+    name       TEXT    NOT NULL,
+    color      TEXT,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    deleted_at INTEGER,
+    updated_at INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    name_updated_at       INTEGER,
+    color_updated_at      INTEGER,
+    sort_order_updated_at INTEGER
+);
+INSERT INTO tags_new (id, name, color, sort_order, deleted_at, updated_at, created_at, name_updated_at, color_updated_at, sort_order_updated_at)
+SELECT id, name, color, sort_order, deleted_at, updated_at, created_at, updated_at, updated_at, updated_at FROM tags;
+DROP TABLE tags;
+ALTER TABLE tags_new RENAME TO tags;
+
+INSERT INTO feed_tags (feed_id, tag_id, deleted_at, updated_at)
+SELECT w.feed_id, w.tag_id, w.deleted_at, w.updated_at FROM migration_feed_tags w
+WHERE EXISTS (SELECT 1 FROM feeds mf WHERE mf.id = w.feed_id);
+UPDATE feeds SET folder_id = w.folder_id FROM migration_feed_folder w WHERE w.feed_id = feeds.id;
+
+DROP TABLE migration_feed_tags;
+DROP TABLE migration_feed_folder;
+
+CREATE INDEX tags_name ON tags(name);
+CREATE INDEX folders_name ON folders(name);
 
 -- 2b. The article body's own last-write-wins stamp, initialized from updated_at (the body group's
 --     stamp before version 3; from here on only a body change moves it, never a read/star/deletion).

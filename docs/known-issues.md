@@ -487,41 +487,6 @@ Classification" in [sync-architecture.md](sync-architecture.md) — including th
 in-transaction checks — and the FTS rule that the merge is followed by the `search_text` recomputation and
 `indexMissing()`.
 
-## A tag or folder rename blocked by a name another row holds is lost
-
-**Status**: not fixed — closing it needs device-local merge state and a swap-safe rename pass, a redesign
-outside the scope of the change that found it (see "What a real fix would need"). It breaks the merge's
-commutativity (see "Design Philosophy" in [sync-architecture.md](sync-architecture.md)) for tag and folder
-names only.
-
-### Symptom
-
-Main holds tags `a` = "Old" and `b` = "Taken". One file renames `a` to "Taken", another renames `b` to "Free",
-both with newer name stamps, and they arrive in separate syncs. Merged in that order, `a` stays "Old" for
-good; merged in the other order, both renames apply. Two devices that received the files in different orders
-keep different names. Folders behave the same way.
-
-### Diagnosis
-
-`MergeSql.perFieldStatements` applies a name change only while no other main row holds that name
-(`NOT EXISTS … m2.name = c.name AND m2.id <> …`), so a merge can never violate `UNIQUE(name)`. A winning
-version that guard rejects is kept nowhere: the file is recorded as applied, and no later merge or local
-write looks at it again. The fold (`ReduceSql`) has no such guard, so a base built from both files holds
-both renames, and a device joining from it ends up with the order-independent result the other devices miss.
-
-### What a real fix would need
-
-- A device-local table holding, per row, the name version that wins last-write-wins whenever main could not
-  apply it yet.
-- A rename pass, run at the end of every merge and inside every local rename's transaction, that applies
-  every pending name whose target is free or freed by another pending name — through a placeholder name
-  first, so swaps and longer cycles apply too.
-- Local name stamps that rise above the pending stamp, so a user's rename outranks a pending winner it has
-  already seen instead of being reverted by it later.
-
-Even then, two devices renaming different rows to the same name at once leave one rename pending, and which
-one depends on the order; it resolves as soon as the row holding the name is renamed.
-
 ## Feeds sharing one URL under different ids keep whichever arrived first
 
 **Status**: not fixed — closing it needs re-keying a feed and everything that references it onto a canonical id,
@@ -548,8 +513,8 @@ which differs between the files and main — so the survivor depends on the orde
 The same cause — an identity taken from content that can change — makes matching tags and folders by name
 non-associative: a cloud row merged into a main row because they share a name is ignored once the fold also
 holds that main row's id, and is no longer matched after its name changes. `feedTags`' and
-`mergeFeedFolderId`'s lookups by name are affected the same way (see also "Same-name folders keep different ids
-per device, so folder assignments can diverge").
+`mergeFeedFolderId`'s lookups by name are affected the same way (see also "A feed can be left pointing at a
+deleted folder across the folder's deletion and revival").
 
 ### What a real fix would need
 
@@ -565,36 +530,36 @@ per device, so folder assignments can diverge").
 Even then, a loser whose URL changes again after the re-key comes back as a separate feed, and a pre-delta cloud
 file cannot be rewritten, so devices can still diverge in those cases.
 
-## Same-name folders keep different ids per device, so folder assignments can diverge
+## A feed can be left pointing at a deleted folder across the folder's deletion and revival
 
-**Status**: not fixed — closing it needs folder ids that converge across devices, a redesign outside the scope
-of the change that found it (see "What a real fix would need"). It breaks the merge's commutativity (see
-"Design Philosophy" in [sync-architecture.md](sync-architecture.md)) for feeds' folder assignments.
+**Status**: not fixed — closing it needs folder ids that converge across devices (or a re-resolution pass),
+a redesign outside the scope of the change that found it (see "What a real fix would need"). It breaks the
+merge's commutativity (see "Design Philosophy" in [sync-architecture.md](sync-architecture.md)) for feeds'
+folder assignments.
+
+The broader form of this — two devices settling on different folders for the same feed when two folder moves
+carry the same `folder_updated_at`, because each held a same-named folder under a different id — is closed
+now that the merge imports a same-named folder under its own id and the feed takes the raw id the winning
+file carried: the tie is decided between the raw ids, as the fold decides it.
 
 ### Symptom
 
-Two devices settle on different folders for the same feed when two folder moves carry the same
-`folder_updated_at`. For example, device A holds the move to cloud folder `dz` (resolved to its own folder `da`
-of the same name) and device B holds the move to `dm`; after each merges the other's upload, A keeps `da` and B
-keeps `dm`.
+A feed keeps pointing at a deleted folder. With folder `d` live and feed `f` assigned to `d` at stamp 500,
+merging a file with `d` live and then one with `d` deleted (both still assigning `f` to `d` at 500) leaves
+`f.folder_id = d`; the other order leaves NULL. The UI already shows a deleted folder as "no folder", but
+the stored and uploaded values differ.
 
 ### Diagnosis
 
-Two devices that create a folder of the same name independently give it different ids, and the merge matches a
-cloud folder to a local one by name, keeping the local id (the name-based matching also noted under "Feeds sharing
-one URL under different ids keep whichever arrived first"). A feed's `folder_id` therefore holds a **resolved**
-id. `MergeSql` keeps the raw winning version beside it (`ks_feed_folder_raw`) so one device's merges rank raw
-against raw, but the upload — a snapshot of the local database — carries only the resolved id, which the receiver
-then ranks as if it were raw. Shipping the raw id instead would not help on its own: the folder it names may not
-exist on the sender, so a receiver could not resolve it.
-
-The same cause leaves a feed pointing at a deleted folder. `mergeFeedFolderId` resolves a feed's folder only when
-an incoming raw assignment strictly wins, so a later file that deletes the folder but carries the same assignment
-never re-resolves it. With folder `d` live and feed `f` assigned to `d` at stamp 500, merging a file with `d` live
-and then one with `d` deleted (both still assigning `f` to `d` at 500) leaves `f.folder_id = d`; the other order
-leaves NULL. The UI already shows a deleted folder as "no folder", but the stored and uploaded values differ.
-Re-resolving under the final folder state would need the raw folder's name, since its id may not exist locally,
-and a rule that also stays order-independent across a folder's deletion and revival.
+`mergeFeedFolderId` resolves a feed's folder only when an incoming raw assignment strictly wins, so a later
+file that deletes the folder but carries the same assignment never re-resolves it. A feed's `folder_id` holds
+a **resolved** id — this device's, which can differ from the one the winning file carried — and `MergeSql`
+keeps the raw winning version beside it (`ks_feed_folder_raw`) so merges rank raw against raw; but the
+upload — a snapshot of the local database — carries only the resolved id, which the receiver then ranks as if
+it were raw. Shipping the raw id instead would not help on its own: the folder it names may not exist on the
+sender, so a receiver could not resolve it. Re-resolving under the final folder state would need the raw
+folder's name, since its id may not exist locally, and a rule that also stays order-independent across a
+folder's deletion and revival.
 
 ### What a real fix would need
 

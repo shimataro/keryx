@@ -86,14 +86,18 @@ class FolderRepository(
     }
 
     /**
-     * Creates the folder named [name], or reactivates the existing one in place, appended to the end
-     * of the folder list, and returns its id — to be called inside a transaction. The statement itself
-     * resolves a name conflict (`upsertByName`), so a same-named row another writer (a sync merge, a
-     * concurrent create) inserted just before is reused rather than failing `UNIQUE(name)`. The id is
-     * read only after that write, so the transaction never reads before it writes.
+     * Creates the folder named [name], or reactivates the canonical one of that name in place,
+     * appended to the end of the folder list, and returns its id — to be called inside a
+     * transaction. The two statements (`reactivateByName`, then `insertIfNameAbsent`) resolve the
+     * name themselves, so a same-named row another writer (a sync merge, a concurrent create)
+     * inserted just before is reused rather than doubled; names are not unique, so the canonical row
+     * (an alive one over a deleted one, then the earliest `created_at`, then the smallest id — the
+     * row `getByName` returns) is the one reused. The id is read only after that write, so the
+     * transaction never reads before it writes.
      */
     private fun upsertFolderByName(name: String, now: Long): String {
-        folders.upsertByName(id = newId(), name = name, now = now)
+        folders.reactivateByName(now = now, name = name)
+        folders.insertIfNameAbsent(id = newId(), name = name, now = now)
         return folders.getByName(name).executeAsOne().id
     }
 

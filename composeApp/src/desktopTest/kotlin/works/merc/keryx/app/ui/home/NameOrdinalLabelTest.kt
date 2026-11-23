@@ -19,10 +19,10 @@ import kotlin.test.assertEquals
 
 /**
  * Same-named tags and folders are numbered on screen ("Work", "Work (2)") — the display contract
- * the sidebar rows already rely on, exercised here on mock rows: the DB's UNIQUE(name) still keeps
- * two live rows of one name out of a real database, and the rows must render the ordinal correctly
- * the day it no longer does (external-spec §7). The rename field's initial value stays the row's
- * own name, ordinal-free.
+ * the sidebar rows already rely on, exercised here on mock rows: the DB no longer keeps two live
+ * rows of one name out of a create dialog (`NameValidation` warns the user instead), and a sync
+ * merge can insert one, so the rows must render the ordinal correctly (external-spec §7). The
+ * rename field's initial value stays the row's own name, ordinal-free.
  */
 @OptIn(ExperimentalTestApi::class)
 class NameOrdinalLabelTest {

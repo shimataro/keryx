@@ -137,7 +137,9 @@ class SyncMergerTest {
     }
 
     @Test
-    fun tagNameCollisionGuardSkipsCloudTag() {
+    fun sameNamedCloudTagIsImportedAndTheLocalRowTakesItsValues() {
+        // Names are not unique any more: the cloud tag is imported under its own id, and the local
+        // canonical row of the same name takes the winning values through the by-name match.
         val (cloudFile, cloudDriver, cloudDb) = fileDb()
         cloudDb.insertTag("t-cloud", "shared-name", now = 200)
         cloudDriver.close()
@@ -149,8 +151,11 @@ class SyncMergerTest {
         DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
-        assertNull(verifyDb.tagsQueries.getById("t-cloud").executeAsOneOrNull())
-        assertNotNull(verifyDb.tagsQueries.getById("t-local").executeAsOneOrNull())
+        val local = verifyDb.tagsQueries.getById("t-local").executeAsOne()
+        assertEquals(200L, local.updated_at)
+        val cloud = verifyDb.tagsQueries.getById("t-cloud").executeAsOne()
+        assertEquals("shared-name", cloud.name)
+        assertEquals(200L, cloud.updated_at)
         verifyDriver.close()
     }
 
@@ -385,7 +390,9 @@ class SyncMergerTest {
     }
 
     @Test
-    fun folderNameCollisionGuardSkipsCloudFolder() {
+    fun sameNamedCloudFolderIsImportedAndTheLocalRowTakesItsValues() {
+        // Names are not unique any more: the cloud folder is imported under its own id, and the local
+        // canonical row of the same name takes the winning values through the by-name match.
         val (cloudFile, cloudDriver, cloudDb) = fileDb()
         cloudDb.insertFolder("d-cloud", "shared-name", now = 200)
         cloudDriver.close()
@@ -397,8 +404,11 @@ class SyncMergerTest {
         DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
-        assertNull(verifyDb.foldersQueries.getById("d-cloud").executeAsOneOrNull())
-        assertNotNull(verifyDb.foldersQueries.getById("d-local").executeAsOneOrNull())
+        val local = verifyDb.foldersQueries.getById("d-local").executeAsOne()
+        assertEquals(200L, local.updated_at)
+        val cloud = verifyDb.foldersQueries.getById("d-cloud").executeAsOne()
+        assertEquals("shared-name", cloud.name)
+        assertEquals(200L, cloud.updated_at)
         verifyDriver.close()
     }
 
@@ -614,7 +624,7 @@ class SyncMergerTest {
     }
 
     @Test
-    fun feedAssignedToLocalFolderWhenCloudHasSameNamedFolder() {
+    fun feedFollowsTheCloudsFolderIdWhenTheSameNamedFolderIsImported() {
         val (cloudFile, cloudDriver, cloudDb) = fileDb()
         cloudDb.insertFolder("d-cloud", "IT", now = 100)
         cloudDb.insertFeed("f1", now = 100, folderId = "d-cloud")
@@ -627,8 +637,11 @@ class SyncMergerTest {
         DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
-        assertNull(verifyDb.foldersQueries.getById("d-cloud").executeAsOneOrNull())
-        assertEquals("d-local", verifyDb.feedsQueries.getById("f1").executeAsOne().folder_id)
+        // The same-named folder arrives under the cloud's id (no UNIQUE(name) stops it), so the
+        // feed's resolved folder is that row, and the local same-named one stays alongside it.
+        assertNotNull(verifyDb.foldersQueries.getById("d-cloud").executeAsOneOrNull())
+        assertNotNull(verifyDb.foldersQueries.getById("d-local").executeAsOneOrNull())
+        assertEquals("d-cloud", verifyDb.feedsQueries.getById("f1").executeAsOne().folder_id)
         verifyDriver.close()
     }
 
@@ -668,11 +681,13 @@ class SyncMergerTest {
         assertNotNull(folder)
         assertEquals(5L, folder.sort_order)
         assertEquals(200L, folder.updated_at)
+        // The cloud row itself is imported too (names are not unique any more).
+        assertNotNull(verifyDb.foldersQueries.getById("d-cloud").executeAsOneOrNull())
         verifyDriver.close()
     }
 
     @Test
-    fun cloudFolderSkippedWhenLocalHasSameNamedNewerFolder() {
+    fun sameNamedCloudFolderIsImportedEvenWhenTheLocalRowIsNewer() {
         val (cloudFile, cloudDriver, cloudDb) = fileDb()
         cloudDb.insertFolder("d-cloud", "IT", now = 100)
         cloudDriver.close()
@@ -684,14 +699,16 @@ class SyncMergerTest {
         DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
-        assertNull(verifyDb.foldersQueries.getById("d-cloud").executeAsOneOrNull())
-        val folder = verifyDb.foldersQueries.getById("d-local").executeAsOne()
-        assertEquals(200L, folder.updated_at)
+        // The local row is newer, so it keeps its values; the cloud row is still imported under its
+        // own id — same-named rows may coexist.
+        val local = verifyDb.foldersQueries.getById("d-local").executeAsOne()
+        assertEquals(200L, local.updated_at)
+        assertEquals(100L, verifyDb.foldersQueries.getById("d-cloud").executeAsOne().updated_at)
         verifyDriver.close()
     }
 
     @Test
-    fun feedTagAssignedToLocalTagWhenCloudHasSameNamedTag() {
+    fun feedTagFollowsTheCloudsTagIdWhenTheSameNamedTagIsImported() {
         val (cloudFile, cloudDriver, cloudDb) = fileDb()
         cloudDb.insertFeed("f1", now = 100)
         cloudDb.insertTag("t-cloud", "News", now = 100)
@@ -706,10 +723,12 @@ class SyncMergerTest {
         DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
-        assertNull(verifyDb.tagsQueries.getById("t-cloud").executeAsOneOrNull())
+        // The same-named tag arrives under the cloud's id (no UNIQUE(name) stops it), so the link
+        // uses that row, and the local same-named one stays alongside it.
+        assertNotNull(verifyDb.tagsQueries.getById("t-cloud").executeAsOneOrNull())
         val activeTags = verifyDb.feed_tagsQueries.watchAllActive().executeAsList()
         assertEquals(1, activeTags.size)
-        assertEquals("t-local", activeTags[0].tag_id)
+        assertEquals("t-cloud", activeTags[0].tag_id)
         verifyDriver.close()
     }
 
@@ -752,11 +771,13 @@ class SyncMergerTest {
         assertNotNull(tag)
         assertEquals(5L, tag.sort_order)
         assertEquals(200L, tag.updated_at)
+        // The cloud row itself is imported too (names are not unique any more).
+        assertNotNull(verifyDb.tagsQueries.getById("t-cloud").executeAsOneOrNull())
         verifyDriver.close()
     }
 
     @Test
-    fun cloudTagSkippedWhenLocalHasSameNamedNewerTag() {
+    fun sameNamedCloudTagIsImportedEvenWhenTheLocalRowIsNewer() {
         val (cloudFile, cloudDriver, cloudDb) = fileDb()
         cloudDb.insertTag("t-cloud", "News", now = 100)
         cloudDriver.close()
@@ -768,9 +789,11 @@ class SyncMergerTest {
         DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
-        assertNull(verifyDb.tagsQueries.getById("t-cloud").executeAsOneOrNull())
-        val tag = verifyDb.tagsQueries.getById("t-local").executeAsOne()
-        assertEquals(200L, tag.updated_at)
+        // The local row is newer, so it keeps its values; the cloud row is still imported under its
+        // own id — same-named rows may coexist.
+        val local = verifyDb.tagsQueries.getById("t-local").executeAsOne()
+        assertEquals(200L, local.updated_at)
+        assertEquals(100L, verifyDb.tagsQueries.getById("t-cloud").executeAsOne().updated_at)
         verifyDriver.close()
     }
 
@@ -808,10 +831,11 @@ class SyncMergerTest {
 
     @Test
     fun aLocalMoveAfterAMergeInvalidatesTheRawFolderVersion() {
-        // The cloud's folder d-cloud resolves by name to the local d-local; the raw version (100, d-cloud)
-        // is kept beside it. A local move in the same millisecond stamps 101, so the raw row no longer
-        // describes the feed's folder: neither re-merging the same file nor a file carrying the stamp 101
-        // with a raw id below the local one (d-aaa < d-other) may undo the move.
+        // The cloud's folder d-cloud is imported under its own id (names are not unique), so the feed
+        // takes it directly and the raw version (100, d-cloud) is kept beside it. A local move in the
+        // same millisecond stamps 101, so the raw row no longer describes the feed's folder: neither
+        // re-merging the same file nor a file carrying the stamp 101 with a raw id below the local one
+        // (d-aaa < d-other) may undo the move.
         val (cloudFile, cloudDriver, cloudDb) = fileDb()
         cloudDb.insertFolder("d-cloud", "IT", now = 100)
         cloudDb.insertFeed("f1", now = 100, folderId = "d-cloud") // folder_updated_at = 100
@@ -830,7 +854,7 @@ class SyncMergerTest {
 
         DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
         reopen(localFile).let { (_, driver, db) ->
-            assertEquals("d-local", db.feedsQueries.getById("f1").executeAsOne().folder_id)
+            assertEquals("d-cloud", db.feedsQueries.getById("f1").executeAsOne().folder_id)
             driver.close()
         }
         assertEquals("100|d-cloud", folderRaw(localFile, "f1"))

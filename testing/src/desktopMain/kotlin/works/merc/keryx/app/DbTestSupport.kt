@@ -259,9 +259,9 @@ fun SqlDriver.stampArticleDeleted(id: String, deletedAt: Long?, deletedUpdatedAt
 /**
  * Plays another writer — a sync merge, or a create running elsewhere — that inserts a row named
  * [name] into [table] (`folders` or `tags`) under [otherId] right after the first lookup by name on
- * that table this driver runs. The insert carries `MergeSql`'s own guard (nothing is inserted while a
- * row of that name exists), so it only lands when the lookup came before the caller's own write:
- * exactly the window a create that looks the name up and then writes would race.
+ * that table this driver runs. The insert carries its own guard (nothing is inserted while a row of
+ * that name exists), so it only lands when the lookup came before the caller's own write: exactly the
+ * window a create that looks the name up and then writes would race.
  */
 class SameNameInsertingDriver(
     private val delegate: SqlDriver,
