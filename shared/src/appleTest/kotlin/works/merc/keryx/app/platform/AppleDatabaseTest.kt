@@ -481,10 +481,14 @@ class AppleDatabaseTest {
     }
 
     private companion object {
-        /** The tables `2.sqm` creates (schema version 3), dropped to roll a file back to version 1. */
+        /**
+         * The tables `2.sqm` creates (schema version 3), dropped to roll a file back to version 1. A
+         * table added to `2.sqm` must be added here too, or the rolled-back file still holds it and
+         * the migration's `CREATE TABLE` fails.
+         */
         val VERSION_3_TABLES = listOf(
             "feed_fetch_state", "sync_outbox", "sync_capture", "sync_merging", "sync_applied", "sync_cursor", "ks_search_pending",
-            "ks_feed_folder_raw",
+            "ks_search_awaiting_body", "ks_feed_folder_raw",
         )
 
         /** The capture triggers `2.sqm` creates, dropped before the tables they write to. */
