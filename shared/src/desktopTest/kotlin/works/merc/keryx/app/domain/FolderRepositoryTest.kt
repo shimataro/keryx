@@ -27,6 +27,7 @@ import works.merc.keryx.app.insertFolder
 import works.merc.keryx.app.ftsManagerIndexed
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -82,6 +83,47 @@ class FolderRepositoryTest {
             assertEquals("Kotlin", row.name)
             assertNull(row.deleted_at)
             assertEquals(1, scheduler.callCount)
+        } finally {
+            driver.close()
+        }
+    }
+
+    /** A new folder's id is the one its name derives from, so devices converge on the same row. */
+    @Test
+    fun createFolderAssignsTheNameDerivedId() {
+        val (driver, db) = inMemoryDb()
+        try {
+            val repo = newRepo(db, driver, clock = Clock { 100L })
+
+            val id = repo.createFolder("Kotlin")
+
+            assertEquals(IdGenerator.folderId("Kotlin"), id)
+            assertEquals(listOf(id), db.foldersQueries.watchAll().executeAsList().map { it.id })
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
+     * When the derived id is already held — a row renamed off the name keeps its id — the creation
+     * falls back to the id source instead of colliding with that row.
+     */
+    @Test
+    fun createFolderFallsBackToTheIdSourceWhenTheDerivedIdIsTaken() {
+        val (driver, db) = inMemoryDb()
+        try {
+            // A row renamed off the name keeps its id: it holds the id "Kotlin" would derive.
+            db.foldersQueries.upsert(
+                id = IdGenerator.folderId("Kotlin"), name = "Renamed away", sort_order = 0L,
+                deleted_at = null, updated_at = 20L, created_at = 10L,
+            )
+            val repo = newRepo(db, driver, clock = Clock { 100L })
+
+            val id = repo.createFolder("Kotlin")
+
+            assertNotEquals(IdGenerator.folderId("Kotlin"), id, "the derived id is held by the renamed row")
+            assertEquals("Kotlin", db.foldersQueries.getById(id).executeAsOne().name)
+            assertEquals("Renamed away", db.foldersQueries.getById(IdGenerator.folderId("Kotlin")).executeAsOne().name)
         } finally {
             driver.close()
         }

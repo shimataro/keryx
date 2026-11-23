@@ -12,6 +12,7 @@ import works.merc.keryx.app.insertFeedTag
 import works.merc.keryx.app.insertTag
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -47,6 +48,48 @@ class TagRepositoryTest {
             assertEquals("#ff0000", row.color)
             assertNull(row.deleted_at)
             assertEquals(1, scheduler.callCount)
+        } finally {
+            driver.close()
+        }
+    }
+
+    /** A new tag's id is the one its name derives from, so devices converge on the same row. */
+    @Test
+    fun createTagAssignsTheNameDerivedId() {
+        val (driver, db) = inMemoryDb()
+        try {
+            val repo = newRepo(db, clock = Clock { 100L })
+
+            val id = repo.createTag("Kotlin", "#ff0000")
+
+            assertEquals(IdGenerator.tagId("Kotlin"), id)
+            assertEquals(listOf(id), db.tagsQueries.watchAll().executeAsList().map { it.id })
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
+     * When the derived id is already held — a row renamed off the name keeps its id — the creation
+     * falls back to the id source instead of colliding with that row.
+     */
+    @Test
+    fun createTagFallsBackToTheIdSourceWhenTheDerivedIdIsTaken() {
+        val (driver, db) = inMemoryDb()
+        try {
+            // A row renamed off the name keeps its id: it holds the id "Kotlin" would derive.
+            db.tagsQueries.upsert(
+                id = IdGenerator.tagId("Kotlin"), name = "Renamed away", color = null, sort_order = 0L,
+                deleted_at = null, updated_at = 20L, created_at = 10L,
+            )
+            val repo = newRepo(db, clock = Clock { 100L })
+
+            val id = repo.createTag("Kotlin", "#ff0000")
+
+            assertNotEquals(IdGenerator.tagId("Kotlin"), id, "the derived id is held by the renamed row")
+            assertEquals(listOf(id, IdGenerator.tagId("Kotlin")).sorted(), db.tagsQueries.watchAll().executeAsList().map { it.id }.sorted())
+            assertEquals("Kotlin", db.tagsQueries.getById(id).executeAsOne().name)
+            assertEquals("Renamed away", db.tagsQueries.getById(IdGenerator.tagId("Kotlin")).executeAsOne().name)
         } finally {
             driver.close()
         }

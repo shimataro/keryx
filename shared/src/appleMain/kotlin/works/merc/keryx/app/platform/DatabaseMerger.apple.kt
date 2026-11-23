@@ -12,6 +12,7 @@ import works.merc.keryx.app.domain.DeferredRerunOutcome
 import works.merc.keryx.app.domain.ForeignKeyViolation
 import works.merc.keryx.app.domain.MainRuledOutVerdict
 import works.merc.keryx.app.domain.MergeFailureClassifier
+import works.merc.keryx.app.domain.KERYX_SCHEMA_CALLBACKS
 import works.merc.keryx.app.domain.MergeSchema
 import works.merc.keryx.app.domain.SqliteFailureCategory
 import works.merc.keryx.app.domain.TransportSchema
@@ -309,12 +310,14 @@ actual object DatabaseMerger {
             val driver = NativeSqliteDriver(
                 schema = KeryxDatabase.Schema,
                 name = name,
+                maxReaderConnections = 1,
                 onConfiguration = { config ->
                     config.copy(
                         journalMode = JournalMode.DELETE,
                         extendedConfig = config.extendedConfig.copy(basePath = dir),
                     )
                 },
+                callbacks = KERYX_SCHEMA_CALLBACKS,
             )
             try {
                 driver.executeQuery(null, "SELECT 1", { QueryResult.Unit }, 0)

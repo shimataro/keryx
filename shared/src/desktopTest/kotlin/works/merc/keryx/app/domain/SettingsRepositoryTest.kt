@@ -482,4 +482,71 @@ class SettingsRepositoryTest {
             driver.close()
         }
     }
+
+    // --- The v2->v3 tag/folder id re-key, applied to the local settings at construction ---
+
+    /**
+     * The remap rows the migration left in `ks_id_remap` rewrite the three local-settings fields
+     * holding tag or folder ids — [LocalSettings.lastFilter], [LocalSettings.collapsedFolderIds] and
+     * [LocalSettings.expandedTagIds] — synchronously at construction, before anything reads them,
+     * and are then cleared.
+     */
+    @Test
+    fun constructionRewritesTheRekeyedTagAndFolderIdsInTheLocalSettings() {
+        val (driver, db) = inMemoryDb()
+        try {
+            val store = LocalSettingsStore(dirOverride = dir)
+            // Persist the pre-migration settings (a tag selection, one collapsed folder, one
+            // expanded tag) with a first repository over an empty remap.
+            val preset = LocalSettings(
+                lastFilter = "tag:t-old",
+                collapsedFolderIds = setOf("d-old", "d-kept"),
+                expandedTagIds = setOf("t-old", "t-kept"),
+            )
+            val first = newRepo(db, store = store)
+            first.saveLocalSettings(preset)
+            runBlocking { first.flush() }
+
+            db.sync_bookkeepingQueries.insertIdRemap(ID_REMAP_KIND_TAG, "t-old", "t-new")
+            db.sync_bookkeepingQueries.insertIdRemap(ID_REMAP_KIND_FOLDER, "d-old", "d-new")
+
+            val repo = newRepo(db, store = store)
+
+            val settings = repo.getLocalSettings()
+            assertEquals("tag:t-new", settings.lastFilter)
+            assertEquals(setOf("d-new", "d-kept"), settings.collapsedFolderIds)
+            assertEquals(setOf("t-new", "t-kept"), settings.expandedTagIds)
+            // The rows are spent: a second repository sees the same values (the old ids are gone
+            // from the database, so re-applying the map would be a no-op anyway).
+            assertTrue(db.sync_bookkeepingQueries.idRemapAll().executeAsList().isEmpty())
+            runBlocking { repo.flush() }
+            val again = newRepo(db, store = store)
+            assertEquals(settings, again.getLocalSettings())
+            // And the persisted file carries the rewritten values.
+            assertEquals("tag:t-new", store.load().lastFilter)
+        } finally {
+            driver.close()
+        }
+    }
+
+    /** A folder filter remaps through the folder rows, not the tag ones; other values pass through. */
+    @Test
+    fun constructionRemapsAFolderFilterAndLeavesEveryOtherFilterAlone() {
+        val (driver, db) = inMemoryDb()
+        try {
+            val store = LocalSettingsStore(dirOverride = dir)
+            val first = newRepo(db, store = store)
+            first.saveLocalSettings(LocalSettings(lastFilter = "folder:d-old"))
+            runBlocking { first.flush() }
+
+            db.sync_bookkeepingQueries.insertIdRemap(ID_REMAP_KIND_TAG, "t-old", "t-new")
+            db.sync_bookkeepingQueries.insertIdRemap(ID_REMAP_KIND_FOLDER, "d-old", "d-new")
+
+            val repo = newRepo(db, store = store)
+
+            assertEquals("folder:d-new", repo.getLocalSettings().lastFilter)
+        } finally {
+            driver.close()
+        }
+    }
 }

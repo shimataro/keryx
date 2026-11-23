@@ -16,7 +16,7 @@ class FolderRepository(
     private val syncScheduler: SyncScheduler,
     private val clock: Clock,
     private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
-    /** Issues the id of a newly created row (a test passes a deterministic source). */
+    /** Issues the id of a newly created row whose name-derived id is already held (a test passes a deterministic source). */
     private val newId: () -> String = IdGenerator::newId,
 ) {
     private val folders get() = db.foldersQueries
@@ -92,12 +92,20 @@ class FolderRepository(
      * name themselves, so a same-named row another writer (a sync merge, a concurrent create)
      * inserted just before is reused rather than doubled; names are not unique, so the canonical row
      * (an alive one over a deleted one, then the earliest `created_at`, then the smallest id — the
-     * row `getByName` returns) is the one reused. The id is read only after that write, so the
-     * transaction never reads before it writes.
+     * row `getByName` returns) is the one reused. A new row's id is the one its name derives from
+     * ([IdGenerator.folderId]), so two devices that create the same name independently converge on
+     * one row in the sync merge; when that id is already held (a row renamed off the name keeps its
+     * id), `insertIfNameAbsent` falls back to a random one from [newId]. The id is read only after
+     * that write, so the transaction never reads before it writes.
      */
     private fun upsertFolderByName(name: String, now: Long): String {
         folders.reactivateByName(now = now, name = name)
-        folders.insertIfNameAbsent(id = newId(), name = name, now = now)
+        folders.insertIfNameAbsent(
+            nameDerivedId = IdGenerator.folderId(name),
+            randomId = newId(),
+            name = name,
+            now = now,
+        )
         return folders.getByName(name).executeAsOne().id
     }
 

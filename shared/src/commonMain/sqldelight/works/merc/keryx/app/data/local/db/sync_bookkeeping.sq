@@ -27,6 +27,11 @@
 --                    FOREIGN KEY through main's own rows (MergeFailureClassifier). Cleared together
 --                    with sync_applied on joining and on disconnect: it only describes the files this
 --                    device has merged in the current generation.
+-- ks_id_remap        the tag/folder id re-key the v2->v3 migration ran (TagFolderIdRekey): kind
+--                    ('tag' / 'folder'), the row's old random id and its new name-derived one, so
+--                    SettingsRepository can rewrite the same ids in local_settings.json (lastFilter,
+--                    collapsedFolderIds, expandedTagIds) once at startup after the migration and then
+--                    clear the table. Populated only by that migration; empty on every fresh database.
 --
 -- The capture triggers fire AFTER INSERT / AFTER UPDATE on the six synced tables, guarded by
 -- sync_capture.enabled and the absence of a sync_merging row. An UPDATE is recorded only when a
@@ -83,6 +88,13 @@ CREATE TABLE ks_feed_folder_raw (
     feed_id           TEXT NOT NULL PRIMARY KEY,
     folder_updated_at INTEGER,
     folder_id         TEXT
+);
+
+CREATE TABLE ks_id_remap (
+    kind   TEXT NOT NULL,
+    old_id TEXT NOT NULL,
+    new_id TEXT NOT NULL,
+    PRIMARY KEY (kind, old_id)
 );
 
 CREATE TRIGGER ks_capture_feeds_insert AFTER INSERT ON feeds
@@ -240,6 +252,15 @@ DELETE FROM sync_merging;
 
 clearFeedFolderRaw:
 DELETE FROM ks_feed_folder_raw;
+
+idRemapAll:
+SELECT kind, old_id, new_id FROM ks_id_remap;
+
+insertIdRemap:
+INSERT OR REPLACE INTO ks_id_remap (kind, old_id, new_id) VALUES (?, ?, ?);
+
+clearIdRemap:
+DELETE FROM ks_id_remap;
 
 searchPendingAll:
 SELECT rowid FROM ks_search_pending ORDER BY rowid;

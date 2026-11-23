@@ -79,11 +79,41 @@ class SettingsRepository(
     private val saveSignals = Channel<Unit>(capacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
 
     init {
+        remapTagAndFolderIdsInLocalSettings()
         writeScope.launch {
             for (signal in saveSignals) {
                 store.save(_localSettings.value)
             }
         }
+    }
+
+    /**
+     * Applies the v2->v3 migration's tag/folder id re-key (`ks_id_remap`, written by
+     * [rekeyTagAndFolderIds]) to the three local-settings fields that hold tag or folder ids, then
+     * clears the table. Runs synchronously in construction, before anything reads [localSettings] —
+     * otherwise a restored selection or collapsed state would reference an id that no longer
+     * exists. Idempotent: an id not in the map (already re-keyed, or not a tag/folder id) passes
+     * through, so a second application is a no-op and the remap rows are only dropped afterwards.
+     */
+    private fun remapTagAndFolderIdsInLocalSettings() {
+        val remaps = db.sync_bookkeepingQueries.idRemapAll().executeAsList()
+        if (remaps.isEmpty()) return
+        val tagIds = remaps.filter { it.kind == ID_REMAP_KIND_TAG }.associate { it.old_id to it.new_id }
+        val folderIds = remaps.filter { it.kind == ID_REMAP_KIND_FOLDER }.associate { it.old_id to it.new_id }
+        mutateLocalSettings { settings ->
+            settings.copy(
+                lastFilter = settings.lastFilter?.let { filter ->
+                    when {
+                        filter.startsWith("tag:") -> "tag:" + tagIds.getOrElse(filter.removePrefix("tag:")) { filter.removePrefix("tag:") }
+                        filter.startsWith("folder:") -> "folder:" + folderIds.getOrElse(filter.removePrefix("folder:")) { filter.removePrefix("folder:") }
+                        else -> filter
+                    }
+                },
+                collapsedFolderIds = settings.collapsedFolderIds.map { folderIds[it] ?: it }.toSet(),
+                expandedTagIds = settings.expandedTagIds.map { tagIds[it] ?: it }.toSet(),
+            )
+        }
+        db.sync_bookkeepingQueries.clearIdRemap()
     }
     // --- Global (synced) settings ---
 

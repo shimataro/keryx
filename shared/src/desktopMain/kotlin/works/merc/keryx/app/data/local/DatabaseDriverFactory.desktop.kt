@@ -6,6 +6,7 @@ import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import works.merc.keryx.app.core.DB_FILE_NAME
 import works.merc.keryx.app.core.SQLITE_BUSY_TIMEOUT_MS
 import works.merc.keryx.app.data.local.db.KeryxDatabase
+import works.merc.keryx.app.domain.KERYX_SCHEMA_CALLBACKS
 import works.merc.keryx.app.platform.AppDirs
 import java.io.File
 import java.util.Properties
@@ -70,7 +71,7 @@ actual class DatabaseDriverFactory {
         requireSupportedSchemaVersion(current, target)
         if (current >= target) return
         object : TransacterImpl(driver) {}.transaction {
-            if (current == 0L) schema.create(driver) else schema.migrate(driver, current, target)
+            if (current == 0L) schema.create(driver) else schema.migrate(driver, current, target, *KERYX_SCHEMA_CALLBACKS)
             setVersion(driver, target)
         }
     }

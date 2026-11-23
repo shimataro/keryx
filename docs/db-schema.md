@@ -54,8 +54,17 @@ through it rather than composing `AppDirs.appDataDir()` with the filename themse
   saved and NULLed only where its folder exists, the `feed_tags` rows whose tag exists move to a work table, and a
   child whose parent was never there survives untouched, so no new `foreign_key_check` violation appears; a link
   whose feed is gone cannot be restored and is dropped) —, adds `articles.body_updated_at` (initialized from
-  `updated_at`), and registers in `ks_search_pending` every
-  article whose `search_text` still equals its raw `content` / `summary` (written before HTML stripping).
+  `updated_at`), registers in `ks_search_pending` every
+  article whose `search_text` still equals its raw `content` / `summary` (written before HTML stripping), and — in
+  the `AfterVersion(2)` callback every migration runs (`domain/TagFolderIdRekey.kt`, wired as
+  `KERYX_SCHEMA_CALLBACKS` into every platform's driver and `DatabaseMerger`'s cloud-file migration) — **re-keys
+  every tag and folder onto the id its name derives from** (`IdGenerator.tagId` / `folderId`): the row is copied
+  under the new id, `feed_tags.tag_id` / `feeds.folder_id` move with it, the old row is deleted, and each move is
+  recorded in `ks_id_remap` so `SettingsRepository` rewrites the same ids in `local_settings.json`
+  (`lastFilter`, `collapsedFolderIds`, `expandedTagIds`) once at startup and then clears the table. Idempotent:
+  running again changes nothing. Version 3 is unreleased; a pre-release development environment that already
+  ran version 3 with the interim random ids is NOT re-keyed (the callback fires only when crossing version 2) —
+  such an environment needs its cloud sync data reset once.
   (SQLDelight derives the version from the highest migration file + 1.) When the schema changes, add a `.sqm` file
   (`<from-version>.sqm`) and the version bumps automatically; `domain/MergeSchema.EXPECTED_SCHEMAS` (which
   `DatabaseMerger.validateSchema` checks against), `domain/TransportSchema` (the delta file schema and its
@@ -141,12 +150,20 @@ Indexes: `feed_id`, `is_read`, `is_starred`, and a composite `(published_at DESC
 `tags`: `id`(PK), `name`, `color`, `sort_order`, `deleted_at`, `updated_at`, `created_at`,
 `name_updated_at`, `color_updated_at`, `sort_order_updated_at`.
 
-- `name` is **not** UNIQUE (schema version 3 dropped the constraint): same-named tags are allowed — a rename on one
-  device can cross a same-named creation on another — and the UI tells them apart with an ordinal. A non-unique index
-  `tags_name` backs the by-name lookups. Every path that resolves a tag by name (creation, reactivation, the sync
-  merge's name resolution) lands on the one **canonical row** of the name: an alive row over a deleted one, then the
-  earliest `created_at`, then the smallest id (`tags.getByName`). The UI still warns the user about duplicates among
-  live rows (`NameValidation`), so a second same-named row is created by a sync merge, not by a create dialog.
+- `id` is deterministically generated from the creation-time name as **UUIDv5** (`IdGenerator.tagId`,
+  case-sensitive, exact). The same tag gets the same id on all devices, so the sync merge (matched by
+  id) converges same-named tags created independently on each device into one row. A row keeps its id
+  when renamed — so its id is the one its ORIGINAL name derived, and a later creation of that original
+  name falls back to a random UUIDv4 (`tags.insertIfNameAbsent` picks between the two in the statement
+  itself) rather than colliding. Existing random ids were re-keyed onto the derived ones by the v2→v3
+  migration (below).
+- `name` is **not** UNIQUE (schema version 3 dropped the constraint): same-named rows coexist where a
+  rename crosses a same-named creation, and the UI tells them apart with an ordinal. A non-unique index
+  `tags_name` backs the by-name lookups. Every path that resolves a tag by name (creation, reactivation)
+  lands on the one **canonical row** of the name: an alive row over a deleted one, then the earliest
+  `created_at`, then the smallest id (`tags.getByName`). The UI still warns the user about duplicates among
+  live rows (`NameValidation`), so a second same-named row is created by a rename crossing a creation, not
+  by a create dialog.
 - Name, color and sort order are each last-write-wins by their own stamp (like the user-edited fields of `feeds`),
   so two devices changing different fields of the same tag both keep their change. `updated_at` stamps creation,
   deletion and reactivation.
@@ -157,8 +174,11 @@ Indexes: `feed_id`, `is_read`, `is_starred`, and a composite `(published_at DESC
 `id`(PK), `name`, `sort_order`, `deleted_at`, `updated_at`, `created_at`, `name_updated_at`,
 `sort_order_updated_at`.
 
+- `id` is deterministically generated from the creation-time name as **UUIDv5**
+  (`IdGenerator.folderId`), exactly as `tags.id` is (its own namespace, so a tag and a folder of the
+  same name never share an id); the same fallback to a random id applies when the derived id is held.
 - `name` is **not** UNIQUE (schema version 3 dropped the constraint), for the same reason as `tags.name`: same-named
-  folders are allowed and shown with an ordinal, backed by the non-unique index `folders_name`, and every by-name
+  rows coexist where a rename crosses a creation, shown with an ordinal, backed by the non-unique index `folders_name`, and every by-name
   lookup lands on the canonical row of the name (see `tags` above and `folders.getByName`).
 - Name and sort order are each last-write-wins by their own stamp; `updated_at` stamps creation, deletion and
   reactivation, as for `tags`.
@@ -197,6 +217,7 @@ with it, so a failed indexing is retried by the next sync). Device-local; cleare
 | `ks_search_pending` | `rowid`(PK) — articles whose `search_text` must be recomputed |
 | `ks_search_awaiting_body` | `id`(PK) — articles a merge inserted without a body (a light row), kept out of the search index until one arrives or the daily rebuild indexes them |
 | `ks_feed_folder_raw` | `feed_id`(PK), `folder_updated_at`, `folder_id` — per feed, the raw folder version (as the winning sync file carried it) that `feeds.folder_id`'s resolved value came from, so the merge ranks raw against raw; valid only while `folder_updated_at` equals the feed's own |
+| `ks_id_remap` | `kind` + `old_id`(composite PK), `new_id` — the tag/folder id re-key the v2→v3 migration ran (`domain/TagFolderIdRekey.kt`): the old random id and the name-derived one it became, so `SettingsRepository` rewrites the same ids in `local_settings.json` (`lastFilter`, `collapsedFolderIds`, `expandedTagIds`) once at startup after the migration and then clears the table. Populated only by that migration; empty on every fresh database |
 
 None of these, nor `sync_state`, `feed_fetch_state` or `articles_fts`, ever leaves the device: delta and base files
 are built from the synced tables only (see [sync-architecture.md](sync-architecture.md)).

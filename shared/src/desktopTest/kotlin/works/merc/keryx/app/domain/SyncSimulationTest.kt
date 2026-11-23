@@ -74,6 +74,18 @@ class SyncSimulationTest {
         var interleavings = 0
         var syncs = 0
 
+        /** The small pool the shared-name create/rename operations pick from, so names collide. */
+        val sharedNames = listOf("Shared-A", "Shared-B", "Shared-C")
+
+        /**
+         * The shared-name choices come from their own stream, so colliding names ride along with the
+         * main operation stream instead of reshuffling every other decision.
+         */
+        val sharedRandom = Random(seed * 31 + 11)
+
+        /** How many operations picked from [sharedNames] (the run must have exercised collisions). */
+        var sharedNameOps = 0
+
         /** field group key -> (stamp, value): the newest write anyone made. */
         val oracle = mutableMapOf<String, Pair<Long, String>>()
 
@@ -173,6 +185,7 @@ class SyncSimulationTest {
                 "deletes=${sim.cloud.deleteCount} generations=${written.map { it.generation }.distinct().size}"
             assertTrue(sim.crashes > 0 && sim.interleavings > 0, "seed $seed: $stats")
             assertTrue(written.count { it.kind == TransportFileKind.BASE } > 3 && sim.cloud.deleteCount > 0, "seed $seed: $stats")
+            assertTrue(sim.sharedNameOps > 0, "seed $seed: no shared-name operation ran ($stats)")
             assertEquals(2, written.map { it.generation }.distinct().size, "seed $seed: $stats")
             if (legacyStart) assertTrue(oldBuildWrites > 0, "seed $seed: no older build wrote")
             quiesce(sim, devices, seed)
@@ -283,16 +296,24 @@ class SyncSimulationTest {
             QueryResult.Value(buildList { while (c.next().value) add(c.getString(0)!!) })
         }, 0).value
         fun name(kind: String) = "$kind-${device.sync.label}-${sim.nameCounter++}"
+        // Half the tag/folder creations and renames pick from the small shared pool, so devices
+        // collide on names: same-named creations (the same name-derived id), renames crossing
+        // creations, and same-named rows that cannot fold into one. Every device must still converge.
+        fun sharedName(): String {
+            sim.sharedNameOps++
+            return sim.sharedNames[sim.sharedRandom.nextInt(sim.sharedNames.size)]
+        }
+        fun sharedOrUnique(kind: String): String = if (sim.sharedRandom.nextBoolean()) sharedName() else name(kind)
         when (r.nextInt(100)) {
             in 0..11 -> device.feeds.subscribeFeed(sim.urls[r.nextInt(sim.urls.size)])
             in 12..15 -> aliveFeeds.randomOrNull(r)?.let { device.feeds.unsubscribeFeed(it.id) }
             in 16..20 -> aliveFeeds.randomOrNull(r)?.let { device.feeds.renameFeed(it.id, if (r.nextBoolean()) name("title") else null) }
-            in 21..24 -> device.folders.createFolder(name("folder"))
-            in 25..27 -> aliveFolders.randomOrNull(r)?.let { device.folders.updateFolder(it.id, name("folder")) }
+            in 21..24 -> device.folders.createFolder(sharedOrUnique("folder"))
+            in 25..27 -> aliveFolders.randomOrNull(r)?.let { device.folders.updateFolder(it.id, sharedOrUnique("folder")) }
             in 28..29 -> aliveFolders.randomOrNull(r)?.let { device.folders.deleteFolder(it.id) }
             in 30..34 -> aliveFeeds.randomOrNull(r)?.let { feed -> device.feeds.moveFeed(feed.id, aliveFolders.randomOrNull(r)?.id) }
-            in 35..37 -> device.tags.createTag(name("tag"), if (r.nextBoolean()) "#ff0000" else null)
-            in 38..39 -> aliveTags.randomOrNull(r)?.let { device.tags.updateTag(it.id, name("tag"), "#00ff00") }
+            in 35..37 -> device.tags.createTag(sharedOrUnique("tag"), if (r.nextBoolean()) "#ff0000" else null)
+            in 38..39 -> aliveTags.randomOrNull(r)?.let { device.tags.updateTag(it.id, sharedOrUnique("tag"), "#00ff00") }
             in 40..41 -> aliveTags.randomOrNull(r)?.let { device.tags.deleteTag(it.id) }
             in 42..49 -> {
                 val feed = aliveFeeds.randomOrNull(r)

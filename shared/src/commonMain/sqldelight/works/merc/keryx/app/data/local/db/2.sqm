@@ -141,6 +141,13 @@ CREATE TABLE ks_feed_folder_raw (
     folder_id         TEXT
 );
 
+CREATE TABLE ks_id_remap (
+    kind   TEXT NOT NULL,
+    old_id TEXT NOT NULL,
+    new_id TEXT NOT NULL,
+    PRIMARY KEY (kind, old_id)
+);
+
 -- 4. Articles whose search_text still equals their raw content / summary (written before HTML
 --    stripping) get it recomputed.
 INSERT INTO ks_search_pending (rowid)

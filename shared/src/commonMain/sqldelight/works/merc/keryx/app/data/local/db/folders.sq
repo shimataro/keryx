@@ -1,7 +1,10 @@
 -- Folders for organizing feeds (1 feed = at most 1 folder). Soft-deleted (deleted_at).
 -- name is not UNIQUE: same-named folders are allowed (a rename on one device can cross a same-named
--- creation on another), and the UI tells them apart with an ordinal (NameOrdinals). Every path that
--- resolves a folder by name reuses one canonical row (see getByName).
+-- creation on another), and the UI tells them apart with an ordinal (NameOrdinals). A folder's id is
+-- the UUIDv5 its creation-time name derives from (IdGenerator.folderId), so independently created
+-- same-named folders share an id and converge in the merge; rows can still share a name once a
+-- rename crosses a creation, and every path that resolves a folder by name (creation, reactivation)
+-- reuses one canonical row (see getByName).
 
 CREATE TABLE folders (
     id         TEXT    NOT NULL PRIMARY KEY,
@@ -63,7 +66,12 @@ ON CONFLICT(id) DO UPDATE SET
 -- insertIfNameAbsent then inserts a new folder, appended to the end of the active folders, when no
 -- row of the name exists at all. The guard is in the statement rather than in a lookup before it,
 -- so a same-named row another writer (a sync merge, a concurrent create) inserted before this
--- statement in the same transaction is reused rather than doubled; :id is used only here.
+-- statement in the same transaction is reused rather than doubled. A new folder's id is the one its
+-- name derives from (IdGenerator.folderId) — so two devices that create the same name independently
+-- converge on one row in the sync merge — unless that id is already held (a row renamed off the
+-- name keeps its id), in which case :randomId is used; the choice sits in the statement, not in a
+-- lookup before it, so no concurrent write can slip between the check and the insert. :randomId is
+-- only ever reached when :nameDerivedId is held, so exactly one of the two is inserted.
 --
 -- Exactly one of the two writes: a row of the name exists -> reactivateByName (whose updated_at
 -- always moves forward, so it always writes) and insertIfNameAbsent no-ops; none exists ->
@@ -89,7 +97,9 @@ WHERE id = (
 
 insertIfNameAbsent:
 INSERT INTO folders (id, name, sort_order, deleted_at, updated_at, created_at, name_updated_at, sort_order_updated_at)
-SELECT :id, :name, (SELECT COALESCE(MAX(sort_order), -1) + 1 FROM folders WHERE deleted_at IS NULL), NULL, :now, :now, :now, :now
+SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM folders WHERE id = :nameDerivedId)
+        THEN :nameDerivedId ELSE :randomId END,
+    :name, (SELECT COALESCE(MAX(sort_order), -1) + 1 FROM folders WHERE deleted_at IS NULL), NULL, :now, :now, :now, :now
 WHERE NOT EXISTS (SELECT 1 FROM folders WHERE name = :name);
 
 -- updated_at moves forward like every local write (see upsert).

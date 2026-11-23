@@ -411,33 +411,37 @@ class SyncAlgebraTest {
     }
 
     @Test
-    fun duplicatesInsideAFoldAreResolvedToTheSameWinnerWhateverTheFoldOrder() {
-        // Two devices created the same tag name, folder name and feed URL independently.
+    fun twoDevicesCreatingTheSameNameConvergeOnOneRowWhateverTheOrder() {
+        // A tag's and a folder's id derive from the name (IdGenerator.tagId / folderId), so two
+        // devices that created the same name independently hold the same id: the fold keys by id and
+        // merges their rows into one, and merging the fold — or the files one by one — lands on that
+        // one row in every order. A feed's URL under two ids is the one remaining duplicate of this
+        // kind (see "Feeds sharing one URL under different ids" in docs/known-issues.md).
         val p = transportFile(
             nameA,
-            tag("tp", "dup", updatedAt = 100),
-            folder("dp", "Dup", updatedAt = 300),
+            tag(IdGenerator.tagId("dup"), "dup", updatedAt = 100),
+            folder(IdGenerator.folderId("Dup"), "Dup", updatedAt = 100),
             feed("fp", url = "https://same/feed", updatedAt = 100),
         )
         val q = transportFile(
             nameB,
-            tag("tq", "dup", updatedAt = 200),
-            folder("dq", "Dup", updatedAt = 100),
+            tag(IdGenerator.tagId("dup"), "dup", updatedAt = 200),
+            folder(IdGenerator.folderId("Dup"), "Dup", updatedAt = 300),
             feed("fq", url = "https://same/feed", updatedAt = 100),
         )
         val pq = fold(p to nameA, q to nameB)
         val qp = fold(q to nameB, p to nameA)
-        // The fold keys by id only: both rows of each pair stay.
         assertEquals(dump(pq), dump(qp))
-        assertEquals(2, dump(pq).getValue("tags").size)
+        assertEquals(1, dump(pq).getValue("tags").size)
+        assertEquals(1, dump(pq).getValue("folders").size)
 
         val viaPq = localDb().also { merge(it, pq) }
         val viaQp = localDb().also { merge(it, qp) }
         assertEquals(dump(viaPq), dump(viaQp))
         val merged = dump(viaPq)
-        // Greatest updated_at, then greatest id.
-        assertEquals(listOf("tq"), merged.getValue("tags").map { it.substringBefore('|') })
-        assertEquals(listOf("dp"), merged.getValue("folders").map { it.substringBefore('|') })
+        // Each row's greater updated_at wins; the feeds' URL collision keeps the greater id.
+        assertEquals(listOf(IdGenerator.tagId("dup")), merged.getValue("tags").map { it.substringBefore('|') })
+        assertEquals(listOf(IdGenerator.folderId("Dup")), merged.getValue("folders").map { it.substringBefore('|') })
         assertEquals(listOf("fq"), merged.getValue("feeds").map { it.substringBefore('|') })
     }
 
@@ -493,29 +497,30 @@ class SyncAlgebraTest {
 
     @Test
     fun separateRowsThatBecomeSameNamedLeaveTheSameRowsWhateverTheOrder() {
-        // Device A renames its tag to "Z"; device B creates a tag named "Z" of its own. The ids are
-        // not deterministic yet, so the rows cannot be folded into one — but every order leaves the
-        // same two rows on a device that receives both files. (Their names can still diverge between
-        // the sequential and the folded orders — in a fold the renamed row loses the winner selection
-        // among the same-named cloud rows — until the ids become name-derived; see the merge notes in
-        // docs/sync-architecture.md.)
+        // Device A renames its tag to "Z" — its id stays the one its original name derived — and
+        // device B creates a tag named "Z", whose id is the one "Z" derives. Two different rows share
+        // the name once the files meet, and every merge and fold order leaves the same two rows with
+        // the same names (the UI numbers them).
         val local = arrayOf(tag("a", "X", updatedAt = 100, nameAt = 100))
         val p = transportFile(nameA, tag("a", "Z", updatedAt = 100, nameAt = 200))
-        val q = transportFile(nameB, tag("c", "Z", updatedAt = 300, createdAt = 300, nameAt = 300))
+        val q = transportFile(nameB, tag(IdGenerator.tagId("Z"), "Z", updatedAt = 300, createdAt = 300, nameAt = 300))
         val results = listOf(
             "P, Q" to localDb(*local).also { db -> merge(db, p); merge(db, q) },
             "Q, P" to localDb(*local).also { db -> merge(db, q); merge(db, p) },
             "fold(P, Q)" to localDb(*local).also { merge(it, fold(p to nameA, q to nameB)) },
             "fold(Q, P)" to localDb(*local).also { merge(it, fold(q to nameB, p to nameA)) },
         )
-        fun rowIds(db: File): Set<String> = TransportFixtures.connect(db).use { conn ->
+        fun rowIdsAndNames(db: File): Set<String> = TransportFixtures.connect(db).use { conn ->
             conn.createStatement().use { st ->
-                st.executeQuery("SELECT id FROM tags ORDER BY id").use { rs ->
-                    buildSet { while (rs.next()) add(rs.getString(1)) }
+                st.executeQuery("SELECT id, name FROM tags ORDER BY id").use { rs ->
+                    buildSet { while (rs.next()) add("${rs.getString(1)}|${rs.getString(2)}") }
                 }
             }
         }
-        for ((label, db) in results) assertEquals(setOf("a", "c"), rowIds(db), label)
+        val expected = setOf("a|Z", "${IdGenerator.tagId("Z")}|Z")
+        for ((label, db) in results) assertEquals(expected, rowIdsAndNames(db), label)
+        val dumps = results.map { (_, db) -> dump(db, local = true) }
+        dumps.drop(1).forEach { assertEquals(dumps.first(), it) }
     }
 
     @Test
@@ -582,28 +587,27 @@ class SyncAlgebraTest {
     }
 
     @Test
-    fun sameNamedFoldersWithDifferentIdsSettleTheAssignmentOnTheSameRawId() {
-        // Two devices created the same folder name independently and each moved their feed into their
-        // own folder. Whichever device merges the other's upload, the assignment settles on the raw id
-        // the tie rule picks (the greater one): the winning folder now lands in main under its own id
-        // instead of being resolved to a local same-named one, so both devices agree — the divergence
-        // the old name-guarded insert produced.
-        val p = transportFile(nameA, folder("da", "X", updatedAt = 50), feed("f1", updatedAt = 100, folderId = "da", folderAt = 500))
-        val q = transportFile(nameB, folder("db", "X", updatedAt = 50), feed("f1", updatedAt = 100, folderId = "db", folderAt = 500))
+    fun twoDevicesAssigningTheirFeedToTheSameNamedFolderSettleOnTheSameId() {
+        // Two devices created the same folder name independently — the same name-derived id — and
+        // each moved their feed into it. The assignment settles on that id on both devices, whatever
+        // the merge order.
+        val folderId = IdGenerator.folderId("X")
+        val p = transportFile(nameA, folder(folderId, "X", updatedAt = 50), feed("f1", updatedAt = 100, folderId = folderId, folderAt = 500))
+        val q = transportFile(nameB, folder(folderId, "X", updatedAt = 50), feed("f1", updatedAt = 100, folderId = folderId, folderAt = 500))
         val deviceA = localDb(
-            folder("da", "X", updatedAt = 50),
-            feed("f1", updatedAt = 100, folderId = "da", folderAt = 500),
+            folder(folderId, "X", updatedAt = 50),
+            feed("f1", updatedAt = 100, folderId = folderId, folderAt = 500),
         ).also { merge(it, q) }
         val deviceB = localDb(
-            folder("db", "X", updatedAt = 50),
-            feed("f1", updatedAt = 100, folderId = "db", folderAt = 500),
+            folder(folderId, "X", updatedAt = 50),
+            feed("f1", updatedAt = 100, folderId = folderId, folderAt = 500),
         ).also { merge(it, p) }
         fun folderOf(db: File): String = TransportFixtures.connect(db).use { conn ->
             conn.createStatement().use { st ->
                 st.executeQuery("SELECT folder_id FROM feeds WHERE id = 'f1'").use { rs -> rs.next(); rs.getString(1) }
             }
         }
-        assertEquals("db", folderOf(deviceA))
+        assertEquals(folderId, folderOf(deviceA))
         assertEquals(folderOf(deviceA), folderOf(deviceB))
     }
 }

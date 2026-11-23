@@ -1,8 +1,12 @@
 package works.merc.keryx.app.data.local
 
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
+import works.merc.keryx.app.SCHEMA_V2_STATEMENTS
 import works.merc.keryx.app.createSchemaV2
 import works.merc.keryx.app.data.local.db.KeryxDatabase
+import works.merc.keryx.app.domain.KERYX_SCHEMA_CALLBACKS
+import works.merc.keryx.app.domain.IdGenerator
+import works.merc.keryx.app.domain.rekeyTagAndFolderIds
 import java.io.File
 import java.sql.Connection
 import java.sql.DriverManager
@@ -159,16 +163,19 @@ class SchemaV3MigrationTest {
     }
 
     /**
-     * The v2 -> v3 rebuild of tags and folders: UNIQUE(name) is dropped (same-named rows are allowed
-     * from here on), the per-field stamps arrive with the rebuild, and the children are re-attached.
-     * A child whose parent was never there (written before foreign keys were enforced) survives
-     * untouched — it was already a violation, and nothing here deletes a row it points at — while a
-     * link whose feed is gone is the only row lost: it cannot be restored, because feeds is not
-     * rebuilt. Seeded with foreign keys off (as the v2 app left them) and migrated through the
-     * production factory, whose connections enforce them.
+     * The v2 -> v3 rebuild of tags and folders, run through the production factory so the
+     * AfterVersion(2) re-key ([rekeyTagAndFolderIds]) runs as it does on every platform: UNIQUE(name)
+     * is dropped (same-named rows are allowed from here on), the per-field stamps arrive with the
+     * rebuild, every row's id becomes the one its name derives from, the children are re-attached
+     * under the new ids, and each move is recorded in ks_id_remap. A child whose parent was never
+     * there (written before foreign keys were enforced) survives untouched — it was already a
+     * violation, and nothing here deletes a row it points at — while a link whose feed is gone is
+     * the only row lost: it cannot be restored, because feeds is not rebuilt. Seeded with foreign
+     * keys off (as the v2 app left them) and migrated through the production factory, whose
+     * connections enforce them.
      */
     @Test
-    fun theRebuildDropsNameUniquenessKeepsTheChildrenAndLeavesTheOrphansAlone() {
+    fun theRebuildDropsNameUniquenessRekeysTheIdsAndKeepsTheChildren() {
         val file = tempFile()
         val driver = JdbcSqliteDriver("jdbc:sqlite:${file.absolutePath}")
         try {
@@ -200,24 +207,52 @@ class SchemaV3MigrationTest {
 
         DatabaseDriverFactory().createDriver(file).close()
 
+        val dId = IdGenerator.folderId("D")
+        val dGoneId = IdGenerator.folderId("Gone")
+        val tId = IdGenerator.tagId("T")
+        val tGoneId = IdGenerator.tagId("Gone")
         withConnection(file) { conn ->
-            // The valid folder assignment is re-attached, the orphan one survives untouched.
+            // Both tables are re-keyed onto the name-derived ids, values and stamps carried over.
+            assertEquals(
+                setOf(
+                    listOf<Any?>(dId, "D", 10, 1),
+                    listOf<Any?>(dGoneId, "Gone", 20, 2),
+                ),
+                conn.rows("SELECT id, name, updated_at, created_at FROM folders ORDER BY created_at").toSet(),
+            )
+            assertEquals(
+                setOf(
+                    listOf<Any?>(tId, "T", 10, 1),
+                    listOf<Any?>(tGoneId, "Gone", 20, 2),
+                ),
+                conn.rows("SELECT id, name, updated_at, created_at FROM tags ORDER BY created_at").toSet(),
+            )
+            // The folder assignment and the links moved to the new ids; the orphans are untouched.
             assertEquals(
                 listOf(
-                    listOf<Any?>("f1", "d1"),
+                    listOf<Any?>("f1", dId),
                     listOf<Any?>("f2", "d-orphan"),
                     listOf<Any?>("f3", null),
                 ),
                 conn.rows("SELECT id, folder_id FROM feeds ORDER BY id"),
             )
-            // The valid links are back; the feed-less one is gone; the tag-orphan one survived.
             assertEquals(
-                listOf(
+                setOf(
                     listOf<Any?>("f1", "t-orphan"),
-                    listOf<Any?>("f1", "t1"),
-                    listOf<Any?>("f1", "t2"),
+                    listOf<Any?>("f1", tGoneId),
+                    listOf<Any?>("f1", tId),
                 ),
-                conn.rows("SELECT feed_id, tag_id FROM feed_tags ORDER BY feed_id, tag_id"),
+                conn.rows("SELECT feed_id, tag_id FROM feed_tags").toSet(),
+            )
+            // Each move is recorded, so SettingsRepository can rewrite the same ids in local_settings.
+            assertEquals(
+                setOf(
+                    listOf<Any?>("folder", "d1", dId),
+                    listOf<Any?>("folder", "d2", dGoneId),
+                    listOf<Any?>("tag", "t1", tId),
+                    listOf<Any?>("tag", "t2", tGoneId),
+                ),
+                conn.rows("SELECT kind, old_id, new_id FROM ks_id_remap").toSet(),
             )
             // UNIQUE(name) is gone: a second row of a name inserts fine, on both tables.
             conn.createStatement().use { st ->
@@ -247,6 +282,77 @@ class SchemaV3MigrationTest {
             assertEquals(
                 listOf(listOf<Any?>("feed_tags", "tags"), listOf<Any?>("feeds", "folders")),
                 violations(),
+            )
+        }
+    }
+
+    /** Running the re-key again changes nothing: every id is already the derived one. */
+    @Test
+    fun theRekeyIsIdempotent() {
+        val file = tempFile()
+        val driver = JdbcSqliteDriver("jdbc:sqlite:${file.absolutePath}")
+        try {
+            driver.createSchemaV2()
+            listOf(
+                "INSERT INTO folders (id, name, updated_at, created_at) VALUES ('d1', 'D', 10, 1)",
+                "INSERT INTO feeds (id, url, title, folder_id, updated_at, created_at) VALUES ('f1', 'https://a', 'A', 'd1', 10, 1)",
+                "INSERT INTO tags (id, name, updated_at, created_at) VALUES ('t1', 'T', 10, 1)",
+                "INSERT INTO feed_tags (feed_id, tag_id, updated_at) VALUES ('f1', 't1', 10)",
+            ).forEach { driver.execute(null, it, 0) }
+            KeryxDatabase.Schema.migrate(driver, 2, 3, *KERYX_SCHEMA_CALLBACKS)
+            rekeyTagAndFolderIds(driver)
+        } finally {
+            driver.close()
+        }
+        withConnection(file) { conn ->
+            assertEquals(
+                setOf(
+                    listOf<Any?>("folder", "d1", IdGenerator.folderId("D")),
+                    listOf<Any?>("tag", "t1", IdGenerator.tagId("T")),
+                ),
+                conn.rows("SELECT kind, old_id, new_id FROM ks_id_remap").toSet(),
+            )
+        }
+    }
+
+    /**
+     * The callback fires for a 1 -> 3 migration too (1.sqm then 2.sqm, then the re-key): a v1 file's
+     * tags and folders are re-keyed exactly as a v2 file's are.
+     */
+    @Test
+    fun theRekeyAlsoRunsForAOneToThreeMigration() {
+        val file = tempFile()
+        val driver = JdbcSqliteDriver("jdbc:sqlite:${file.absolutePath}")
+        try {
+            // The version-1 schema is version 2 without the two article-deletion columns 1.sqm adds.
+            SCHEMA_V2_STATEMENTS.map { sql ->
+                if (sql.contains("CREATE TABLE articles")) {
+                    sql.replace(Regex("deleted_at\\s+INTEGER,\\s*deleted_updated_at\\s+INTEGER,\\s*"), "")
+                } else {
+                    sql
+                }
+            }.forEach { driver.execute(null, it, 0) }
+            driver.execute(null, "PRAGMA user_version = 1", 0)
+            driver.execute(
+                null,
+                "INSERT INTO tags (id, name, updated_at, created_at) VALUES ('t1', 'T', 10, 1)",
+                0,
+            )
+        } finally {
+            driver.close()
+        }
+
+        DatabaseDriverFactory().createDriver(file).close()
+
+        withConnection(file) { conn ->
+            assertEquals(listOf(listOf<Any?>(3)), conn.rows("PRAGMA user_version"))
+            assertEquals(
+                listOf(listOf<Any?>("tag", "t1", IdGenerator.tagId("T"))),
+                conn.rows("SELECT kind, old_id, new_id FROM ks_id_remap"),
+            )
+            assertEquals(
+                listOf(listOf<Any?>(IdGenerator.tagId("T"), "T")),
+                conn.rows("SELECT id, name FROM tags"),
             )
         }
     }

@@ -510,12 +510,6 @@ URL under different ids. The merge's guard (`NOT EXISTS … l2.url = c.url AND l
 whose URL main already holds under another id, and `winnerAmong` picks among cloud duplicates by `updated_at`,
 which differs between the files and main — so the survivor depends on the order.
 
-The same cause — an identity taken from content that can change — makes matching tags and folders by name
-non-associative: a cloud row merged into a main row because they share a name is ignored once the fold also
-holds that main row's id, and is no longer matched after its name changes. `feedTags`' and
-`mergeFeedFolderId`'s lookups by name are affected the same way (see also "A feed can be left pointing at a
-deleted folder across the folder's deletion and revival").
-
 ### What a real fix would need
 
 - A canonical id per URL that does not depend on the order: the id equal to `IdGenerator.feedId(url)` if one
@@ -532,15 +526,16 @@ file cannot be rewritten, so devices can still diverge in those cases.
 
 ## A feed can be left pointing at a deleted folder across the folder's deletion and revival
 
-**Status**: not fixed — closing it needs folder ids that converge across devices (or a re-resolution pass),
-a redesign outside the scope of the change that found it (see "What a real fix would need"). It breaks the
+**Status**: not fixed — closing it needs a re-resolution of a feed's folder under the final folder state, a
+redesign outside the scope of the change that found it (see "What a real fix would need"). It breaks the
 merge's commutativity (see "Design Philosophy" in [sync-architecture.md](sync-architecture.md)) for feeds'
 folder assignments.
 
-The broader form of this — two devices settling on different folders for the same feed when two folder moves
-carry the same `folder_updated_at`, because each held a same-named folder under a different id — is closed
-now that the merge imports a same-named folder under its own id and the feed takes the raw id the winning
-file carried: the tie is decided between the raw ids, as the fold decides it.
+What its earlier, broader form covered — two devices settling on different folders for the same feed when two
+folder moves carry the same `folder_updated_at` and each held a same-named folder under a different id — is
+closed: folder ids are now derived from the folder's creation-time name (`IdGenerator.folderId`, re-keyed by the
+v2→v3 migration), so independently created same-named folders share an id and the tie is decided between the raw
+ids as the fold decides it. What remains is the plain tie below, which the id scheme does not touch.
 
 ### Symptom
 
@@ -552,20 +547,15 @@ the stored and uploaded values differ.
 ### Diagnosis
 
 `mergeFeedFolderId` resolves a feed's folder only when an incoming raw assignment strictly wins, so a later
-file that deletes the folder but carries the same assignment never re-resolves it. A feed's `folder_id` holds
-a **resolved** id — this device's, which can differ from the one the winning file carried — and `MergeSql`
-keeps the raw winning version beside it (`ks_feed_folder_raw`) so merges rank raw against raw; but the
-upload — a snapshot of the local database — carries only the resolved id, which the receiver then ranks as if
-it were raw. Shipping the raw id instead would not help on its own: the folder it names may not exist on the
-sender, so a receiver could not resolve it. Re-resolving under the final folder state would need the raw
-folder's name, since its id may not exist locally, and a rule that also stays order-independent across a
-folder's deletion and revival.
+file that deletes the folder but carries the same assignment never re-resolves it. A feed's `folder_id` holds a
+**resolved** id — this device's, which can differ from the one the winning file carried — and `MergeSql` keeps
+the raw winning version beside it (`ks_feed_folder_raw`) so merges rank raw against raw; but the upload — a
+snapshot of the local database — carries only the resolved id, which the receiver then ranks as if it were raw.
 
 ### What a real fix would need
 
-Folder ids that converge across devices — for instance, re-keying a folder matched by name onto a canonical id on
-every device, with the feeds that reference it — so that a feed's folder id means the same folder everywhere and
-no resolution is needed.
+Re-resolving the feed's folder under the final folder state, in a way that stays order-independent across a
+folder's deletion and revival — a rule that does not depend on which file arrived last.
 
 ## Google Drive: an upload can overwrite another device's upload unnoticed
 

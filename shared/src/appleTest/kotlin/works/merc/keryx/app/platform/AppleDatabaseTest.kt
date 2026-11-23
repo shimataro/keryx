@@ -10,6 +10,7 @@ import works.merc.keryx.app.data.local.DatabaseTooNewException
 import works.merc.keryx.app.data.local.FtsManager
 import works.merc.keryx.app.data.local.FtsSearch
 import works.merc.keryx.app.data.local.db.KeryxDatabase
+import works.merc.keryx.app.domain.IdGenerator
 import works.merc.keryx.app.domain.MergeSql
 import works.merc.keryx.app.tempFilePath
 import kotlin.test.AfterTest
@@ -181,6 +182,31 @@ class AppleDatabaseTest {
         assertTrue("deleted_updated_at" in cloudColumns)
         RawSqliteConnection.open(path("main.db")).use { db ->
             assertEquals(1, db.queryLong("SELECT count(*) FROM articles WHERE id = 'cloud-article' AND deleted_at IS NULL"))
+        }
+    }
+
+    /**
+     * The migration callbacks run on the Apple path too: a version-1 cloud file's tag arrives
+     * re-keyed onto the id its name derives from (`IdGenerator.tagId`), so it meets a migrated
+     * device's own same-named row under the same id.
+     */
+    @Test
+    fun anOlderCloudFilesTagsArriveRekeyedOntoTheirNameDerivedIds() {
+        open("main.db").close()
+        drivers.clear()
+        writeVersion1CloudFile("cloud-v1-rekey.db")
+        RawSqliteConnection.open(path("cloud-v1-rekey.db")).use { db ->
+            db.exec("INSERT INTO tags (id, name, sort_order, deleted_at, updated_at, created_at) VALUES ('t1', 'Legacy tag', 0, NULL, 1, 1)")
+        }
+
+        DatabaseMerger.merge(path("main.db"), path("cloud-v1-rekey.db"), KeryxDatabase.Schema.version, MergeSql.all)
+
+        RawSqliteConnection.open(path("main.db")).use { db ->
+            assertEquals(
+                1,
+                db.queryLong("SELECT count(*) FROM tags WHERE id = '${IdGenerator.tagId("Legacy tag")}' AND name = 'Legacy tag'"),
+            )
+            assertEquals(0, db.queryLong("SELECT count(*) FROM tags WHERE id = 't1'"))
         }
     }
 
@@ -488,7 +514,7 @@ class AppleDatabaseTest {
          */
         val VERSION_3_TABLES = listOf(
             "feed_fetch_state", "sync_outbox", "sync_capture", "sync_merging", "sync_applied", "sync_cursor", "ks_search_pending",
-            "ks_search_awaiting_body", "ks_feed_folder_raw",
+            "ks_search_awaiting_body", "ks_feed_folder_raw", "ks_id_remap",
         )
 
         /** The capture triggers `2.sqm` creates, dropped before the tables they write to. */

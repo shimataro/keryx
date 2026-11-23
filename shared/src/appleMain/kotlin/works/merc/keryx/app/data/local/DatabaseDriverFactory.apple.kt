@@ -6,6 +6,7 @@ import app.cash.sqldelight.driver.native.NativeSqliteDriver
 import works.merc.keryx.app.core.DB_FILE_NAME
 import works.merc.keryx.app.core.SQLITE_BUSY_TIMEOUT_MS
 import works.merc.keryx.app.data.local.db.KeryxDatabase
+import works.merc.keryx.app.domain.KERYX_SCHEMA_CALLBACKS
 import works.merc.keryx.app.platform.AppDirs
 import works.merc.keryx.app.platform.FileIO
 import works.merc.keryx.app.platform.RawSqliteConnection
@@ -31,6 +32,7 @@ actual class DatabaseDriverFactory {
         return NativeSqliteDriver(
             schema = KeryxDatabase.Schema,
             name = name,
+            maxReaderConnections = 1,
             onConfiguration = { config ->
                 config.copy(
                     extendedConfig = config.extendedConfig.copy(
@@ -40,6 +42,7 @@ actual class DatabaseDriverFactory {
                     ),
                 )
             },
+            callbacks = KERYX_SCHEMA_CALLBACKS,
         ).also { driver ->
             // NativeSqliteDriver opens (and so creates/migrates) the file lazily, on its first
             // statement; open it now, as the other platforms' factories do, so the schema is in

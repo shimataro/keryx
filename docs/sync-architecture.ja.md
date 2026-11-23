@@ -7,7 +7,7 @@
 `domain/TransportCoverage.kt`（ベースが何を覆うか、ベースのキャッシュ、記録した送信）、`domain/LegacyCloudFile.kt`
 （差分同期以前の形式からの移行と旧ビルドの監視）、`domain/MergeSql.kt`、
 `domain/ReduceSql.kt`、`domain/TransportSchema.kt`、`domain/MergeFailureClassifier.kt`、`domain/MergeSchema.kt`、
-`domain/DeltaExportSql.kt`、`platform/DatabaseMerger`、`platform/DeltaExporter`、`platform/TransportFiles`。
+`domain/DeltaExportSql.kt`、`domain/TagFolderIdRekey.kt`（v2→v3 のタグ/フォルダー id 振り直し）、`platform/DatabaseMerger`、`platform/DeltaExporter`、`platform/TransportFiles`。
 
 ## 設計方針
 
@@ -21,9 +21,12 @@
   （1 つずつマージしても、畳み込んでからマージしても同じ）である。そのため、ファイルの重複、順序の逆転、クラッシュ
   後の再適用はすべて無害であり、この文書の残りはこの性質に依拠している。
   まだ塞いでいない既知の例外は [known-issues.ja.md](known-issues.ja.md) に記録してある: URL が同じで id が違う
-  フィード、そして名前が同じで id が違う行（フォルダーの削除と復活をまたいでフィードが削除済みフォルダーを指し続ける
-  こと、および畳み込まれたファイルの中で同名の勝者選定に負けた行のリネーム）——どちらも、タグとフォルダーの id が
-  名前から決まるようになるまでの話である。
+  フィード、そしてフォルダーの削除と復活をまたいでフィードが削除済みフォルダーを指し続けること。（3 つ目にあった
+  「名前が同じで id が違う行」は、タグとフォルダーの id が名前から決まるようになって塞がれた:
+  `IdGenerator.tagId` / `folderId`。v2→v3 移行が一度だけ振り直すので、2 台が同じ名前を独立に作れば同じ id となり、
+  マージはタグとフォルダーを id だけで照合する。バージョン 3 は未リリースだが、暫定のランダム id でバージョン 3 を
+  すでに走らせた開発環境は振り直されない——コールバックはバージョン 2 をまたぐときしか発火しない——ため、
+  クラウド同期データを一度リセットする必要がある。）
 - **送るのはローカルの変更だけ。** マージで入ってきた変更は再送しないので、変更が端末間を往復し続けることはない。
 - **どの変更も到達不能にしない。** すべての変更は、常にクラウド上の少なくとも 1 つの差分ファイルかベースに含まれて
   いる。ファイルの削除は、この性質を保つガベージコレクションの規則に従うときだけ行う（「ベースとガベージ
@@ -82,7 +85,8 @@ Depth 1 の `PROPFIND`。既にたどったページ指定（カーソル、ペ�
 差分とベースは、同期対象の 6 テーブル（`feeds`、`articles`、`tags`、`feed_tags`、`folders`、`global_settings`）を、
 同期対象の列だけで持つ——`feeds` の取得状態（端末ローカルの `feed_fetch_state` に移った）と
 `articles.search_text`（受信側で再計算する）は含まない——。UNIQUE 制約と外部キーも持たない: ベースは複数の端末の
-行を畳み込み、2 台が同じタグ名に別々の id を持つことは正当にありうるため。各ファイルは `PRAGMA user_version` と、
+行を畳み込み、リネームが同名の作成と交差すれば、1 つのタグ名やフォルダー名を 2 つの別々の id が持つことは正当に
+ありうる（行の名前由来 id は「元の名前」から導かれたもの）。各ファイルは `PRAGMA user_version` と、
 次の表を持つ:
 
 - `ks_meta(key, value)` — `format`（形式）、`generation`（世代）、`device`（書き込んだ端末）、`created_at`（作成時刻）、
@@ -119,6 +123,7 @@ Depth 1 の `PROPFIND`。既にたどったページ指定（カーソル、ペ�
 | `ks_search_pending(rowid)` | `search_text` の再計算が必要な記事（「FTS5 の扱い」参照） |
 | `ks_search_awaiting_body(id)` | マージが本文なし（軽量行）で挿入した記事。本文が届くまで検索索引に入れない（「FTS5 の扱い」参照） |
 | `ks_feed_folder_raw(feed_id, folder_updated_at, folder_id)` | フィードごとに、`feeds.folder_id` の解決後の値の元になった生のフォルダー版（勝ったファイルが持っていたままのもの）。スタンプがフィードの `folder_updated_at` と等しい間だけ有効（「マージ」参照） |
+| `ks_id_remap(kind, old_id, new_id)` | v2→v3 移行が走らせたタグ/フォルダー id の振り直し（`domain/TagFolderIdRekey.kt`）の記録。`SettingsRepository` が移行後の最初の起動時に `local_settings.json` の同じ id を書き換えた後、表を空にする（[db-schema.ja.md](db-schema.ja.md) 参照） |
 | `feed_fetch_state(feed_id, etag, last_modified, error_count, last_error)` | この端末でのフィードの取得状態——同期しない |
 
 同期対象の 6 テーブルの**トリガー**（`AFTER INSERT` / `AFTER UPDATE`）が `sync_outbox` に追記する。条件は
@@ -274,7 +279,8 @@ Depth 1 の `PROPFIND`。既にたどったページ指定（カーソル、ペ�
 
 **どうやって。** ほかのベースに支配されていないすべてのベースと、そのどれにも覆われていない一覧上のすべての差分を
 検証し、`ReduceSql` で新しいベースに畳み込む。ベースは**決してローカルのデータベースから作らない**: ローカルの
-マージは、ガードが拒否する行（名前の衝突など）を飛ばすので、そこから作ったベースは、ほかのすべての端末からその行を
+マージは、ガードが拒否する行（main が別の id で同じ URL を持つフィード、main にフィードが無い記事など）を飛ばすので、
+そこから作ったベースは、ほかのすべての端末からその行を
 黙って落としてしまう。新しいベースの名前は `ks-<gen>-b-<dev>-<n>-<createdAt>-<hash12>` で、`n` はこの端末の一覧上で
 最大のベースの番号に 1 を足したもの。`ks_vector` は入力ベースのベクトルを合わせ、それを畳み込んだ差分のうち隙間なく
 続くものの分だけ伸ばす——**ただしベース自身の作成時刻より `KS_DELTA_GRACE_MS` 以上前に作られた差分だけを数える**
@@ -535,20 +541,20 @@ SQLDelight コードの `getLong` がそれを読むときに例外を投げ、�
   書き込みは常に、その行がすでに持つスタンプより大きく打刻する（[db-schema.ja.md](db-schema.ja.md) の「設計方針」参照）
   ので、同着は 2 台が同じミリ秒に独立して書いたときにしか起きない。
 - **`cloud` 内の重複は決定的に解決する。** 畳み込んだファイルは、同じ一意キー（`feeds.url`、
-  `articles(feed_id, guid)`、タグ名やフォルダー名）を持つ行を、別々の端末から 2 つ持ちうる。そうしたキーで照合する
+  `articles(feed_id, guid)`）を持つ行を、別々の端末から 2 つ持ちうる。そうしたキーで照合する
   文は、その中の勝者——`updated_at` が最大、次に id が最大——だけを対象にする。参照を id で解決する文
-  （`mergeFeedFolderId`、`feedTags`）は、引き続きすべての行を見る。
+  （`mergeFeedFolderId`、`feedTags`）は、引き続きすべての行を見る。（タグとフォルダーの行は、名前で重複することは
+  なくなった: id が名前から導かれるので、同じ名前はどこでも同じ id を持つ。）
 - **`cloud` に行が無いことは何も意味しない。** 差分は一部の行しか持たない。参照先の行によって結果が変わる文
   （`mergeFeedFolderId` の「フォルダーが `cloud` で生きていなければ NULL」、`feedTags` のタグ解決）も、これまでと同じ
   答えになる。どの差分も、自分の行が参照する行を含んでいるからである（検証の手順 9 で確認する）。
 - feeds / tags / folders / global_settings: 後勝ち（論理削除を含む）。feeds の文の `ON CONFLICT` は内容系の
   フィールド（url / title / description / … + `updated_at`）だけを扱い、利用者が編集するフィールドはそれぞれの
   スタンプを使う専用の文でマージする: `mergeFeedFolderId`（`folder_id` / `folder_updated_at`）、
-  `mergeFeedSortOrder`、`mergeFeedCustomTitle`、`mergeFeedDeletedAt`。`folder_id` は 4 分岐で解決する: クラウドが
+  `mergeFeedSortOrder`、`mergeFeedCustomTitle`、`mergeFeedDeletedAt`。`folder_id` は 3 分岐で解決する: クラウドが
   参照するフォルダーが `cloud.folders` で生きていなければ NULL、そのフォルダーが `main` で生きていればクラウドの
-  `folder_id`、そうでなければ `main.folders` / `cloud.folders` を結合する同名検索（両方とも生きているもの。main 側は
-  その名前の正規の行——`created_at` が最も古いもの、同点なら小さいほうの `id`——に着地する）、それも
-  なければ NULL。
+  `folder_id`、それ以外は NULL。（フォルダーの id は名前から導かれるので、同じフォルダーはどの端末でも同じ id となり、
+  同名検索はもう残っていない。）
   保存される `folder_id` は解決後の値——この端末の id で、勝ったファイルが持っていた id とは限らない——なので、
   マージはクラウドの生の `folder_id` をそれと比べない: `folder_updated_at` が等しいとき、2 つの id は別々の id 空間に
   属し、マージの順序が結果を決めてしまう（一方 `ReduceSql` の畳み込みは生の最大値を残す）。勝った生の版を
@@ -561,14 +567,15 @@ SQLDelight コードの `getLong` がそれを読むときに例外を投げ、�
   フィードはどの端末でも同じ id になる。
 - **tags / folders: フィールドごとの後勝ち。** feeds と同じく、名前（`name_updated_at`）、色（`color_updated_at`、
   tags のみ）、並び順（`sort_order_updated_at`）を、それぞれのスタンプで決める。`updated_at` は作成・削除・再有効化を
-  打刻する。2 台が同じタグの別々のフィールドを変えれば、両方の変更が残る。`name` はもはや一意ではないので、行は
-  id で照合し、無ければ名前で照合する——その名前を持つ cloud の行が照合するのは、その名前の**正規の** main 行 1 つ
-  だけ（生きている行を優先し、次に `created_at`、最後に `id`。ローカルの `getByName` が返す行）で、1 つの名前が 2 つの
-  main 行に適用されることはない。名前の変更は、その名前の勝者から、スタンプで勝ったときに常に適用される——もう
-  `UNIQUE(name)` のガードに阻まれることはない——そして insert が飛ばすのは id が main にある行だけで、id の違う
-  同名の行は共存できる（この端末の正規の行も、名前による照合を通じて勝者の値を取り込む）。id が名前から決まるように
-  なるまで、畳み込まれたファイルの中で同名の勝者選定に負けた行のリネームは、その畳み込みのマージでは適用されず、
-  端末間で名前が食い違うことがある——[known-issues.ja.md](known-issues.ja.md) を参照。
+  打刻する。2 台が同じタグの別々のフィールドを変えれば、両方の変更が残る。行は **id だけで**照合する——タグや
+  フォルダーの id は作成時の名前から導かれる（`IdGenerator.tagId` / `IdGenerator.folderId`。v2→v3 移行が既存の行を
+  一度だけ振り直した）ので、2 台が同じ名前を独立に作れば、通常のフィールドごとのマージで 1 行に収束する。id が
+  main に無い行はそのまま挿入する: main が別の id で持つ名前（2 つのリネームが 1 つの名前に着地した場合）は
+  そのまま通し、同名の行は共存する（UI が番号を振る）。名前由来 id の意図された帰結のひとつは、feeds の「同じ URL は
+  同じフィード」と同じく、片方の端末でリネームしたタグを、最初の同期の前に別の端末がその元の名前で新規作成しても、
+  マージ後は 1 行であり、名前は `name_updated_at` で決まる——名前を作った端末は、それがリネーム後の名前に変わるのを
+  見ることがある（片方の端末で「Work」を「Job」にリネーム、もう片方で「Work」を作成: どの端末でも「Job」という
+  1 つのタグになる）。
 - articles は 3 つのグループ:
   - **本文** — `content`・`summary`・`title`・`url`・`author`・`published_at`・`thumbnail_url`（と、ローカルの
     マージが既存の行では書き換えない `feed_id` / `guid`）で、スタンプは `body_updated_at`。スタンプを比べる前に、
@@ -592,22 +599,21 @@ SQLDelight コードの `getLong` がそれを読むときに例外を投げ、�
   登録し、新しく挿入された記事は `''` から始まり、本文なしで挿入された記事は `ks_search_awaiting_body` に記録する
   （「FTS5 の扱い」参照）。articles は **`id`**（`(feed_id, guid)` の
   UUIDv5、`IdGenerator.articleId`）で照合する。
-- feed_tags: 後勝ち。フィードが main にあるときだけ取り込む。タグは、main で生きていればそのまま使い、そうでなければ
-  `cloud.tags` を通じて（id で照合するので、cloud のすべてのタグ行が見える）その名前の正規の main のタグに解決する
-  （生きている行を優先する。`getByName` の順と同じ）。どちらでも解決できない行は飛ばす。
+- feed_tags: 後勝ち。フィードとタグが main にあるとき（どちらも id で。タグの id は名前から導かれるので、同じタグは
+  どの端末でも同じ id になる）だけ取り込む。main がタグをまるごと持たないリンクは孤児なので飛ばす。main が墓標として
+  しか持っていないタグへのリンクは、ほかの行と同じく取り込む——リンクは自分の `updated_at` に乗る。
 - `NOT EXISTS` / `EXISTS` のガードは、main と衝突する行（別の ID で同じ URL や `(feed_id, guid)` を持つ行、main が
   持たない参照先の行）を飛ばすので、UNIQUE / FK 違反でトランザクション全体が失敗することはない。タグとフォルダーの
-  名前はもうガードしない: 別の id が同じ名前を持っていても通し、同名の行は共存する。
-- `MergeSql.all` の順序: folders（名前、id、フィールドごとの文の順）、feeds、フォルダーのマージの 3 つの文と残り
-  3 つの `mergeFeed*`、tags（名前、id、
-  フィールドごと）、articles、feed_tags、global_settings。folders は feeds より前（`feeds.folder_id` のため）、
-  `mergeFeed*` はその両方の後。
+  行には追加のガードはない: 別の id が同じ名前を持っていても通し、同名の行は共存する。
+- `MergeSql.all` の順序: folders（id ごとのフィールド文、次に insert）、feeds、フォルダーのマージの 3 つの文と残り
+  3 つの `mergeFeed*`、tags（フィールドごと、insert）、articles、feed_tags、global_settings。folders は feeds より前
+  （`feeds.folder_id` のため）、`mergeFeed*` はその両方の後。
 - 管理用の表（`sync_outbox`、`ks_search_pending`、`ks_feed_folder_raw`、`sync_merging` など）は主キー以外の制約を
   持たないので、後述の分類が前提とする
   「main が既存の状態で違反しうるのは FOREIGN KEY 制約だけ」は引き続き成り立つ。
 
 `ReduceSql` は、同じフィールドごとの規則と同着の決め方で、転送ファイルを 1 つに畳み込む。キーは主キーだけで、
-ローカル用のガードや名前の解決は持たない——それは各端末自身のマージの役目である。
+ローカル用のガードは持たない——それは各端末自身のマージの役目である。
 
 ### マージ失敗の分類
 
@@ -1267,8 +1273,10 @@ Drive で古いビルドの上書きとスタブの置き直しが同時に起�
 
 差分同期以前のデータベースは、現行スキーマがもう同期しない列を持つ: スキーマ 3 への移行は、その取得状態を一時ファイルの
 中の `feed_fetch_state` にだけ移し（ローカルのデータベースには決して入れない）、タグとフォルダーを `2.sqm` と同じ手順で
-作り直し（フィールドごとのスタンプは `updated_at` で初期化、`UNIQUE(name)` を廃止、子は退避・復帰）、
-`articles.body_updated_at` を `updated_at` で初期化する。その記事の `search_text` は、ほかのマージと同じく再計算する。
+作り直したうえで（フィールドごとのスタンプは `updated_at` で初期化、`UNIQUE(name)` を廃止、子は退避・復帰）、名前から
+導かれた id に振り直す（`IdGenerator.tagId` / `folderId`。ローカルの移行が走らせるのと同じ `AfterVersion(2)`
+コールバック——その行は、すでに移行済みの端末の行と同じ id で出会うことになる）、`articles.body_updated_at` を
+`updated_at` で初期化する。その記事の `search_text` は、ほかのマージと同じく再計算する。
 
 圧縮の導入前のビルド（`/keryx.db` だけを読む）はスタブの影響を受けず、それらについて文書化済みの一方向の乖離が
 そのまま残る: このバージョンは `/keryx.db` を読みも書きもしない。旧ビルドの監視とこの移行は、v1.0.0 で削除する。

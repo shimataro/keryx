@@ -51,7 +51,15 @@
   退避して NULL にし、タグが存在する `feed_tags` 行を作業表へ移す。親がもともと存在しない子は触らずに残るので、
   `foreign_key_check` に新しい違反は現れない。フィードが存在しないリンクは復帰できないため捨てられる）——、
   `articles.body_updated_at` を追加し（初期値は `updated_at`）、`search_text` が生の `content` / `summary` と同じままの記事（HTML 除去の
-  導入前に書かれた行）を `ks_search_pending` に登録する。（SQLDelight は最大のマイグレーションファイル + 1 で
+  導入前に書かれた行）を `ks_search_pending` に登録し、さらにすべての移行が走らせる `AfterVersion(2)` コールバック
+  （`domain/TagFolderIdRekey.kt`。各プラットフォームのドライバーと `DatabaseMerger` のクラウドファイル移行に
+  `KERYX_SCHEMA_CALLBACKS` として配線済み）で、**すべてのタグとフォルダーの id を名前から導かれた id に振り直す**
+  （`IdGenerator.tagId` / `folderId`）: 行を新しい id でコピーし、`feed_tags.tag_id` / `feeds.folder_id` を
+  付け替え、旧行を削除し、付け替えを `ks_id_remap` に記録する。`SettingsRepository` は起動時にその一度だけ
+  `local_settings.json` の同じ id（`lastFilter`、`collapsedFolderIds`、`expandedTagIds`）を書き換えてから表を
+  空にする。べき等で、2 度走らせても何も変わらない。バージョン 3 は未リリースだが、暫定のランダム id で
+  バージョン 3 をすでに走らせたプリリリースの開発環境は振り直されない（コールバックはバージョン 2 をまたぐとき
+  しか発火しない）——そうした環境はクラウド同期データを一度リセットする必要がある。（SQLDelight は最大のマイグレーションファイル + 1 で
   バージョンを導出。）スキーマを変える場合は `.sqm` ファイル（`<移行元バージョン>.sqm`）を追加すればバージョンは自動で
   上がる。あわせて `domain/MergeSchema.EXPECTED_SCHEMAS`（`DatabaseMerger.validateSchema` が参照する期待スキーマ）、
   `domain/TransportSchema`（差分ファイルのスキーマとそのマイグレーション）、記録用トリガーが比較する列の一覧を
@@ -156,12 +164,17 @@
 `tags`: `id`(PK), `name`, `color`, `sort_order`, `deleted_at`, `updated_at`, `created_at`,
 `name_updated_at`, `color_updated_at`, `sort_order_updated_at`。
 
-- `name` は **UNIQUE ではない**（スキーマバージョン 3 で制約を廃止）: 同名のタグが複数存在できる——片方の端末での
-  リネームが、別の端末での同名作成と交差しうるため——で、UI は序数で区別する。名前による検索は非一意インデックス
-  `tags_name` が支える。名前でタグを解決するすべての経路（作成・再有効化・同期マージの名前解決）は、その名前の
-  1 つの**正規の行**（正規の行 = 生きている行を優先し、次に `created_at`、最後に `id` の順で最初の行。
-  `tags.getByName`）に着地する。UI は生きている行どうしの重複を引き続き警告する（`NameValidation`）ので、
-  2 つ目の同名行は同期マージによって作られるのであって、作成ダイアログによってではない。
+- `id` は作成時の名前から **UUIDv5** として決定的に生成される（`IdGenerator.tagId`。大小区別あり、完全一致）。
+  同じ名前のタグは全デバイスで同じ id を持つので、id で照合する同期マージは、各端末で独立に作成された同名タグを
+  1 行に収束させる。リネームしても id は変わらない——つまり id は「元の名前」から導かれたものであり、その元の名前で
+  後から作成すると派生 id が使用中になるため、ランダム UUIDv4 にフォールバックする（`tags.insertIfNameAbsent` が
+  1 文の中で両者を選ぶ）。既存のランダム id は v2→v3 移行で派生 id に振り直された（後述）。
+- `name` は **UNIQUE ではない**（スキーマバージョン 3 で制約を廃止）: リネームが同名の作成と交差すれば同名の行が
+  併存し、UI は序数で区別する。名前による検索は非一意インデックス `tags_name` が支える。名前でタグを解決する
+  すべての経路（作成・再有効化）は、その名前の 1 つの**正規の行**（正規の行 = 生きている行を優先し、次に
+  `created_at`、最後に `id` の順で最初の行。`tags.getByName`）に着地する。UI は生きている行どうしの重複を
+  引き続き警告する（`NameValidation`）ので、2 つ目の同名行はリネームと作成の交差によって作られるのであって、
+  作成ダイアログによってではない。
 - 名前・色・並び順は、それぞれ自分のスタンプで後勝ちにする（`feeds` の利用者が編集するフィールドと同じ）ので、
   2 台が同じタグの別々のフィールドを変えれば、両方の変更が残る。`updated_at` は作成・削除・再有効化を打刻する。
 `feed_tags`: `feed_id` + `tag_id`（複合 PK）, `deleted_at`, `updated_at`。タグの付け外しは `deleted_at` で表現。
@@ -171,9 +184,12 @@
 `id`(PK), `name`, `sort_order`, `deleted_at`, `updated_at`, `created_at`, `name_updated_at`,
 `sort_order_updated_at`。
 
-- `name` は **UNIQUE ではない**（スキーマバージョン 3 で制約を廃止）。理由は `tags.name` と同じ: 同名のフォルダーが
-  複数存在でき、序数で表示される。非一意インデックス `folders_name` が名前による検索を支え、名前による検索は
-  その名前の正規の行に着地する（上の `tags` と `folders.getByName` を参照）。
+- `id` は作成時の名前から **UUIDv5** として決定的に生成される（`IdGenerator.folderId`）。仕組みは `tags.id`
+  と同じ（名前空間は別なので、同名のタグとフォルダーが同じ id を持つことはない）。派生 id が使用中のときの
+  ランダム id へのフォールバックも同様。
+- `name` は **UNIQUE ではない**（スキーマバージョン 3 で制約を廃止）。理由は `tags.name` と同じ: リネームが同名の
+  作成と交差すれば同名の行が併存し、序数で表示される。非一意インデックス `folders_name` が名前による検索を支え、
+  名前による検索はその名前の正規の行に着地する（上の `tags` と `folders.getByName` を参照）。
 - 名前と並び順は、それぞれ自分のスタンプで後勝ちにする。`updated_at` は `tags` と同じく作成・削除・再有効化を打刻する。
 - タグとは独立した分類軸。1フィード = 最大1フォルダー（`feeds.folder_id`、多対多ではない）ため、
   `feed_tags` のような中間テーブルは持たない。
@@ -214,6 +230,7 @@
 | `ks_search_pending` | `rowid`(PK) — `search_text` の再計算が必要な記事 |
 | `ks_search_awaiting_body` | `id`(PK) — マージが本文なし（軽量行）で挿入した記事。本文が届くか、日次 rebuild が索引するまで検索索引に入れない |
 | `ks_feed_folder_raw` | `feed_id`(PK), `folder_updated_at`, `folder_id` — フィードごとに、`feeds.folder_id` の解決後の値の元になった生のフォルダー版（勝った同期ファイルが持っていたままのもの）。マージが生の値どうしで順位を比べるためのもの。`folder_updated_at` がフィード自身の値と等しい間だけ有効 |
+| `ks_id_remap` | `kind` + `old_id`（複合 PK）, `new_id` — v2→v3 移行が走らせたタグ/フォルダー id の振り直し（`domain/TagFolderIdRekey.kt`）の記録: 旧ランダム id と、それが変わった名前由来の id。`SettingsRepository` が移行後の最初の起動時に `local_settings.json` の同じ id（`lastFilter`、`collapsedFolderIds`、`expandedTagIds`）を書き換えた後、表を空にする。この移行だけが書き込む。新規作成 DB では常に空 |
 
 これらも、`sync_state`、`feed_fetch_state`、`articles_fts` も、端末の外に出ることは決してない: 差分ファイルと
 ベースは同期対象のテーブルだけから作る（[sync-architecture.ja.md](sync-architecture.ja.md) 参照）。

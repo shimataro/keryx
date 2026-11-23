@@ -7,6 +7,7 @@ import io.requery.android.database.sqlite.RequerySQLiteOpenHelperFactory
 import works.merc.keryx.app.core.DB_FILE_NAME
 import works.merc.keryx.app.core.SQLITE_BUSY_TIMEOUT_MS
 import works.merc.keryx.app.data.local.db.KeryxDatabase
+import works.merc.keryx.app.domain.KERYX_SCHEMA_CALLBACKS
 import works.merc.keryx.app.platform.AndroidAppContext
 
 /**
@@ -27,7 +28,7 @@ import works.merc.keryx.app.platform.AndroidAppContext
  */
 actual class DatabaseDriverFactory {
     actual fun create(): SqlDriver {
-        val callback = object : AndroidSqliteDriver.Callback(KeryxDatabase.Schema) {
+        val callback = object : AndroidSqliteDriver.Callback(KeryxDatabase.Schema, *KERYX_SCHEMA_CALLBACKS) {
             // Desktop's JDBC driver reapplies these on every connection it opens (see
             // sqliteConnectionProperties() in the desktop actual) because its ThreadedConnectionManager
             // closes and reopens connections between statements. AndroidSqliteDriver holds one

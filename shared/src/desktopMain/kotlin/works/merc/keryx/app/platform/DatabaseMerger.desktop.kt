@@ -15,6 +15,7 @@ import works.merc.keryx.app.domain.DeferredRerunOutcome
 import works.merc.keryx.app.domain.ForeignKeyViolation
 import works.merc.keryx.app.domain.MainRuledOutVerdict
 import works.merc.keryx.app.domain.MergeFailureClassifier
+import works.merc.keryx.app.domain.KERYX_SCHEMA_CALLBACKS
 import works.merc.keryx.app.domain.MergeSchema
 import works.merc.keryx.app.domain.SqliteFailureCategory
 import works.merc.keryx.app.domain.TransportSchema
@@ -457,7 +458,7 @@ actual object DatabaseMerger {
         if (cloudVersion in 1 until localSchemaVersion) {
             val driver = JdbcSqliteDriver("jdbc:sqlite:$cloudDbPath", Properties())
             try {
-                KeryxDatabase.Schema.migrate(driver, cloudVersion, localSchemaVersion)
+                KeryxDatabase.Schema.migrate(driver, cloudVersion, localSchemaVersion, *KERYX_SCHEMA_CALLBACKS)
                 driver.execute(null, "PRAGMA user_version=$localSchemaVersion;", 0)
             } finally {
                 driver.close()
