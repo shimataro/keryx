@@ -524,8 +524,9 @@ Merge SQL (`MergeSql`) key points:
 - **Duplicates inside `cloud` are resolved deterministically.** A folded file can hold two rows with the same key
   (`feeds.url`, `articles(feed_id, guid)`) from different devices. Statements that match
   by such a key consider only the winner among them — greatest `updated_at`, then greatest id. Statements that
-  resolve a reference by id (`mergeFeedFolderId`, `feedTags`) still see every row. (Tag and folder rows can no
-  longer be duplicated by name: their ids derive from the name, so the same name carries the same id everywhere.)
+  resolve a reference by id (`mergeFeedFolderId`, `feedTags`) still see every row. (Tag and folder names are no
+  longer unique keys: their ids derive from the creation-time name, so independently-created same-named rows converge
+  to the same id, but renames can leave different ids sharing the same current name. The UI numbers such rows.)
 - **Rows absent from `cloud` mean nothing.** A delta holds only some rows; the statements whose outcome depends on a
   referenced row (`mergeFeedFolderId`'s "the folder is not alive in `cloud` → NULL", `feedTags`' tag resolution)
   get the same answer as before because every delta carries the rows its rows reference (checked by validation
