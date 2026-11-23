@@ -24,7 +24,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     # Every OS additionally runs createDistributable + native packaging below, so this matches the
     # 30 min budget release.yml's packaging jobs use.
-    timeout-minutes: 30
+    # Windows gets 45: its runner runs the file-database sync tests about ten times slower than the
+    # others, and the desktop test suite alone takes about 20 minutes there.
+    timeout-minutes: ${{ matrix.os == 'windows-latest' && 45 || 30 }}
     strategy:
       fail-fast: false
       matrix:
