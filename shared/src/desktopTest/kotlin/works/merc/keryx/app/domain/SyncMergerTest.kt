@@ -13,6 +13,8 @@ import works.merc.keryx.app.insertTag
 import works.merc.keryx.app.setFeedFetchState
 import works.merc.keryx.app.stampArticleDeleted
 import works.merc.keryx.app.platform.DatabaseMerger
+import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
+import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -51,7 +53,7 @@ class SyncMergerTest {
         insertArticle(localDb, "a1", "f1", "g1", isRead = 0, readAt = 100, updatedAt = 100)
         localDriver.close() // release the SQLDelight connection before merging on a raw one
 
-        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.allWithReconciliation)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         val merged = verifyDb.articlesQueries.getById("a1").executeAsOne()
@@ -72,7 +74,7 @@ class SyncMergerTest {
         insertArticle(localDb, "a1", "f1", "g1", isRead = 1, readAt = 300, updatedAt = 300)
         localDriver.close()
 
-        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.allWithReconciliation)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         assertEquals(1L, verifyDb.articlesQueries.getById("a1").executeAsOne().is_read)
@@ -89,7 +91,7 @@ class SyncMergerTest {
         val (localFile, localDriver, _) = fileDb()
         localDriver.close()
 
-        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.allWithReconciliation)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         assertNotNull(verifyDb.feedsQueries.getById("f2").executeAsOneOrNull())
@@ -107,7 +109,7 @@ class SyncMergerTest {
         localDb.insertFeed("f-local", now = 100, url = "https://shared/feed")
         localDriver.close()
 
-        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.allWithReconciliation)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         // The cloud feed (different id, same URL) must not be imported.
@@ -128,7 +130,7 @@ class SyncMergerTest {
         localDb.insertTag("t1", "tag", now = 100, deletedAt = null)
         localDriver.close()
 
-        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.allWithReconciliation)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         assertEquals(200L, verifyDb.feedsQueries.getById("f1").executeAsOne().deleted_at)
@@ -149,7 +151,7 @@ class SyncMergerTest {
         localDb.insertTag("t-local", "shared-name", now = 100)
         localDriver.close()
 
-        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.allWithReconciliation)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         val local = verifyDb.tagsQueries.getById("t-local").executeAsOne()
@@ -181,7 +183,7 @@ class SyncMergerTest {
         )
         localDriver.close()
 
-        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.allWithReconciliation)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         val merged = verifyDb.articlesQueries.getById("a1").executeAsOne()
@@ -210,7 +212,7 @@ class SyncMergerTest {
         insertArticle(localDb, "a1", "f1", "g1", isRead = 1, readAt = 300, updatedAt = 50, content = null, summary = "local summary")
         localDriver.close()
 
-        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.allWithReconciliation)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         val merged = verifyDb.articlesQueries.getById("a1").executeAsOne()
@@ -234,7 +236,7 @@ class SyncMergerTest {
         insertArticle(localDb, "a1", "f1", "g1", isRead = 0, readAt = null, updatedAt = 50, content = null, summary = "local summary")
         localDriver.close()
 
-        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.allWithReconciliation)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         val merged = verifyDb.articlesQueries.getById("a1").executeAsOne()
@@ -267,7 +269,7 @@ class SyncMergerTest {
         )
         localDriver.close()
 
-        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.allWithReconciliation)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         val merged = verifyDb.articlesQueries.getById("a1").executeAsOne()
@@ -288,7 +290,7 @@ class SyncMergerTest {
         insertArticle(localDb, "a-local", "f1", "g1", isRead = 0, readAt = null, updatedAt = 100)
         localDriver.close()
 
-        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.allWithReconciliation)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         assertNull(verifyDb.articlesQueries.getById("a-cloud").executeAsOneOrNull())
@@ -306,7 +308,7 @@ class SyncMergerTest {
         val (localFile, localDriver, _) = fileDb()
         localDriver.close()
 
-        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.allWithReconciliation)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         assertNull(verifyDb.articlesQueries.getById("a1").executeAsOneOrNull())
@@ -326,7 +328,7 @@ class SyncMergerTest {
         localDb.insertTag("t1", "tag", now = 100)
         localDriver.close()
 
-        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.allWithReconciliation)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         assertNotNull(verifyDb.feed_tagsQueries.watchTagIdsForFeed("f1").executeAsList().find { it == "t1" })
@@ -345,7 +347,7 @@ class SyncMergerTest {
         localDb.insertFeed("f1", now = 100)
         localDriver.close()
 
-        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.allWithReconciliation)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         assertEquals(emptyList(), verifyDb.feed_tagsQueries.watchAllActive().executeAsList())
@@ -364,7 +366,7 @@ class SyncMergerTest {
         localDb.insertGlobalSetting("k2", "local-value", now = 100)
         localDriver.close()
 
-        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.allWithReconciliation)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         assertEquals("cloud-value", verifyDb.global_settingsQueries.get("k1").executeAsOne())
@@ -383,7 +385,7 @@ class SyncMergerTest {
         localDb.insertFolder("d1", "folder", now = 100, deletedAt = null)
         localDriver.close()
 
-        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.allWithReconciliation)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         assertEquals(200L, verifyDb.foldersQueries.getById("d1").executeAsOne().deleted_at)
@@ -402,7 +404,7 @@ class SyncMergerTest {
         localDb.insertFolder("d-local", "shared-name", now = 100)
         localDriver.close()
 
-        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.allWithReconciliation)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         val local = verifyDb.foldersQueries.getById("d-local").executeAsOne()
@@ -423,7 +425,7 @@ class SyncMergerTest {
         val (localFile, localDriver, _) = fileDb()
         localDriver.close()
 
-        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.allWithReconciliation)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         assertNotNull(verifyDb.foldersQueries.getById("d1").executeAsOneOrNull())
@@ -441,7 +443,7 @@ class SyncMergerTest {
         val (localFile, localDriver, _) = fileDb()
         localDriver.close()
 
-        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.allWithReconciliation)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         assertNull(verifyDb.foldersQueries.getById("d-missing").executeAsOneOrNull())
@@ -461,7 +463,7 @@ class SyncMergerTest {
         val (localFile, localDriver, _) = fileDb()
         localDriver.close()
 
-        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.allWithReconciliation)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         val folder = verifyDb.foldersQueries.getById("d1").executeAsOneOrNull()
@@ -485,7 +487,7 @@ class SyncMergerTest {
         localDb.insertFeed("f1", now = 500, sortOrder = 1L) // newer content, sort_order_updated_at = NULL
         localDriver.close()
 
-        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.allWithReconciliation)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         assertEquals(5L, verifyDb.feedsQueries.getById("f1").executeAsOne().sort_order)
@@ -504,7 +506,7 @@ class SyncMergerTest {
         localDb.feedsQueries.updateSortOrder(9L, 300L, 300L, "f1") // local reorder is newer
         localDriver.close()
 
-        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.allWithReconciliation)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         assertEquals(9L, verifyDb.feedsQueries.getById("f1").executeAsOne().sort_order)
@@ -524,7 +526,7 @@ class SyncMergerTest {
         localDb.insertFeed("f1", now = 100, sortOrder = 1L)
         localDriver.close()
 
-        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.allWithReconciliation)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         assertEquals(5L, verifyDb.feedsQueries.getById("f1").executeAsOne().sort_order)
@@ -542,7 +544,7 @@ class SyncMergerTest {
         val (localFile, localDriver, _) = fileDb()
         localDriver.close()
 
-        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.allWithReconciliation)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         assertEquals(7L, verifyDb.feedsQueries.getById("f2").executeAsOne().sort_order)
@@ -560,7 +562,7 @@ class SyncMergerTest {
         localDb.insertFeed("f1", now = 500) // newer content, custom_title = null, custom_title_updated_at = NULL
         localDriver.close()
 
-        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.allWithReconciliation)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         assertEquals("My Name", verifyDb.feedsQueries.getById("f1").executeAsOne().custom_title)
@@ -579,7 +581,7 @@ class SyncMergerTest {
         localDb.feedsQueries.updateCustomTitle("Local Name", 300L, 300L, "f1")
         localDriver.close()
 
-        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.allWithReconciliation)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         assertEquals("Local Name", verifyDb.feedsQueries.getById("f1").executeAsOne().custom_title)
@@ -598,7 +600,7 @@ class SyncMergerTest {
         localDb.insertFeed("f1", now = 500) // live, newer content, deleted_updated_at = NULL
         localDriver.close()
 
-        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.allWithReconciliation)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         assertEquals(200L, verifyDb.feedsQueries.getById("f1").executeAsOne().deleted_at)
@@ -617,7 +619,7 @@ class SyncMergerTest {
         localDb.insertFeed("f1", now = 100, deletedAt = 200) // unsubscribed at deleted_updated_at = 200
         localDriver.close()
 
-        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.allWithReconciliation)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         assertNull(verifyDb.feedsQueries.getById("f1").executeAsOne().deleted_at)
@@ -635,7 +637,7 @@ class SyncMergerTest {
         localDb.insertFolder("d-local", "IT", now = 100)
         localDriver.close()
 
-        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.allWithReconciliation)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         // The same-named folder arrives under the cloud's id (no UNIQUE(name) stops it), so the
@@ -659,7 +661,7 @@ class SyncMergerTest {
         localDb.insertFolder("d-local", "IT", now = 50)
         localDriver.close()
 
-        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.allWithReconciliation)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         assertNull(verifyDb.foldersQueries.getById("d-local").executeAsOne().deleted_at)
@@ -678,7 +680,7 @@ class SyncMergerTest {
         localDb.insertFolder("d-local", "IT", now = 100, sortOrder = 1L)
         localDriver.close()
 
-        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.allWithReconciliation)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         // The rows share only a name: the local one keeps its values, the cloud one is imported.
@@ -702,7 +704,7 @@ class SyncMergerTest {
         localDb.insertFolder("d-local", "IT", now = 200)
         localDriver.close()
 
-        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.allWithReconciliation)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         // The local row is newer, so it keeps its values; the cloud row is still imported under its
@@ -726,7 +728,7 @@ class SyncMergerTest {
         localDb.insertTag("t-local", "News", now = 100)
         localDriver.close()
 
-        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.allWithReconciliation)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         // The same-named tag arrives under the cloud's id (no UNIQUE(name) stops it), so the link
@@ -754,7 +756,7 @@ class SyncMergerTest {
         localDb.insertFeedTag("f1", "t-local", now = 50)
         localDriver.close()
 
-        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.allWithReconciliation)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         assertNull(verifyDb.tagsQueries.getById("t-local").executeAsOne().deleted_at)
@@ -773,7 +775,7 @@ class SyncMergerTest {
         localDb.insertTag("t-local", "News", now = 100, sortOrder = 1L)
         localDriver.close()
 
-        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.allWithReconciliation)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         // The rows share only a name: the local one keeps its values, the cloud one is imported.
@@ -797,7 +799,7 @@ class SyncMergerTest {
         localDb.insertTag("t-local", "News", now = 200)
         localDriver.close()
 
-        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.allWithReconciliation)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         // The local row is newer, so it keeps its values; the cloud row is still imported under its
@@ -823,7 +825,7 @@ class SyncMergerTest {
         localDb.insertFeed("f1", now = 500) // folder_id = NULL, folder_updated_at = NULL, updated_at newer
         localDriver.close()
 
-        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.allWithReconciliation)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         assertNotNull(verifyDb.foldersQueries.getById("d1").executeAsOneOrNull())
@@ -863,7 +865,7 @@ class SyncMergerTest {
         localDb.insertFeed("f1", now = 50)
         localDriver.close()
 
-        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.allWithReconciliation)
         reopen(localFile).let { (_, driver, db) ->
             assertEquals("d-cloud", db.feedsQueries.getById("f1").executeAsOne().folder_id)
             driver.close()
@@ -875,9 +877,9 @@ class SyncMergerTest {
             driver.close()
         }
 
-        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.allWithReconciliation)
         assertEquals("101|d-other", folderRaw(localFile, "f1"), "a stale raw row is refreshed from main's own value")
-        DatabaseMerger.merge(localFile.absolutePath, tieFile.absolutePath, 1L, MergeSql.all)
+        DatabaseMerger.merge(localFile.absolutePath, tieFile.absolutePath, 1L, MergeSql.allWithReconciliation)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         val feed = verifyDb.feedsQueries.getById("f1").executeAsOne()
@@ -901,7 +903,7 @@ class SyncMergerTest {
         localDb.insertFeed("f1", now = 50, folderId = "d1") // folder_updated_at = 50 (older)
         localDriver.close()
 
-        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.allWithReconciliation)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         assertNull(verifyDb.feedsQueries.getById("f1").executeAsOne().folder_id)
@@ -922,7 +924,7 @@ class SyncMergerTest {
         localDb.insertFeed("f1", now = 300, folderId = "d2") // folder_updated_at = 300 (newer)
         localDriver.close()
 
-        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.allWithReconciliation)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         assertEquals("d2", verifyDb.feedsQueries.getById("f1").executeAsOne().folder_id)
@@ -943,7 +945,7 @@ class SyncMergerTest {
         localDb.insertFeed("f1", now = 500) // same feed id, newer content
         localDriver.close()
 
-        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.allWithReconciliation)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         assertNotNull(verifyDb.tagsQueries.getById("t1").executeAsOneOrNull())
@@ -966,7 +968,7 @@ class SyncMergerTest {
         localDriver.close()
 
         assertFailsWith<CloudDataIncompatibleException> {
-            DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, KeryxDatabase.Schema.version, MergeSql.all)
+            DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, KeryxDatabase.Schema.version, MergeSql.allWithReconciliation)
         }
         cloudFile.delete()
     }
@@ -1018,7 +1020,7 @@ class SyncMergerTest {
         val (localFile, localDriver, _) = fileDb()
         localDriver.close()
 
-        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, KeryxDatabase.Schema.version, MergeSql.all)
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, KeryxDatabase.Schema.version, MergeSql.allWithReconciliation)
         cloudFile.delete()
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
@@ -1048,7 +1050,7 @@ class SyncMergerTest {
         localDriver.close()
 
         assertFailsWith<CloudDataIncompatibleException> {
-            DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, KeryxDatabase.Schema.version, MergeSql.all)
+            DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, KeryxDatabase.Schema.version, MergeSql.allWithReconciliation)
         }
     }
 
@@ -1063,7 +1065,7 @@ class SyncMergerTest {
         localDriver.close()
 
         val thrown = assertFailsWith<Exception> {
-            DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, KeryxDatabase.Schema.version, MergeSql.all)
+            DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, KeryxDatabase.Schema.version, MergeSql.allWithReconciliation)
         }
         assertFalse(thrown is CloudDataIncompatibleException)
     }
@@ -1078,7 +1080,7 @@ class SyncMergerTest {
         localDriver.close()
 
         assertFailsWith<SchemaVersionException> {
-            DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, KeryxDatabase.Schema.version, MergeSql.all)
+            DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, KeryxDatabase.Schema.version, MergeSql.allWithReconciliation)
         }
     }
 
@@ -1111,7 +1113,7 @@ class SyncMergerTest {
         localDriver.setFeedFetchState("f1", etag = "\"local-etag\"")
         localDriver.close()
 
-        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, KeryxDatabase.Schema.version, MergeSql.all)
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, KeryxDatabase.Schema.version, MergeSql.allWithReconciliation)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         try {
@@ -1125,6 +1127,96 @@ class SyncMergerTest {
             assertEquals(listOf<Long?>(600L, 600L, 600L), listOf(tag.name_updated_at, tag.color_updated_at, tag.sort_order_updated_at))
             val folder = verifyDb.foldersQueries.getById(IdGenerator.folderId("Folder")).executeAsOne()
             assertEquals(listOf<Long?>(700L, 700L), listOf(folder.name_updated_at, folder.sort_order_updated_at))
+        } finally {
+            verifyDriver.close()
+        }
+    }
+
+    /**
+     * Two synced v2 devices share a tag and folder id. One renames them before the rename syncs, then
+     * both upgrade to v3. Each side derives a different name-derived id, but the old id is still
+     * recorded in `ks_id_remap`. The merge must reconcile by that old id so the rows converge to one
+     * identity and feed-tag/folder references are unified.
+     */
+    @Test
+    fun preUpgradeRowsRenamedBeforeMigrationAreReconciledByOldId() {
+        val oldTagId = "old-tag-id"
+        val oldFolderId = "old-folder-id"
+
+        // Local v2 DB: shared id, already renamed. Migrate it to v3 so re-key runs.
+        val localFile = File.createTempFile("local-v2-", ".db").apply { deleteOnExit() }
+        JdbcSqliteDriver("jdbc:sqlite:${localFile.absolutePath}").use { driver ->
+            driver.createSchemaV2()
+            driver.execute(null, """
+                INSERT INTO feeds (id, url, title, etag, updated_at, created_at)
+                VALUES ('f1', 'https://a', 'Feed', '"e"', 100, 1)
+            """.trimIndent(), 0)
+            driver.execute(null, "UPDATE feeds SET folder_id = '$oldFolderId' WHERE id = 'f1'", 0)
+            driver.execute(null, """
+                INSERT INTO tags (id, name, color, sort_order, updated_at, created_at)
+                VALUES ('$oldTagId', 'Job', '#f00', 0, 200, 1)
+            """.trimIndent(), 0)
+            driver.execute(null, """
+                INSERT INTO feed_tags (feed_id, tag_id, updated_at)
+                VALUES ('f1', '$oldTagId', 200)
+            """.trimIndent(), 0)
+            driver.execute(null, """
+                INSERT INTO folders (id, name, sort_order, updated_at, created_at)
+                VALUES ('$oldFolderId', 'JobDir', 0, 200, 1)
+            """.trimIndent(), 0)
+        }
+        JdbcSqliteDriver("jdbc:sqlite:${localFile.absolutePath}").use { driver ->
+            KeryxDatabase.Schema.migrate(driver, 2, KeryxDatabase.Schema.version, *KERYX_SCHEMA_CALLBACKS)
+            driver.execute(null, "PRAGMA user_version=${KeryxDatabase.Schema.version}", 0)
+        }
+
+        // Cloud v2 DB: same old ids, not yet renamed. The merge migrates it to v3.
+        val cloudFile = File.createTempFile("cloud-v2-", ".db").apply { deleteOnExit() }
+        JdbcSqliteDriver("jdbc:sqlite:${cloudFile.absolutePath}").use { driver ->
+            driver.createSchemaV2()
+            driver.execute(null, """
+                INSERT INTO feeds (id, url, title, etag, updated_at, created_at)
+                VALUES ('f1', 'https://a', 'Feed', '"e"', 100, 1)
+            """.trimIndent(), 0)
+            driver.execute(null, "UPDATE feeds SET folder_id = '$oldFolderId' WHERE id = 'f1'", 0)
+            driver.execute(null, """
+                INSERT INTO tags (id, name, color, sort_order, updated_at, created_at)
+                VALUES ('$oldTagId', 'Work', '#0f0', 0, 100, 1)
+            """.trimIndent(), 0)
+            driver.execute(null, """
+                INSERT INTO feed_tags (feed_id, tag_id, updated_at)
+                VALUES ('f1', '$oldTagId', 100)
+            """.trimIndent(), 0)
+            driver.execute(null, """
+                INSERT INTO folders (id, name, sort_order, updated_at, created_at)
+                VALUES ('$oldFolderId', 'WorkDir', 0, 100, 1)
+            """.trimIndent(), 0)
+        }
+
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, KeryxDatabase.Schema.version, MergeSql.allWithReconciliation)
+
+        val (_, verifyDriver, verifyDb) = reopen(localFile)
+        try {
+            val expectedTagId = IdGenerator.tagId("Job")
+            val expectedFolderId = IdGenerator.folderId("JobDir")
+
+            // The reconciled row uses main's id (from the rename) and keeps the renamed values.
+            assertNotNull(verifyDb.tagsQueries.getById(expectedTagId).executeAsOneOrNull())
+            assertNull(verifyDb.tagsQueries.getById(IdGenerator.tagId("Work")).executeAsOneOrNull())
+            assertNotNull(verifyDb.foldersQueries.getById(expectedFolderId).executeAsOneOrNull())
+            assertNull(verifyDb.foldersQueries.getById(IdGenerator.folderId("WorkDir")).executeAsOneOrNull())
+
+            val tag = verifyDb.tagsQueries.getById(expectedTagId).executeAsOne()
+            assertEquals("Job", tag.name)
+            assertEquals("#f00", tag.color)
+            val folder = verifyDb.foldersQueries.getById(expectedFolderId).executeAsOne()
+            assertEquals("JobDir", folder.name)
+
+            // Feed references point at the reconciled id, not the cloud-derived id.
+            val feed = verifyDb.feedsQueries.getById("f1").executeAsOne()
+            assertEquals(expectedFolderId, feed.folder_id)
+            val feedTagIds = verifyDb.feed_tagsQueries.watchTagIdsForFeed("f1").executeAsList()
+            assertEquals(listOf(expectedTagId), feedTagIds)
         } finally {
             verifyDriver.close()
         }
@@ -1185,7 +1277,7 @@ class SyncMergerTest {
         insertArticle(localDb, "a1", "f1", "g1", isRead = 0, readAt = null, updatedAt = 100)
         localDriver.close()
 
-        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.allWithReconciliation)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         assertEquals(200L, verifyDb.articlesQueries.getById("a1").executeAsOne().deleted_at)
@@ -1207,7 +1299,7 @@ class SyncMergerTest {
         localDriver.stampArticleDeleted("a1", deletedAt = 200)
         localDriver.close()
 
-        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.allWithReconciliation)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         assertEquals(200L, verifyDb.articlesQueries.getById("a1").executeAsOne().deleted_at)
@@ -1229,7 +1321,7 @@ class SyncMergerTest {
         localDriver.stampArticleDeleted("a1", deletedAt = 100)
         localDriver.close()
 
-        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.allWithReconciliation)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         val merged = verifyDb.articlesQueries.getById("a1").executeAsOne()
@@ -1252,7 +1344,7 @@ class SyncMergerTest {
         insertArticle(localDb, "a1", "f1", "g1", isRead = 0, readAt = null, updatedAt = 100, isStarred = 1, starredAt = 100)
         localDriver.close()
 
-        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.allWithReconciliation)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         assertEquals(200L, verifyDb.articlesQueries.getById("a1").executeAsOne().deleted_at)
@@ -1273,7 +1365,7 @@ class SyncMergerTest {
         localDriver.stampArticleDeleted("a1", deletedAt = 100)
         localDriver.close()
 
-        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.allWithReconciliation)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         val merged = verifyDb.articlesQueries.getById("a1").executeAsOne()
@@ -1293,7 +1385,7 @@ class SyncMergerTest {
         val (localFile, localDriver, _) = fileDb()
         localDriver.close()
 
-        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.allWithReconciliation)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         assertEquals(100L, verifyDb.articlesQueries.getById("a9").executeAsOne().deleted_at)
@@ -1316,7 +1408,7 @@ class SyncMergerTest {
         localDriver.stampArticleDeleted("a1", deletedAt = 0)
         localDriver.close()
 
-        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.allWithReconciliation)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         assertEquals(0L, verifyDb.articlesQueries.getById("a1").executeAsOne().deleted_at)
@@ -1339,7 +1431,7 @@ class SyncMergerTest {
         val (localFile, localDriver, _) = fileDb()
         localDriver.close()
 
-        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.allWithReconciliation)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         val merged = verifyDb.articlesQueries.getById("a1").executeAsOne()
@@ -1368,7 +1460,7 @@ class SyncMergerTest {
         )
         localDriver.close()
 
-        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.allWithReconciliation)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         val merged = verifyDb.articlesQueries.getById("a1").executeAsOne()
@@ -1399,7 +1491,7 @@ class SyncMergerTest {
         )
         localDriver.close()
 
-        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.allWithReconciliation)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         val merged = verifyDb.articlesQueries.getById("a1").executeAsOne()
@@ -1428,7 +1520,7 @@ class SyncMergerTest {
         local(localDb)
         localDriver.close()
 
-        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.allWithReconciliation)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         try {
@@ -1602,7 +1694,7 @@ class SyncMergerTest {
         val (aFile, aDriver, aDb) = fileDb()
         deviceA(aDb)
         aDriver.close()
-        DatabaseMerger.merge(aFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+        DatabaseMerger.merge(aFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.allWithReconciliation)
 
         val (_, aVerifyDriver, aVerifyDb) = reopen(aFile)
         assertEquals("value-B", aVerifyDb.global_settingsQueries.get("k1").executeAsOne())
@@ -1615,7 +1707,7 @@ class SyncMergerTest {
         val (bFile, bDriver, bDb) = fileDb()
         deviceB(bDb)
         bDriver.close()
-        DatabaseMerger.merge(bFile.absolutePath, uploaded.absolutePath, 1L, MergeSql.all)
+        DatabaseMerger.merge(bFile.absolutePath, uploaded.absolutePath, 1L, MergeSql.allWithReconciliation)
 
         val (_, bVerifyDriver, bVerifyDb) = reopen(bFile)
         assertEquals("value-B", bVerifyDb.global_settingsQueries.get("k1").executeAsOne())
@@ -1658,7 +1750,7 @@ class SyncMergerTest {
         localDriver.close()
         assertEquals(emptySet(), foreignKeyViolations(localFile))
 
-        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.allWithReconciliation)
 
         assertEquals(emptySet(), foreignKeyViolations(localFile))
         val (_, verifyDriver, verifyDb) = reopen(localFile)
@@ -1727,7 +1819,7 @@ class SyncMergerTest {
             before.map { it.split('|')[2] }.toSet(),
         )
 
-        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.allWithReconciliation)
 
         val after = foreignKeyViolations(localFile)
         assertEquals(emptySet(), after - before, "the merge added FK violations")
@@ -1777,7 +1869,7 @@ class SyncMergerTest {
         afterWrite(localDb, localDriver)
         localDriver.close()
 
-        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.allWithReconciliation)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         try {
@@ -2079,7 +2171,7 @@ class SyncMergerTest {
         localDb.articlesQueries.updateStarStatus(1L, 900L, 900L, "a1")
         localDriver.close()
 
-        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.allWithReconciliation)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         val merged = verifyDb.articlesQueries.getById("a1").executeAsOne()

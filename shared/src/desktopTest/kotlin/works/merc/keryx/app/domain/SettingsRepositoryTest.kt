@@ -488,8 +488,10 @@ class SettingsRepositoryTest {
     /**
      * The remap rows the migration left in `ks_id_remap` rewrite the three local-settings fields
      * holding tag or folder ids — [LocalSettings.lastFilter], [LocalSettings.collapsedFolderIds] and
-     * [LocalSettings.expandedTagIds] — synchronously at construction, before anything reads them,
-     * and are then cleared.
+     * [LocalSettings.expandedTagIds] — synchronously at construction, before anything reads them.
+     * The remap rows are kept so [MergeSql] can reconcile pre-upgrade rows that were renamed before
+     * the migration; a second application is a no-op because the old ids are no longer present in the
+     * local settings.
      */
     @Test
     fun constructionRewritesTheRekeyedTagAndFolderIdsInTheLocalSettings() {
@@ -516,9 +518,18 @@ class SettingsRepositoryTest {
             assertEquals("tag:t-new", settings.lastFilter)
             assertEquals(setOf("d-new", "d-kept"), settings.collapsedFolderIds)
             assertEquals(setOf("t-new", "t-kept"), settings.expandedTagIds)
-            // The rows are spent: a second repository sees the same values (the old ids are gone
-            // from the database, so re-applying the map would be a no-op anyway).
-            assertTrue(db.sync_bookkeepingQueries.idRemapAll().executeAsList().isEmpty())
+            // The remap rows are kept for merge-time reconciliation: a second repository sees the
+            // same values because the old ids are gone from the local settings, so re-applying the
+            // map is a no-op.
+            assertEquals(
+                setOf(
+                    Triple(ID_REMAP_KIND_TAG, "t-old", "t-new"),
+                    Triple(ID_REMAP_KIND_FOLDER, "d-old", "d-new"),
+                ),
+                db.sync_bookkeepingQueries.idRemapAll().executeAsList()
+                    .map { Triple(it.kind, it.old_id, it.new_id) }
+                    .toSet(),
+            )
             runBlocking { repo.flush() }
             val again = newRepo(db, store = store)
             assertEquals(settings, again.getLocalSettings())

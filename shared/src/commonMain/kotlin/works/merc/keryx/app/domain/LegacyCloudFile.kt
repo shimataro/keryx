@@ -127,7 +127,7 @@ internal class LegacyCloudFile(
                             localDbPath = localDbPath,
                             cloudDbPath = plain,
                             localSchemaVersion = KeryxDatabase.Schema.version,
-                            mergeStatements = MergeSql.all + MARK_INDEX_PENDING_SQL,
+                            mergeStatements = MergeSql.allWithReconciliation + MARK_INDEX_PENDING_SQL,
                         )
                     }.valueOrElse { return it }
                     Log.info(TAG, "Merged the pre-delta cloud database (rev ${downloaded.rev})")

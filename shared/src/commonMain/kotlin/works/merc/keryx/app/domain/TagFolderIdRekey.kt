@@ -36,14 +36,16 @@ val KERYX_SCHEMA_CALLBACKS: Array<AfterVersion> = arrayOf(
  * For every row whose id is not already the derived one: the row is copied under the new id, its
  * children (`feed_tags.tag_id`, or `feeds.folder_id`) are moved, the old row is deleted, and the
  * move is recorded in `ks_id_remap` so `SettingsRepository` can rewrite the same ids in
- * `local_settings.json` once at startup and then clear the table. The insert-children-delete order
+ * `local_settings.json` once at startup, and so `MergeSql` can reconcile pre-upgrade rows that were
+ * renamed before the migration. The insert-children-delete order
  * keeps every foreign key satisfied with foreign keys enforced, as they are on every platform's
  * migration connection. Capture is not recording yet (`2.sqm` seeds `sync_capture` disabled), so
  * none of this enters `sync_outbox`; and `sync_outbox` / `ks_feed_folder_raw` are empty on any
  * database this runs on (they are created by the very migration), so there is nothing else to move.
- * A pre-delta cloud file migrated by `DatabaseMerger` runs the same step on the downloaded copy, so
- * its rows reach an already-migrated device under the same ids its own rows carry. Running again
- * changes nothing: every row's id is already the derived one.
+ * A pre-delta cloud file migrated by `DatabaseMerger` runs the same step on the downloaded copy; its
+ * rows then meet an already-migrated device under the same ids when their current names match, and
+ * `MergeSql` reconciles rows that shared a pre-upgrade id but were renamed before the migration.
+ * Running again changes nothing: every row's id is already the derived one.
  */
 fun rekeyTagAndFolderIds(driver: SqlDriver) {
     // `2.sqm` creates the table; the IF NOT EXISTS keeps this self-contained if it is ever reached

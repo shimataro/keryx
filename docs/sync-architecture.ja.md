@@ -123,7 +123,7 @@ Depth 1 の `PROPFIND`。既にたどったページ指定（カーソル、ペ�
 | `ks_search_pending(rowid)` | `search_text` の再計算が必要な記事（「FTS5 の扱い」参照） |
 | `ks_search_awaiting_body(id)` | マージが本文なし（軽量行）で挿入した記事。本文が届くまで検索索引に入れない（「FTS5 の扱い」参照） |
 | `ks_feed_folder_raw(feed_id, folder_updated_at, folder_id)` | フィードごとに、`feeds.folder_id` の解決後の値の元になった生のフォルダー版（勝ったファイルが持っていたままのもの）。スタンプがフィードの `folder_updated_at` と等しい間だけ有効（「マージ」参照） |
-| `ks_id_remap(kind, old_id, new_id)` | v2→v3 移行が走らせたタグ/フォルダー id の振り直し（`domain/TagFolderIdRekey.kt`）の記録。`SettingsRepository` が移行後の最初の起動時に `local_settings.json` の同じ id を書き換えた後、表を空にする（[db-schema.ja.md](db-schema.ja.md) 参照） |
+| `ks_id_remap(kind, old_id, new_id)` | v2→v3 移行が走らせたタグ/フォルダー id の振り直し（`domain/TagFolderIdRekey.kt`）の記録。`SettingsRepository` が移行後の最初の起動時に `local_settings.json` の同じ id を書き換える。表は無期限に保持され、v2 で同じ id を持っていた行が移行後に異なる名前由来 id に振り直された端末間でクラウド行を再統合するために `MergeSql` でも使う（[db-schema.ja.md](db-schema.ja.md) 参照） |
 | `feed_fetch_state(feed_id, etag, last_modified, error_count, last_error)` | この端末でのフィードの取得状態——同期しない |
 
 同期対象の 6 テーブルの**トリガー**（`AFTER INSERT` / `AFTER UPDATE`）が `sync_outbox` に追記する。条件は
@@ -577,6 +577,12 @@ SQLDelight コードの `getLong` がそれを読むときに例外を投げ、�
   マージ後は 1 行であり、名前は `name_updated_at` で決まる——名前を作った端末は、それがリネーム後の名前に変わるのを
   見ることがある（片方の端末で「Work」を「Job」にリネーム、もう片方で「Work」を作成: どの端末でも「Job」という
   1 つのタグになる）。
+- **v2 id の差分同期以前ファイル用の再統合。** 差分同期以前のマージ（`keryx.db.gz` だけに使う `DatabaseMerger.merge`）では
+  `MergeSql.allWithReconciliation` を実行する。フィールドごとのタグ/フォルダーマージの前に、v2 で同じ id を持ちながら
+  移行後に異なる名前由来 id に振り直された cloud 行を、両端末が `ks_id_remap` に残している v2→v3 の `old_id → new_id`
+  対応を使って再統合する。main の id でプレースホルダー行を挿入し、子の参照（`feed_tags.tag_id`、`feeds.folder_id`）を
+  付け替え、`ks_id_remap` を更新してから古い cloud 行を削除する。これにより、移行の前にリネームされたタグやフォルダーが、
+  差分同期以前のファイルをマージする際に 2 つの identity に分かれるのを防ぐ。
 - articles は 3 つのグループ:
   - **本文** — `content`・`summary`・`title`・`url`・`author`・`published_at`・`thumbnail_url`（と、ローカルの
     マージが既存の行では書き換えない `feed_id` / `guid`）で、スタンプは `body_updated_at`。スタンプを比べる前に、

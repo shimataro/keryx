@@ -230,7 +230,7 @@
 | `ks_search_pending` | `rowid`(PK) — `search_text` の再計算が必要な記事 |
 | `ks_search_awaiting_body` | `id`(PK) — マージが本文なし（軽量行）で挿入した記事。本文が届くか、日次 rebuild が索引するまで検索索引に入れない |
 | `ks_feed_folder_raw` | `feed_id`(PK), `folder_updated_at`, `folder_id` — フィードごとに、`feeds.folder_id` の解決後の値の元になった生のフォルダー版（勝った同期ファイルが持っていたままのもの）。マージが生の値どうしで順位を比べるためのもの。`folder_updated_at` がフィード自身の値と等しい間だけ有効 |
-| `ks_id_remap` | `kind` + `old_id`（複合 PK）, `new_id` — v2→v3 移行が走らせたタグ/フォルダー id の振り直し（`domain/TagFolderIdRekey.kt`）の記録: 旧ランダム id と、それが変わった名前由来の id。`SettingsRepository` が移行後の最初の起動時に `local_settings.json` の同じ id（`lastFilter`、`collapsedFolderIds`、`expandedTagIds`）を書き換えた後、表を空にする。この移行だけが書き込む。新規作成 DB では常に空 |
+| `ks_id_remap` | `kind` + `old_id`（複合 PK）, `new_id` — v2→v3 移行が走らせたタグ/フォルダー id の振り直し（`domain/TagFolderIdRekey.kt`）の記録: 旧ランダム id と、それが変わった名前由来の id。`SettingsRepository` は移行後の最初の起動時に `local_settings.json` の同じ id（`lastFilter`、`collapsedFolderIds`、`expandedTagIds`）を書き換える。移行の前にリネームされた事前アップグレード行を `MergeSql` が再統合できるよう、表は無期限に保持する。この移行だけが書き込む。新規作成 DB では常に空 |
 
 これらも、`sync_state`、`feed_fetch_state`、`articles_fts` も、端末の外に出ることは決してない: 差分ファイルと
 ベースは同期対象のテーブルだけから作る（[sync-architecture.ja.md](sync-architecture.ja.md) 参照）。

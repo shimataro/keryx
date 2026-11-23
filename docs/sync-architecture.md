@@ -128,7 +128,7 @@ extend).
 | `ks_search_pending(rowid)` | Articles whose `search_text` must be recomputed (see "FTS5 Handling") |
 | `ks_search_awaiting_body(id)` | Articles a merge inserted without a body (a light row), kept out of the search index until one arrives (see "FTS5 Handling") |
 | `ks_feed_folder_raw(feed_id, folder_updated_at, folder_id)` | Per feed, the raw folder version (as the winning file carried it) that `feeds.folder_id`'s resolved value came from; valid only while its stamp equals the feed's `folder_updated_at` (see "Merge") |
-| `ks_id_remap(kind, old_id, new_id)` | The tag/folder id re-key the v2→v3 migration ran (`domain/TagFolderIdRekey.kt`), so `SettingsRepository` rewrites the same ids in `local_settings.json` once at startup and then clears the table (see [db-schema.md](db-schema.md)) |
+| `ks_id_remap(kind, old_id, new_id)` | The tag/folder id re-key the v2→v3 migration ran (`domain/TagFolderIdRekey.kt`), so `SettingsRepository` rewrites the same ids in `local_settings.json` once at startup. The table is kept indefinitely and is also used by `MergeSql` to reconcile pre-upgrade rows that shared a v2 id but were re-keyed to different name-derived ids on different devices (see [db-schema.md](db-schema.md)) |
 | `feed_fetch_state(feed_id, etag, last_modified, error_count, last_error)` | A feed's fetch state on this device — never synced |
 
 **Triggers** on the six synced tables append to `sync_outbox` (`AFTER INSERT` / `AFTER UPDATE`), guarded by
@@ -561,6 +561,13 @@ Merge SQL (`MergeSql`) key points:
   created afresh on another before the first sync are ONE row after the merge, and the name is decided by
   `name_updated_at` — so the creator of the name may see it change to the rename ("Work" renamed to "Job" on one
   device, "Work" created on another: one tag named "Job" everywhere).
+- **Pre-delta reconciliation of v2 ids.** The pre-delta merge (`DatabaseMerger.merge`, used only for `keryx.db.gz`)
+  runs `MergeSql.allWithReconciliation`. Before the per-field tag/folder merge, it rewrites any cloud rows that
+  came from the same v2 id as a main row but were re-keyed to a different name-derived id, using the v2→v3
+  `old_id → new_id` mapping both sides kept in `ks_id_remap`. A placeholder row is inserted under main's id, child
+  references (`feed_tags.tag_id`, `feeds.folder_id`) are moved, `ks_id_remap` is updated, and the old cloud row is
+  deleted. This keeps a tag or folder that was renamed before the migration from splitting into two identities when
+  the pre-delta file is merged.
 - articles, three groups:
   - **Body** — `content`, `summary`, `title`, `url`, `author`, `published_at`, `thumbnail_url` (and `feed_id` /
     `guid`, which the local merge never rewrites on an existing row), stamped by `body_updated_at`. A version with

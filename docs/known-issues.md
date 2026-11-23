@@ -557,31 +557,6 @@ snapshot of the local database — carries only the resolved id, which the recei
 Re-resolving the feed's folder under the final folder state, in a way that stays order-independent across a
 folder's deletion and revival — a rule that does not depend on which file arrived last.
 
-## A tag or folder shared by id in v2 can split into two rows after the v2→v3 migration
-
-**Status**: not fixed — closing it needs old-id reconciliation during the v2→v3 migration window,
-a redesign outside the scope of the change that found it (see "What a real fix would need"). It can
-leave a tag or folder's feed links pointing at two different identities.
-
-A tag or folder in v2 has a random UUIDv4 id. Two devices that synced the same row share that id.
-If one device renames the row and the rename has not propagated to the other device before both
-devices upgrade to schema 3, each device derives the new id from the row's current name. The two
-derived ids are different, and the id-only merge that follows keeps both rows. Feeds tagged with
-(or assigned to) that identity on the two devices end up linked to two different rows.
-
-### Workaround
-
-Complete a sync before upgrading every device to schema 3, so the rename reaches every device while
-they still share the v2 id. If the split has already happened, reset cloud data: every device
-rejoins from its local base and converges on one id per current name.
-
-### What a real fix would need
-
-During the migration window, preserve the v2→v3 `old_id → new_id` mapping and use it during merge
-to reconcile cloud rows that came from the same v2 id, rewriting their ids (and the ids in
-`feed_tags`, `feeds`, and `ks_feed_folder_raw`) to the same canonical id before the per-field LWW
-merge runs.
-
 ## Google Drive: an upload can overwrite another device's upload unnoticed
 
 **Status**: not fixed — external (Google Drive API) limitation: Drive offers no conditional content

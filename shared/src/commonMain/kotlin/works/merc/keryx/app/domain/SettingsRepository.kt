@@ -90,10 +90,11 @@ class SettingsRepository(
     /**
      * Applies the v2->v3 migration's tag/folder id re-key (`ks_id_remap`, written by
      * [rekeyTagAndFolderIds]) to the three local-settings fields that hold tag or folder ids, then
-     * clears the table. Runs synchronously in construction, before anything reads [localSettings] —
-     * otherwise a restored selection or collapsed state would reference an id that no longer
-     * exists. Idempotent: an id not in the map (already re-keyed, or not a tag/folder id) passes
-     * through, so a second application is a no-op and the remap rows are only dropped afterwards.
+     * persists the result synchronously. Runs synchronously in construction, before anything reads
+     * [localSettings] — otherwise a restored selection or collapsed state would reference an id that
+     * no longer exists. Idempotent: an id not in the map (already re-keyed, or not a tag/folder id)
+     * passes through, so a second application is a no-op. The remap table is kept: it is also used
+     * by [MergeSql] to reconcile pre-upgrade rows that were renamed before the migration.
      */
     private fun remapTagAndFolderIdsInLocalSettings() {
         val remaps = db.sync_bookkeepingQueries.idRemapAll().executeAsList()
@@ -114,7 +115,6 @@ class SettingsRepository(
             )
         }
         store.save(_localSettings.value)
-        db.sync_bookkeepingQueries.clearIdRemap()
     }
     // --- Global (synced) settings ---
 

@@ -65,6 +65,90 @@ object MergeSql {
         "updated_at", "created_at", "deleted_at", "deleted_updated_at", "body_updated_at",
     )
 
+    // ---- v2→v3 re-key reconciliation: rows sharing a pre-upgrade id keep one identity ----
+
+    /**
+     * Two devices that synced the same v2 tag/folder share its random id. If one renames it and the
+     * rename has not propagated before both devices upgrade to v3, each device derives a different
+     * name-derived id for that pre-upgrade row. The id-only merge would keep both rows; these
+     * statements reconcile them first by rewriting the cloud row's id (and the ids that reference it)
+     * to match main's id, so the per-field LWW merge treats them as one row.
+     *
+     * The remap tables are populated by `rekeyTagAndFolderIds` during the v2→v3 migration and kept
+     * in main (SettingsRepository no longer clears them). A cloud file migrated by DatabaseMerger
+     * also populates its own `ks_id_remap`, so old ids can be matched across the two databases.
+     *
+     * Steps (FK-safe with foreign keys enforced):
+     * 1. Build a temp mapping `cloud.new_id -> main.new_id` from matching `ks_id_remap` rows.
+     * 2. Insert placeholder rows into `cloud.tags` / `cloud.folders` under main's id.
+     * 3. Update child references (`feed_tags.tag_id`, `feeds.folder_id`, `ks_feed_folder_raw.folder_id`).
+     * 4. Update `cloud.ks_id_remap` so later reconciliation steps see the canonical id.
+     * 5. Delete the old cloud rows.
+     *
+     * A v2 database enforces UNIQUE(name), so no two rows in one v2 database can derive the same id;
+     * therefore the target main id never already exists in the cloud table being reconciled, and the
+     * placeholder insert cannot conflict. (A v3-created row with the same name falls back to a random
+     * id when the derived id is already taken, so it does not collide either.)
+     */
+    private val reconcileFolders: List<String> = listOf(
+        "CREATE TABLE IF NOT EXISTS cloud.ks_id_remap (kind TEXT NOT NULL, old_id TEXT NOT NULL, new_id TEXT NOT NULL, PRIMARY KEY (kind, old_id))",
+        "CREATE TEMP TABLE IF NOT EXISTS ks_folder_reconcile (cloud_id TEXT PRIMARY KEY, main_id TEXT NOT NULL)",
+        "DELETE FROM ks_folder_reconcile",
+        """
+        INSERT INTO ks_folder_reconcile
+        SELECT ckr.new_id, mkr.new_id
+        FROM cloud.ks_id_remap ckr
+        JOIN main.ks_id_remap mkr ON ckr.old_id = mkr.old_id AND ckr.kind = '$ID_REMAP_KIND_FOLDER'
+        WHERE ckr.new_id != mkr.new_id
+        """.trimIndent(),
+        """
+        INSERT INTO cloud.folders (${FOLDER_COLUMNS.joinToString(", ")})
+        SELECT r.main_id, ${FOLDER_COLUMNS.drop(1).joinToString(", ") { "f.$it" }}
+        FROM cloud.folders f
+        JOIN ks_folder_reconcile r ON r.cloud_id = f.id
+        """.trimIndent(),
+        """
+        UPDATE cloud.feeds
+        SET folder_id = (SELECT main_id FROM ks_folder_reconcile WHERE cloud_id = folder_id)
+        WHERE folder_id IN (SELECT cloud_id FROM ks_folder_reconcile)
+        """.trimIndent(),
+        """
+        UPDATE cloud.ks_id_remap
+        SET new_id = (SELECT main_id FROM ks_folder_reconcile WHERE cloud_id = new_id)
+        WHERE kind = '$ID_REMAP_KIND_FOLDER' AND new_id IN (SELECT cloud_id FROM ks_folder_reconcile)
+        """.trimIndent(),
+        "DELETE FROM cloud.folders WHERE id IN (SELECT cloud_id FROM ks_folder_reconcile)",
+    )
+
+    private val reconcileTags: List<String> = listOf(
+        "CREATE TEMP TABLE IF NOT EXISTS ks_tag_reconcile (cloud_id TEXT PRIMARY KEY, main_id TEXT NOT NULL)",
+        "DELETE FROM ks_tag_reconcile",
+        """
+        INSERT INTO ks_tag_reconcile
+        SELECT ckr.new_id, mkr.new_id
+        FROM cloud.ks_id_remap ckr
+        JOIN main.ks_id_remap mkr ON ckr.old_id = mkr.old_id AND ckr.kind = '$ID_REMAP_KIND_TAG'
+        WHERE ckr.new_id != mkr.new_id
+        """.trimIndent(),
+        """
+        INSERT INTO cloud.tags (${TAG_COLUMNS.joinToString(", ")})
+        SELECT r.main_id, ${TAG_COLUMNS.drop(1).joinToString(", ") { "t.$it" }}
+        FROM cloud.tags t
+        JOIN ks_tag_reconcile r ON r.cloud_id = t.id
+        """.trimIndent(),
+        """
+        UPDATE cloud.feed_tags
+        SET tag_id = (SELECT main_id FROM ks_tag_reconcile WHERE cloud_id = tag_id)
+        WHERE tag_id IN (SELECT cloud_id FROM ks_tag_reconcile)
+        """.trimIndent(),
+        """
+        UPDATE cloud.ks_id_remap
+        SET new_id = (SELECT main_id FROM ks_tag_reconcile WHERE cloud_id = new_id)
+        WHERE kind = '$ID_REMAP_KIND_TAG' AND new_id IN (SELECT cloud_id FROM ks_tag_reconcile)
+        """.trimIndent(),
+        "DELETE FROM cloud.tags WHERE id IN (SELECT cloud_id FROM ks_tag_reconcile)",
+    )
+
     // ---- tags / folders: per-field last-write-wins, matched by id ----
 
     /**
@@ -379,14 +463,25 @@ object MergeSql {
     """.trimIndent()
 
     /**
+     * The merge statements for delta/base transport files. Transport files contain only the six
+     * synced tables plus metadata, so this list does not reference device-local tables such as
+     * `ks_id_remap`.
+     *
      * Applied in FK-safe order (parents before children): folders, feeds, the folder merge's three
-     * statements and the other three `mergeFeed*`,
-     * tags, articles (with the `ks_search_pending` / `ks_search_awaiting_body` registrations around it), feed_tags,
-     * global_settings.
+     * statements and the other three `mergeFeed*`, tags, articles (with the `ks_search_pending` /
+     * `ks_search_awaiting_body` registrations around it), feed_tags, global_settings.
      */
     val all: List<String> = folders + listOf(
         feeds, normalizeFeedFolderRaw, mergeFeedFolderId, recordFeedFolderRaw, mergeFeedSortOrder, mergeFeedCustomTitle, mergeFeedDeletedAt,
     ) + tags + listOf(
         registerChangedBodies, registerAwaitingBodies, articles, registerNewBodies, feedTags, globalSettings,
     )
+
+    /**
+     * The merge statements for the pre-delta `keryx.db.gz` format. A pre-delta file is first
+     * migrated to the app's full schema, which creates `ks_id_remap`; these statements run the same
+     * merge as [all] but prepend reconciliation so that rows which shared a v2 id but were re-keyed
+     * to different name-derived ids on different devices are rewritten to a single id first.
+     */
+    val allWithReconciliation: List<String> = reconcileFolders + reconcileTags + all
 }
