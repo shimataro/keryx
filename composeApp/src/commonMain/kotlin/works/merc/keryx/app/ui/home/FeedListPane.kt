@@ -175,6 +175,8 @@ internal fun FeedListPane(
     val tags by vm.tags.collectAsState()
     val feedTagMap by vm.feedTagMap.collectAsState()
     val folders by vm.folders.collectAsState()
+    val tagOrdinals by vm.tagOrdinals.collectAsState()
+    val folderOrdinals by vm.folderOrdinals.collectAsState()
     val unreadByFeed by vm.unreadByFeed.collectAsState()
     val unreadByTag by vm.unreadByTag.collectAsState()
     val unreadByFolder by vm.unreadByFolder.collectAsState()
@@ -348,6 +350,11 @@ internal fun FeedListPane(
     val onDragHaptic: (HapticFeedbackType) -> Unit =
         if (isTouchPrimary) { type -> haptics.performHapticFeedback(type) } else { _ -> }
 
+    // The drag ghost's folder labels, with each folder's ordinal applied — resolved in composition
+    // because the controller's titleOf runs at drag time, outside it, where the @Composable
+    // formatter cannot be called (same reason FeedRow pre-resolves its submenu labels). Feed
+    // titles carry no ordinal.
+    val folderDisplayNames = folders.associate { it.id to nameWithOrdinal(it.name, folderOrdinals[it.id]) }
     val dragController = rememberFeedListDragController(
         vm = vm,
         listState = listState,
@@ -363,7 +370,7 @@ internal fun FeedListPane(
     ) { key ->
         when (key) {
             is FeedListDragSourceKey.Feed -> feeds.find { it.id == key.feedId }?.displayTitle().orEmpty()
-            is FeedListDragSourceKey.Folder -> folders.find { it.id == key.folderId }?.name.orEmpty()
+            is FeedListDragSourceKey.Folder -> folderDisplayNames[key.folderId].orEmpty()
         }
     }
 
@@ -588,6 +595,8 @@ internal fun FeedListPane(
                             attachedTagIds = feedTagMap[feed.id] ?: emptySet(),
                             onToggleFeedTag = { tagId, attached -> vm.setFeedTag(feed.id, tagId, attached) },
                             folders = folders,
+                            tagOrdinals = tagOrdinals,
+                            folderOrdinals = folderOrdinals,
                             onMoveFeedToFolder = { moveFolderId -> vm.moveFeed(feed.id, moveFolderId) },
                             onUnsubscribe = { confirmingUnsubscribeFeed = feed },
                             onCopyFeedUrl = { copyUrl(feed.url) },
@@ -685,6 +694,7 @@ internal fun FeedListPane(
                             item(key = folderRowKey(folder.id), contentType = "folder-header") {
                                 FolderGroupHeader(
                                     folder = folder,
+                                    ordinal = folderOrdinals[folder.id],
                                     count = unreadByFolder[folder.id] ?: 0L,
                                     refreshing = folder.id in refreshingFolderIds,
                                     collapsed = collapsed,
@@ -742,6 +752,7 @@ internal fun FeedListPane(
                         item(key = tagRowKey(tag.id), contentType = "tag") {
                             TagRow(
                                 tag = tag,
+                                ordinal = tagOrdinals[tag.id],
                                 count = unreadByTag[tag.id] ?: 0L,
                                 expanded = tag.id in expandedTagIds,
                                 selected = filter == ArticleFilter.Tag(tag.id),
@@ -805,6 +816,8 @@ internal fun FeedListPane(
         vm = vm,
         tags = tags,
         folders = folders,
+        tagOrdinals = tagOrdinals,
+        folderOrdinals = folderOrdinals,
         showAddTag = showAddTag,
         onShowAddTagChange = { showAddTag = it },
         confirmingDeleteTag = confirmingDeleteTag,

@@ -254,23 +254,23 @@ class FeedListModelTest {
         val tags = listOf(tag("t1"))
 
         assertEquals(
-            "All",
+            OrdinalName("All"),
             articleListTitle(ArticleFilter.All, feeds, folders, tags, "All", "Starred"),
         )
         assertEquals(
-            "Starred",
+            OrdinalName("Starred"),
             articleListTitle(ArticleFilter.Starred, feeds, folders, tags, "All", "Starred"),
         )
         assertEquals(
-            "Feed f1",
+            OrdinalName("Feed f1"),
             articleListTitle(ArticleFilter.Feed("f1"), feeds, folders, tags, "All", "Starred"),
         )
         assertEquals(
-            "Folder d1",
+            OrdinalName("Folder d1"),
             articleListTitle(ArticleFilter.Folder("d1"), feeds, folders, tags, "All", "Starred"),
         )
         assertEquals(
-            "Tag t1",
+            OrdinalName("Tag t1"),
             articleListTitle(ArticleFilter.Tag("t1"), feeds, folders, tags, "All", "Starred"),
         )
     }
@@ -278,16 +278,57 @@ class FeedListModelTest {
     @Test
     fun articleListTitleFallsBackToAllLabelForAMissingFeedTagOrFolder() {
         assertEquals(
-            "All",
+            OrdinalName("All"),
             articleListTitle(ArticleFilter.Feed("gone"), emptyList(), emptyList(), emptyList(), "All", "Starred"),
         )
         assertEquals(
-            "All",
+            OrdinalName("All"),
             articleListTitle(ArticleFilter.Folder("gone"), emptyList(), emptyList(), emptyList(), "All", "Starred"),
         )
         assertEquals(
-            "All",
+            OrdinalName("All"),
             articleListTitle(ArticleFilter.Tag("gone"), emptyList(), emptyList(), emptyList(), "All", "Starred"),
+        )
+    }
+
+    @Test
+    fun articleListTitleResolvesTheSelectedTagOrFolderTogetherWithItsOrdinal() {
+        // Two tags and two folders named "Work", created 5 then 9 — the ordinals tagOrdinals/
+        // folderOrdinals would hand the UI, keyed by row id. Note the DB rejects a second
+        // same-named row today; this is the contract the display relies on once it no longer does
+        // (external-spec §7).
+        val tags = listOf(ordinalTag("t1", "Work", 5), ordinalTag("t2", "Work", 9))
+        val folders = listOf(ordinalFolder("d1", "Work", 5), ordinalFolder("d2", "Work", 9))
+        val feeds = emptyList<Feeds>()
+
+        assertEquals(
+            OrdinalName("Work"),
+            articleListTitle(
+                ArticleFilter.Tag("t1"), feeds, folders, tags, "All", "Starred",
+                folderOrdinals = folderOrdinals(folders), tagOrdinals = tagOrdinals(tags),
+            ),
+        )
+        assertEquals(
+            OrdinalName("Work", ordinal = 2),
+            articleListTitle(
+                ArticleFilter.Tag("t2"), feeds, folders, tags, "All", "Starred",
+                folderOrdinals = folderOrdinals(folders), tagOrdinals = tagOrdinals(tags),
+            ),
+        )
+        assertEquals(
+            OrdinalName("Work", ordinal = 2),
+            articleListTitle(
+                ArticleFilter.Folder("d2"), feeds, folders, tags, "All", "Starred",
+                folderOrdinals = folderOrdinals(folders), tagOrdinals = tagOrdinals(tags),
+            ),
+        )
+        // A missing row still falls back to the All label, with no ordinal to format.
+        assertEquals(
+            OrdinalName("All"),
+            articleListTitle(
+                ArticleFilter.Tag("gone"), feeds, folders, tags, "All", "Starred",
+                folderOrdinals = folderOrdinals(folders), tagOrdinals = tagOrdinals(tags),
+            ),
         )
     }
 
@@ -580,6 +621,9 @@ private fun tag(id: String): Tags = Tags(
     sort_order_updated_at = null,
 )
 
+/** A tag with its own name and creation time, for the same-name ordinal tests. */
+private fun ordinalTag(id: String, name: String, createdAt: Long): Tags = tag(id).copy(name = name, created_at = createdAt)
+
 private fun folder(id: String): Folders = Folders(
     id = id,
     name = "Folder $id",
@@ -590,6 +634,9 @@ private fun folder(id: String): Folders = Folders(
     name_updated_at = null,
     sort_order_updated_at = null,
 )
+
+/** A folder with its own name and creation time, for the same-name ordinal tests. */
+private fun ordinalFolder(id: String, name: String, createdAt: Long): Folders = folder(id).copy(name = name, created_at = createdAt)
 
 private fun feed(id: String, folderId: String? = null, sortOrder: Long = 0L): Feeds = Feeds(
     id = id,

@@ -197,15 +197,20 @@ fun ArticleListPane(
     val feeds by vm.structuralFeeds.collectAsState()
     val folders by vm.folders.collectAsState()
     val tags by vm.tags.collectAsState()
+    val tagOrdinals by vm.tagOrdinals.collectAsState()
+    val folderOrdinals by vm.folderOrdinals.collectAsState()
     val title = onOpenDrawer?.let {
-        articleListTitle(
+        val resolved = articleListTitle(
             filter = filter,
             feeds = feeds,
             folders = folders,
             tags = tags,
             allLabel = stringResource(Res.string.home_all_feeds),
             starredLabel = stringResource(Res.string.home_starred),
+            folderOrdinals = folderOrdinals,
+            tagOrdinals = tagOrdinals,
         )
+        nameWithOrdinal(resolved.name, resolved.ordinal)
     }
     val feedTitles = remember(feeds) { feeds.associate { it.id to it.displayTitle() } }
     val feedFavicons = remember(feeds) { feeds.associate { it.id to it.favicon_url } }

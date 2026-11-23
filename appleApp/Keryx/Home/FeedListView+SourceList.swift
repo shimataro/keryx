@@ -178,7 +178,8 @@ extension FeedListView {
         } label: {
             SidebarSourceListRow(
                 home: home,
-                content: sidebar.folderContents[folder.id] ?? SidebarRowStaticContent(title: folder.name, icon: .symbol("folder")),
+                content: sidebar.folderContents[folder.id]
+                    ?? SidebarRowStaticContent(title: nameWithOrdinal(folder.name, home.folderOrdinals[folder.id]), icon: .symbol("folder")),
                 unread: .folder(folder.id),
                 highlight: highlight(for: instance),
                 editor: folderRenameEditor(folder)
@@ -232,7 +233,8 @@ extension FeedListView {
                 home: home,
                 dialogs: dialogs,
                 tag: tag,
-                content: sidebar.tagContents[tag.id] ?? SidebarRowStaticContent(title: tag.name, icon: .tagColor(hex: tag.color)),
+                content: sidebar.tagContents[tag.id]
+                    ?? SidebarRowStaticContent(title: nameWithOrdinal(tag.name, home.tagOrdinals[tag.id]), icon: .tagColor(hex: tag.color)),
                 selection: selection,
                 editor: tagRenameEditor(tag),
                 appearedRowKeys: $appearedRowKeys,
@@ -277,7 +279,7 @@ extension FeedListView {
             Button(L("home_refresh")) { home.refreshFeed(feed) }
             Menu(L("home_assign_tags")) {
                 ForEach(sortedTags, id: \.id) { tag in
-                    Toggle(tag.name, isOn: Binding(
+                    Toggle(nameWithOrdinal(tag.name, home.tagOrdinals[tag.id]), isOn: Binding(
                         get: { home.feedTagMap[feed.id]?.contains(tag.id) ?? false },
                         set: { attached in home.viewModel.setFeedTag(feedId: feed.id, tagId: tag.id, attached: attached) }
                     ))
@@ -290,7 +292,7 @@ extension FeedListView {
                     set: { _ in home.viewModel.moveFeed(feedId: feed.id, folderId: nil, targetFeedId: nil) }
                 ))
                 ForEach(sortedFolders, id: \.id) { folder in
-                    Toggle(folder.name, isOn: Binding(
+                    Toggle(nameWithOrdinal(folder.name, home.folderOrdinals[folder.id]), isOn: Binding(
                         get: { feed.folder_id == folder.id },
                         set: { _ in home.viewModel.moveFeed(feedId: feed.id, folderId: folder.id, targetFeedId: nil) }
                     ))

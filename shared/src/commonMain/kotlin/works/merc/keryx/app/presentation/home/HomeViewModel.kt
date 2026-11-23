@@ -185,6 +185,21 @@ class HomeViewModel(
     val unreadByFolder: StateFlow<Map<String, Long>> =
         articleRepository.watchUnreadCountsByFolder().stateIn(viewModelScope, started, emptyMap())
 
+    /**
+     * Each live tag's ordinal among the tags sharing its name — [tagOrdinals] over [tags], keyed
+     * by tag id — so both UIs render two same-named tags as "X" and "X (2)". Only the second and
+     * later of a name have an entry; a tag absent from the map displays its bare name.
+     */
+    val tagOrdinals: StateFlow<Map<String, Int>> =
+        tags.map { tagOrdinals(it) }.stateIn(viewModelScope, started, emptyMap())
+
+    /**
+     * Each live folder's ordinal among the folders sharing its name — the folder counterpart of
+     * [tagOrdinals], keyed by folder id.
+     */
+    val folderOrdinals: StateFlow<Map<String, Int>> =
+        folders.map { folderOrdinals(it) }.stateIn(viewModelScope, started, emptyMap())
+
     val totalUnread: StateFlow<Long> =
         articleRepository.watchUnreadCount().stateIn(viewModelScope, started, 0L)
 

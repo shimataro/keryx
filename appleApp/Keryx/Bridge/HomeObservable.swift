@@ -47,6 +47,12 @@ final class HomeObservable: ObservableAssignment {
     private(set) var subscribedFeedUrls: Set<String> = []
     private(set) var tags: [Tags] = []
     private(set) var folders: [Folders] = []
+    /// Each live tag's ordinal among the tags sharing its name, by tag id (`HomeViewModel.tagOrdinals`
+    /// — `NameOrdinals.kt` in `:shared` decides it) — what `nameWithOrdinal` renders as "X (2)".
+    /// Drives `sidebar` (the rows' titles), the context menus and the menu bar.
+    private(set) var tagOrdinals: [String: Int32] = [:]
+    /// The folder counterpart of `tagOrdinals`, by folder id.
+    private(set) var folderOrdinals: [String: Int32] = [:]
     private(set) var feedTagMap: [String: Set<String>] = [:]
     /// `HomeViewModel.feedFetchProblems` — why a feed row is flagged, by feed id; part of `sidebar`.
     @ObservationIgnored private var feedFetchProblems: [String: FeedFetchProblem] = [:]
@@ -357,6 +363,8 @@ final class HomeObservable: ObservableAssignment {
         async let t1b: () = observeStructuralFeeds()
         async let t2: () = observeTags()
         async let t3: () = observeFolders()
+        async let t3b: () = observeTagOrdinals()
+        async let t3c: () = observeFolderOrdinals()
         async let t4: () = observeFeedTagMap()
         async let t4b: () = observeFeedFetchProblems()
         async let t5: () = observeUnreadByFeed()
@@ -399,7 +407,7 @@ final class HomeObservable: ObservableAssignment {
         async let t36: () = observeManualRefreshStatus()
         #endif
         _ = await (
-            t1, t1b, t2, t3, t4, t5, t6, t7, t8, t9, t10,
+            t1, t1b, t2, t3, t3b, t3c, t4, t5, t6, t7, t8, t9, t10,
             t11, t12, t13, t14, t15, t16, t17, t18, t19, t20,
             t21, t22, t23, t24, t25, t25b, t25c, t26, t27, t28, t29, t30,
             t31, t32, t33, t34, t35, t37, t38, t39, t4b
@@ -443,6 +451,18 @@ final class HomeObservable: ObservableAssignment {
     private func observeFolders() async {
         for await v in viewModel.folders {
             if assignIfChanged(\.folders, v) { sidebarRebuild?.markDirty() }
+        }
+    }
+
+    private func observeTagOrdinals() async {
+        for await v in viewModel.tagOrdinals {
+            if assignIfChanged(\.tagOrdinals, v.mapValues { $0.int32Value }) { sidebarRebuild?.markDirty() }
+        }
+    }
+
+    private func observeFolderOrdinals() async {
+        for await v in viewModel.folderOrdinals {
+            if assignIfChanged(\.folderOrdinals, v.mapValues { $0.int32Value }) { sidebarRebuild?.markDirty() }
         }
     }
 
@@ -608,10 +628,21 @@ final class HomeObservable: ObservableAssignment {
     private func updateFeedListSelectionTarget() {
         let target = FeedListModelKt.resolveFeedListSelectionTarget(filter: filter, feeds: structuralFeeds, folders: folders, tags: tags)
         if !kotlinValuesEqual(feedListSelectionTarget as AnyObject?, target as AnyObject?) { feedListSelectionTarget = target }
-        assignIfChanged(\.articleListTitle, FeedListModelKt.articleListTitle(
+        // `articleListTitle` resolves the selected filter's display name together with its ordinal
+        // (`NameOrdinals.kt` decides it); the ordinal maps travel back as Kotlin values for the
+        // call, since the observable copies are native (see `observeTagOrdinals`).
+        let resolved = FeedListModelKt.articleListTitle(
             filter: filter, feeds: structuralFeeds, folders: folders, tags: tags,
-            allLabel: L("home_all_feeds"), starredLabel: L("home_starred")
-        ))
+            allLabel: L("home_all_feeds"), starredLabel: L("home_starred"),
+            folderOrdinals: kotlinOrdinals(folderOrdinals), tagOrdinals: kotlinOrdinals(tagOrdinals)
+        )
+        assignIfChanged(\.articleListTitle, nameWithOrdinal(resolved.name, resolved.ordinal?.int32Value))
+    }
+
+    /// The native ordinal copies as the Kotlin `Map<String, Int>` the shared functions take — see
+    /// `updateFeedListSelectionTarget`.
+    private func kotlinOrdinals(_ ordinals: [String: Int32]) -> [String: KotlinInt] {
+        ordinals.mapValues { KotlinInt(int: $0) }
     }
 
     /// Runs through `sidebarRebuild` only, once per MainActor turn in which any of its inputs changed.
@@ -623,7 +654,9 @@ final class HomeObservable: ObservableAssignment {
             feedTagMap: feedTagMap,
             collapsedFolderIds: collapsedFolderIds,
             expandedTagIds: expandedTagIds,
-            fetchProblems: feedFetchProblems
+            fetchProblems: feedFetchProblems,
+            folderOrdinals: folderOrdinals,
+            tagOrdinals: tagOrdinals
         )
         sidebar = model
         assignIfChanged(\.sortedFolders, model.sortedFolders)

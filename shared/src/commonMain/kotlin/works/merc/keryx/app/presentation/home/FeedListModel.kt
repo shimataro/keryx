@@ -134,6 +134,12 @@ fun feedsForTag(feeds: List<Feeds>, feedTagMap: Map<String, Set<String>>, tagId:
  * `groupFeedsByFolder`'s own defensive "no folder" treatment. The SwiftUI app shows the same
  * title in the iOS article list's heading, at every width (`HomeObservable.articleListTitle`).
  *
+ * Returns the name together with the ordinal [nameOrdinals] gave the selected tag/folder
+ * (via [folderOrdinals]/[tagOrdinals], the [HomeViewModel] flows) — an [OrdinalName] the caller
+ * renders through its UI's one ordinal formatter, since the "name (n)" pattern is localized per
+ * UI. The defaults keep the title ordinal-free for callers with no ordinal maps (all labels,
+ * feeds, and uniquely named tags/folders render identically either way).
+ *
  * Search has no title of its own here — its own query field replaces this title row entirely
  * while it's expanded (see `ArticleListPane`'s own KDoc) — so [filter] alone (never displaced by
  * search) is what this always reflects.
@@ -145,12 +151,16 @@ fun articleListTitle(
     tags: List<Tags>,
     allLabel: String,
     starredLabel: String,
-): String = when (filter) {
-    ArticleFilter.All -> allLabel
-    ArticleFilter.Starred -> starredLabel
-    is ArticleFilter.Feed -> feeds.find { it.id == filter.feedId }?.displayTitle() ?: allLabel
-    is ArticleFilter.Folder -> folders.find { it.id == filter.folderId }?.name ?: allLabel
-    is ArticleFilter.Tag -> tags.find { it.id == filter.tagId }?.name ?: allLabel
+    folderOrdinals: Map<String, Int> = emptyMap(),
+    tagOrdinals: Map<String, Int> = emptyMap(),
+): OrdinalName = when (filter) {
+    ArticleFilter.All -> OrdinalName(allLabel)
+    ArticleFilter.Starred -> OrdinalName(starredLabel)
+    is ArticleFilter.Feed -> OrdinalName(feeds.find { it.id == filter.feedId }?.displayTitle() ?: allLabel)
+    is ArticleFilter.Folder -> folders.find { it.id == filter.folderId }
+        ?.let { OrdinalName(it.name, folderOrdinals[it.id]) } ?: OrdinalName(allLabel)
+    is ArticleFilter.Tag -> tags.find { it.id == filter.tagId }
+        ?.let { OrdinalName(it.name, tagOrdinals[it.id]) } ?: OrdinalName(allLabel)
 }
 
 /**

@@ -196,12 +196,20 @@ internal data class AppMenuActions(
  * The selected feed's dynamic submenu data for the Feed menu's Tags/Move-to-folder items. Empty
  * lists / a `null` [currentFolderId] when no feed is meaningfully selected — harmless, since the
  * submenus are disabled via [MenuUiState.feedActionsEnabled] in that case and never opened.
+ *
+ * @param tagDisplayNames Each tag's display name with its ordinal applied
+ *   ([works.merc.keryx.app.ui.home.nameWithOrdinal]), by tag id — resolved by the caller in
+ *   composition, because [buildAppMenuTree] runs outside it and cannot call a composable.
+ *   A missing id falls back to the tag's own name.
+ * @param folderDisplayNames The same for the folders.
  */
 internal data class SelectedFeedMenuData(
     val tags: List<Tags>,
     val attachedTagIds: Set<String>,
     val folders: List<Folders>,
     val currentFolderId: String?,
+    val tagDisplayNames: Map<String, String> = emptyMap(),
+    val folderDisplayNames: Map<String, String> = emptyMap(),
 )
 
 /**
@@ -318,7 +326,7 @@ internal fun buildAppMenuTree(
             enabled = ui.feedActionsEnabled,
             items = selectedFeedMenu.tags.map { tag ->
                 AppMenuNode.CheckboxItem(
-                    label = tag.name,
+                    label = selectedFeedMenu.tagDisplayNames[tag.id] ?: tag.name,
                     enabled = true,
                     checked = tag.id in selectedFeedMenu.attachedTagIds,
                     onCheckedChange = { attached -> actions.toggleFeedTag(tag.id, attached) },
@@ -340,7 +348,7 @@ internal fun buildAppMenuTree(
                 selectedFeedMenu.folders.forEach { folder ->
                     add(
                         AppMenuNode.CheckboxItem(
-                            label = folder.name,
+                            label = selectedFeedMenu.folderDisplayNames[folder.id] ?: folder.name,
                             enabled = true,
                             checked = selectedFeedMenu.currentFolderId == folder.id,
                             onCheckedChange = { actions.moveFeedToFolder(folder.id) },

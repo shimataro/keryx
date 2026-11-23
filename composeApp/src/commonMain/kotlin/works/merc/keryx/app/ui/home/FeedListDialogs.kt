@@ -40,12 +40,18 @@ import works.merc.keryx.app.ui.common.KeryxConfirmDialog
  *
  * @param tags The tags used for duplicate-name validation.
  * @param folders The folders used for duplicate-name validation.
+ * @param tagOrdinals Each tag's ordinal among the tags sharing its name, by tag id
+ *   ([works.merc.keryx.app.presentation.home.tagOrdinals]) — numbers the tag a delete
+ *   confirmation names, so it says which of several same-named tags is meant.
+ * @param folderOrdinals Each folder's ordinal among the folders sharing its name, by folder id.
  */
 @Composable
 internal fun FeedListDialogs(
     vm: HomeViewModel,
     tags: List<Tags>,
     folders: List<Folders>,
+    tagOrdinals: Map<String, Int> = emptyMap(),
+    folderOrdinals: Map<String, Int> = emptyMap(),
     showAddTag: Boolean,
     onShowAddTagChange: (Boolean) -> Unit,
     confirmingDeleteTag: Tags?,
@@ -81,7 +87,7 @@ internal fun FeedListDialogs(
     confirmingDeleteTag?.let { tag ->
         KeryxConfirmDialog(
             title = stringResource(Res.string.home_delete_tag_menu),
-            body = stringResource(Res.string.home_delete_tag_confirm, tag.name),
+            body = stringResource(Res.string.home_delete_tag_confirm, nameWithOrdinal(tag.name, tagOrdinals[tag.id])),
             confirmText = stringResource(Res.string.common_delete),
             onConfirm = { vm.deleteTag(tag.id); onConfirmingDeleteTagChange(null) },
             onDismiss = { onConfirmingDeleteTagChange(null) },
@@ -108,7 +114,7 @@ internal fun FeedListDialogs(
     confirmingDeleteFolder?.let { folder ->
         KeryxConfirmDialog(
             title = stringResource(Res.string.home_delete_folder_menu),
-            body = stringResource(Res.string.home_delete_folder_confirm, folder.name),
+            body = stringResource(Res.string.home_delete_folder_confirm, nameWithOrdinal(folder.name, folderOrdinals[folder.id])),
             confirmText = stringResource(Res.string.common_delete),
             onConfirm = { vm.deleteFolder(folder.id); onConfirmingDeleteFolderChange(null) },
             onDismiss = { onConfirmingDeleteFolderChange(null) },

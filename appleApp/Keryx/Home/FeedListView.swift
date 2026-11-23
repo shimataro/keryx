@@ -459,7 +459,7 @@ private struct SidebarDeleteAlerts: ViewModifier {
         // Cancel.
         content
             .confirmationDialog(
-                dialogs.deletingFolder.map { LF("home_delete_folder_confirm", $0.name) } ?? "",
+                dialogs.deletingFolder.map { LF("home_delete_folder_confirm", nameWithOrdinal($0.name, home.folderOrdinals[$0.id])) } ?? "",
                 isPresented: isPresentedBinding($dialogs.deletingFolder),
                 titleVisibility: .visible,
                 presenting: dialogs.deletingFolder
@@ -468,7 +468,7 @@ private struct SidebarDeleteAlerts: ViewModifier {
                 Button(L("common_cancel"), role: .cancel) {}
             }
             .confirmationDialog(
-                dialogs.deletingTag.map { LF("home_delete_tag_confirm", $0.name) } ?? "",
+                dialogs.deletingTag.map { LF("home_delete_tag_confirm", nameWithOrdinal($0.name, home.tagOrdinals[$0.id])) } ?? "",
                 isPresented: isPresentedBinding($dialogs.deletingTag),
                 titleVisibility: .visible,
                 presenting: dialogs.deletingTag
@@ -490,7 +490,7 @@ private struct SidebarDeleteAlerts: ViewModifier {
         #else
         content
             .alert(
-                dialogs.deletingFolder.map { LF("home_delete_folder_confirm", $0.name) } ?? "",
+                dialogs.deletingFolder.map { LF("home_delete_folder_confirm", nameWithOrdinal($0.name, home.folderOrdinals[$0.id])) } ?? "",
                 isPresented: isPresentedBinding($dialogs.deletingFolder),
                 presenting: dialogs.deletingFolder
             ) { folder in
@@ -498,7 +498,7 @@ private struct SidebarDeleteAlerts: ViewModifier {
                 Button(L("common_cancel"), role: .cancel) {}
             }
             .alert(
-                dialogs.deletingTag.map { LF("home_delete_tag_confirm", $0.name) } ?? "",
+                dialogs.deletingTag.map { LF("home_delete_tag_confirm", nameWithOrdinal($0.name, home.tagOrdinals[$0.id])) } ?? "",
                 isPresented: isPresentedBinding($dialogs.deletingTag),
                 presenting: dialogs.deletingTag
             ) { tag in

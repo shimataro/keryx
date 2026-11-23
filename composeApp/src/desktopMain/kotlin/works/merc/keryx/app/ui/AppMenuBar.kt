@@ -72,6 +72,7 @@ import works.merc.keryx.app.resources.menu_view_list_mode_unread
 import works.merc.keryx.app.resources.website_url
 import works.merc.keryx.app.tray.updateMenuEntry
 import works.merc.keryx.app.ui.home.openInBrowserIfAllowed
+import works.merc.keryx.app.ui.home.nameWithOrdinal
 import works.merc.keryx.app.ui.menu.AppMenuActions
 import works.merc.keryx.app.ui.menu.AppMenuLabels
 import works.merc.keryx.app.ui.menu.AppMenuNode
@@ -143,6 +144,8 @@ internal fun FrameWindowScope.AppMenuBar(
     val tags by homeVm.tags.collectAsState()
     val folders by homeVm.folders.collectAsState()
     val feedTagMap by homeVm.feedTagMap.collectAsState()
+    val tagOrdinals by homeVm.tagOrdinals.collectAsState()
+    val folderOrdinals by homeVm.folderOrdinals.collectAsState()
     // Collected here (rather than by main.kt's `application {}`, which deliberately passes the raw
     // flow down to the tray) so a download-progress tick only rebuilds this menu tree. The label is
     // already rounded to 5% steps by `updateMenuEntry` → `roundedTrayProgressPercent`, so the D-Bus
@@ -281,6 +284,10 @@ internal fun FrameWindowScope.AppMenuBar(
         attachedTagIds = selectedFeed?.let { feedTagMap[it.id] }.orEmpty(),
         folders = folders,
         currentFolderId = selectedFeed?.folder_id,
+        // The submenus' labels with each tag/folder's ordinal applied — resolved here, in
+        // composition, because buildAppMenuTree runs outside it (see SelectedFeedMenuData).
+        tagDisplayNames = tags.associate { it.id to nameWithOrdinal(it.name, tagOrdinals[it.id]) },
+        folderDisplayNames = folders.associate { it.id to nameWithOrdinal(it.name, folderOrdinals[it.id]) },
     )
     val tree = buildAppMenuTree(ui, labels, actions, menuBarToggle, selectedFeedMenu, updateEntry)
 

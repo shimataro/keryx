@@ -33,3 +33,14 @@ func LF(_ key: String, _ args: CVarArg...) -> String {
     default: return String(format: format, arguments: args)
     }
 }
+
+/// A tag/folder display name with the ordinal that tells it apart from same-named rows — the one
+/// formatter every display of a tag/folder name in this app goes through (sidebar rows, delete
+/// alerts, context menus, the menu bar, the article list's title), matching Compose's own
+/// `nameWithOrdinal` (`ui/home/NameWithOrdinal.kt`). Which row gets which number is `:shared`'s
+/// decision (`NameOrdinals.kt`); only the localized pattern lives here. A `nil` ordinal (a uniquely
+/// named row, or the first of its name) shows the bare name.
+func nameWithOrdinal(_ name: String, _ ordinal: Int32?) -> String {
+    guard let ordinal else { return name }
+    return LF("name_with_ordinal", name, Int64(ordinal))
+}
