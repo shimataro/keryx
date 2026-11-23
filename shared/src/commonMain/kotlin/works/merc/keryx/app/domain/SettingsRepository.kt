@@ -100,7 +100,7 @@ class SettingsRepository(
         if (remaps.isEmpty()) return
         val tagIds = remaps.filter { it.kind == ID_REMAP_KIND_TAG }.associate { it.old_id to it.new_id }
         val folderIds = remaps.filter { it.kind == ID_REMAP_KIND_FOLDER }.associate { it.old_id to it.new_id }
-        mutateLocalSettings { settings ->
+        _localSettings.update { settings ->
             settings.copy(
                 lastFilter = settings.lastFilter?.let { filter ->
                     when {
@@ -113,6 +113,7 @@ class SettingsRepository(
                 expandedTagIds = settings.expandedTagIds.map { tagIds[it] ?: it }.toSet(),
             )
         }
+        store.save(_localSettings.value)
         db.sync_bookkeepingQueries.clearIdRemap()
     }
     // --- Global (synced) settings ---
