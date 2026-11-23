@@ -1189,7 +1189,8 @@ state into `feed_fetch_state` inside the temporary file only (never into the loc
 `folders` the same way `2.sqm` does (per-field stamps initialized from `updated_at`, `UNIQUE(name)` dropped, the
 children evacuated and restored) and re-keys them onto their name-derived ids (`IdGenerator.tagId` / `folderId`,
 the same `AfterVersion(2)` callback the local migration runs — so its rows meet an already-migrated device under
-the same ids its own rows carry), initializes `articles.body_updated_at` from `updated_at`, and its articles'
+the same ids when their current names match; a row renamed on one device before the cloud file is migrated derives
+a different id and remains a separate row), initializes `articles.body_updated_at` from `updated_at`, and its articles'
 `search_text` is recomputed as for any merge.
 
 Builds older than compression (reading only `/keryx.db`) are unaffected by the stub and keep the one-way divergence
