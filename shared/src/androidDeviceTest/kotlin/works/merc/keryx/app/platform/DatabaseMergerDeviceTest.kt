@@ -4,7 +4,6 @@ import io.requery.android.database.sqlite.SQLiteDatabase
 import works.merc.keryx.app.core.SchemaVersionException
 import works.merc.keryx.app.createSchemaDbFile
 import works.merc.keryx.app.deleteDbFiles
-import works.merc.keryx.app.domain.SnapshotSql
 import java.io.File
 import kotlin.test.AfterTest
 import kotlin.test.Test
@@ -114,8 +113,8 @@ class DatabaseMergerDeviceTest {
         // call has actual work to do, rather than re-creating objects that already exist (which
         // would fail).
         SQLiteDatabase.openOrCreateDatabase(cloudFile.absolutePath, null, NoOpDatabaseErrorHandler).use { db ->
-            SnapshotSql.CAPTURE_TRIGGERS.forEach { db.execSQL("DROP TRIGGER $it") }
-            SnapshotSql.DEVICE_LOCAL_TABLES.filter { it != "sync_state" }.forEach { db.execSQL("DROP TABLE $it") }
+            VERSION_3_TRIGGERS.forEach { db.execSQL("DROP TRIGGER $it") }
+            VERSION_3_TABLES.forEach { db.execSQL("DROP TABLE $it") }
             db.execSQL("ALTER TABLE feeds ADD COLUMN etag TEXT")
             db.execSQL("ALTER TABLE feeds ADD COLUMN last_modified TEXT")
             db.execSQL("ALTER TABLE feeds ADD COLUMN error_count INTEGER NOT NULL DEFAULT 0")
@@ -144,6 +143,20 @@ class DatabaseMergerDeviceTest {
     }
 
     private companion object {
+        /**
+         * The tables `2.sqm` creates (schema version 3), dropped to roll a file back to version 1. A
+         * table added to `2.sqm` must be added here too, or the rolled-back file still holds it and
+         * the migration's `CREATE TABLE` fails.
+         */
+        val VERSION_3_TABLES = listOf(
+            "feed_fetch_state", "sync_outbox", "sync_capture", "sync_merging", "sync_applied", "sync_cursor", "ks_search_pending",
+            "ks_search_awaiting_body", "ks_feed_folder_raw",
+        )
+
+        /** The capture triggers `2.sqm` creates, dropped before the tables they write to. */
+        val VERSION_3_TRIGGERS = listOf("feeds", "articles", "tags", "folders", "feed_tags", "global_settings")
+            .flatMap { listOf("ks_capture_${it}_insert", "ks_capture_${it}_update") }
+
         /** Must stay a version actually registered in [works.merc.keryx.app.domain.MergeSchema.EXPECTED_SCHEMAS]. */
         val SCHEMA_VERSION = works.merc.keryx.app.data.local.db.KeryxDatabase.Schema.version
     }

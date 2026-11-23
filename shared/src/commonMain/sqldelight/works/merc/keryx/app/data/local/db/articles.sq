@@ -124,7 +124,7 @@ SELECT id FROM articles WHERE feed_id IN ? AND deleted_at IS NULL;
 -- refresh upserts and the sync merge both use INSERT ... ON CONFLICT DO UPDATE (never INSERT OR
 -- REPLACE, which would delete and re-insert under a new rowid), rows are only ever soft-deleted
 -- (never physically removed, so a freed max rowid can't be reused), and a plain VACUUM (which may
--- renumber an implicit rowid) only ever runs on the upload snapshot copy, never on the live DB.
+-- renumber an implicit rowid) never runs on the live DB (the full send only reads a VACUUM INTO copy).
 -- articles_fts's content_rowid already depends on the same guarantee.
 maxRowId:
 SELECT COALESCE(MAX(rowid), 0) FROM articles;

@@ -18,7 +18,7 @@
   ネイティブでも実行される（どちらも Xcode のある Mac では `./gradlew build` に含まれ、Linux/Windows ではスキップされる）。
   そのため共通テストで JVM の API を使ってはならない——一時ファイルは `:testing` の `tempFilePath()`/`tempFileWith()`
   （kotlinx-io）を使い、本当に JVM が必要なテストは `desktopTest` に置く。`appleTest/` には Apple の actual でしか確かめられないもの
-  を置く——`AppleDatabaseTest`（システム SQLite 上の NativeSqliteDriver、FTS5 trigram 検索、スナップショット、実際のマージ）、
+  を置く——`AppleDatabaseTest`（システム SQLite 上の NativeSqliteDriver、FTS5 trigram 検索、実際のマージ）、
   `ApplePlatformTest`（gzip、ダイジェスト、ファイル）、`KeryxSdkTest`。`macosTest/` には `KeychainTokenStorageTest` を置く：
   Kotlin/Native は iOS のテストをアプリバンドル外の裸の実行ファイルとして動かすのでキーチェーンが存在しない
   （`errSecNotAvailable`）が、macOS ではログインキーチェーンに届く（ランダムで後片付けするサービス名を使い、
@@ -35,9 +35,9 @@
   - `shared/src/androidDeviceTest/` — DB の計装テスト。新しい DB の計装テストはここに置く。ヘルパーは
     `AndroidDbTestSupport.kt`（`createSchemaDbFile()`。`DbTestSupport.kt` の `fileDb()` に相当するが、
     本番と同じスキーマ導入経路である実際の `AndroidSqliteDriver` 経由で作成する）。
-    - `DatabaseMergerDeviceTest.kt` / `DatabaseSnapshotDeviceTest.kt` — スキーマバージョンガード、
-      マイグレーション経路、バンドルされた `requery` SQLite（ネイティブライブラリ）に対するマージ/
-      スナップショット動作。`desktopTest` のスイート全体を移植するものではない——マージ SQL 自体
+    - `DatabaseMergerDeviceTest.kt` — スキーマバージョンガード、
+      マイグレーション経路、バンドルされた `requery` SQLite（ネイティブライブラリ）に対するマージ
+      動作。`desktopTest` のスイート全体を移植するものではない——マージ SQL 自体
       （`MergeSql`）は純粋ロジックであり、既に `desktopTest` 側でカバーされているため。
     - `MergeFailureClassificationDeviceTest.kt` — 例外**クラス**ベースの失敗分類（Android の
       `SQLiteException` は数値エラーコードを持たない。デスクトップの `DatabaseMerger` は JDBC ドライバの
@@ -200,7 +200,7 @@ Android には計装テストスイートが 3 つある。CI に組み込まれ
 
 | スイート | タスク | 対象 | CI |
 | --- | --- | --- | --- |
-| `shared/src/androidDeviceTest/` | `:shared:connectedAndroidDeviceTest` | 実際のバンドル SQLite に対する `DatabaseMerger`/`DatabaseSnapshot` | ✓ ブランチへの push ごと（`android-instrumented-test` ジョブ。下の行と同じエミュレータ上） |
+| `shared/src/androidDeviceTest/` | `:shared:connectedAndroidDeviceTest` | 実際のバンドル SQLite に対する `DatabaseMerger` | ✓ ブランチへの push ごと（`android-instrumented-test` ジョブ。下の行と同じエミュレータ上） |
 | `composeApp/src/androidDeviceTest/` | `:composeApp:connectedAndroidDeviceTest` | 他に置き場のない `androidMain` 専用ロジック（SAF の書き込み、Keystore のトークン保存、同意画面リクエストのスロット） | ✗ ローカルのみ |
 | `androidApp/src/androidTest/` | `:androidApp:connectedGithubDebugAndroidTest` | Compose UI（長押しジェスチャ、検索バー） | ✓ ブランチへの push ごと |
 
@@ -275,7 +275,7 @@ AGP の `build` ライフサイクルは `androidTest` ソースセットに対�
 - AppFont（Linux の UI フォント用 Pango フォント記述のパース）
 - カスタム URI スキーム登録（`UriSchemeRegistration` の OS 別ディスパッチとパッケージ版ランチャー判定、`LinuxUriSchemeRegistrar` の `.desktop` 生成——`%u` フィールドコードを含む——、`mimeapps.list` の非破壊マージ、冪等性）
 - `.opml` ファイル関連付け（`LaunchArg` による OAuth URI と `.opml` パスの分類、`registerWindowsOpmlAssociation` の ProgID レジストリ書き込み、`LinuxOpmlAssociationRegistrar` の `.desktop` 生成——`%f` フィールドコードを含む——、その shared-mime-info パッケージ XML、冪等性、および `OpmlImporter` の追加/失敗件数カウントとフォルダー/タグの照合）
-- FTS（FtsManager/FtsSearch、`indexMissing` の増分投入・非破壊、`rebuildIndex` がテーブル存在を前提とすること、同期アップロードが`VACUUM INTO` スナップショットで `articles_fts` を除外し `user_version` を保全することを含む）
+- FTS（FtsManager/FtsSearch、`indexMissing` の増分投入・非破壊、`rebuildIndex` がテーブル存在を前提とすることを含む）
 - Linux の SNI トレイ（`TrayPixmapTest`＝ビッグエンディアン ARGB32 / RGBA エンコーダーとアルファ保全、`TrayMenuModelTest`＝dbusmenu レイアウト、`TrayMenuRevisionTest`＝revision / `AboutToShow` / イベントディスパッチ、`DBusSignatureTest`＝export した D-Bus シグネチャ）
 - Windows のトレイメニュー（`WindowsTrayMenuTest`＝構築される Swing ウィジェット・ラベル・コールバック・heavyweight ポップアップの強制。置き換え対象の AWT ウィジェットは HiDPI の Windows デスクトップで自身のラベルを重ねて描画してしまう）
 - KDE Global Menu / AppMenu（`AppMenuTreeTest`＝共有メニューツリーモデルの形状／`isMacOs` による省略／有効・チェック状態のミラーリング／任意の「メニューバーを表示」項目、`AppMenuLayoutBuilderTest`＝再帰的な `com.canonical.dbusmenu` レイアウト／プロパティフィルタリング／チェックボックスマッピング／行きがけ順 id の安定性、`AppMenuRevisionTest`＝revision の増分／`AboutToShow`／クリックディスパッチ／重複排除なし、`AppMenuSignatureTest`＝`com.canonical.AppMenu.Registrar` のワイヤーシグネチャ、`MenuBarVisibilityTest`＝AWT キーコードマップ／ショートカット→ノードのマッチャ／表示状態の永続化）
@@ -292,14 +292,13 @@ AGP の `build` ライフサイクルは `androidTest` ソースセットに対�
   ファイルが出続ける一覧、存在しないファイルへの 404、create-only とリビジョンチェック付きの書き込み——と、端末ごとに
   ファイル DB とリポジトリを持つ `SyncDevice` を使う。[sync-architecture.ja.md](sync-architecture.ja.md) の「同期フロー」参照）:
   - 各手順: 最初の端末がポインタを作る前にベースをアップロードすること、何もすることのない同期がペイロードを
-    運ばないこと（`metadata` 1 回）、ローカルの変更が次の差分として送られ outbox の記録が消えること、差分の送信中の
+    運ばないこと（ポインタと `keryx.db.gz` の `metadata` 2 回）、ローカルの変更が次の差分として送られ outbox の記録が消えること、差分の送信中の
     書き込みが次の差分に入ること、参加する端末がクラウドをマージしてクラウドに無い行だけを送ること（新しいものが
     無ければ何も送らない）、世代の変化で端末が再参加すること。
   - 分類: 壊れたポインタ、壊れた・ハッシュの合わない・型の誤った差分が `CloudDataIncompatibleException` になり、
     その同期では何もマージされないこと（壊れたファイルは先に 2 回ダウンロードする）、新しい形式のポインタや差分が
     カーソルを進めずに `SchemaVersionException` になること、一時的なダウンロード失敗が次の同期で再試行されること、
-    ポインタの無い差分同期以前のデータに触れず一時的な失敗とすること（移行の担当）、マージのコミット後の失敗を
-    クラウドのせいにしないこと。
+    マージのコミット後の失敗をクラウドのせいにしないこと。
   - 受信: 差分が一度だけマージ・記録されること（二度とダウンロードしない）、一覧の隙間でカーソルが止まっても後の
     差分はマージされること、重複した名前を一度だけ取得すること、一覧にあってダウンロード時に消えていたファイルを
     まだ一覧に無いものとして扱うこと、他人のファイルを無視すること、マージした記事の `search_text` と索引、リスナー
@@ -318,6 +317,30 @@ AGP の `build` ライフサイクルは `androidTest` ソースセットに対�
     その世代に参加する。使えないデータから回復すると自動同期が再開する）と接続解除（記録を止め、接続の管理情報と
     保存中の送信を消し、`ks_search_pending` は残し、実行中の同期——成功でも失敗でも——に取り消されず、再接続は
     ローカルのみの間に書いたものを持って新たに参加すること）。
+- 差分同期以前の形式からの移行とレガシー監視（`LegacyMigrationTest.kt`。同じ `FakeCloudStorage` と `SyncDevice` を使い、
+  バージョン 2 の DB とスタブは `SyncTestSupport.kt` の `PreDeltaFiles` で作る。[sync-architecture.ja.md](sync-architecture.ja.md)
+  の「差分同期以前の形式からの移行」参照）: `keryx.db.gz` だけがあるクラウドを端末が移行すること（すべての行が
+  `search_text` ごとマージされ、最初のベースが差分同期以前の行と端末自身の行を持ち、ベース・ポインタ・ダウンロードした
+  バイトそのままの `.bak`・スタブの順に書かれ、スタブのリビジョンが記録され、次の同期は `metadata` 2 回だけで、2 台目は
+  参加してスタブを記録するだけであること）。最初の端末がマージとポインタの間にいる間に別の端末が移行を最後まで行い
+  ポインタを作った場合（通常の参加になり、退避は 1 つ）。別の端末が先にスタブを置いた場合（記録し、そのまま残す）。
+  スタブで置き換える直前に古いビルドが完全な DB を書いた場合（記録を有効にしたままマージするので、その行は次の差分で
+  出て 2 台目に届き、退避はしない）。スタブの置き換えがリビジョンチェックに負け続けた場合（`SYNC_MAX_RETRY` 回で
+  一時的な失敗になり、次の同期が仕上げる）。各手順——マージの後、ベースのアップロードと確定の前後、ポインタの後、
+  退避の前、スタブの前後——でのクラッシュが、次の同期で 1 つの世代に収束し、その後の同期が静かであること。スタブの上に
+  書かれた完全な DB（Google Drive の場合）をレガシー監視が取り込み、スタブを戻し、行がもう 1 台に届くこと。ポインタの
+  無いスタブを最初の端末のクラウドとして扱うこと。壊れた・型の誤った・参照の閉じていない差分同期以前のファイルが
+  `CloudDataIncompatibleException` に（壊れたものは 2 回ダウンロードしてから）、新しい `user_version` のもの——テーブルを
+  含む 1000 も——が `SchemaVersionException` になり、いずれも何もマージも書き込みもしないこと。古いビルドが実行する
+  差分同期以前の `DatabaseMerger.merge` が、ローカル DB を 1 バイトも変えずに `SchemaVersionException` でスタブを拒むこと。
+  リセットの差分同期以前のファイルの手順（「クラウドデータのリセット（退避）」参照）: スタブの上に書かれた壊れた
+  `keryx.db.gz` がリセットまですべての同期を止め、リセット後はどの端末でも同期でき、`.bak` が壊れたファイルの生の
+  バイト列を持ち、スタブが戻ってそのリビジョンが記録されること。検証に通らない完全な DB が同じく退避され、マージは
+  されないこと。有効なスタブはそのまま残ること（それを見ていなかった端末が記録し、何も書かず退避もしない）。
+  `keryx.db.gz` が無ければ無いままであること。スタブのリビジョンチェック付きアップロードの前にファイルが変わった場合
+  （もう一度退避してから置き換える）と、毎回変わる場合（`SYNC_MAX_RETRY` 回で一時的な失敗になり、ファイルは書かれた
+  ままで、次のリセットが仕上げる）。ダウンロードの失敗が、ファイルを置き換えずにリセットを失敗させること。退避の前、
+  スタブのアップロードの前後でのクラッシュが、次のリセットまたは同期で収束すること。
 - 複数端末のシミュレーション（`SyncSimulationTest`）: 自分の DB を持つ 3 台が、一覧が遅れ、名前が重複し、削除済み
   ファイルが出続ける 1 つの `FakeCloudStorage` を共有する。シード付きの乱数による操作（`MockEngine` のフィードに対する
   `FeedRepository` での購読・購読解除、名前の変更、フォルダー、タグ、既読・未読、スターの付け外し、キャッシュ削除、
@@ -326,7 +349,9 @@ AGP の `build` ライフサイクルは `androidTest` ソースセットに対�
   リセットと入り混じる。何も変わらない一巡まで全員が同期した後、すべての端末が同じ観測可能な状態を示し、誰かが
   書いたすべてのフィールドグループが最新の書き込みを保ち（毎手順の後に全端末の行から作るオラクル——つまり失われた
   変更が無いこと）、送り残しが無いことを確かめる。中断、割り込み、畳み込み、削除、2 つの世代を実際に通ったことも
-  確かめるので、空振りで通ることはない。
+  確かめるので、空振りで通ることはない。2 つ目の実行は、最初の端末が移行する差分同期以前のクラウドから始まり、
+  古いビルドが時々スタブの上に完全な DB を書く（Google Drive の場合）。最後にスタブが戻り、すべての端末が差分同期以前の
+  行を持ち、スタブのリビジョンを記録していることを確かめる。
 - 純粋な規則（commonTest の `TransportCoverageTest`）: ベースがベクトルや名前で何を覆うか（複製の重複は含意しない）、
   覆われた差分がいつ回収してよい古さになるか、厳密な順序としての支配（列挙された複製のコピーはベクトルだけでは
   満たせない）、ベースのキャッシュ、ポインタの解析（新しい形式は `SchemaVersionException`、使えないものは
@@ -549,6 +574,9 @@ Google Drive / Nextcloud）ごとに1回、手動で確認する:
   再参加し、持っていたものが何も失われないこと。
 - 差分をダウンロードして展開し、`sqlite3` CLI で記事 1 件の `read_at` をテキスト値にしてから、再圧縮し、新しい内容に
   ハッシュが一致する名前で再アップロードする: 同じ `ResetCloudData` の通知が出て、アプリがクラッシュしないこと——型の検査の確認。
+- **使えない差分同期以前のファイル**: 移行の後、`keryx.db.gz` を任意の非 gzip ファイルに置き換える: すべての同期が
+  `ResetCloudData` のエントリーとともに失敗すること。リセットを実行すると、そのファイルを持つ新しい
+  `keryx-YYYYMMDD-HHMMSS.db.gz.bak` が残ってスタブが戻り、どの端末でも再び同期できること。
 - **移行**: 差分同期より古いビルドが最後に書いたクラウド（`keryx.db.gz` があり、`keryx-sync.json` が無い）で、このビルドで
   同期する: `keryx-sync.json`、最初のベース、`keryx-YYYYMMDD-HHMMSS.db.gz.bak` が現れ、`keryx.db.gz` が小さなスタブに
   なること。その後に同期した古いビルドが、アプリの更新が必要だと表示し、何も書き込まないこと。
@@ -1667,7 +1695,8 @@ SwiftUI のファイルメニューのインポート／エクスポートは要
   他のプロバイダーからの切り替え（切り替えを確認してからサーバーのダイアログが出て、それをキャンセルすれば元の接続が残る）と、
   再接続（保存済みのサーバーがダイアログの初期値になる）ができる。
 - **2 台**で同時に編集して同期し、競合の再試行で収束する。
-- **同期データのリセット**で、`Keryx` フォルダーに `keryx-<日時>.db.gz.bak` が残る。
+- **同期データのリセット**で、`Keryx` フォルダーに新しい世代の `keryx-sync.json` とベースが書かれ、古い世代の
+  ファイルはそのまま残る。
 - **連携の解除**で、サーバーの「設定 ▸ セキュリティ ▸ デバイスとセッション」からアプリパスワードが消える。
 - **実機・実サーバーでしか確かめられない項目：**
   - iOS / macOS：コールバックスキームなしで開いた `ASWebAuthenticationSession` が、サインインの完了後に `cancel()` で閉じる。

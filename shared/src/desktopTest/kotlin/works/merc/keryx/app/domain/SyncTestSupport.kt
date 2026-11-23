@@ -17,6 +17,7 @@ import works.merc.keryx.app.data.cloud.CloudFileMeta
 import works.merc.keryx.app.data.cloud.CloudStorage
 import works.merc.keryx.app.data.local.FtsManager
 import works.merc.keryx.app.data.local.db.KeryxDatabase
+import works.merc.keryx.app.createSchemaV2
 import works.merc.keryx.app.fileDb
 import works.merc.keryx.app.platform.Gzip
 import works.merc.keryx.app.platform.TransportConnections
@@ -321,4 +322,61 @@ internal object SyncFiles {
             plain.delete()
         }
     }
+}
+
+/** Builders for the pre-delta `keryx.db.gz` and its stub. */
+internal object PreDeltaFiles {
+    /** A feed row of the version-2 schema. */
+    fun feed(id: String, updatedAt: Long = 1) =
+        "INSERT INTO feeds (id, url, title, updated_at, created_at, sort_order) VALUES ('$id', 'https://legacy/$id', '$id', $updatedAt, 1, 0)"
+
+    /** An article row of the version-2 schema (its feed must be in the same file). */
+    fun article(id: String, feedId: String, body: String = "legacy body $id", read: Boolean = false, readAt: Long? = null) =
+        "INSERT INTO articles (id, feed_id, guid, url, title, content, is_read, read_at, cached_at, search_text, updated_at, created_at) " +
+            "VALUES ('$id', '$feedId', 'g-$id', 'https://legacy/$id', 'Title $id', '<p>$body</p>', ${if (read) 1 else 0}, ${readAt ?: "NULL"}, 1, '', 1, 1)"
+
+    /**
+     * A pre-delta database of [userVersion] (the version-2 schema — what the last pre-delta builds
+     * wrote) with [statements] run on it, gzip-compressed.
+     */
+    fun database(vararg statements: String, userVersion: Long = 2): ByteArray {
+        val plain = File.createTempFile("keryx-predelta-", ".db")
+        try {
+            val driver = app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver("jdbc:sqlite:${plain.absolutePath}", java.util.Properties())
+            try {
+                driver.createSchemaV2()
+                statements.forEach { driver.execute(null, it, 0) }
+                if (userVersion != 2L) driver.execute(null, "PRAGMA user_version = $userVersion", 0)
+            } finally {
+                driver.close()
+            }
+            return SyncFiles.gzip(plain)
+        } finally {
+            plain.delete()
+        }
+    }
+
+    /** The stub, gzip-compressed, as this version writes it. */
+    fun stub(): ByteArray {
+        val plain = File.createTempFile("keryx-stub-", ".db")
+        try {
+            TransportFiles.createLegacyStub(plain.absolutePath)
+            return SyncFiles.gzip(plain)
+        } finally {
+            plain.delete()
+        }
+    }
+
+    /** Whether [gzBytes] is the stub. */
+    fun isStub(gzBytes: ByteArray?): Boolean {
+        val plain = SyncFiles.gunzip(gzBytes ?: return false)
+        try {
+            return TransportFiles.isLegacyStub(plain.absolutePath)
+        } finally {
+            plain.delete()
+        }
+    }
+
+    /** The cloud's `.bak` archives of the pre-delta file. */
+    fun backups(cloud: FakeCloudStorage): List<String> = cloud.names().filter { it.startsWith("keryx-") && it.endsWith(".db.gz.bak") }
 }

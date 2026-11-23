@@ -135,7 +135,7 @@ Split into what every target needs in common, and what's specific to the Android
   everything else, so the four keys above are enough to build and install everything locally; see
   build.md's "Publishing to Google Play" for why the two keys exist in the first place.
 - **A connected Android device or running emulator**: only needed to run one of the two Android
-  instrumented suites — `androidDeviceTest` (`DatabaseMerger`/`DatabaseSnapshot`'s Android actuals
+  instrumented suites — `androidDeviceTest` (`DatabaseMerger`'s Android actual
   against the real bundled SQLite) and `androidApp`'s own suite (Compose UI gesture tests) — see
   [testing.md](testing.md) for both. Building, `./gradlew build`, and every other
   test task work without one. Running the emulator at a usable speed on Linux needs **KVM**

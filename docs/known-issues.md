@@ -777,6 +777,64 @@ The same as the entry above: creation times the server assigns, used for bases t
 enter the domination rule. Alternatively, a cutoff per vector component, which changes the transport format and
 the validation, folding, garbage-collection and domination rules.
 
+## Delta sync: a row's search tokens are not replaced when its text changes
+
+**Status**: partly fixed. The case that left an article unsearchable by its body on one device — the one
+`SyncSimulationTest`'s seed 37 found — is closed by `ks_search_awaiting_body`. The underlying cause remains:
+an indexed row's tokens are never replaced on a hot path, so one narrow case of the same failure is still
+reachable (below). Fixing that needs a change to how `articles_fts` is maintained, outside the scope of the
+pre-delta migration change that exposed it. No synced data is affected.
+
+### Cause
+
+`articles_fts` is an external-content FTS5 table. Removing a row's tokens takes an external-content `'delete'`
+with exactly the values that were indexed, and those are not kept anywhere — a row whose text changed after it
+was indexed (a refresh or a merge changing its body) no longer holds them. `indexMissing()` therefore only adds
+rows that are not indexed yet and never revisits one that is. Normally that only leaves a row with its earlier
+tokens until the daily rebuild ("FTS5 Handling" in [sync-architecture.md](sync-architecture.md)) — stale, but
+still found by its earlier text.
+
+It becomes a real failure when the text a row was indexed with is `''`. A light row (a read, star or deletion
+change) can reach a device before the file carrying the article's body, since an eventually consistent listing
+can show a later delta first. The merge then inserts the article with no body, it was indexed at once with its
+title and `''`, and once the body arrived, the article could not be found by its body on that device until the
+daily rebuild — while every other device found it. Seed 37 indexed exactly 12 articles that way, the 12 its
+diverging device was missing; it surfaced only when the pre-delta migration's extra crash points changed the
+simulation's random sequence.
+
+### What is fixed
+
+The merge records an article it inserts without a body in `ks_search_awaiting_body`, in the merge transaction,
+and `indexMissing()` skips it while it still has no body; once a body arrives (a later merge, or this device's
+own refresh) it is indexed like any new row. See "FTS5 Handling" in [sync-architecture.md](sync-architecture.md).
+Tested by `SearchIndexAfterMergeTest`, and `SyncSimulationTest` converges again on seed 37.
+
+### What remains
+
+A delta cannot tell a light row from a feed item that genuinely has no body, so an article still waiting is
+indexed by its title at the next daily rebuild (otherwise such an item could never be found by its title). If
+the body arrives only after that rebuild — the file carrying it listed more than about a day after the light
+row — the article is again indexed with `''` and unsearchable by its body until the following rebuild. The same
+root also keeps the accepted staleness of a body changed by a refresh or a merge.
+
+### What a real fix would need
+
+A way to replace an indexed row's tokens when its text changes, on the hot path (`indexMissing()` re-indexing
+the rows whose text it just recomputed, or that a refresh changed), without a full `'rebuild'`. Candidates,
+to be chosen when this is taken up:
+
+- **B1. A contentless FTS5 table with `contentless_delete=1`.** Deletes by rowid without the indexed values and
+  stores no copy of the text. Keryx highlights matches in Kotlin and never reads FTS5 columns back, so nothing
+  is lost. Needs SQLite 3.43 or later: desktop (sqlite-jdbc 3.53) and Android (bundled 3.49) have it; whether
+  the system SQLite of iOS 17 / macOS 14 does was not checked, and if not, this option is out.
+- **B2. Keep the indexed `title` / `search_text` in a device-local table**, so the exact `'delete'` is always
+  possible. Works on every platform, at the cost of storing the plain text of every body twice.
+- **B3. A regular (non-external-content) FTS5 table**, which keeps its own copy and deletes by rowid. About the
+  same size cost as B2, with a larger migration.
+
+Whichever is chosen, the live `articles_fts` must not be dropped during the switch, and `ks_search_awaiting_body`
+becomes unnecessary once a body arriving later simply re-indexes the row.
+
 ## Linux/GNOME: the tray menu briefly shows the previous label when it opens
 
 **Status**: not fixed — external (GNOME Shell AppIndicator extension) design limitation, and not

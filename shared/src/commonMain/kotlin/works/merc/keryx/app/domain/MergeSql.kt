@@ -14,7 +14,9 @@ package works.merc.keryx.app.domain
  *   comparison), so devices merging the same files in different orders converge;
  * - `created_at` takes the earliest value, articles' `cached_at` and `updated_at` the latest;
  * - `search_text` is never merged: an article whose body the merge changes is registered in
- *   `main.ks_search_pending`, and a new article starts with `''` (see "FTS5 Handling").
+ *   `main.ks_search_pending`, and a new article starts with `''`; one inserted without a body is
+ *   recorded in `main.ks_search_awaiting_body`, so it is not indexed before its body arrives (see
+ *   "FTS5 Handling").
  *
  * Statements reference only columns present both in the transport schema ([TransportSchema]) and in
  * a full database of the current schema, so the same list merges deltas, bases and pre-delta files.
@@ -292,6 +294,23 @@ object MergeSql {
           AND (c.content IS NOT l.content OR ${SyncLww.normalizedSummary("c")} IS NOT l.summary);
     """.trimIndent()
 
+    /**
+     * Before the articles statement: records every article the merge is about to insert without a
+     * body (a light row — its body travels in another file, which may arrive later). Such a row has
+     * nothing for [registerNewBodies] to recompute, and `indexMissing()` never revisits an indexed
+     * row, so indexing it now with `''` would leave its body unsearchable once that body arrives.
+     * `indexMissing()` therefore skips it while it is still bodiless. Matched by id, since the row
+     * has no rowid yet.
+     */
+    private val registerAwaitingBodies = """
+        INSERT OR IGNORE INTO main.ks_search_awaiting_body (id)
+        SELECT c.id
+        FROM $cloudArticles
+        WHERE $articleEligible
+          AND c.content IS NULL AND c.summary IS NULL
+          AND NOT EXISTS (SELECT 1 FROM main.articles l WHERE l.id = c.id);
+    """.trimIndent()
+
     private val bodyColumns = listOf("url", "title", "summary", "content", "author", "published_at", "thumbnail_url", "body_updated_at")
 
     /** Every column the articles statement may rewrite on an existing row. */
@@ -397,12 +416,12 @@ object MergeSql {
     /**
      * Applied in FK-safe order (parents before children): folders, feeds, the folder merge's three
      * statements and the other three `mergeFeed*`,
-     * tags, articles (with the `ks_search_pending` registrations around it), feed_tags,
+     * tags, articles (with the `ks_search_pending` / `ks_search_awaiting_body` registrations around it), feed_tags,
      * global_settings.
      */
     val all: List<String> = folders + listOf(
         feeds, normalizeFeedFolderRaw, mergeFeedFolderId, recordFeedFolderRaw, mergeFeedSortOrder, mergeFeedCustomTitle, mergeFeedDeletedAt,
     ) + tags + listOf(
-        registerChangedBodies, articles, registerNewBodies, feedTags, globalSettings,
+        registerChangedBodies, registerAwaitingBodies, articles, registerNewBodies, feedTags, globalSettings,
     )
 }

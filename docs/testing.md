@@ -11,7 +11,7 @@
   Linux/Windows), so a common test must not use JVM APIs — temp files go through `:testing`'s
   `tempFilePath()`/`tempFileWith()` (kotlinx-io); a test that genuinely needs the JVM belongs in
   `desktopTest`. `appleTest/` holds what only the Apple actuals can show — `AppleDatabaseTest`
-  (NativeSqliteDriver, FTS5 trigram search, snapshot and a real merge on the system SQLite),
+  (NativeSqliteDriver, FTS5 trigram search and a real merge on the system SQLite),
   `ApplePlatformTest` (gzip, digests, files), `KeryxSdkTest`. `macosTest/` holds
   `KeychainTokenStorageTest`: Kotlin/Native runs iOS tests as a bare executable outside any app
   bundle, where no keychain exists (`errSecNotAvailable`), while on macOS it reaches the login
@@ -29,8 +29,8 @@
     Helpers are in `AndroidDbTestSupport.kt` (`createSchemaDbFile()`, mirroring `DbTestSupport.kt`'s
     `fileDb()` but driven through a real `AndroidSqliteDriver` so the schema is installed the same way
     production creates it).
-    - `DatabaseMergerDeviceTest.kt` / `DatabaseSnapshotDeviceTest.kt` — the schema-version guard, the
-      migration path, and merge/snapshot behavior against the bundled `requery` SQLite (a native library);
+    - `DatabaseMergerDeviceTest.kt` — the schema-version guard, the
+      migration path, and merge behavior against the bundled `requery` SQLite (a native library);
       not a full port of `desktopTest`'s suites, since the merge SQL itself (`MergeSql`) is pure and already
       covered there.
     - `MergeFailureClassificationDeviceTest.kt` — exception-*class*-based failure classification (Android's
@@ -176,7 +176,7 @@ into CI:
 
 | Suite | Task | Covers | CI |
 | --- | --- | --- | --- |
-| `shared/src/androidDeviceTest/` | `:shared:connectedAndroidDeviceTest` | `DatabaseMerger`/`DatabaseSnapshot` against the real bundled SQLite | ✓ every branch push (`android-instrumented-test` job, same emulator as the row below) |
+| `shared/src/androidDeviceTest/` | `:shared:connectedAndroidDeviceTest` | `DatabaseMerger` against the real bundled SQLite | ✓ every branch push (`android-instrumented-test` job, same emulator as the row below) |
 | `composeApp/src/androidDeviceTest/` | `:composeApp:connectedAndroidDeviceTest` | The `androidMain`-only logic that has nowhere else to live (SAF writes, Keystore token storage, the consent-screen request slot) | ✗ local only |
 | `androidApp/src/androidTest/` | `:androidApp:connectedGithubDebugAndroidTest` | Compose UI (long-press gesture, search bar) | ✓ every branch push |
 
@@ -247,7 +247,7 @@ Project-wide, this is on top of the three Android instrumented suites above:
 - AppFont (Pango font-description parsing for the Linux UI font)
 - custom URI scheme registration (`UriSchemeRegistration`'s per-OS dispatch and packaged-launcher gate, `LinuxUriSchemeRegistrar`'s desktop-entry generation including the `%u` field code, non-destructive `mimeapps.list` merge, and idempotency)
 - the `.opml` file association (`LaunchArg`'s classification of an OAuth URI vs. an `.opml` path, `registerWindowsOpmlAssociation`'s ProgID registry writes, `LinuxOpmlAssociationRegistrar`'s desktop-entry generation including the `%f` field code, its shared-mime-info package XML, and idempotency, and `OpmlImporter`'s added/failed counting and folder/tag reconciliation)
-- FTS (FtsManager/FtsSearch, including `indexMissing` incremental insert / non-destructive behavior, `rebuildIndex` requiring table existence, sync upload excluding `articles_fts` via `VACUUM INTO` snapshot while preserving `user_version`)
+- FTS (FtsManager/FtsSearch, including `indexMissing` incremental insert / non-destructive behavior, `rebuildIndex` requiring table existence)
 - the Linux SNI tray (`TrayPixmapTest` for the big-endian ARGB32 / RGBA encoders and alpha preservation, `TrayMenuModelTest` for the dbusmenu layout, `TrayMenuRevisionTest` for revision / `AboutToShow` / event dispatch, `DBusSignatureTest` for the exported D-Bus signatures)
 - the Windows tray menu (`WindowsTrayMenuTest` for the built Swing widgets, their labels, their callbacks, and the forced-heavyweight popup — the AWT widgets it replaces overlap their own labels on a HiDPI Windows desktop)
 - the KDE Global Menu / AppMenu (`AppMenuTreeTest` for the shared menu-tree model shape / `isMacOs` omissions / enabled-checked mirroring / the optional "Show Menu Bar" item, `AppMenuLayoutBuilderTest` for the recursive `com.canonical.dbusmenu` layout / property filtering / checkbox mapping / pre-order id stability, `AppMenuRevisionTest` for revision bump / `AboutToShow` / click dispatch / no-dedup, `AppMenuSignatureTest` for the `com.canonical.AppMenu.Registrar` wire signatures, `MenuBarVisibilityTest` for the AWT key-code map / shortcut→node matcher / visibility persistence)
@@ -265,14 +265,13 @@ Project-wide, this is on top of the three Android instrumented suites above:
   and `SyncDevice`, one file database and repository per device; see "Sync Flow" in
   [sync-architecture.md](sync-architecture.md)):
   - The steps: the first device uploading its base before creating the pointer, a sync with nothing to do moving no
-    payload (one `metadata`), a local change sent as the next delta and its outbox entries deleted, a write made while
+    payload (two `metadata` — the pointer and `keryx.db.gz`), a local change sent as the next delta and its outbox entries deleted, a write made while
     a delta is being sent going into the next one, a joining device merging the cloud and sending only the rows the
     cloud lacks (nothing at all when it has nothing new), a generation change making a device rejoin.
   - Classification: a malformed pointer and a corrupt, hash-mismatched or wrongly typed delta as
     `CloudDataIncompatibleException` with nothing from that sync merged (a corrupt file downloaded twice first); a
     pointer or delta of a newer format as `SchemaVersionException` advancing no cursor; a transient download failure
-    retried by the next sync; pre-delta data without a pointer left untouched as a transient failure (the migration's);
-    a failure after the merge committed never blamed on the cloud.
+    retried by the next sync; a failure after the merge committed never blamed on the cloud.
   - Receiving: a delta merged and recorded once (never downloaded again), a gap in the listing stopping the cursor
     while later deltas still merge, duplicate names fetched once, a listed file gone by its download treated as not
     listed yet, someone else's files ignored, the merged articles' `search_text` and index and the listeners' poke.
@@ -291,6 +290,32 @@ Project-wide, this is on top of the three Android instrumented suites above:
     joins that generation; recovering from unusable data resumes automatic sync) and disconnect (recording off, the
     connection's bookkeeping and saved send gone, `ks_search_pending` kept, not undone by a sync in flight — succeeding
     or failing — and a reconnect joining afresh with what was written while local-only).
+- the pre-delta migration and the legacy watch (`LegacyMigrationTest.kt`, against the same `FakeCloudStorage` and
+  `SyncDevice`, with `SyncTestSupport.kt`'s `PreDeltaFiles` building version-2 databases and the stub; see "Migration
+  from the Pre-Delta Format" in [sync-architecture.md](sync-architecture.md)): a device migrating a cloud that holds only
+  `keryx.db.gz` (every row merged with its `search_text`; the first base carrying the pre-delta and the device's own
+  rows; base, pointer, `.bak` holding the downloaded bytes, then the stub, in that order; the stub's revision recorded;
+  the next sync two `metadata` calls and nothing more; a second device joining and only recording the stub); a pointer
+  created by another device's whole migration while the first is between its merge and its pointer (an ordinary join,
+  one archive); a stub placed by another device first (recorded, left in place); an older build writing a full database
+  just before the stub replaces it (merged with capture on, so its rows leave in the next delta and reach a second
+  device, and not archived); the stub replacement losing every revision check (a transient failure after
+  `SYNC_MAX_RETRY` attempts, finished by the next sync); a crash at each step — after the merge, around the base's
+  upload and commit, after the pointer, before the archive, before and after the stub — converging on the next sync
+  in one generation with a quiet sync after it; the legacy watch absorbing a full database written over the stub
+  (Google Drive's case), putting the stub back and the rows reaching the other device; a stub with no pointer treated
+  as a first device's cloud; a corrupt, wrongly typed or dangling pre-delta file as `CloudDataIncompatibleException` (a
+  corrupt one downloaded twice), and one of a newer `user_version` — including 1000 with tables in it — as
+  `SchemaVersionException`, each with nothing merged or written; and the pre-delta `DatabaseMerger.merge` an older build
+  runs refusing the stub with `SchemaVersionException` before its local database changes by a byte. The reset's
+  pre-delta step (see "Resetting (Archiving) Cloud Data"): a corrupt `keryx.db.gz` written over the stub blocking
+  every sync until a reset, after which syncing works on every device, a `.bak` holds the corrupt file's raw bytes and
+  the stub is back with its revision recorded; a full database failing validation archived the same way and never
+  merged; a valid stub left in place (recorded by a device that had not seen it, nothing written or archived); no
+  `keryx.db.gz` left absent; the file changing before the stub's revision-checked upload (archived again, then
+  replaced), and changing every time (a transient failure after `SYNC_MAX_RETRY` attempts, the file left as written,
+  finished by the next reset); a failed download failing the reset without replacing the file; and a crash before
+  the archive or before or after the stub's upload converging on the next reset or sync.
 - the multi-device simulation (`SyncSimulationTest`): three devices with their own databases share one
   `FakeCloudStorage` whose listing lags, repeats names and shows deleted files; seeded random operations (subscribing
   and unsubscribing through `FeedRepository` over a `MockEngine` feed, renaming, folders, tags, read/unread, star/unstar,
@@ -299,7 +324,10 @@ Project-wide, this is on top of the three Android instrumented suites above:
   deletion, multi-day clock jumps, and one reset. Once everyone has synced until a round changes nothing, every device
   must show the same observable state, every field group anyone wrote must hold its newest write (an oracle built from
   every device's rows after every step — so no change was lost), and nothing may be left to send. The run asserts it
-  exercised crashes, interleavings, folds, deletions and both generations, so it cannot pass vacuously.
+  exercised crashes, interleavings, folds, deletions and both generations, so it cannot pass vacuously. A second run
+  starts from a pre-delta cloud that the first device migrates, while an older build now and then writes a full
+  database over the stub (Google Drive's case); at the end the stub must be back, every device must hold the pre-delta
+  rows and have recorded the stub's revision.
 - the pure rules (`TransportCoverageTest`, commonTest): what a base covers by vector or by name (a clone's duplicate
   not implied), when a covered delta is old enough to collect, domination as a strict order that a vector alone cannot
   satisfy for listed clone copies, the base cache, the pointer's parsing (`SchemaVersionException` for a newer format,
@@ -494,6 +522,9 @@ Cloud-data corruption recovery and the migration need a real cloud connection en
 
 - Replace one `ks-<gen>-d-…` file with an arbitrary non-gzip file (keeping its name), then sync on another device: the notification center's entry offers "Reset sync data" (`ResetCloudData`), and nothing from that sync is merged. Running the reset writes a new `keryx-sync.json` generation and a new base; the old generation's files stay in the folder, untouched. Every other device rejoins on its next sync and nothing it held is lost.
 - Download a delta, decompress it, set one article's `read_at` to a text value with the `sqlite3` CLI, re-compress it and re-upload it under a name whose hash matches the new content: the same `ResetCloudData` notification appears and the app does not crash — confirms the type check.
+- **Unusable pre-delta file**: after the migration, replace `keryx.db.gz` with an arbitrary non-gzip file: every
+  sync fails with the `ResetCloudData` entry. Running the reset leaves a new `keryx-YYYYMMDD-HHMMSS.db.gz.bak` holding
+  that file and puts the stub back, and syncing works again on every device.
 - **Migration**: with a cloud last written by a build older than delta sync (`keryx.db.gz` present, no `keryx-sync.json`), sync with this build: a `keryx-sync.json`, a first base and a `keryx-YYYYMMDD-HHMMSS.db.gz.bak` appear, and `keryx.db.gz` becomes a small stub. The older build, synced afterwards, reports that the app must be updated and writes nothing.
 - With the cloud data still unusable, trigger several automatic syncs (toggle read/star repeatedly, or wait for the background interval) and confirm no further download happens (no network activity, no repeated/duplicate notification) until the data is reset — then confirm a manual "sync now" *does* still attempt a real sync (and fails again) even while automatic syncs are suppressed.
 - After a successful reset, confirm automatic syncing resumes (a read/star toggle triggers a real sync again).
@@ -1623,7 +1654,8 @@ release and the oldest maintained one.
   server dialog appears only after the switch is confirmed, and cancelling it keeps the old connection) and
   reconnecting (the dialog starts from the stored server) both work.
 - **Two devices** editing and syncing at the same time converge through the conflict retry.
-- **Reset sync data** leaves a `keryx-<date-time>.db.gz.bak` in the `Keryx` folder.
+- **Reset sync data** writes a new `keryx-sync.json` generation and base in the `Keryx` folder, leaving the old
+  generation's files in place.
 - **Disconnect** removes the app password from the server's Settings ▸ Security ▸ Devices & sessions.
 - **Only on real devices / servers:**
   - iOS / macOS: an `ASWebAuthenticationSession` opened with no callback scheme is closed by `cancel()` once the

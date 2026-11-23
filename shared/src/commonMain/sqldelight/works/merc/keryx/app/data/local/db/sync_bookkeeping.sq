@@ -12,6 +12,11 @@
 -- sync_applied       cloud files already merged (this device's own included).
 -- sync_cursor        per device, the highest delta seq up to which everything has been merged.
 -- ks_search_pending  articles whose search_text must be recomputed after a merge.
+-- ks_search_awaiting_body
+--                    articles (by id) a merge inserted with no body — from a light row, whose body
+--                    another file carries — kept out of the search index until a body arrives, so
+--                    they are never indexed with '' (FtsManager.indexMissing). The daily rebuild
+--                    indexes them anyway and clears the table.
 -- ks_feed_folder_raw per feed, the raw (unresolved) folder version — folder_updated_at and the
 --                    folder_id as the winning file carried it — that main.feeds' resolved folder_id
 --                    came from, so the merge ranks raw against raw (MergeSql). A row is valid only
@@ -68,6 +73,10 @@ CREATE TABLE sync_cursor (
 
 CREATE TABLE ks_search_pending (
     rowid INTEGER NOT NULL PRIMARY KEY
+);
+
+CREATE TABLE ks_search_awaiting_body (
+    id TEXT NOT NULL PRIMARY KEY
 );
 
 CREATE TABLE ks_feed_folder_raw (

@@ -475,7 +475,9 @@ class SyncRepository(
      * "Resetting (Archiving) Cloud Data" in sync-architecture.md). Deletes nothing: this device joins
      * a new generation, uploads its full state as that generation's base, and replaces the pointer
      * with a revision check; the previous generation's files stay in place, unread, as the archive.
-     * Every other device then rejoins with its own full send.
+     * Every other device then rejoins with its own full send. A pre-delta `keryx.db.gz` that is not
+     * the stub (corrupt, a full database) is then archived as a `.bak` and replaced by the stub, so it
+     * no longer blocks syncing.
      *
      * @return A successful result when the new generation is in place; otherwise the failure.
      */

@@ -24,7 +24,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     # Every OS additionally runs createDistributable + native packaging below, so this matches the
     # 30 min budget release.yml's packaging jobs use.
-    timeout-minutes: 30
+    # Windows gets 45: its runner runs the file-database sync tests about ten times slower than the
+    # others, and the desktop test suite alone takes about 20 minutes there.
+    timeout-minutes: ${{ matrix.os == 'windows-latest' && 45 || 30 }}
     strategy:
       fail-fast: false
       matrix:
@@ -607,9 +609,8 @@ jobs:
           # the REQUEST_INSTALL_PACKAGES manifest permission). There's no "play" debug variant to
           # fall back to either way: build.gradle.kts disables playDebug entirely, so
           # connectedAndroidTest (no flavor) now runs only githubDebug, same as this explicit task.
-          # :shared:connectedAndroidDeviceTest runs on the same emulator: DatabaseMerger/
-          # DatabaseSnapshot against the real bundled SQLite (see docs/testing.md's instrumented-
-          # suite table). It was previously "local only". :composeApp's own androidDeviceTest
+          # :shared:connectedAndroidDeviceTest runs on the same emulator: DatabaseMerger against
+          # the real bundled SQLite (see docs/testing.md's instrumented-suite table). It was previously "local only". :composeApp's own androidDeviceTest
           # suite (SAF writes, Keystore token storage, Play services token-scope checks) is left
           # out of this change — bringing it into CI too is a separate follow-up.
           script: ./gradlew :androidApp:connectedGithubDebugAndroidTest :shared:connectedAndroidDeviceTest --no-configuration-cache

@@ -35,6 +35,13 @@ object DeltaExportSql {
     fun detach(alias: String): String = "DETACH DATABASE $alias"
 
     /**
+     * `VACUUM INTO` of the connection's `main` into [destPath] — the full send's copy of the live
+     * database. It refuses to write to an existing file, so the caller deletes [destPath] first; SQLite
+     * has no bind parameter for the target either, so quotes are escaped.
+     */
+    fun vacuumInto(destPath: String): String = "VACUUM INTO '${destPath.replace("'", "''")}'"
+
+    /**
      * The outbox high-water mark `S` of the source: `MAX(sync_outbox.seq)`, NULL (no row) when the
      * outbox is empty. Read inside the export's transaction, so it and the rows come from one snapshot.
      */

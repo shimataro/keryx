@@ -52,7 +52,9 @@ You review Keryx (a cross-platform RSS reader, Kotlin Multiplatform / Compose Mu
   data must be bound as parameters, not concatenated; only app-internal file
   paths are interpolated (and single-quote-escaped). Any feed/article content
   built into a raw SQL string is a finding. (`data/local/FtsSearch`,
-  `platform/DatabaseMerger`, `platform/DatabaseSnapshot`)
+  `platform/DatabaseMerger`'s `ATTACH` path, `domain/DeltaExportSql`'s `ATTACH` and
+  `VACUUM INTO` target paths, `DeltaExporter`'s `ks_vector` rows from validated sync ids,
+  `domain/DeltaSync`'s validated transport file names)
 - Does the network stay HTTPS + guarded — cloud/OAuth endpoints HTTPS-only (the
   OAuth loopback on `127.0.0.1` is the sole intended http exception), and feed
   fetch keeping its redirect-loop guard (`MAX_REDIRECTS`) with correct

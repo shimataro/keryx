@@ -244,7 +244,7 @@ kotlin {
             }
         }
 
-        // Instrumented ("device") tests for DatabaseMerger/DatabaseSnapshot's Android actuals —
+        // Instrumented ("device") tests for DatabaseMerger's Android actual —
         // requery's bundled SQLite is a native library that only loads on a real device/emulator.
         // See composeApp/build.gradle.kts's own withDeviceTestBuilder for why the tree is named
         // "deviceTest" rather than "test".

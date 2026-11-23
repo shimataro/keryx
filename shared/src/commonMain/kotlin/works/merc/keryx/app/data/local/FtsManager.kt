@@ -12,8 +12,8 @@ import works.merc.keryx.app.core.runCatchingUnlessCancelled
 /**
  * Manages the `articles_fts` FTS5 virtual table with raw SQL, deliberately
  * *outside* the SQLDelight-managed schema, so it is never part of a `.sq` file.
- * The live table is never dropped: the sync flow excludes it from the uploaded
- * file by dropping it on a throwaway [DatabaseSnapshot] copy, not on the live DB.
+ * The live table is never dropped, and the index never leaves the device: sync's
+ * transport files are built from the synced tables only (`DeltaExporter`).
  *
  * External-content FTS5 (`content='articles'`) keeps only the index; the text is
  * read from `articles.search_text` via rowid. New rows are indexed incrementally
@@ -113,6 +113,12 @@ class FtsManager internal constructor(
      * indexed with the `''` a merge gave it. The pending list is committed state, so work an earlier
      * call left undone — interrupted, or skipped for a concurrent change — is picked up by the next.
      *
+     * An article a merge inserted without a body (`ks_search_awaiting_body`: a light row, whose body
+     * travels in another file) is skipped while it is still bodiless: indexed now with `''`, it would
+     * stay unsearchable by its body once that body arrived, since an indexed row is never revisited.
+     * Once it has a body its marker is dropped and it is indexed like any new row. One that never
+     * gets a body (the feed item has none) is indexed by the next [rebuildIndex].
+     *
      * Content edits to *existing* rows (e.g. a feed re-publishing edited text, or a sync merge
      * changing a body — whose `search_text` is recomputed here) are not re-indexed — that row keeps
      * its old tokens until the next full [rebuildIndex] (the daily healing pass). This is the
@@ -127,7 +133,22 @@ class FtsManager internal constructor(
                 INSERT INTO articles_fts(rowid, title, search_text)
                 SELECT a.rowid, a.title, a.search_text FROM articles a
                 WHERE a.rowid NOT IN (SELECT id FROM articles_fts_docsize)
-                  AND a.rowid NOT IN (SELECT rowid FROM ks_search_pending);
+                  AND a.rowid NOT IN (SELECT rowid FROM ks_search_pending)
+                  AND (a.content IS NOT NULL OR a.summary IS NOT NULL
+                       OR a.id NOT IN (SELECT id FROM ks_search_awaiting_body));
+            """.trimIndent(),
+            0,
+        )
+        // A body has arrived (a merge, or this device's own refresh): the row no longer waits, and the
+        // statement above already indexed it unless it is pending, in which case a later call does.
+        driver.execute(
+            null,
+            """
+                DELETE FROM ks_search_awaiting_body
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM articles a
+                    WHERE a.id = ks_search_awaiting_body.id AND a.content IS NULL AND a.summary IS NULL
+                );
             """.trimIndent(),
             0,
         )
@@ -433,6 +454,12 @@ class FtsManager internal constructor(
      * is a write, so it takes the write lock from the start (see "A concurrent write can fail a
      * read-then-write transaction" in `docs/known-issues.md`); to a concurrent search the whole
      * transaction is still one atomic change.
+     *
+     * Articles waiting for a body (`ks_search_awaiting_body`, see [indexMissing]) are indexed with
+     * their title and `''`, and the table is cleared in the same transaction, so an article whose feed
+     * item genuinely has no body becomes searchable by its title within a day. If a body still arrives
+     * after that, the row keeps its earlier tokens until the next rebuild — see "Delta sync: a row's
+     * search tokens are not replaced when its text changes" in `docs/known-issues.md`.
      */
     suspend fun rebuildIndex(): Unit = indexWriteMutex.withLock {
         recomputePendingSearchText()
@@ -447,6 +474,9 @@ class FtsManager internal constructor(
                 """.trimIndent(),
                 0,
             )
+            // 'rebuild' indexed every article, the bodiless ones a merge inserted included, so none is
+            // waiting any more.
+            driver.execute(null, "DELETE FROM ks_search_awaiting_body;", 0)
         }
     }
 
