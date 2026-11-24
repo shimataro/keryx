@@ -19,14 +19,14 @@ enum SidebarFixtures {
     static func folder(_ id: String, sortOrder: Int64) -> Folders {
         Folders(
             id: id, name: "name-\(id)", sort_order: sortOrder, deleted_at: nil, updated_at: 0, created_at: 0,
-            name_updated_at: nil, sort_order_updated_at: nil
+            name_updated_at: nil, sort_order_updated_at: nil, v2_id: nil
         )
     }
 
     static func tag(_ id: String, sortOrder: Int64, color: String? = nil) -> Tags {
         Tags(
             id: id, name: "name-\(id)", color: color, sort_order: sortOrder, deleted_at: nil, updated_at: 0, created_at: 0,
-            name_updated_at: nil, color_updated_at: nil, sort_order_updated_at: nil
+            name_updated_at: nil, color_updated_at: nil, sort_order_updated_at: nil, v2_id: nil
         )
     }
 
