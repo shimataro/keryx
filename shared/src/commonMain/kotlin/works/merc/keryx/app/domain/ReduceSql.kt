@@ -43,7 +43,10 @@ object ReduceSql {
     private val folders = upsert(
         table("folders"),
         listOf(SyncLww.FOLDER_EXISTENCE, SyncLww.FOLDER_NAME, SyncLww.FOLDER_SORT_ORDER),
-        listOf(EARLIEST_CREATED_AT),
+        listOf(
+            EARLIEST_CREATED_AT,
+            "v2_id = CASE WHEN v2_id IS NULL THEN excluded.v2_id WHEN excluded.v2_id IS NULL THEN v2_id ELSE MAX(v2_id, excluded.v2_id) END",
+        ),
     )
 
     private val feeds = upsert(
@@ -58,7 +61,10 @@ object ReduceSql {
     private val tags = upsert(
         table("tags"),
         listOf(SyncLww.TAG_EXISTENCE, SyncLww.TAG_NAME, SyncLww.TAG_COLOR, SyncLww.TAG_SORT_ORDER),
-        listOf(EARLIEST_CREATED_AT),
+        listOf(
+            EARLIEST_CREATED_AT,
+            "v2_id = CASE WHEN v2_id IS NULL THEN excluded.v2_id WHEN excluded.v2_id IS NULL THEN v2_id ELSE MAX(v2_id, excluded.v2_id) END",
+        ),
     )
 
     private val articles = upsert(

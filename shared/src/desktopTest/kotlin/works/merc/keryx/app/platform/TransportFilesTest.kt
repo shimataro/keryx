@@ -419,6 +419,42 @@ class TransportFilesTest {
     }
 
     @Test
+    fun foldingKeepsNonNullV2IdForFoldersRegardlessOfInputOrder() {
+        val id = "d1"
+        val withV2 = transportFile(delta, folder(id = id, name = "Work", v2Id = "legacy-1"))
+        val withoutV2 = transportFile(deltaName(DEV_B, 1), folder(id = id, name = "Work"))
+
+        fun v2Id(file: File): String? = TransportFixtures.connect(file).use { conn ->
+            conn.createStatement().use { st ->
+                st.executeQuery("SELECT v2_id FROM folders WHERE id = '$id'").use { rs ->
+                    if (rs.next()) rs.getString(1) else null
+                }
+            }
+        }
+
+        assertEquals("legacy-1", v2Id(TransportFixtures.fold(withV2 to delta, withoutV2 to deltaName(DEV_B, 1))))
+        assertEquals("legacy-1", v2Id(TransportFixtures.fold(withoutV2 to deltaName(DEV_B, 1), withV2 to delta)))
+    }
+
+    @Test
+    fun foldingKeepsNonNullV2IdForTagsRegardlessOfInputOrder() {
+        val id = "t1"
+        val withV2 = transportFile(delta, tag(id = id, name = "news", v2Id = "legacy-1"))
+        val withoutV2 = transportFile(deltaName(DEV_B, 1), tag(id = id, name = "news"))
+
+        fun v2Id(file: File): String? = TransportFixtures.connect(file).use { conn ->
+            conn.createStatement().use { st ->
+                st.executeQuery("SELECT v2_id FROM tags WHERE id = '$id'").use { rs ->
+                    if (rs.next()) rs.getString(1) else null
+                }
+            }
+        }
+
+        assertEquals("legacy-1", v2Id(TransportFixtures.fold(withV2 to delta, withoutV2 to deltaName(DEV_B, 1))))
+        assertEquals("legacy-1", v2Id(TransportFixtures.fold(withoutV2 to deltaName(DEV_B, 1), withV2 to delta)))
+    }
+
+    @Test
     fun createEmptyReplacesAnExistingFile() {
         val file = validFile()
         TransportFiles.createEmpty(file.absolutePath, works.merc.keryx.app.domain.TransportMeta(TransportFixtures.GEN, delta.kind, DEV_A, 1, delta.createdAt))
