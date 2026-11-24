@@ -1528,7 +1528,40 @@ class SyncMergerTest {
     }
 
     /**
-     * Builds a v2 database whose v3 name-derived ids form a blocked chain:
+     * A local row whose id matches cloud but has no `v2_id` picks up the cloud `v2_id`, and a later
+     * cloud row with the same `v2_id` then reconciles onto that local row instead of remaining a
+     * separate identity.
+     */
+    @Test
+    fun v2IdIsCopiedOnIdMatchAndEnablesLaterReconciliation() {
+        val idA = IdGenerator.folderId("A")
+        val idB = IdGenerator.folderId("B")
+        val local = TransportFixtures.localDb(TransportFixtures.folder(id = idA, name = "A", updatedAt = 100))
+
+        val firstCloud = TransportFixtures.transportFile(
+            TransportFixtures.baseName(TransportFixtures.DEV_A, 1),
+            TransportFixtures.folder(id = idA, name = "A", updatedAt = 100, v2Id = "old-1"),
+        )
+        TransportFixtures.merge(local, firstCloud)
+
+        val secondCloud = TransportFixtures.transportFile(
+            TransportFixtures.baseName(TransportFixtures.DEV_A, 2),
+            TransportFixtures.folder(id = idB, name = "B", updatedAt = 200, v2Id = "old-1"),
+        )
+        TransportFixtures.merge(local, secondCloud)
+
+        val (_, verifyDriver, verifyDb) = reopen(local)
+        try {
+            val folder = verifyDb.foldersQueries.getById(idA).executeAsOne()
+            assertEquals("B", folder.name)
+            assertEquals("old-1", folder.v2_id)
+            assertNull(verifyDb.foldersQueries.getById(idB).executeAsOneOrNull())
+        } finally {
+            verifyDriver.close()
+        }
+    }
+
+    /**
      * - folder/tag A (v2 [folder/tag]OldId1) derives id A
      * - folder/tag B (v2 [folder/tag]OldId2) derives id B
      * - a v3-created folder/tag C (no v2_id) derives id C

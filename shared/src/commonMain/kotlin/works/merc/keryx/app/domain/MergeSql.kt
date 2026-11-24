@@ -364,10 +364,29 @@ object MergeSql {
 
     private val folders: List<String> = perFieldStatements(
         "folders", FOLDER_COLUMNS, listOf(SyncLww.FOLDER_NAME, SyncLww.FOLDER_SORT_ORDER, SyncLww.FOLDER_EXISTENCE),
+    ) + listOf(
+        // A row whose id already matches but has no v2_id yet picks it up from cloud.
+        """
+        UPDATE main.folders
+        SET v2_id = c.v2_id
+        FROM cloud.folders c
+        WHERE c.id = main.folders.id
+          AND main.folders.v2_id IS NULL
+          AND c.v2_id IS NOT NULL;
+        """.trimIndent(),
     )
 
     private val tags: List<String> = perFieldStatements(
         "tags", TAG_COLUMNS, listOf(SyncLww.TAG_NAME, SyncLww.TAG_COLOR, SyncLww.TAG_SORT_ORDER, SyncLww.TAG_EXISTENCE),
+    ) + listOf(
+        """
+        UPDATE main.tags
+        SET v2_id = c.v2_id
+        FROM cloud.tags c
+        WHERE c.id = main.tags.id
+          AND main.tags.v2_id IS NULL
+          AND c.v2_id IS NOT NULL;
+        """.trimIndent(),
     )
 
     // ---- feeds ----
