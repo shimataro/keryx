@@ -294,12 +294,15 @@ object MergeSql {
                    COALESCE((SELECT r.target_id FROM $TAG_MAP r JOIN $TAG_FREE free ON free.target_id = r.target_id WHERE r.cloud_id = ft.tag_id), ft.tag_id),
                    ft.deleted_at, ft.updated_at
             FROM cloud.feed_tags ft
-            WHERE true
+            WHERE EXISTS (
+                SELECT 1 FROM $TAG_MAP m
+                JOIN $TAG_FREE free ON free.target_id = m.target_id
+                WHERE m.cloud_id <> m.target_id)
             ON CONFLICT(feed_id, tag_id) DO UPDATE SET
                 ${SyncLww.upsertAssignments(SyncLww.FEED_TAG).joinToString(",\n                ")}
             WHERE ${SyncLww.wins("excluded", "", SyncLww.FEED_TAG)}
             """.trimIndent(),
-            "DELETE FROM cloud.feed_tags",
+            "DELETE FROM cloud.feed_tags WHERE EXISTS (\n    SELECT 1 FROM $TAG_MAP m\n    JOIN $TAG_FREE free ON free.target_id = m.target_id\n    WHERE m.cloud_id <> m.target_id)",
             """
             DELETE FROM cloud.tags
             WHERE id IN (
