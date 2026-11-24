@@ -1371,7 +1371,7 @@ class SyncMergerTest {
             "local-", oldFolderId1, oldFolderId2,
             folderNames = "Job" to "Work",
             tagNames = "Job" to "Work",
-            assignChildren = true,
+            assignChildren = false,
             stamp = 100L,
         )
         val cloudFile = migratedSwappedDevice(
@@ -1415,10 +1415,13 @@ class SyncMergerTest {
         val localFile = migratedRenamedDevice("local-", oldTagId = "old-tag", oldFolderId, "Job", "JobDir", stamp = 100, assignChildren = false)
 
         val cloudFile = migratedRenamedDevice("cloud-", oldTagId = "old-tag", oldFolderId, "Work", "WorkDir", stamp = 200, assignChildren = true)
-        // Add an unrelated v3-created folder whose name-derived id collides with the target id.
+        // Add an unrelated v3-created folder whose name-derived id collides with the target id,
+        // with its own newer name and its own child feed, to make sure both identities survive intact.
         JdbcSqliteDriver("jdbc:sqlite:${cloudFile.absolutePath}").use { driver ->
             val db = KeryxDatabase(driver)
-            db.insertFolder(IdGenerator.folderId("JobDir"), "JobDir", now = 50)
+            val targetId = IdGenerator.folderId("JobDir")
+            db.insertFolder(targetId, "Occupied", now = 300)
+            db.insertFeed("f2", folderId = targetId, now = 310)
         }
 
         DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, KeryxDatabase.Schema.version, MergeSql.all)
@@ -1431,10 +1434,12 @@ class SyncMergerTest {
             val sourceFolder = verifyDb.foldersQueries.getById(sourceId).executeAsOne()
             assertEquals("WorkDir", sourceFolder.name)
             assertEquals(oldFolderId, sourceFolder.v2_id)
-            // The unrelated target row was imported too.
-            assertNotNull(verifyDb.foldersQueries.getById(targetId).executeAsOneOrNull())
             // f1 stays assigned to the source identity.
             assertEquals(sourceId, verifyDb.feedsQueries.getById("f1").executeAsOne().folder_id)
+            // The unrelated target row was imported too, keeping its own name and child.
+            val targetFolder = verifyDb.foldersQueries.getById(targetId).executeAsOne()
+            assertEquals("Occupied", targetFolder.name)
+            assertEquals(targetId, verifyDb.feedsQueries.getById("f2").executeAsOne().folder_id)
         } finally {
             verifyDriver.close()
         }
@@ -1452,7 +1457,7 @@ class SyncMergerTest {
             "local-", oldTagId1, oldTagId2,
             folderNames = "Job" to "Work",
             tagNames = "Job" to "Work",
-            assignChildren = true,
+            assignChildren = false,
             stamp = 100L,
         )
         val cloudFile = migratedSwappedDevice(
@@ -1492,9 +1497,14 @@ class SyncMergerTest {
         val localFile = migratedRenamedDevice("local-", oldTagId, oldFolderId = "old-folder", "Job", "JobDir", stamp = 100, assignChildren = false)
 
         val cloudFile = migratedRenamedDevice("cloud-", oldTagId, oldFolderId = "old-folder", "Work", "WorkDir", stamp = 200, assignChildren = true)
+        // Add an unrelated v3-created tag whose name-derived id collides with the target id,
+        // with its own newer name and its own child feed, to make sure both identities survive intact.
         JdbcSqliteDriver("jdbc:sqlite:${cloudFile.absolutePath}").use { driver ->
             val db = KeryxDatabase(driver)
-            db.insertTag(IdGenerator.tagId("Job"), "Job", now = 50)
+            val targetId = IdGenerator.tagId("Job")
+            db.insertTag(targetId, "Occupied", now = 300)
+            db.insertFeed("f2", now = 310)
+            db.insertFeedTag("f2", targetId, now = 320)
         }
 
         DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, KeryxDatabase.Schema.version, MergeSql.all)
@@ -1506,8 +1516,12 @@ class SyncMergerTest {
             val sourceTag = verifyDb.tagsQueries.getById(sourceId).executeAsOne()
             assertEquals("Work", sourceTag.name)
             assertEquals(oldTagId, sourceTag.v2_id)
-            assertNotNull(verifyDb.tagsQueries.getById(targetId).executeAsOneOrNull())
+            // f1 stays attached to the source identity.
             assertEquals(listOf(sourceId), verifyDb.feed_tagsQueries.watchTagIdsForFeed("f1").executeAsList())
+            // The unrelated target tag was imported too, keeping its own name and child.
+            val targetTag = verifyDb.tagsQueries.getById(targetId).executeAsOne()
+            assertEquals("Occupied", targetTag.name)
+            assertEquals(listOf(targetId), verifyDb.feed_tagsQueries.watchTagIdsForFeed("f2").executeAsList())
         } finally {
             verifyDriver.close()
         }
