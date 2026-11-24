@@ -8,7 +8,7 @@ package works.merc.keryx.app.domain
  * ([works.merc.keryx.app.platform.TransportFiles.createEmpty]) with the source database — the live
  * database for a delta, a `VACUUM INTO` copy of it for a full send — attached as [SOURCE] and, for a
  * full send, the file to leave out attached as [EXCEPT]. Only the transport columns
- * ([TransportSchema.SYNCED_TABLES_V1]) are copied, listed explicitly, so `search_text`, the fetch
+ * ([TransportSchema.SYNCED_TABLES]) are copied, listed explicitly, so `search_text`, the fetch
  * state and the bookkeeping never leave the device.
  *
  * Both kinds end with [closureStatements]: every row a written row references (a feed's folder, an
@@ -25,7 +25,7 @@ object DeltaExportSql {
     /** The alias a full send's except-file is attached under. */
     const val EXCEPT = "ex"
 
-    private val tables: Map<String, TableSpec> = TransportSchema.SYNCED_TABLES_V1.associateBy { it.name }
+    private val tables: Map<String, TableSpec> = TransportSchema.SYNCED_TABLES.associateBy { it.name }
 
     private fun table(name: String): TableSpec = tables.getValue(name)
 
@@ -54,7 +54,7 @@ object DeltaExportSql {
     }
 
     /** The synced tables, in the order [countQuery] is reported. */
-    val tableNames: List<String> = TransportSchema.SYNCED_TABLES_V1.map { it.name }
+    val tableNames: List<String> = TransportSchema.SYNCED_TABLES.map { it.name }
 
     private fun columns(table: TableSpec, alias: String? = null): String =
         table.columnNames.joinToString(", ") { if (alias == null) it else "$alias.$it" }
@@ -122,7 +122,7 @@ object DeltaExportSql {
      * (`EXCEPT` compares NULLs as equal) — the receivers already get it from that file.
      */
     fun fullStatements(withExcept: Boolean): List<String> = buildList {
-        for (spec in TransportSchema.SYNCED_TABLES_V1) {
+        for (spec in TransportSchema.SYNCED_TABLES) {
             val except = if (withExcept) " EXCEPT SELECT ${columns(spec)} FROM $EXCEPT.${spec.name}" else ""
             add("INSERT INTO main.${spec.name} (${columns(spec)}) SELECT ${columns(spec)} FROM $SOURCE.${spec.name}$except")
         }

@@ -73,7 +73,7 @@ class TransportFilesTest {
     @Test
     fun transportSyncedColumnsAreTheLocalSchemasSyncedColumnsWithoutSearchText() {
         val local = TransportFixtures.localDb()
-        for (table in TransportSchema.SYNCED_TABLES_V1) {
+        for (table in TransportSchema.SYNCED_TABLES) {
             val localInfo = tableInfo(local, table.name)
             val expected = localInfo.filterKeys { it != "search_text" }
             // Same names, types and NOT NULL; the local primary keys match too.

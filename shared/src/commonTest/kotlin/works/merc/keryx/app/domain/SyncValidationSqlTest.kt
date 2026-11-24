@@ -31,7 +31,7 @@ class SyncValidationSqlTest {
 
     @Test
     fun typeViolationQueryCoversEveryColumnInOneScan() {
-        val table = TransportSchema.SYNCED_TABLES_V1.first { it.name == "feeds" }
+        val table = TransportSchema.SYNCED_TABLES.first { it.name == "feeds" }
         val sql = SyncValidationSql.typeViolationQuery(table)
         assertTrue(sql.startsWith("SELECT CASE "))
         assertTrue(sql.endsWith("FROM \"feeds\" WHERE ${table.columns.joinToString(" OR ") { SyncValidationSql.violation(it) }} LIMIT 1"))

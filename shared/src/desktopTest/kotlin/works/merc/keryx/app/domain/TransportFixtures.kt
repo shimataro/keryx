@@ -83,7 +83,7 @@ internal object TransportFixtures {
                 }
             }
         }
-        val tables = TransportSchema.SYNCED_TABLES_V1 + if (coverage) TransportSchema.META_TABLES.filter { it.name != "ks_meta" } else emptyList()
+        val tables = TransportSchema.SYNCED_TABLES + if (coverage) TransportSchema.META_TABLES.filter { it.name != "ks_meta" } else emptyList()
         val synced = tables.associate { table ->
             val sql = "SELECT ${table.columnNames.joinToString(", ")} FROM ${table.name} ORDER BY ${table.primaryKey.joinToString(", ")}"
             table.name to rows(sql, table.columnNames.size)

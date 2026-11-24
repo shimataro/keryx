@@ -18,7 +18,7 @@ class DeltaExportSqlTest {
             assertFalse("etag" in statement || "error_count" in statement, statement)
         }
         val articles = delta.single { it.startsWith("INSERT INTO main.articles") }
-        val columns = TransportSchema.SYNCED_TABLES_V1.first { it.name == "articles" }.columnNames
+        val columns = TransportSchema.SYNCED_TABLES.first { it.name == "articles" }.columnNames
         assertTrue(articles.startsWith("INSERT INTO main.articles (${columns.joinToString(", ")})"), articles)
     }
 

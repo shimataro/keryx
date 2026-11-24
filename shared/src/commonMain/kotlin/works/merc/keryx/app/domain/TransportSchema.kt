@@ -26,9 +26,19 @@ import works.merc.keryx.app.domain.ColumnKind.TEXT
 object TransportSchema {
 
     /** The transport format this build writes (`PRAGMA user_version` of a transport file). */
-    const val VERSION: Long = 1L
+    const val VERSION: Long = 2L
 
     private val FOLDERS_V1 = TableSpec(
+        "folders",
+        listOf(
+            req("id", ID), req("name", TEXT), req("sort_order", INTEGER), opt("deleted_at", STAMP),
+            req("updated_at", STAMP), req("created_at", STAMP), opt("name_updated_at", STAMP),
+            opt("sort_order_updated_at", STAMP),
+        ),
+        primaryKey = listOf("id"),
+    )
+
+    private val FOLDERS_V2 = TableSpec(
         "folders",
         listOf(
             req("id", ID), req("name", TEXT), req("sort_order", INTEGER), opt("deleted_at", STAMP),
@@ -51,6 +61,16 @@ object TransportSchema {
     )
 
     private val TAGS_V1 = TableSpec(
+        "tags",
+        listOf(
+            req("id", ID), req("name", TEXT), opt("color", TEXT), req("sort_order", INTEGER), opt("deleted_at", STAMP),
+            req("updated_at", STAMP), req("created_at", STAMP), opt("name_updated_at", STAMP),
+            opt("color_updated_at", STAMP), opt("sort_order_updated_at", STAMP),
+        ),
+        primaryKey = listOf("id"),
+    )
+
+    private val TAGS_V2 = TableSpec(
         "tags",
         listOf(
             req("id", ID), req("name", TEXT), opt("color", TEXT), req("sort_order", INTEGER), opt("deleted_at", STAMP),
@@ -101,8 +121,15 @@ object TransportSchema {
     private val KS_COVERED = TableSpec("ks_covered", listOf(req("name", ID), opt("created_at", STAMP)), primaryKey = listOf("name"))
 
     /**
-     * The six synced tables of transport version 1, in FK-safe order. They are exactly local schema
-     * version 3's synced columns minus `articles.search_text` (pinned by a test).
+     * The six synced tables of the current transport version, in FK-safe order. They are exactly
+     * local schema version 3's synced columns minus `articles.search_text` (pinned by a test).
+     */
+    val SYNCED_TABLES: List<TableSpec> =
+        listOf(FOLDERS_V2, FEEDS_V1, TAGS_V2, ARTICLES_V1, FEED_TAGS_V1, GLOBAL_SETTINGS_V1)
+
+    /**
+     * The version-1 shape of the synced tables, kept for migration expectations. Version 2 only
+     * added the optional `v2_id` column to folders and tags.
      */
     val SYNCED_TABLES_V1: List<TableSpec> =
         listOf(FOLDERS_V1, FEEDS_V1, TAGS_V1, ARTICLES_V1, FEED_TAGS_V1, GLOBAL_SETTINGS_V1)
@@ -117,6 +144,7 @@ object TransportSchema {
      */
     val EXPECTED_TABLES: Map<Long, List<TableSpec>> = mapOf(
         1L to SYNCED_TABLES_V1 + META_TABLES,
+        2L to SYNCED_TABLES + META_TABLES,
     )
 
     /** The `CREATE TABLE` statements of a fresh transport file of [VERSION]. */
@@ -130,10 +158,18 @@ object TransportSchema {
     }
 
     /**
-     * Transport migrations, in order. Empty while version 1 is the only version: a later version adds
-     * its `from -> to` step here, together with its [EXPECTED_TABLES] entry.
+     * Transport migrations, in order. The 1→2 step adds the optional `v2_id` column to folders and
+     * tags so older transport files without it can still be validated and merged.
      */
-    val MIGRATIONS: List<Migration> = emptyList()
+    val MIGRATIONS: List<Migration> = listOf(
+        Migration(
+            1, 2,
+            listOf(
+                "ALTER TABLE folders ADD COLUMN v2_id TEXT",
+                "ALTER TABLE tags ADD COLUMN v2_id TEXT",
+            ),
+        ),
+    )
 
     /**
      * The chain of [MIGRATIONS] that brings a file from [from] up to [to] (empty when they are

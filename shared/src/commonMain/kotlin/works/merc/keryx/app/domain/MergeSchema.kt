@@ -15,12 +15,12 @@ import works.merc.keryx.app.domain.ColumnKind.TEXT
 object MergeSchema {
 
     /**
-     * Schema version 3's synced tables: transport version 1's tables plus `articles.search_text`.
-     * The device-local bookkeeping tables are not listed: transport files never carry them
-     * ([DeltaExportSql] copies the synced tables only). Keep in sync with [MergeSql] and the `.sq` schema files (a test compares
-     * this with a freshly created database).
+     * Schema version 3's synced tables: the current transport version's tables plus
+     * `articles.search_text`. The device-local bookkeeping tables are not listed: transport files
+     * never carry them ([DeltaExportSql] copies the synced tables only). Keep in sync with
+     * [MergeSql] and the `.sq` schema files (a test compares this with a freshly created database).
      */
-    private val EXPECTED_TABLES_V3: List<TableSpec> = TransportSchema.SYNCED_TABLES_V1.map { table ->
+    private val EXPECTED_TABLES_V3: List<TableSpec> = TransportSchema.SYNCED_TABLES.map { table ->
         if (table.name == "articles") table.withColumnAfter("cached_at", req("search_text", TEXT)) else table
     }
 

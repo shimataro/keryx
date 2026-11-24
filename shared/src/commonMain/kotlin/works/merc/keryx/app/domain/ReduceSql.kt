@@ -36,7 +36,7 @@ object ReduceSql {
         """.trimIndent()
     }
 
-    private fun table(name: String): TableSpec = TransportSchema.SYNCED_TABLES_V1.first { it.name == name }
+    private fun table(name: String): TableSpec = TransportSchema.SYNCED_TABLES.first { it.name == name }
 
     private const val EARLIEST_CREATED_AT = "created_at = MIN(created_at, excluded.created_at)"
 
