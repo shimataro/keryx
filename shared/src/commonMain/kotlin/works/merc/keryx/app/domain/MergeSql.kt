@@ -30,8 +30,11 @@ package works.merc.keryx.app.domain
  * that key — greatest `updated_at`, then greatest id ([winnerAmong]). Statements resolving a
  * reference by id (`mergeFeedFolderId`, `feedTags`) still see every cloud row. Tag and folder rows
  * are matched by id only — their ids are name-derived (`IdGenerator.tagId` / `folderId`), so two
- * devices that created the same name hold the same id and no duplicate by name can arise (a folded
- * file from the random-id era, or a name two renames landed on, simply imports both rows).
+ * devices that created the same name hold the same id. A row the v2→v3 migration re-keyed also
+ * carries its pre-upgrade id in `v2_id`: rows that shared that id but were renamed differently on
+ * two devices before they upgraded are reconciled onto one id first ([reconcileFolders] /
+ * [reconcileTags]), so the per-field merge converges them instead of keeping both. A tag or folder
+ * name two renames landed on simply imports both rows.
  */
 object MergeSql {
 
@@ -48,11 +51,12 @@ object MergeSql {
             "FROM cloud.$table)"
 
     private val FOLDER_COLUMNS = listOf(
-        "id", "name", "sort_order", "deleted_at", "updated_at", "created_at", "name_updated_at", "sort_order_updated_at",
+        "id", "name", "sort_order", "deleted_at", "updated_at", "created_at", "name_updated_at",
+        "sort_order_updated_at", "v2_id",
     )
     private val TAG_COLUMNS = listOf(
         "id", "name", "color", "sort_order", "deleted_at", "updated_at", "created_at",
-        "name_updated_at", "color_updated_at", "sort_order_updated_at",
+        "name_updated_at", "color_updated_at", "sort_order_updated_at", "v2_id",
     )
     private val FEED_COLUMNS = listOf(
         "id", "url", "site_url", "title", "description", "favicon_url", "custom_title", "folder_id",
@@ -65,89 +69,136 @@ object MergeSql {
         "updated_at", "created_at", "deleted_at", "deleted_updated_at", "body_updated_at",
     )
 
-    // ---- v2→v3 re-key reconciliation: rows sharing a pre-upgrade id keep one identity ----
+    // ---- v2→v3 identity reconciliation: rows sharing a pre-upgrade id keep one identity ----
 
     /**
-     * Two devices that synced the same v2 tag/folder share its random id. If one renames it and the
-     * rename has not propagated before both devices upgrade to v3, each device derives a different
-     * name-derived id for that pre-upgrade row. The id-only merge would keep both rows; these
-     * statements reconcile them first by rewriting the cloud row's id (and the ids that reference it)
-     * to match main's id, so the per-field LWW merge treats them as one row.
+     * Before version 3 a tag's or folder's id was a random UUIDv4, and two devices that created the
+     * same name held different ids. The v2→v3 migration re-keyed every row onto the id its
+     * creation-time name derives from and kept the pre-upgrade id in `v2_id` ([TagFolderIdRekey]); a
+     * row created after the migration has no `v2_id`. If one device renames such a row and the
+     * rename has not propagated before both devices upgrade, each derives a different name-derived
+     * id, and an id-only merge would keep both rows. These statements reconcile them first, in every
+     * merge — delta, base and pre-delta — so the per-field last-write-wins merge then treats them as
+     * one row.
      *
-     * The remap tables are populated by `rekeyTagAndFolderIds` during the v2→v3 migration and kept
-     * in main (SettingsRepository no longer clears them). A cloud file migrated by DatabaseMerger
-     * also populates its own `ks_id_remap`, so old ids can be matched across the two databases.
+     * For every cloud row with a non-null `v2_id`:
      *
-     * Steps (FK-safe with foreign keys enforced):
-     * 1. Build a temp mapping `cloud.new_id -> main.new_id` from matching `ks_id_remap` rows.
-     * 2. Insert placeholder rows into `cloud.tags` / `cloud.folders` under main's id.
-     * 3. Update child references (`feed_tags.tag_id`, `feeds.folder_id`, `ks_feed_folder_raw.folder_id`).
-     * 4. Update `cloud.ks_id_remap` so later reconciliation steps see the canonical id.
-     * 5. Delete the old cloud rows.
+     * 1. Its group is the cloud rows sharing that `v2_id`; the group's canonical cloud row is the
+     *    greatest `updated_at`, then greatest id ([canonicalSource]).
+     * 2. Its target id is main's row carrying the same `v2_id` when one exists (that is the identity
+     *    already established here), else the canonical cloud row's id ([reconcileMap]). A row whose
+     *    id already equals its target maps to itself.
+     * 3. The target row is copied into `cloud` when `cloud` lacks it, so the per-field statements
+     *    have one row per identity to match by id.
+     * 4. Child references move to the target id, then the rows mapped away are deleted. For tags,
+     *    `cloud.feed_tags` is resolved first: its links to the merged ids are folded into one link
+     *    per `(feed_id, tag_id)` by the same last-write-wins rule as any other link, so a feed linked
+     *    to both ids of a reconciled tag keeps one link.
      *
-     * A v2 database enforces UNIQUE(name), so no two rows in one v2 database can derive the same id;
-     * therefore the target main id never already exists in the cloud table being reconciled, and the
-     * placeholder insert cannot conflict. (A v3-created row with the same name falls back to a random
-     * id when the derived id is already taken, so it does not collide either.)
+     * The order is FK-safe with foreign keys enforced (a pre-delta cloud file is migrated to the
+     * full schema, which enforces them): a parent row is copied in before a child points at it, and
+     * children are moved before their old parent is deleted. A transport file carries no foreign
+     * keys, so the same statements simply run there. A dangling `cloud.feed_tags` row — one this
+     * merge would skip anyway — is not re-inserted, so the rebuild does not fail on it.
+     *
+     * Running the statements twice changes nothing: after the first run every surviving cloud row's
+     * id is its target, so it maps to itself. Neither the canonical choice (`updated_at`, then id)
+     * nor [SyncLww]'s link comparison depends on the order the rows were folded into the file.
      */
-    private val reconcileFolders: List<String> = listOf(
-        "CREATE TABLE IF NOT EXISTS cloud.ks_id_remap (kind TEXT NOT NULL, old_id TEXT NOT NULL, new_id TEXT NOT NULL, PRIMARY KEY (kind, old_id))",
-        "CREATE TEMP TABLE IF NOT EXISTS ks_folder_reconcile (cloud_id TEXT PRIMARY KEY, main_id TEXT NOT NULL)",
-        "DELETE FROM ks_folder_reconcile",
+    private const val TAG_SOURCE = "ks_tag_source"
+    private const val TAG_MAP = "ks_tag_reconcile"
+    private const val FEED_TAG_MAP = "ks_feed_tag_reconcile"
+    private const val FOLDER_SOURCE = "ks_folder_source"
+    private const val FOLDER_MAP = "ks_folder_reconcile"
+
+    /**
+     * The canonical cloud row per `v2_id` of [table] (greatest `updated_at`, then greatest id), into
+     * the temp table [source] (`v2_id` PRIMARY KEY, `source_id`).
+     */
+    private fun canonicalSource(table: String, source: String): List<String> = listOf(
+        "CREATE TEMP TABLE IF NOT EXISTS $source (v2_id TEXT PRIMARY KEY, source_id TEXT NOT NULL)",
+        "DELETE FROM $source",
         """
-        INSERT INTO ks_folder_reconcile
-        SELECT ckr.new_id, mkr.new_id
-        FROM cloud.ks_id_remap ckr
-        JOIN main.ks_id_remap mkr ON ckr.old_id = mkr.old_id AND ckr.kind = '$ID_REMAP_KIND_FOLDER'
-        WHERE ckr.new_id != mkr.new_id
+        INSERT INTO $source (v2_id, source_id)
+        SELECT v2_id, id FROM (
+            SELECT v2_id, id, ROW_NUMBER() OVER (PARTITION BY v2_id ORDER BY updated_at DESC, id DESC) AS rn
+            FROM cloud.$table
+            WHERE v2_id IS NOT NULL
+        ) WHERE rn = 1
         """.trimIndent(),
-        """
-        INSERT INTO cloud.folders (${FOLDER_COLUMNS.joinToString(", ")})
-        SELECT r.main_id, ${FOLDER_COLUMNS.drop(1).joinToString(", ") { "f.$it" }}
-        FROM cloud.folders f
-        JOIN ks_folder_reconcile r ON r.cloud_id = f.id
-        """.trimIndent(),
-        """
-        UPDATE cloud.feeds
-        SET folder_id = (SELECT main_id FROM ks_folder_reconcile WHERE cloud_id = folder_id)
-        WHERE folder_id IN (SELECT cloud_id FROM ks_folder_reconcile)
-        """.trimIndent(),
-        """
-        UPDATE cloud.ks_id_remap
-        SET new_id = (SELECT main_id FROM ks_folder_reconcile WHERE cloud_id = new_id)
-        WHERE kind = '$ID_REMAP_KIND_FOLDER' AND new_id IN (SELECT cloud_id FROM ks_folder_reconcile)
-        """.trimIndent(),
-        "DELETE FROM cloud.folders WHERE id IN (SELECT cloud_id FROM ks_folder_reconcile)",
     )
 
-    private val reconcileTags: List<String> = listOf(
-        "CREATE TEMP TABLE IF NOT EXISTS ks_tag_reconcile (cloud_id TEXT PRIMARY KEY, main_id TEXT NOT NULL)",
-        "DELETE FROM ks_tag_reconcile",
+    /**
+     * The target id of every cloud row of [table] with a non-null `v2_id`, into the temp table [map]
+     * (`cloud_id` PRIMARY KEY, `target_id`): main's row carrying the same `v2_id` when one exists,
+     * else the canonical cloud row's id ([canonicalSource]).
+     */
+    private fun reconcileMap(table: String, source: String, map: String): List<String> = listOf(
+        "CREATE TEMP TABLE IF NOT EXISTS $map (cloud_id TEXT PRIMARY KEY, target_id TEXT NOT NULL)",
+        "DELETE FROM $map",
         """
-        INSERT INTO ks_tag_reconcile
-        SELECT ckr.new_id, mkr.new_id
-        FROM cloud.ks_id_remap ckr
-        JOIN main.ks_id_remap mkr ON ckr.old_id = mkr.old_id AND ckr.kind = '$ID_REMAP_KIND_TAG'
-        WHERE ckr.new_id != mkr.new_id
+        INSERT INTO $map (cloud_id, target_id)
+        SELECT c.id, COALESCE(
+            (SELECT MIN(m.id) FROM main.$table m WHERE m.v2_id = c.v2_id),
+            (SELECT s.source_id FROM $source s WHERE s.v2_id = c.v2_id))
+        FROM cloud.$table c
+        WHERE c.v2_id IS NOT NULL
         """.trimIndent(),
-        """
-        INSERT INTO cloud.tags (${TAG_COLUMNS.joinToString(", ")})
-        SELECT r.main_id, ${TAG_COLUMNS.drop(1).joinToString(", ") { "t.$it" }}
-        FROM cloud.tags t
-        JOIN ks_tag_reconcile r ON r.cloud_id = t.id
-        """.trimIndent(),
-        """
-        UPDATE cloud.feed_tags
-        SET tag_id = (SELECT main_id FROM ks_tag_reconcile WHERE cloud_id = tag_id)
-        WHERE tag_id IN (SELECT cloud_id FROM ks_tag_reconcile)
-        """.trimIndent(),
-        """
-        UPDATE cloud.ks_id_remap
-        SET new_id = (SELECT main_id FROM ks_tag_reconcile WHERE cloud_id = new_id)
-        WHERE kind = '$ID_REMAP_KIND_TAG' AND new_id IN (SELECT cloud_id FROM ks_tag_reconcile)
-        """.trimIndent(),
-        "DELETE FROM cloud.tags WHERE id IN (SELECT cloud_id FROM ks_tag_reconcile)",
     )
+
+    private val reconcileFolders: List<String> =
+        canonicalSource("folders", FOLDER_SOURCE) +
+            reconcileMap("folders", FOLDER_SOURCE, FOLDER_MAP) + listOf(
+            """
+            INSERT INTO cloud.folders (${FOLDER_COLUMNS.joinToString(", ")})
+            SELECT r.target_id, ${FOLDER_COLUMNS.drop(1).joinToString(", ") { "f.$it" }}
+            FROM cloud.folders f
+            JOIN $FOLDER_SOURCE s ON s.source_id = f.id
+            JOIN $FOLDER_MAP r ON r.cloud_id = f.id
+            WHERE NOT EXISTS (SELECT 1 FROM cloud.folders x WHERE x.id = r.target_id)
+            """.trimIndent(),
+            """
+            UPDATE cloud.feeds
+            SET folder_id = (SELECT r.target_id FROM $FOLDER_MAP r WHERE r.cloud_id = cloud.feeds.folder_id)
+            WHERE folder_id IN (SELECT cloud_id FROM $FOLDER_MAP)
+            """.trimIndent(),
+            "DELETE FROM cloud.folders WHERE id IN (SELECT cloud_id FROM $FOLDER_MAP WHERE cloud_id <> target_id)",
+        )
+
+    private val reconcileTags: List<String> =
+        canonicalSource("tags", TAG_SOURCE) +
+            reconcileMap("tags", TAG_SOURCE, TAG_MAP) + listOf(
+            "CREATE TEMP TABLE IF NOT EXISTS $FEED_TAG_MAP (feed_id TEXT NOT NULL, tag_id TEXT NOT NULL, deleted_at INTEGER, updated_at INTEGER NOT NULL, PRIMARY KEY (feed_id, tag_id))",
+            "DELETE FROM $FEED_TAG_MAP",
+            """
+            INSERT INTO $FEED_TAG_MAP (feed_id, tag_id, deleted_at, updated_at)
+            SELECT ft.feed_id,
+                   COALESCE((SELECT r.target_id FROM $TAG_MAP r WHERE r.cloud_id = ft.tag_id), ft.tag_id),
+                   ft.deleted_at, ft.updated_at
+            FROM cloud.feed_tags ft
+            WHERE true
+            ON CONFLICT(feed_id, tag_id) DO UPDATE SET
+                ${SyncLww.upsertAssignments(SyncLww.FEED_TAG).joinToString(",\n                ")}
+            WHERE ${SyncLww.wins("excluded", "", SyncLww.FEED_TAG)}
+            """.trimIndent(),
+            "DELETE FROM cloud.feed_tags",
+            """
+            INSERT INTO cloud.tags (${TAG_COLUMNS.joinToString(", ")})
+            SELECT r.target_id, ${TAG_COLUMNS.drop(1).joinToString(", ") { "t.$it" }}
+            FROM cloud.tags t
+            JOIN $TAG_SOURCE s ON s.source_id = t.id
+            JOIN $TAG_MAP r ON r.cloud_id = t.id
+            WHERE NOT EXISTS (SELECT 1 FROM cloud.tags x WHERE x.id = r.target_id)
+            """.trimIndent(),
+            """
+            INSERT INTO cloud.feed_tags (feed_id, tag_id, deleted_at, updated_at)
+            SELECT m.feed_id, m.tag_id, m.deleted_at, m.updated_at
+            FROM $FEED_TAG_MAP m
+            WHERE EXISTS (SELECT 1 FROM cloud.feeds f WHERE f.id = m.feed_id)
+              AND EXISTS (SELECT 1 FROM cloud.tags t WHERE t.id = m.tag_id)
+            """.trimIndent(),
+            "DELETE FROM cloud.tags WHERE id IN (SELECT cloud_id FROM $TAG_MAP WHERE cloud_id <> target_id)",
+        )
 
     // ---- tags / folders: per-field last-write-wins, matched by id ----
 
@@ -463,25 +514,20 @@ object MergeSql {
     """.trimIndent()
 
     /**
-     * The merge statements for delta/base transport files. Transport files contain only the six
-     * synced tables plus metadata, so this list does not reference device-local tables such as
-     * `ks_id_remap`.
+     * The merge statements for every kind of cloud file — a delta, a base, or a pre-delta database
+     * migrated to the current local schema. Transport files contain only the six synced tables plus
+     * metadata, so this list does not reference device-local tables. A pre-delta file's tags and
+     * folders carry `v2_id` from the migration as well, so the same reconciliation applies wherever
+     * a pre-upgrade id matches.
      *
-     * Applied in FK-safe order (parents before children): folders, feeds, the folder merge's three
-     * statements and the other three `mergeFeed*`, tags, articles (with the `ks_search_pending` /
-     * `ks_search_awaiting_body` registrations around it), feed_tags, global_settings.
+     * Applied in FK-safe order (parents before children): the v2→v3 identity reconciliation,
+     * folders, feeds, the folder merge's three statements and the other three `mergeFeed*`, tags,
+     * articles (with the `ks_search_pending` / `ks_search_awaiting_body` registrations around it),
+     * feed_tags, global_settings.
      */
-    val all: List<String> = folders + listOf(
+    val all: List<String> = reconcileFolders + reconcileTags + folders + listOf(
         feeds, normalizeFeedFolderRaw, mergeFeedFolderId, recordFeedFolderRaw, mergeFeedSortOrder, mergeFeedCustomTitle, mergeFeedDeletedAt,
     ) + tags + listOf(
         registerChangedBodies, registerAwaitingBodies, articles, registerNewBodies, feedTags, globalSettings,
     )
-
-    /**
-     * The merge statements for the pre-delta `keryx.db.gz` format. A pre-delta file is first
-     * migrated to the app's full schema, which creates `ks_id_remap`; these statements run the same
-     * merge as [all] but prepend reconciliation so that rows which shared a v2 id but were re-keyed
-     * to different name-derived ids on different devices are rewritten to a single id first.
-     */
-    val allWithReconciliation: List<String> = reconcileFolders + reconcileTags + all
 }

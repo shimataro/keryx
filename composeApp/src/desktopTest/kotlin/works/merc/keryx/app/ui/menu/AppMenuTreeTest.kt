@@ -25,10 +25,10 @@ import kotlin.test.assertTrue
 class AppMenuTreeTest {
 
     private fun tag(id: String, name: String) =
-        Tags(id, name, color = null, sort_order = 0L, deleted_at = null, updated_at = 0L, created_at = 0L, name_updated_at = null, color_updated_at = null, sort_order_updated_at = null)
+        Tags(id, name, color = null, sort_order = 0L, deleted_at = null, updated_at = 0L, created_at = 0L, name_updated_at = null, color_updated_at = null, sort_order_updated_at = null, v2_id = null)
 
     private fun folder(id: String, name: String) =
-        Folders(id, name, sort_order = 0L, deleted_at = null, updated_at = 0L, created_at = 0L, name_updated_at = null, sort_order_updated_at = null)
+        Folders(id, name, sort_order = 0L, deleted_at = null, updated_at = 0L, created_at = 0L, name_updated_at = null, sort_order_updated_at = null, v2_id = null)
 
     private fun labels() = AppMenuLabels(
         fileMenu = "File", addFeed = "AddFeed", addFolder = "AddFolder", addTag = "AddTag",

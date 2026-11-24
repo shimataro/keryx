@@ -24,9 +24,11 @@ pre-delta migration and the legacy watch), `domain/MergeSql.kt`,
   different ids, and a feed left pointing at a folder across the folder's deletion and revival. (A former third —
   rows that shared a name under different ids — closed when the tag and folder ids became name-derived:
   `IdGenerator.tagId` / `folderId`, re-keyed once by the v2→v3 migration, so the same name created on two devices
-  carries the same id and the merge matches tags and folders by id alone. Version 3 is unreleased, but a
-  development environment that already ran it with the interim random ids is not re-keyed — the callback fires only
-  when crossing version 2 — and needs its cloud sync data reset once.)
+  carries the same id and the merge matches tags and folders by id alone. A row re-keyed by that migration also
+  keeps its pre-upgrade id in `v2_id`; rows renamed differently on two devices before they upgraded still carry
+  the same `v2_id`, and the merge reconciles them onto one identity first, in every kind of file. Version 3 is
+  unreleased, but a development environment that already ran it with the interim random ids is not re-keyed — the
+  callback fires only when crossing version 2 — and needs its cloud sync data reset once.)
 - **Only local changes are sent.** A change that arrived through a merge is never re-sent, so changes do not echo
   back and forth between devices.
 - **No change is ever unreachable.** Every change is, at every moment, in at least one delta file or base in the
@@ -92,6 +94,8 @@ A delta or base holds the six synced tables (`feeds`, `articles`, `tags`, `feed_
 `articles.search_text` (recomputed by the receiver) are not in it — and without UNIQUE or foreign-key constraints:
 a base folds rows from several devices, and a tag or folder name can legitimately be held by two different ids once
 a rename crosses a same-named creation (the name-derived id of a row is the one its original name derived).
+A tag's or folder's `v2_id` — the id it carried before the v2→v3 re-key, NULL for a row created afterwards — travels
+with it, so a receiver can reconcile a row renamed differently on two devices before they upgraded (see "Merge").
 Each file carries `PRAGMA user_version` and:
 
 - `ks_meta(key, value)` — `format`, `generation`, `device` (the writing device), `created_at`, `kind` (`delta`/`base`)
@@ -128,7 +132,7 @@ extend).
 | `ks_search_pending(rowid)` | Articles whose `search_text` must be recomputed (see "FTS5 Handling") |
 | `ks_search_awaiting_body(id)` | Articles a merge inserted without a body (a light row), kept out of the search index until one arrives (see "FTS5 Handling") |
 | `ks_feed_folder_raw(feed_id, folder_updated_at, folder_id)` | Per feed, the raw folder version (as the winning file carried it) that `feeds.folder_id`'s resolved value came from; valid only while its stamp equals the feed's `folder_updated_at` (see "Merge") |
-| `ks_id_remap(kind, old_id, new_id)` | The tag/folder id re-key the v2→v3 migration ran (`domain/TagFolderIdRekey.kt`), so `SettingsRepository` rewrites the same ids in `local_settings.json` once at startup. The table is kept indefinitely and is also used by `MergeSql` to reconcile pre-upgrade rows that shared a v2 id but were re-keyed to different name-derived ids on different devices (see [db-schema.md](db-schema.md)) |
+| `ks_id_remap(kind, old_id, new_id)` | The tag/folder id re-key the v2→v3 migration ran (`domain/TagFolderIdRekey.kt`), so `SettingsRepository` rewrites the same ids in `local_settings.json` once at startup. The table is kept indefinitely so that rewrite stays idempotent; the sync merge reconciles pre-upgrade identities by the row's `v2_id`, not by this table (see `db-schema.md`) |
 | `feed_fetch_state(feed_id, etag, last_modified, error_count, last_error)` | A feed's fetch state on this device — never synced |
 
 **Triggers** on the six synced tables append to `sync_outbox` (`AFTER INSERT` / `AFTER UPDATE`), guarded by
@@ -561,13 +565,23 @@ Merge SQL (`MergeSql`) key points:
   created afresh on another before the first sync are ONE row after the merge, and the name is decided by
   `name_updated_at` — so the creator of the name may see it change to the rename ("Work" renamed to "Job" on one
   device, "Work" created on another: one tag named "Job" everywhere).
-- **Pre-delta reconciliation of v2 ids.** The pre-delta merge (`DatabaseMerger.merge`, used only for `keryx.db.gz`)
-  runs `MergeSql.allWithReconciliation`. Before the per-field tag/folder merge, it rewrites any cloud rows that
-  came from the same v2 id as a main row but were re-keyed to a different name-derived id, using the v2→v3
-  `old_id → new_id` mapping both sides kept in `ks_id_remap`. A placeholder row is inserted under main's id, child
-  references (`feed_tags.tag_id`, `feeds.folder_id`) are moved, `ks_id_remap` is updated, and the old cloud row is
-  deleted. This keeps a tag or folder that was renamed before the migration from splitting into two identities when
-  the pre-delta file is merged.
+- **Reconciliation of v2 identities (every merge).** A tag or folder re-keyed by the v2→v3 migration keeps its
+  pre-upgrade id in `v2_id`; a row created afterwards has NULL. Two devices that shared a v2 id derive different
+  name-derived ids if they renamed that row differently before upgrading, and an id-only match would keep both.
+  `MergeSql` reconciles them first, in every merge — delta, base and pre-delta — before the per-field merge, for
+  every cloud row with a non-null `v2_id`:
+  1. The group is the cloud rows sharing that `v2_id`; its canonical cloud row is the greatest `updated_at`, then
+     greatest id.
+  2. The target id is main's row carrying the same `v2_id` when one exists (that identity is already
+     established here), else the canonical cloud row's id.
+  3. The target row is copied into `cloud` when `cloud` lacks it, so the per-field statements have one row per
+     identity to match by id.
+  4. Child references move to the target id — `cloud.feeds.folder_id`, and `cloud.feed_tags.tag_id` after the links
+     are folded to one link per `(feed_id, tag_id)` by the ordinary last-write-wins — and the rows mapped away are
+     deleted.
+  The order is foreign-key-safe, the canonical and link choices do not depend on fold order, and a second run
+  changes nothing. Transport files carry `v2_id`, so this works for a delta or base; a pre-delta file gains it from
+  the same migration. `ks_id_remap` is not consulted by the merge.
 - articles, three groups:
   - **Body** — `content`, `summary`, `title`, `url`, `author`, `published_at`, `thumbnail_url` (and `feed_id` /
     `guid`, which the local merge never rewrites on an existing row), stamped by `body_updated_at`. A version with
@@ -1194,11 +1208,12 @@ device's upload unnoticed" in [known-issues.md](known-issues.md).
 A pre-delta database holds columns the current schema no longer syncs: migrating it to schema 3 moves its fetch
 state into `feed_fetch_state` inside the temporary file only (never into the local database), rebuilds its `tags` /
 `folders` the same way `2.sqm` does (per-field stamps initialized from `updated_at`, `UNIQUE(name)` dropped, the
-children evacuated and restored) and re-keys them onto their name-derived ids (`IdGenerator.tagId` / `folderId`,
-the same `AfterVersion(2)` callback the local migration runs — so its rows meet an already-migrated device under
-the same ids when their current names match; a row renamed on one device before the cloud file is migrated derives
-a different id and remains a separate row), initializes `articles.body_updated_at` from `updated_at`, and its articles'
-`search_text` is recomputed as for any merge.
+pre-upgrade id kept in `v2_id`, the children evacuated and restored) and re-keys them onto their name-derived ids
+(`IdGenerator.tagId` / `folderId`, the same `AfterVersion(2)` callback the local migration runs). Its rows therefore
+meet an already-migrated device under the same ids when their current names match, and a row renamed on one device
+before the cloud file is migrated — which derives a different id — is reconciled by the shared `v2_id` in the merge,
+so it does not become a separate identity. It initializes `articles.body_updated_at` from `updated_at`, and its
+articles' `search_text` is recomputed as for any merge.
 
 Builds older than compression (reading only `/keryx.db`) are unaffected by the stub and keep the one-way divergence
 documented for them: this version neither reads nor writes `/keryx.db`. The legacy watch and this migration are

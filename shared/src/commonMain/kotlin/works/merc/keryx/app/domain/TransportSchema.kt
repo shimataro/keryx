@@ -15,7 +15,10 @@ import works.merc.keryx.app.domain.ColumnKind.TEXT
  * state, no `articles.search_text`), with primary keys and NOT NULL but **no UNIQUE or foreign-key
  * constraints** — a base folds rows from several devices, and two devices can legitimately hold
  * different ids for the same tag name — plus three metadata tables: `ks_meta`, `ks_vector` and
- * `ks_covered`. `KeryxDatabase.Schema.migrate` is never run on a transport file.
+ * `ks_covered`. A tag's or folder's `v2_id` travels with it as well: the id it carried before the
+ * v2→v3 migration re-keyed it, which lets every receiver reconcile rows renamed differently on two
+ * devices before they upgraded (`MergeSql`). `KeryxDatabase.Schema.migrate` is never run on a
+ * transport file.
  *
  * Pure data; the DDL is generated from the same [TableSpec]s the validation reads, so the two
  * cannot drift.
@@ -30,7 +33,7 @@ object TransportSchema {
         listOf(
             req("id", ID), req("name", TEXT), req("sort_order", INTEGER), opt("deleted_at", STAMP),
             req("updated_at", STAMP), req("created_at", STAMP), opt("name_updated_at", STAMP),
-            opt("sort_order_updated_at", STAMP),
+            opt("sort_order_updated_at", STAMP), opt("v2_id", TEXT),
         ),
         primaryKey = listOf("id"),
     )
@@ -52,7 +55,7 @@ object TransportSchema {
         listOf(
             req("id", ID), req("name", TEXT), opt("color", TEXT), req("sort_order", INTEGER), opt("deleted_at", STAMP),
             req("updated_at", STAMP), req("created_at", STAMP), opt("name_updated_at", STAMP),
-            opt("color_updated_at", STAMP), opt("sort_order_updated_at", STAMP),
+            opt("color_updated_at", STAMP), opt("sort_order_updated_at", STAMP), opt("v2_id", TEXT),
         ),
         primaryKey = listOf("id"),
     )

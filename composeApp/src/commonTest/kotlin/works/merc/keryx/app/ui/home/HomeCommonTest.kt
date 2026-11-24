@@ -676,6 +676,7 @@ private fun tag(id: String): Tags = Tags(
     name_updated_at = null,
     color_updated_at = null,
     sort_order_updated_at = null,
+    v2_id = null,
 )
 
 private fun folder(id: String): Folders = Folders(
@@ -687,6 +688,7 @@ private fun folder(id: String): Folders = Folders(
     created_at = 0L,
     name_updated_at = null,
     sort_order_updated_at = null,
+    v2_id = null,
 )
 
 private fun feed(id: String, folderId: String? = null, sortOrder: Long = 0L): Feeds = Feeds(

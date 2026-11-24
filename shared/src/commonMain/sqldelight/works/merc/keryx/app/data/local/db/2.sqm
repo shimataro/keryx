@@ -20,9 +20,12 @@ ALTER TABLE feeds DROP COLUMN error_count;
 ALTER TABLE feeds DROP COLUMN last_error;
 
 -- 2. tags and folders are rebuilt: the per-field last-write-wins stamps are added (initialized from
---    updated_at) and UNIQUE(name) is dropped — same-named rows are allowed from here on, so the
+--    updated_at), UNIQUE(name) is dropped — same-named rows are allowed from here on, so the
 --    non-unique tags_name / folders_name indexes (created after the swap) replace the implicit
---    UNIQUE ones. Each child is evacuated first, so dropping the parent cannot violate its foreign
+--    UNIQUE ones — and v2_id preserves each row's v2 id. The final re-key (TagFolderIdRekey, run as
+--    the AfterVersion(2) callback) derives each row's new id from its name; v2_id lets two devices
+--    that renamed the same pre-upgrade row differently still recognise it as one identity in the
+--    sync merge. Each child is evacuated first, so dropping the parent cannot violate its foreign
 --    key: feeds.folder_id is saved and NULLed where it references a folder that exists, and the
 --    feed_tags rows whose tag exists move to a work table. A child whose parent was never there
 --    (written before foreign keys were enforced) is left untouched — it was already a violation, and
@@ -57,10 +60,11 @@ CREATE TABLE folders_new (
     updated_at INTEGER NOT NULL,
     created_at INTEGER NOT NULL,
     name_updated_at       INTEGER,
-    sort_order_updated_at INTEGER
+    sort_order_updated_at INTEGER,
+    v2_id                 TEXT
 );
-INSERT INTO folders_new (id, name, sort_order, deleted_at, updated_at, created_at, name_updated_at, sort_order_updated_at)
-SELECT id, name, sort_order, deleted_at, updated_at, created_at, updated_at, updated_at FROM folders;
+INSERT INTO folders_new (id, name, sort_order, deleted_at, updated_at, created_at, name_updated_at, sort_order_updated_at, v2_id)
+SELECT id, name, sort_order, deleted_at, updated_at, created_at, updated_at, updated_at, id FROM folders;
 DROP TABLE folders;
 ALTER TABLE folders_new RENAME TO folders;
 
@@ -74,10 +78,11 @@ CREATE TABLE tags_new (
     created_at INTEGER NOT NULL,
     name_updated_at       INTEGER,
     color_updated_at      INTEGER,
-    sort_order_updated_at INTEGER
+    sort_order_updated_at INTEGER,
+    v2_id                 TEXT
 );
-INSERT INTO tags_new (id, name, color, sort_order, deleted_at, updated_at, created_at, name_updated_at, color_updated_at, sort_order_updated_at)
-SELECT id, name, color, sort_order, deleted_at, updated_at, created_at, updated_at, updated_at, updated_at FROM tags;
+INSERT INTO tags_new (id, name, color, sort_order, deleted_at, updated_at, created_at, name_updated_at, color_updated_at, sort_order_updated_at, v2_id)
+SELECT id, name, color, sort_order, deleted_at, updated_at, created_at, updated_at, updated_at, updated_at, id FROM tags;
 DROP TABLE tags;
 ALTER TABLE tags_new RENAME TO tags;
 

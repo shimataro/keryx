@@ -619,6 +619,7 @@ private fun tag(id: String): Tags = Tags(
     name_updated_at = null,
     color_updated_at = null,
     sort_order_updated_at = null,
+    v2_id = null,
 )
 
 /** A tag with its own name and creation time, for the same-name ordinal tests. */
@@ -633,6 +634,7 @@ private fun folder(id: String): Folders = Folders(
     created_at = 0L,
     name_updated_at = null,
     sort_order_updated_at = null,
+    v2_id = null,
 )
 
 /** A folder with its own name and creation time, for the same-name ordinal tests. */

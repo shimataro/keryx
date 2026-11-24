@@ -38,6 +38,7 @@ class NameOrdinalLabelTest {
         name_updated_at = null,
         color_updated_at = null,
         sort_order_updated_at = null,
+        v2_id = null,
     )
 
     private fun folder(id: String, name: String): Folders = Folders(
@@ -49,6 +50,7 @@ class NameOrdinalLabelTest {
         created_at = 0L,
         name_updated_at = null,
         sort_order_updated_at = null,
+        v2_id = null,
     )
 
     @Test

@@ -77,6 +77,7 @@ private fun tag(id: String, name: String, createdAt: Long, deletedAt: Long? = nu
     name_updated_at = null,
     color_updated_at = null,
     sort_order_updated_at = null,
+    v2_id = null,
 )
 
 private fun folder(id: String, name: String, createdAt: Long): Folders = Folders(
@@ -88,4 +89,5 @@ private fun folder(id: String, name: String, createdAt: Long): Folders = Folders
     created_at = createdAt,
     name_updated_at = null,
     sort_order_updated_at = null,
+    v2_id = null,
 )

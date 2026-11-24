@@ -227,6 +227,15 @@ class SchemaV3MigrationTest {
                 ),
                 conn.rows("SELECT id, name, updated_at, created_at FROM tags ORDER BY created_at").toSet(),
             )
+            // Each re-keyed row keeps its pre-upgrade id in v2_id, which the sync merge reconciles by.
+            assertEquals(
+                setOf(listOf<Any?>(dId, "d1"), listOf<Any?>(dGoneId, "d2")),
+                conn.rows("SELECT id, v2_id FROM folders").toSet(),
+            )
+            assertEquals(
+                setOf(listOf<Any?>(tId, "t1"), listOf<Any?>(tGoneId, "t2")),
+                conn.rows("SELECT id, v2_id FROM tags").toSet(),
+            )
             // The folder assignment and the links moved to the new ids; the orphans are untouched.
             assertEquals(
                 listOf(

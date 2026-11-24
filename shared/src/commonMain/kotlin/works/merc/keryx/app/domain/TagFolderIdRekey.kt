@@ -36,15 +36,16 @@ val KERYX_SCHEMA_CALLBACKS: Array<AfterVersion> = arrayOf(
  * For every row whose id is not already the derived one: the row is copied under the new id, its
  * children (`feed_tags.tag_id`, or `feeds.folder_id`) are moved, the old row is deleted, and the
  * move is recorded in `ks_id_remap` so `SettingsRepository` can rewrite the same ids in
- * `local_settings.json` once at startup, and so `MergeSql` can reconcile pre-upgrade rows that were
- * renamed before the migration. The insert-children-delete order
+ * `local_settings.json` once at startup. The row's `v2_id` (set by `2.sqm` to its pre-upgrade id)
+ * is copied along, so `MergeSql` can reconcile two devices that renamed the same pre-upgrade row
+ * differently before upgrading. The insert-children-delete order
  * keeps every foreign key satisfied with foreign keys enforced, as they are on every platform's
  * migration connection. Capture is not recording yet (`2.sqm` seeds `sync_capture` disabled), so
  * none of this enters `sync_outbox`; and `sync_outbox` / `ks_feed_folder_raw` are empty on any
  * database this runs on (they are created by the very migration), so there is nothing else to move.
  * A pre-delta cloud file migrated by `DatabaseMerger` runs the same step on the downloaded copy; its
- * rows then meet an already-migrated device under the same ids when their current names match, and
- * `MergeSql` reconciles rows that shared a pre-upgrade id but were renamed before the migration.
+ * rows then meet an already-migrated device under the same `v2_id`, and `MergeSql` reconciles rows
+ * that were renamed before the migration.
  * Running again changes nothing: every row's id is already the derived one.
  */
 fun rekeyTagAndFolderIds(driver: SqlDriver) {
@@ -68,7 +69,7 @@ fun rekeyTagAndFolderIds(driver: SqlDriver) {
         kind = ID_REMAP_KIND_TAG,
         columns = listOf(
             "id", "name", "color", "sort_order", "deleted_at", "updated_at", "created_at",
-            "name_updated_at", "color_updated_at", "sort_order_updated_at",
+            "name_updated_at", "color_updated_at", "sort_order_updated_at", "v2_id",
         ),
         derivedId = IdGenerator::tagId,
         moveChildrenSql = "UPDATE feed_tags SET tag_id = ? WHERE tag_id = ?",
@@ -79,7 +80,7 @@ fun rekeyTagAndFolderIds(driver: SqlDriver) {
         kind = ID_REMAP_KIND_FOLDER,
         columns = listOf(
             "id", "name", "sort_order", "deleted_at", "updated_at", "created_at",
-            "name_updated_at", "sort_order_updated_at",
+            "name_updated_at", "sort_order_updated_at", "v2_id",
         ),
         derivedId = IdGenerator::folderId,
         moveChildrenSql = "UPDATE feeds SET folder_id = ? WHERE folder_id = ?",

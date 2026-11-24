@@ -16,7 +16,11 @@ CREATE TABLE tags (
     created_at INTEGER NOT NULL,
     name_updated_at       INTEGER,
     color_updated_at      INTEGER,
-    sort_order_updated_at INTEGER
+    sort_order_updated_at INTEGER,
+    -- The id this row carried before the v2->v3 migration re-keyed it (TagFolderIdRekey). NULL for
+    -- a row created after the migration. Never changed after the migration; MergeSql uses it to
+    -- reconcile rows renamed differently on two devices before they upgraded (see docs/db-schema.md).
+    v2_id                 TEXT
 );
 
 CREATE INDEX tags_name ON tags(name);

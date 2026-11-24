@@ -524,6 +524,41 @@ which differs between the files and main — so the survivor depends on the orde
 Even then, a loser whose URL changes again after the re-key comes back as a separate feed, and a pre-delta cloud
 file cannot be rewritten, so devices can still diverge in those cases.
 
+## `tags.v2_id` / `folders.v2_id` are temporary and must be removed eventually
+
+**Status**: not fixed — a deliberate transitional column. It is needed only while devices that ran schema
+version 2 are upgrading, and removing it needs one more one-time step (see "What a real fix would need").
+
+### Why it exists
+
+Before version 3 a tag's or folder's id was a random UUIDv4; the v2→v3 migration re-keyed each row onto the id its
+creation-time name derives from and kept the pre-upgrade id in `v2_id`. Two devices that shared that v2 id still
+recognise each other's row even if one renamed it before the rename reached the other, which would otherwise derive
+a different name-derived id on each device (see "Reconciliation of v2 identities" in
+[sync-architecture.md](sync-architecture.md)). The column travels in transport files and is NULL on a row created
+after the migration.
+
+### Why it cannot simply be dropped once every device has upgraded
+
+The reconciliation rewrites the **cloud** row onto the receiving device's id; it does not rewrite the receiving
+device's own row. So after two devices have renamed the same pre-upgrade row differently, they keep different ids
+for it, reconciled on every merge by `v2_id`. Dropping the column before those ids are unified would let the next
+merge import each other's row under a second id, and both rows share the name (same-named rows are allowed) and
+are numbered by the UI — one logical tag or folder split in two.
+
+### What a real fix would need
+
+1. Every device past version 2 migrated and every pending `v2` identity reconciled (at least one sync each).
+2. A one-time step that re-keys the rows still held under different name-derived ids onto one canonical id (the
+   same kind of re-key `TagFolderIdRekey` performs, moving `feed_tags.tag_id` / `feeds.folder_id` and
+   `local_settings` with it), or evidence that no such pair remains.
+3. Then a new schema version drops `v2_id` from `tags` / `folders`, and `TransportSchema`, `MergeSchema`,
+   `MergeSql`'s reconciliation, `DeltaExport` and the re-key stop carrying it.
+
+`DROP COLUMN` needs SQLite 3.35+: desktop (sqlite-jdbc 3.53.4) and Android (requery 3.49.0) support it. Apple
+(iOS 17 / macOS 14, whose SQLite is 3.39.x or later in practice) is expected to support it as well, but verify on a
+device before relying on it.
+
 ## A feed can be left pointing at a deleted folder across the folder's deletion and revival
 
 **Status**: not fixed — closing it needs a re-resolution of a feed's folder under the final folder state, a

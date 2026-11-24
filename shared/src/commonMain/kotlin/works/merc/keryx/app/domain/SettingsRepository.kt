@@ -93,8 +93,8 @@ class SettingsRepository(
      * persists the result synchronously. Runs synchronously in construction, before anything reads
      * [localSettings] — otherwise a restored selection or collapsed state would reference an id that
      * no longer exists. Idempotent: an id not in the map (already re-keyed, or not a tag/folder id)
-     * passes through, so a second application is a no-op. The remap table is kept: it is also used
-     * by [MergeSql] to reconcile pre-upgrade rows that were renamed before the migration.
+     * passes through, so a second application is a no-op. The remap table is kept (rather than
+     * dropped after this run), so the rewrite stays idempotent across launches.
      */
     private fun remapTagAndFolderIdsInLocalSettings() {
         val remaps = db.sync_bookkeepingQueries.idRemapAll().executeAsList()
