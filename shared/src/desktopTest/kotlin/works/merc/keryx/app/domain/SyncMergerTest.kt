@@ -1576,6 +1576,8 @@ class SyncMergerTest {
         folderOldId2: String,
         tagOldId1: String = folderOldId1.replace("folder", "tag"),
         tagOldId2: String = folderOldId2.replace("folder", "tag"),
+        folderNames: Pair<String, String> = "A" to "B",
+        tagNames: Pair<String, String> = "A" to "B",
         assignChildren: Boolean,
         stamp: Long,
     ): File {
@@ -1588,19 +1590,19 @@ class SyncMergerTest {
             """.trimIndent(), 0)
             driver.execute(null, """
                 INSERT INTO tags (id, name, color, sort_order, updated_at, created_at)
-                VALUES ('$tagOldId1', 'A', '#f00', 0, $stamp, 1)
+                VALUES ('$tagOldId1', '${tagNames.first}', '#f00', 0, $stamp, 1)
             """.trimIndent(), 0)
             driver.execute(null, """
                 INSERT INTO tags (id, name, color, sort_order, updated_at, created_at)
-                VALUES ('$tagOldId2', 'B', '#0f0', 0, $stamp, 1)
+                VALUES ('$tagOldId2', '${tagNames.second}', '#0f0', 0, $stamp, 1)
             """.trimIndent(), 0)
             driver.execute(null, """
                 INSERT INTO folders (id, name, sort_order, updated_at, created_at)
-                VALUES ('$folderOldId1', 'A', 0, $stamp, 1)
+                VALUES ('$folderOldId1', '${folderNames.first}', 0, $stamp, 1)
             """.trimIndent(), 0)
             driver.execute(null, """
                 INSERT INTO folders (id, name, sort_order, updated_at, created_at)
-                VALUES ('$folderOldId2', 'B', 0, $stamp, 1)
+                VALUES ('$folderOldId2', '${folderNames.second}', 0, $stamp, 1)
             """.trimIndent(), 0)
             if (assignChildren) {
                 driver.execute(null, """
@@ -1635,6 +1637,8 @@ class SyncMergerTest {
             "local-", oldFolderId1, oldFolderId2,
             tagOldId1 = "old-tag-1",
             tagOldId2 = "old-tag-2",
+            folderNames = "B" to "C",
+            tagNames = "B" to "C",
             assignChildren = false,
             stamp = 100L,
         )
@@ -1642,6 +1646,8 @@ class SyncMergerTest {
             "cloud-", oldFolderId1, oldFolderId2,
             tagOldId1 = "old-tag-1",
             tagOldId2 = "old-tag-2",
+            folderNames = "A" to "B",
+            tagNames = "A" to "B",
             assignChildren = true,
             stamp = 200L,
         )
@@ -1653,12 +1659,21 @@ class SyncMergerTest {
             val idA = IdGenerator.folderId("A")
             val idB = IdGenerator.folderId("B")
             val idC = IdGenerator.folderId("C")
-            // All three cloud identities survive.
-            assertNotNull(verifyDb.foldersQueries.getById(idA).executeAsOneOrNull())
-            assertNotNull(verifyDb.foldersQueries.getById(idB).executeAsOneOrNull())
+            // cloud B stays a separate identity and does not overwrite local B.
+            val folderB = verifyDb.foldersQueries.getById(idB).executeAsOne()
+            assertEquals("A", folderB.name)
+            assertEquals(oldFolderId1, folderB.v2_id)
+            val folderC = verifyDb.foldersQueries.getById(idC).executeAsOne()
+            assertEquals("B", folderC.name)
+            assertEquals(oldFolderId2, folderC.v2_id)
+            // The unrelated v3-created row survives.
             assertNotNull(verifyDb.foldersQueries.getById(idC).executeAsOneOrNull())
-            // The feed's folder assignment stayed with the source identity A.
-            assertEquals(idA, verifyDb.feedsQueries.getById("f1").executeAsOne().folder_id)
+            // Blocked cloud identities A and B merge onto local identities B and C by v2_id, so they
+            // do not appear under their original derived ids.
+            assertNull(verifyDb.foldersQueries.getById(idA).executeAsOneOrNull())
+            // The feed's folder assignment stayed with the local identity B (cloud A's child was
+            // blocked and must not attach to B).
+            assertNull(verifyDb.feedsQueries.getById("f1").executeAsOne().folder_id)
         } finally {
             verifyDriver.close()
         }
@@ -1678,6 +1693,8 @@ class SyncMergerTest {
             "local-", oldFolderId1, oldFolderId2,
             tagOldId1 = oldTagId1,
             tagOldId2 = oldTagId2,
+            folderNames = "B" to "C",
+            tagNames = "B" to "C",
             assignChildren = false,
             stamp = 100L,
         )
@@ -1685,6 +1702,8 @@ class SyncMergerTest {
             "cloud-", oldFolderId1, oldFolderId2,
             tagOldId1 = oldTagId1,
             tagOldId2 = oldTagId2,
+            folderNames = "A" to "B",
+            tagNames = "A" to "B",
             assignChildren = true,
             stamp = 200L,
         )
@@ -1696,10 +1715,16 @@ class SyncMergerTest {
             val idA = IdGenerator.tagId("A")
             val idB = IdGenerator.tagId("B")
             val idC = IdGenerator.tagId("C")
-            assertNotNull(verifyDb.tagsQueries.getById(idA).executeAsOneOrNull())
-            assertNotNull(verifyDb.tagsQueries.getById(idB).executeAsOneOrNull())
+            val tagB = verifyDb.tagsQueries.getById(idB).executeAsOne()
+            assertEquals("A", tagB.name)
+            assertEquals(oldTagId1, tagB.v2_id)
+            val tagC = verifyDb.tagsQueries.getById(idC).executeAsOne()
+            assertEquals("B", tagC.name)
+            assertEquals(oldTagId2, tagC.v2_id)
             assertNotNull(verifyDb.tagsQueries.getById(idC).executeAsOneOrNull())
-            assertEquals(listOf(idA), verifyDb.feed_tagsQueries.watchTagIdsForFeed("f1").executeAsList())
+            assertNull(verifyDb.tagsQueries.getById(idA).executeAsOneOrNull())
+            // cloud A's child reference was blocked and must not attach to local B.
+            assertEquals(emptyList<String>(), verifyDb.feed_tagsQueries.watchTagIdsForFeed("f1").executeAsList())
         } finally {
             verifyDriver.close()
         }

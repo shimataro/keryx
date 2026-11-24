@@ -169,22 +169,41 @@ object MergeSql {
             reconcileMap("folders", FOLDER_SOURCE, FOLDER_MAP) + listOf(
             // Determine which moving mappings are blocked because their target is occupied by a row
             // that will remain in cloud (an unrelated identity, or a source row that is itself blocked).
+            // Anchor cases (target occupied by an unrelated row) keep their original id; chain cases
+            // (blocked because another blocked source occupies the target) merge by v2_id instead.
             "CREATE TEMP TABLE IF NOT EXISTS ks_folder_blocked (cloud_id TEXT PRIMARY KEY)",
             "DELETE FROM ks_folder_blocked",
+            "CREATE TEMP TABLE IF NOT EXISTS ks_folder_blocked_chain (cloud_id TEXT PRIMARY KEY)",
+            "DELETE FROM ks_folder_blocked_chain",
             """
-            WITH RECURSIVE blocked(cloud_id) AS (
-                SELECT m.cloud_id FROM $FOLDER_MAP m
+            WITH RECURSIVE blocked(cloud_id, is_chain) AS (
+                SELECT m.cloud_id, 0 FROM $FOLDER_MAP m
                 JOIN cloud.folders x ON x.id = m.target_id
                 WHERE x.id NOT IN (SELECT cloud_id FROM $FOLDER_MAP)
                   AND m.cloud_id <> m.target_id
                 UNION
-                SELECT m.cloud_id FROM $FOLDER_MAP m
+                SELECT m.cloud_id, 1 FROM $FOLDER_MAP m
                 JOIN cloud.folders x ON x.id = m.target_id
                 JOIN blocked b ON b.cloud_id = x.id
                 WHERE m.cloud_id <> m.target_id
             )
             INSERT INTO ks_folder_blocked (cloud_id)
-            SELECT cloud_id FROM blocked
+            SELECT cloud_id FROM blocked;
+            """.trimIndent(),
+            """
+            WITH RECURSIVE blocked(cloud_id, is_chain) AS (
+                SELECT m.cloud_id, 0 FROM $FOLDER_MAP m
+                JOIN cloud.folders x ON x.id = m.target_id
+                WHERE x.id NOT IN (SELECT cloud_id FROM $FOLDER_MAP)
+                  AND m.cloud_id <> m.target_id
+                UNION
+                SELECT m.cloud_id, 1 FROM $FOLDER_MAP m
+                JOIN cloud.folders x ON x.id = m.target_id
+                JOIN blocked b ON b.cloud_id = x.id
+                WHERE m.cloud_id <> m.target_id
+            )
+            INSERT INTO ks_folder_blocked_chain (cloud_id)
+            SELECT cloud_id FROM blocked WHERE is_chain = 1;
             """.trimIndent(),
             "CREATE TEMP TABLE IF NOT EXISTS $FOLDER_FREE (target_id TEXT PRIMARY KEY)",
             "DELETE FROM $FOLDER_FREE",
@@ -195,6 +214,23 @@ object MergeSql {
             WHERE m.cloud_id <> m.target_id
               AND m.cloud_id NOT IN (SELECT cloud_id FROM ks_folder_blocked)
             """.trimIndent(),
+            // Anchor-blocked rows whose original id collides with a main row of a different v2 identity
+            // cannot safely keep that id; treat them like chain-blocked rows and merge by v2_id instead.
+            """
+            INSERT OR IGNORE INTO ks_folder_blocked_chain (cloud_id)
+            SELECT b.cloud_id
+            FROM ks_folder_blocked b
+            JOIN $FOLDER_MAP m ON m.cloud_id = b.cloud_id
+            JOIN cloud.folders c ON c.id = b.cloud_id
+            JOIN main.folders l ON l.id = m.cloud_id
+            WHERE b.cloud_id NOT IN (SELECT cloud_id FROM ks_folder_blocked_chain)
+              AND (l.v2_id IS NULL OR l.v2_id <> c.v2_id)
+            """.trimIndent(),
+            // Chain-blocked source rows (including forced-chain anchors whose original id collides with a
+            // different main identity) stay in cloud and merge by v2_id. Their child refs are cleared so
+            // they do not attach to the wrong identity. Anchor-blocked sources keep their original id and
+            // child refs.
+            "UPDATE cloud.feeds SET folder_id = NULL WHERE folder_id IN (\n    SELECT m.cloud_id FROM $FOLDER_MAP m\n    JOIN ks_folder_blocked_chain b ON b.cloud_id = m.cloud_id\n    WHERE m.cloud_id <> m.target_id)",
             // Stage the canonical source rows that will move, and the child refs that point at them.
             "CREATE TEMP TABLE IF NOT EXISTS ks_folder_stage (source_id TEXT PRIMARY KEY, target_id TEXT NOT NULL, name TEXT NOT NULL, sort_order INTEGER NOT NULL, deleted_at INTEGER, updated_at INTEGER NOT NULL, created_at INTEGER NOT NULL, name_updated_at INTEGER, sort_order_updated_at INTEGER, v2_id TEXT)",
             "DELETE FROM ks_folder_stage",
@@ -248,22 +284,40 @@ object MergeSql {
             reconcileMap("tags", TAG_SOURCE, TAG_MAP) + listOf(
             // Determine which moving mappings are blocked because their target is occupied by a row
             // that will remain in cloud (an unrelated identity, or a source row that is itself blocked).
+            // Anchor cases keep their original id; chain cases merge by v2_id instead.
             "CREATE TEMP TABLE IF NOT EXISTS ks_tag_blocked (cloud_id TEXT PRIMARY KEY)",
             "DELETE FROM ks_tag_blocked",
+            "CREATE TEMP TABLE IF NOT EXISTS ks_tag_blocked_chain (cloud_id TEXT PRIMARY KEY)",
+            "DELETE FROM ks_tag_blocked_chain",
             """
-            WITH RECURSIVE blocked(cloud_id) AS (
-                SELECT m.cloud_id FROM $TAG_MAP m
+            WITH RECURSIVE blocked(cloud_id, is_chain) AS (
+                SELECT m.cloud_id, 0 FROM $TAG_MAP m
                 JOIN cloud.tags x ON x.id = m.target_id
                 WHERE x.id NOT IN (SELECT cloud_id FROM $TAG_MAP)
                   AND m.cloud_id <> m.target_id
                 UNION
-                SELECT m.cloud_id FROM $TAG_MAP m
+                SELECT m.cloud_id, 1 FROM $TAG_MAP m
                 JOIN cloud.tags x ON x.id = m.target_id
                 JOIN blocked b ON b.cloud_id = x.id
                 WHERE m.cloud_id <> m.target_id
             )
             INSERT INTO ks_tag_blocked (cloud_id)
-            SELECT cloud_id FROM blocked
+            SELECT cloud_id FROM blocked;
+            """.trimIndent(),
+            """
+            WITH RECURSIVE blocked(cloud_id, is_chain) AS (
+                SELECT m.cloud_id, 0 FROM $TAG_MAP m
+                JOIN cloud.tags x ON x.id = m.target_id
+                WHERE x.id NOT IN (SELECT cloud_id FROM $TAG_MAP)
+                  AND m.cloud_id <> m.target_id
+                UNION
+                SELECT m.cloud_id, 1 FROM $TAG_MAP m
+                JOIN cloud.tags x ON x.id = m.target_id
+                JOIN blocked b ON b.cloud_id = x.id
+                WHERE m.cloud_id <> m.target_id
+            )
+            INSERT INTO ks_tag_blocked_chain (cloud_id)
+            SELECT cloud_id FROM blocked WHERE is_chain = 1;
             """.trimIndent(),
             "CREATE TEMP TABLE IF NOT EXISTS $TAG_FREE (target_id TEXT PRIMARY KEY)",
             "DELETE FROM $TAG_FREE",
@@ -274,6 +328,21 @@ object MergeSql {
             WHERE m.cloud_id <> m.target_id
               AND m.cloud_id NOT IN (SELECT cloud_id FROM ks_tag_blocked)
             """.trimIndent(),
+            """
+            INSERT OR IGNORE INTO ks_tag_blocked_chain (cloud_id)
+            SELECT b.cloud_id
+            FROM ks_tag_blocked b
+            JOIN $TAG_MAP m ON m.cloud_id = b.cloud_id
+            JOIN cloud.tags c ON c.id = b.cloud_id
+            JOIN main.tags l ON l.id = m.cloud_id
+            WHERE b.cloud_id NOT IN (SELECT cloud_id FROM ks_tag_blocked_chain)
+              AND (l.v2_id IS NULL OR l.v2_id <> c.v2_id)
+            """.trimIndent(),
+            // Chain-blocked source rows (including forced-chain anchors whose original id collides with a
+            // different main identity) stay in cloud and merge by v2_id; their child refs are cleared so
+            // they do not attach to the wrong identity. Anchor-blocked sources keep their original id and
+            // child refs.
+            "DELETE FROM cloud.feed_tags WHERE tag_id IN (\n    SELECT m.cloud_id FROM $TAG_MAP m\n    JOIN ks_tag_blocked_chain b ON b.cloud_id = m.cloud_id\n    WHERE m.cloud_id <> m.target_id)",
             // Stage the canonical source rows that will move, then delete them before inserting at the target ids.
             "CREATE TEMP TABLE IF NOT EXISTS ks_tag_stage (source_id TEXT PRIMARY KEY, target_id TEXT NOT NULL, name TEXT NOT NULL, color TEXT, sort_order INTEGER NOT NULL, deleted_at INTEGER, updated_at INTEGER NOT NULL, created_at INTEGER NOT NULL, name_updated_at INTEGER, color_updated_at INTEGER, sort_order_updated_at INTEGER, v2_id TEXT)",
             "DELETE FROM ks_tag_stage",
@@ -335,23 +404,49 @@ object MergeSql {
      * and per-field last-write-wins converges them into one row. A row whose id main does not hold is
      * inserted as-is — a name main holds under another id (two renames that landed on one name) is
      * allowed through, so same-named rows can coexist (the UI numbers them).
+     *
+     * When [blockedTable] is supplied, chain-blocked cloud rows (those that could not move to their
+     * reconciliation target) are additionally merged by matching `v2_id` onto the main identity they
+     * target. These updates run after the id-based updates so a persistent v2 identity wins over an
+     * unrelated row that happens to share the same id.
      */
-    private fun perFieldStatements(table: String, columns: List<String>, groups: List<LwwGroup>): List<String> {
+    private fun perFieldStatements(
+        table: String,
+        columns: List<String>,
+        groups: List<LwwGroup>,
+        blockedTable: String? = null,
+    ): List<String> {
         val target = "main.$table"
+        val blockedFilter = if (blockedTable != null) {
+            "AND c.id NOT IN (SELECT cloud_id FROM $blockedTable)"
+        } else ""
 
-        fun update(group: LwwGroup): String = """
+        fun normalUpdate(group: LwwGroup): String = """
             UPDATE $target
             SET ${group.columns.joinToString(", ") { "$it = c.$it" }}
             FROM cloud.$table c
             WHERE c.id = $target.id
+              $blockedFilter
               AND ${SyncLww.wins("c", target, group)};
         """.trimIndent()
+
+        fun blockedUpdate(group: LwwGroup): String = if (blockedTable != null) """
+            UPDATE $target
+            SET ${group.columns.joinToString(", ") { "$it = c.$it" }}
+            FROM cloud.$table c
+            WHERE c.id IN (SELECT cloud_id FROM $blockedTable)
+              AND c.v2_id = $target.v2_id
+              AND ${SyncLww.wins("c", target, group)};
+        """.trimIndent() else ""
+
+        val updates = groups.flatMap { listOf(normalUpdate(it), blockedUpdate(it)) }.filter { it.isNotEmpty() }
 
         val insert = """
             INSERT INTO $target (${columns.joinToString(", ")})
             SELECT ${columns.joinToString(", ") { "c.$it" }}
             FROM cloud.$table c
-            WHERE NOT EXISTS (SELECT 1 FROM main.$table l WHERE l.id = c.id);
+            WHERE NOT EXISTS (SELECT 1 FROM main.$table l WHERE l.id = c.id)
+              $blockedFilter;
         """.trimIndent()
         val earliestCreatedAt = """
             UPDATE $target
@@ -359,11 +454,12 @@ object MergeSql {
             FROM cloud.$table c
             WHERE c.id = $target.id AND c.created_at < $target.created_at;
         """.trimIndent()
-        return groups.map { update(it) } + listOf(insert, earliestCreatedAt)
+        return updates + listOf(insert, earliestCreatedAt)
     }
 
     private val folders: List<String> = perFieldStatements(
         "folders", FOLDER_COLUMNS, listOf(SyncLww.FOLDER_NAME, SyncLww.FOLDER_SORT_ORDER, SyncLww.FOLDER_EXISTENCE),
+        blockedTable = "ks_folder_blocked_chain",
     ) + listOf(
         // A row whose id already matches but has no v2_id yet picks it up from cloud.
         """
@@ -378,6 +474,7 @@ object MergeSql {
 
     private val tags: List<String> = perFieldStatements(
         "tags", TAG_COLUMNS, listOf(SyncLww.TAG_NAME, SyncLww.TAG_COLOR, SyncLww.TAG_SORT_ORDER, SyncLww.TAG_EXISTENCE),
+        blockedTable = "ks_tag_blocked_chain",
     ) + listOf(
         """
         UPDATE main.tags
