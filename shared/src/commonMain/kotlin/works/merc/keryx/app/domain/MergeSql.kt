@@ -96,11 +96,13 @@ object MergeSql {
      *    to both ids of a reconciled tag keeps one link.
      *
      * A target id is considered free only after the reconciled cloud rows that would be deleted are
-     * taken into account. When a target id is still occupied by a cloud row that is **not** part of
-     * the reconciliation (a different identity with a NULL `v2_id`), the source row is kept at its
-     * original id instead: both identities and their child references are preserved, and the
-     * per-field merge handles them as distinct rows. This makes the reconciliation idempotent and
-     * keeps merge/fold behavior deterministic.
+     * taken into account, including transitively: if a source row's target is occupied by another
+     * source row that cannot move because its own target is blocked, neither row moves. When a target
+     * id is still occupied by a cloud row that is **not** part of the reconciliation (a different
+     * identity with a NULL `v2_id`), the source row is kept at its original id instead: both
+     * identities and their child references are preserved, and the per-field merge handles them as
+     * distinct rows. This makes the reconciliation idempotent and keeps merge/fold behavior
+     * deterministic.
      *
      * The order is FK-safe with foreign keys enforced (a pre-delta cloud file is migrated to the
      * full schema, which enforces them): a parent row is copied in before a child points at it, and
@@ -165,6 +167,25 @@ object MergeSql {
     private val reconcileFolders: List<String> =
         canonicalSource("folders", FOLDER_SOURCE) +
             reconcileMap("folders", FOLDER_SOURCE, FOLDER_MAP) + listOf(
+            // Determine which moving mappings are blocked because their target is occupied by a row
+            // that will remain in cloud (an unrelated identity, or a source row that is itself blocked).
+            "CREATE TEMP TABLE IF NOT EXISTS ks_folder_blocked (cloud_id TEXT PRIMARY KEY)",
+            "DELETE FROM ks_folder_blocked",
+            """
+            WITH RECURSIVE blocked(cloud_id) AS (
+                SELECT m.cloud_id FROM $FOLDER_MAP m
+                JOIN cloud.folders x ON x.id = m.target_id
+                WHERE x.id NOT IN (SELECT cloud_id FROM $FOLDER_MAP)
+                  AND m.cloud_id <> m.target_id
+                UNION
+                SELECT m.cloud_id FROM $FOLDER_MAP m
+                JOIN cloud.folders x ON x.id = m.target_id
+                JOIN blocked b ON b.cloud_id = x.id
+                WHERE m.cloud_id <> m.target_id
+            )
+            INSERT INTO ks_folder_blocked (cloud_id)
+            SELECT cloud_id FROM blocked
+            """.trimIndent(),
             "CREATE TEMP TABLE IF NOT EXISTS $FOLDER_FREE (target_id TEXT PRIMARY KEY)",
             "DELETE FROM $FOLDER_FREE",
             """
@@ -172,10 +193,7 @@ object MergeSql {
             SELECT DISTINCT m.target_id
             FROM $FOLDER_MAP m
             WHERE m.cloud_id <> m.target_id
-              AND NOT EXISTS (
-                  SELECT 1 FROM cloud.folders x
-                  WHERE x.id = m.target_id
-                    AND x.id NOT IN (SELECT cloud_id FROM $FOLDER_MAP))
+              AND m.cloud_id NOT IN (SELECT cloud_id FROM ks_folder_blocked)
             """.trimIndent(),
             // Stage the canonical source rows that will move, and the child refs that point at them.
             "CREATE TEMP TABLE IF NOT EXISTS ks_folder_stage (source_id TEXT PRIMARY KEY, target_id TEXT NOT NULL, name TEXT NOT NULL, sort_order INTEGER NOT NULL, deleted_at INTEGER, updated_at INTEGER NOT NULL, created_at INTEGER NOT NULL, name_updated_at INTEGER, sort_order_updated_at INTEGER, v2_id TEXT)",
@@ -228,6 +246,25 @@ object MergeSql {
     private val reconcileTags: List<String> =
         canonicalSource("tags", TAG_SOURCE) +
             reconcileMap("tags", TAG_SOURCE, TAG_MAP) + listOf(
+            // Determine which moving mappings are blocked because their target is occupied by a row
+            // that will remain in cloud (an unrelated identity, or a source row that is itself blocked).
+            "CREATE TEMP TABLE IF NOT EXISTS ks_tag_blocked (cloud_id TEXT PRIMARY KEY)",
+            "DELETE FROM ks_tag_blocked",
+            """
+            WITH RECURSIVE blocked(cloud_id) AS (
+                SELECT m.cloud_id FROM $TAG_MAP m
+                JOIN cloud.tags x ON x.id = m.target_id
+                WHERE x.id NOT IN (SELECT cloud_id FROM $TAG_MAP)
+                  AND m.cloud_id <> m.target_id
+                UNION
+                SELECT m.cloud_id FROM $TAG_MAP m
+                JOIN cloud.tags x ON x.id = m.target_id
+                JOIN blocked b ON b.cloud_id = x.id
+                WHERE m.cloud_id <> m.target_id
+            )
+            INSERT INTO ks_tag_blocked (cloud_id)
+            SELECT cloud_id FROM blocked
+            """.trimIndent(),
             "CREATE TEMP TABLE IF NOT EXISTS $TAG_FREE (target_id TEXT PRIMARY KEY)",
             "DELETE FROM $TAG_FREE",
             """
@@ -235,10 +272,7 @@ object MergeSql {
             SELECT DISTINCT m.target_id
             FROM $TAG_MAP m
             WHERE m.cloud_id <> m.target_id
-              AND NOT EXISTS (
-                  SELECT 1 FROM cloud.tags x
-                  WHERE x.id = m.target_id
-                    AND x.id NOT IN (SELECT cloud_id FROM $TAG_MAP))
+              AND m.cloud_id NOT IN (SELECT cloud_id FROM ks_tag_blocked)
             """.trimIndent(),
             // Stage the canonical source rows that will move, then delete them before inserting at the target ids.
             "CREATE TEMP TABLE IF NOT EXISTS ks_tag_stage (source_id TEXT PRIMARY KEY, target_id TEXT NOT NULL, name TEXT NOT NULL, color TEXT, sort_order INTEGER NOT NULL, deleted_at INTEGER, updated_at INTEGER NOT NULL, created_at INTEGER NOT NULL, name_updated_at INTEGER, color_updated_at INTEGER, sort_order_updated_at INTEGER, v2_id TEXT)",

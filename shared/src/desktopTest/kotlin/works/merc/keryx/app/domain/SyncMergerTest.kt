@@ -1514,6 +1514,151 @@ class SyncMergerTest {
     }
 
     /**
+     * Builds a v2 database whose v3 name-derived ids form a blocked chain:
+     * - folder/tag A (v2 [folder/tag]OldId1) derives id A
+     * - folder/tag B (v2 [folder/tag]OldId2) derives id B
+     * - a v3-created folder/tag C (no v2_id) derives id C
+     *
+     * After migration, main holds B (v2 old1) and C (v2 old2), while cloud holds A (v2 old1),
+     * B (v2 old2) and C (no v2_id). This gives mappings A->B and B->C, but C is occupied by an
+     * unrelated identity so the chain is blocked.
+     */
+    private fun migratedBlockedChainDevice(
+        prefix: String,
+        folderOldId1: String,
+        folderOldId2: String,
+        tagOldId1: String = folderOldId1.replace("folder", "tag"),
+        tagOldId2: String = folderOldId2.replace("folder", "tag"),
+        assignChildren: Boolean,
+        stamp: Long,
+    ): File {
+        val file = File.createTempFile(prefix, ".db").apply { deleteOnExit() }
+        JdbcSqliteDriver("jdbc:sqlite:${file.absolutePath}").use { driver ->
+            driver.createSchemaV2()
+            driver.execute(null, """
+                INSERT INTO feeds (id, url, title, etag, updated_at, created_at)
+                VALUES ('f1', 'https://a', 'Feed', '"e"', 100, 1)
+            """.trimIndent(), 0)
+            driver.execute(null, """
+                INSERT INTO tags (id, name, color, sort_order, updated_at, created_at)
+                VALUES ('$tagOldId1', 'A', '#f00', 0, $stamp, 1)
+            """.trimIndent(), 0)
+            driver.execute(null, """
+                INSERT INTO tags (id, name, color, sort_order, updated_at, created_at)
+                VALUES ('$tagOldId2', 'B', '#0f0', 0, $stamp, 1)
+            """.trimIndent(), 0)
+            driver.execute(null, """
+                INSERT INTO folders (id, name, sort_order, updated_at, created_at)
+                VALUES ('$folderOldId1', 'A', 0, $stamp, 1)
+            """.trimIndent(), 0)
+            driver.execute(null, """
+                INSERT INTO folders (id, name, sort_order, updated_at, created_at)
+                VALUES ('$folderOldId2', 'B', 0, $stamp, 1)
+            """.trimIndent(), 0)
+            if (assignChildren) {
+                driver.execute(null, """
+                    INSERT INTO feed_tags (feed_id, tag_id, updated_at)
+                    VALUES ('f1', '$tagOldId1', $stamp)
+                """.trimIndent(), 0)
+                driver.execute(null, """
+                    UPDATE feeds SET folder_id = '$folderOldId1', folder_updated_at = $stamp WHERE id = 'f1'
+                """.trimIndent(), 0)
+            }
+        }
+        JdbcSqliteDriver("jdbc:sqlite:${file.absolutePath}").use { driver ->
+            KeryxDatabase.Schema.migrate(driver, 2, KeryxDatabase.Schema.version, *KERYX_SCHEMA_CALLBACKS)
+            driver.execute(null, "PRAGMA user_version=${KeryxDatabase.Schema.version}", 0)
+            val db = KeryxDatabase(driver)
+            db.insertFolder(IdGenerator.folderId("C"), "C", now = 50)
+            db.insertTag(IdGenerator.tagId("C"), "C", now = 50)
+        }
+        return file
+    }
+
+    /**
+     * A blocked chain: cloud has `A(v2-old1) -> main B`, `B(v2-old2) -> main C`, but `C` is an
+     * unrelated v3-created row. Because `B` cannot move to the occupied `C`, `A` must not be moved
+     * to `B` either; otherwise the insert at `B` would collide with the still-present `B` row.
+     */
+    @Test
+    fun blockedChainFolderReconciliationSkipsMoveWhenFinalTargetIsOccupiedByUnrelatedRow() {
+        val oldFolderId1 = "old-folder-1"
+        val oldFolderId2 = "old-folder-2"
+        val localFile = migratedBlockedChainDevice(
+            "local-", oldFolderId1, oldFolderId2,
+            tagOldId1 = "old-tag-1",
+            tagOldId2 = "old-tag-2",
+            assignChildren = false,
+            stamp = 100L,
+        )
+        val cloudFile = migratedBlockedChainDevice(
+            "cloud-", oldFolderId1, oldFolderId2,
+            tagOldId1 = "old-tag-1",
+            tagOldId2 = "old-tag-2",
+            assignChildren = true,
+            stamp = 200L,
+        )
+
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, KeryxDatabase.Schema.version, MergeSql.all)
+
+        val (_, verifyDriver, verifyDb) = reopen(localFile)
+        try {
+            val idA = IdGenerator.folderId("A")
+            val idB = IdGenerator.folderId("B")
+            val idC = IdGenerator.folderId("C")
+            // All three cloud identities survive.
+            assertNotNull(verifyDb.foldersQueries.getById(idA).executeAsOneOrNull())
+            assertNotNull(verifyDb.foldersQueries.getById(idB).executeAsOneOrNull())
+            assertNotNull(verifyDb.foldersQueries.getById(idC).executeAsOneOrNull())
+            // The feed's folder assignment stayed with the source identity A.
+            assertEquals(idA, verifyDb.feedsQueries.getById("f1").executeAsOne().folder_id)
+        } finally {
+            verifyDriver.close()
+        }
+    }
+
+    /**
+     * Same as [blockedChainFolderReconciliationSkipsMoveWhenFinalTargetIsOccupiedByUnrelatedRow]
+     * for tags and their feed_tag links.
+     */
+    @Test
+    fun blockedChainTagReconciliationSkipsMoveWhenFinalTargetIsOccupiedByUnrelatedRow() {
+        val oldTagId1 = "old-tag-1"
+        val oldTagId2 = "old-tag-2"
+        val oldFolderId1 = "old-folder-1"
+        val oldFolderId2 = "old-folder-2"
+        val localFile = migratedBlockedChainDevice(
+            "local-", oldFolderId1, oldFolderId2,
+            tagOldId1 = oldTagId1,
+            tagOldId2 = oldTagId2,
+            assignChildren = false,
+            stamp = 100L,
+        )
+        val cloudFile = migratedBlockedChainDevice(
+            "cloud-", oldFolderId1, oldFolderId2,
+            tagOldId1 = oldTagId1,
+            tagOldId2 = oldTagId2,
+            assignChildren = true,
+            stamp = 200L,
+        )
+
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, KeryxDatabase.Schema.version, MergeSql.all)
+
+        val (_, verifyDriver, verifyDb) = reopen(localFile)
+        try {
+            val idA = IdGenerator.tagId("A")
+            val idB = IdGenerator.tagId("B")
+            val idC = IdGenerator.tagId("C")
+            assertNotNull(verifyDb.tagsQueries.getById(idA).executeAsOneOrNull())
+            assertNotNull(verifyDb.tagsQueries.getById(idB).executeAsOneOrNull())
+            assertNotNull(verifyDb.tagsQueries.getById(idC).executeAsOneOrNull())
+            assertEquals(listOf(idA), verifyDb.feed_tagsQueries.watchTagIdsForFeed("f1").executeAsList())
+        } finally {
+            verifyDriver.close()
+        }
+    }
+
+    /**
      * Builds a v2 database with two tags and two folders sharing the given old ids, renames them
      * according to [tagNames] / [folderNames], then migrates it to v3. When [assignChildren] is true,
      * feed f1 is placed in the first folder and linked to the first tag.
