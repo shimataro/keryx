@@ -6,6 +6,7 @@ import app.cash.sqldelight.db.SqlPreparedStatement
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -27,7 +28,9 @@ import kotlin.random.Random
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -556,6 +559,76 @@ class SettingsRepositoryTest {
             val repo = newRepo(db, store = store)
 
             assertEquals("folder:d-new", repo.getLocalSettings().lastFilter)
+        } finally {
+            driver.close()
+        }
+    }
+
+    /** A [LocalSettingsStore] fake that returns a fixed initial value and records save calls. */
+    private class RecordingLocalSettingsStore(
+        dir: String,
+        private val initial: LocalSettings,
+    ) : LocalSettingsStore(dirOverride = dir) {
+        var saveCount = 0
+            private set
+        var error: Throwable? = null
+
+        override fun load(): LocalSettings = initial
+        override fun save(settings: LocalSettings) {
+            saveCount++
+            error?.let { throw it }
+            super.save(settings)
+        }
+    }
+
+    /** When the remap produces no change, the synchronous disk write is skipped entirely. */
+    @Test
+    fun remapSaveIsSkippedWhenRemapProducesNoChange() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.sync_bookkeepingQueries.insertIdRemap(ID_REMAP_KIND_TAG, "t-old", "t-new")
+            val store = RecordingLocalSettingsStore(dir, LocalSettings(lastFilter = "tag:t-new"))
+
+            val repo = newRepo(db, store = store)
+
+            assertEquals("tag:t-new", repo.getLocalSettings().lastFilter)
+            assertEquals(0, store.saveCount)
+        } finally {
+            driver.close()
+        }
+    }
+
+    /** A save failure during construction is logged and swallowed; the in-memory value still applies. */
+    @Test
+    fun remapSaveFailureDoesNotCrashConstruction() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.sync_bookkeepingQueries.insertIdRemap(ID_REMAP_KIND_TAG, "t-old", "t-new")
+            val store = RecordingLocalSettingsStore(dir, LocalSettings(lastFilter = "tag:t-old")).apply {
+                error = RuntimeException("disk full")
+            }
+
+            val repo = newRepo(db, store = store)
+
+            assertEquals("tag:t-new", repo.getLocalSettings().lastFilter)
+            assertEquals(1, store.saveCount)
+        } finally {
+            driver.close()
+        }
+    }
+
+    /** Cancellation during the remap save is rethrown rather than swallowed. */
+    @Test
+    fun remapSaveCancellationPropagates() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.sync_bookkeepingQueries.insertIdRemap(ID_REMAP_KIND_TAG, "t-old", "t-new")
+            val store = RecordingLocalSettingsStore(dir, LocalSettings(lastFilter = "tag:t-old")).apply {
+                error = CancellationException("cancelled")
+            }
+
+            assertFailsWith<CancellationException> { newRepo(db, store = store) }
+            assertEquals(1, store.saveCount)
         } finally {
             driver.close()
         }

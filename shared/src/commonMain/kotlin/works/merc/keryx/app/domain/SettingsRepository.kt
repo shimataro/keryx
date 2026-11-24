@@ -13,6 +13,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.CancellationException
+import works.merc.keryx.app.core.Log
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.job
 import kotlinx.coroutines.channels.BufferOverflow
@@ -67,6 +69,10 @@ class SettingsRepository(
     // for them (see [PendingLocalWrites]). Shared with `SyncRepository` in production.
     private val pendingLocalWrites: PendingLocalWrites = PendingLocalWrites(),
 ) {
+    private companion object {
+        const val TAG = "SettingsRepository"
+    }
+
     private val _localSettings = MutableStateFlow(store.load())
 
     /** Live device-local settings — the theme/font live off this. */
@@ -90,17 +96,24 @@ class SettingsRepository(
     /**
      * Applies the v2->v3 migration's tag/folder id re-key (`ks_id_remap`, written by
      * [rekeyTagAndFolderIds]) to the three local-settings fields that hold tag or folder ids, then
-     * persists the result synchronously. Runs synchronously in construction, before anything reads
-     * [localSettings] — otherwise a restored selection or collapsed state would reference an id that
-     * no longer exists. Idempotent: an id not in the map (already re-keyed, or not a tag/folder id)
-     * passes through, so a second application is a no-op. The remap table is kept (rather than
-     * dropped after this run), so the rewrite stays idempotent across launches.
+     * persists the result only when the remap actually changes a value. Runs synchronously in
+     * construction, before anything reads [localSettings] — otherwise a restored selection or
+     * collapsed state would reference an id that no longer exists. Idempotent: an id not in the map
+     * (already re-keyed, or not a tag/folder id) passes through, so a second application is a no-op.
+     * The remap table is kept (rather than dropped after this run), so the rewrite stays idempotent
+     * across launches.
+     *
+     * A disk-write failure (e.g. disk full or a read-only file) is logged and swallowed: the
+     * in-memory [localSettings] still carries the remap, so the app can start, and the next save
+     * (or launch) will retry. Cancellation is rethrown so a closing scope does not wait on a hung
+     * write.
      */
     private fun remapTagAndFolderIdsInLocalSettings() {
         val remaps = db.sync_bookkeepingQueries.idRemapAll().executeAsList()
         if (remaps.isEmpty()) return
         val tagIds = remaps.filter { it.kind == ID_REMAP_KIND_TAG }.associate { it.old_id to it.new_id }
         val folderIds = remaps.filter { it.kind == ID_REMAP_KIND_FOLDER }.associate { it.old_id to it.new_id }
+        val original = _localSettings.value
         _localSettings.update { settings ->
             settings.copy(
                 lastFilter = settings.lastFilter?.let { filter ->
@@ -114,7 +127,15 @@ class SettingsRepository(
                 expandedTagIds = settings.expandedTagIds.map { tagIds[it] ?: it }.toSet(),
             )
         }
-        store.save(_localSettings.value)
+        val rewritten = _localSettings.value
+        if (rewritten == original) return
+        try {
+            store.save(rewritten)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            Log.error(TAG, "Failed to persist remapped local settings", e)
+        }
     }
     // --- Global (synced) settings ---
 
