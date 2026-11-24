@@ -548,16 +548,17 @@ are numbered by the UI — one logical tag or folder split in two.
 
 ### What a real fix would need
 
-1. Every device past version 2 migrated and every pending `v2` identity reconciled (at least one sync each).
-2. A one-time step that re-keys the rows still held under different name-derived ids onto one canonical id (the
-   same kind of re-key `TagFolderIdRekey` performs, moving `feed_tags.tag_id` / `feeds.folder_id` and
-   `local_settings` with it), or evidence that no such pair remains.
-3. Then a new schema version drops `v2_id` from `tags` / `folders`, and `TransportSchema`, `MergeSchema`,
-   `MergeSql`'s reconciliation, `DeltaExport` and the re-key stop carrying it.
+`v2_id` may be removed only when the following technical condition holds:
 
-`DROP COLUMN` needs SQLite 3.35+: desktop (sqlite-jdbc 3.53.4) and Android (requery 3.49.0) support it. Apple
-(iOS 17 / macOS 14, whose SQLite is 3.39.x or later in practice) is expected to support it as well, but verify on a
-device before relying on it.
+- **SQLite `DROP COLUMN` is supported on every targeted platform.** SQLite ≥ 3.35.0 is required. Known bundled versions: desktop sqlite-jdbc 3.53.4 → SQLite 3.53.4; Android requery 3.49.0 → SQLite 3.49.0. Apple (iOS 17 / macOS 14) ships SQLite 3.39.x or later in practice and is expected to support it, but confirm on a real device before relying on it.
+
+The removal must be performed by a schema migration after version 3 (i.e., version 4 or later) and must follow this order:
+
+1. **Re-key any remaining v2 identities before dropping the column.** Any rows that still share a `v2_id` but are held under different name-derived ids must be collapsed onto one canonical id, moving `feed_tags.tag_id`, `feeds.folder_id` and `local_settings` references just as `TagFolderIdRekey` does.
+2. **Drop `v2_id` from `tags` and `folders`.**
+3. **Remove `v2_id` from the sync code and transport format:** `TransportSchema`, `MergeSchema`, `MergeSql`, `DeltaExport` and the re-key logic itself.
+
+**Caveat:** The re-key guarantees safety for local v2→v4 upgrades, but it cannot by itself prove that no folded cloud file still carries two rows sharing a `v2_id` under different ids. That is an operational assumption about the age of the cloud data, not a verifiable technical precondition.
 
 ## A feed can be left pointing at a deleted folder across the folder's deletion and revival
 

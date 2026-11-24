@@ -527,15 +527,17 @@ id に振り直し、移行前の id を `v2_id` に残した。v2 の id を共
 
 ### 本当の修正に必要なこと
 
-1. すべての端末がバージョン 2 から移行し、未処理の `v2` の同一性を再統合済みであること（各端末で最低 1 回の同期）。
-2. 異なる名前由来 id のまま残っている行を 1 つの正規の id に振り直す一度きりの処理（`TagFolderIdRekey` と同じ種類の
-   振り直しで、`feed_tags.tag_id` / `feeds.folder_id` と `local_settings` を一緒に移す）、またはそのような組が残って
-   いないことの確認。
-3. そのうえで、新しいスキーマバージョンで `tags` / `folders` から `v2_id` を削除し、`TransportSchema`、`MergeSchema`、
-   `MergeSql` の再統合、`DeltaExport`、振り直し処理がそれを運ばないようにする。
+`v2_id` を削除するには、以下の技術的条件を満たす必要がある。
 
-`DROP COLUMN` には SQLite 3.35 以上が必要: desktop（sqlite-jdbc 3.53.4）と Android（requery 3.49.0）は対応している。
-Apple（iOS 17 / macOS 14 で、実際には SQLite 3.39.x 以降）も対応している見込みだが、依存する前に実機で確認すること。
+- **対象とするすべてのプラットフォームで SQLite の `DROP COLUMN` が使えること。** SQLite 3.35.0 以上が必要。既知の同梱バージョン: desktop の sqlite-jdbc 3.53.4 → SQLite 3.53.4; Android の requery 3.49.0 → SQLite 3.49.0。Apple（iOS 17 / macOS 14）は実際には SQLite 3.39.x 以降を搭載しており、対応している見込みだが、依存する前に実機で確認すること。
+
+削除は、v3 より後のマイグレーション（つまり v4 以降）で行い、以下の順序で実施する必要がある。
+
+1. **列を削除する前に、残っている v2 の同一性を再統合する。** 同じ `v2_id` を共有しながら異なる名前由来 id で残っている行を、1 つの正規 id に統合する。`TagFolderIdRekey` と同じ方式で `feed_tags.tag_id` / `feeds.folder_id` / `local_settings` の参照を一緒に移す。
+2. **`tags` / `folders` から `v2_id` を `DROP COLUMN` する。**
+3. **同期コードと transport 形式から `v2_id` を取り除く。** `TransportSchema` / `MergeSchema` / `MergeSql` / `DeltaExport` / 振り直し処理。
+
+**注意:** 上記の再統合はローカルの v2→v4 アップグレードの安全性を保証するが、畳み込まれたクラウドファイルにまだ同じ `v2_id` を共有しながら異なる id の 2 行が残っているかどうかは、技術的に証明できない。それはクラウドデータの経過時間に関する運用上の仮定であり、検証可能な技術的前提条件ではない。
 
 ## フォルダの削除と復活をまたいで、フィードが削除済みのフォルダを指したまま残る
 
