@@ -574,14 +574,22 @@ Merge SQL (`MergeSql`) key points:
      greatest id.
   2. The target id is main's row carrying the same `v2_id` when one exists (that identity is already
      established here), else the canonical cloud row's id.
-  3. The target row is copied into `cloud` when `cloud` lacks it, so the per-field statements have one row per
-     identity to match by id.
-  4. Child references move to the target id — `cloud.feeds.folder_id`, and `cloud.feed_tags.tag_id` after the links
+  3. The set of permitted moves is resolved before any row changes: a moving mapping whose target is occupied by a
+     cloud row that is **not** part of the reconciliation (a different identity with a NULL `v2_id`) is blocked, and a
+     mapping whose target is occupied by another source row that is itself blocked is blocked transitively. Only
+     targets of non-blocked moving mappings are considered free.
+  4. The target row is copied into `cloud` when `cloud` lacks it and the mapping is permitted, so the per-field
+     statements have one row per identity to match by id.
+  5. Child references move to the target id — `cloud.feeds.folder_id`, and `cloud.feed_tags.tag_id` after the links
      are folded to one link per `(feed_id, tag_id)` by the ordinary last-write-wins — and the rows mapped away are
-     deleted.
-  The order is foreign-key-safe, the canonical and link choices do not depend on fold order, and a second run
-  changes nothing. Transport files carry `v2_id`, so this works for a delta or base; a pre-delta file gains it from
-  the same migration. `ks_id_remap` is not consulted by the merge.
+     deleted. A complete swap or cycle, where every target occupant also moves, is staged through temporary copies:
+     source rows are deleted before target rows are inserted, so the inserts do not collide; folder references are
+     briefly cleared while the source folders are removed and then restored to the target ids. A blocked mapping keeps
+     its original id, and both identities and their child references survive for the per-field merge.
+  The order is foreign-key-safe (a pre-delta cloud file is migrated to the full schema, which enforces foreign keys),
+  the canonical and link choices do not depend on fold order, and a second run changes nothing. Transport files carry
+  `v2_id`, so this works for a delta or base; a pre-delta file gains it from the same migration. `ks_id_remap` is not
+  consulted by the merge.
 - articles, three groups:
   - **Body** — `content`, `summary`, `title`, `url`, `author`, `published_at`, `thumbnail_url` (and `feed_id` /
     `guid`, which the local merge never rewrites on an existing row), stamped by `body_updated_at`. A version with
