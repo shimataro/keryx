@@ -95,11 +95,25 @@ object MergeSql {
      *    per `(feed_id, tag_id)` by the same last-write-wins rule as any other link, so a feed linked
      *    to both ids of a reconciled tag keeps one link.
      *
+     * A target id is considered free only after the reconciled cloud rows that would be deleted are
+     * taken into account. When a target id is still occupied by a cloud row that is **not** part of
+     * the reconciliation (a different identity with a NULL `v2_id`), the source row is kept at its
+     * original id instead: both identities and their child references are preserved, and the
+     * per-field merge handles them as distinct rows. This makes the reconciliation idempotent and
+     * keeps merge/fold behavior deterministic.
+     *
      * The order is FK-safe with foreign keys enforced (a pre-delta cloud file is migrated to the
      * full schema, which enforces them): a parent row is copied in before a child points at it, and
      * children are moved before their old parent is deleted. A transport file carries no foreign
      * keys, so the same statements simply run there. A dangling `cloud.feed_tags` row — one this
      * merge would skip anyway — is not re-inserted, so the rebuild does not fail on it.
+     *
+     * A reconciled row whose target id is currently occupied by *another* reconciled source row
+     * (a swap/cycle of two pre-upgrade identities) is staged through a temporary copy: the source
+     * rows are deleted before the target rows are inserted, so the insert does not collide. Feeds'
+     * `folder_id` is nullable, so folder references are briefly cleared while the source folders are
+     * removed and then restored to the target ids. Tag references live in `feed_tags`, which is
+     * rebuilt after the source and target tag rows are in place.
      *
      * Running the statements twice changes nothing: after the first run every surviving cloud row's
      * id is its target, so it maps to itself. Neither the canonical choice (`updated_at`, then id)
@@ -107,9 +121,11 @@ object MergeSql {
      */
     private const val TAG_SOURCE = "ks_tag_source"
     private const val TAG_MAP = "ks_tag_reconcile"
+    private const val TAG_FREE = "ks_tag_reconcile_free"
     private const val FEED_TAG_MAP = "ks_feed_tag_reconcile"
     private const val FOLDER_SOURCE = "ks_folder_source"
     private const val FOLDER_MAP = "ks_folder_reconcile"
+    private const val FOLDER_FREE = "ks_folder_reconcile_free"
 
     /**
      * The canonical cloud row per `v2_id` of [table] (greatest `updated_at`, then greatest id), into
@@ -149,31 +165,99 @@ object MergeSql {
     private val reconcileFolders: List<String> =
         canonicalSource("folders", FOLDER_SOURCE) +
             reconcileMap("folders", FOLDER_SOURCE, FOLDER_MAP) + listOf(
+            "CREATE TEMP TABLE IF NOT EXISTS $FOLDER_FREE (target_id TEXT PRIMARY KEY)",
+            "DELETE FROM $FOLDER_FREE",
             """
-            INSERT INTO cloud.folders (${FOLDER_COLUMNS.joinToString(", ")})
-            SELECT r.target_id, ${FOLDER_COLUMNS.drop(1).joinToString(", ") { "f.$it" }}
+            INSERT INTO $FOLDER_FREE (target_id)
+            SELECT DISTINCT m.target_id
+            FROM $FOLDER_MAP m
+            WHERE m.cloud_id <> m.target_id
+              AND NOT EXISTS (
+                  SELECT 1 FROM cloud.folders x
+                  WHERE x.id = m.target_id
+                    AND x.id NOT IN (SELECT cloud_id FROM $FOLDER_MAP))
+            """.trimIndent(),
+            // Stage the canonical source rows that will move, and the child refs that point at them.
+            "CREATE TEMP TABLE IF NOT EXISTS ks_folder_stage (source_id TEXT PRIMARY KEY, target_id TEXT NOT NULL, name TEXT NOT NULL, sort_order INTEGER NOT NULL, deleted_at INTEGER, updated_at INTEGER NOT NULL, created_at INTEGER NOT NULL, name_updated_at INTEGER, sort_order_updated_at INTEGER, v2_id TEXT)",
+            "DELETE FROM ks_folder_stage",
+            """
+            INSERT INTO ks_folder_stage (source_id, target_id, name, sort_order, deleted_at, updated_at, created_at, name_updated_at, sort_order_updated_at, v2_id)
+            SELECT f.id, r.target_id, f.name, f.sort_order, f.deleted_at, f.updated_at, f.created_at, f.name_updated_at, f.sort_order_updated_at, f.v2_id
             FROM cloud.folders f
             JOIN $FOLDER_SOURCE s ON s.source_id = f.id
             JOIN $FOLDER_MAP r ON r.cloud_id = f.id
-            WHERE NOT EXISTS (SELECT 1 FROM cloud.folders x WHERE x.id = r.target_id)
+            JOIN $FOLDER_FREE free ON free.target_id = r.target_id
+            WHERE r.cloud_id <> r.target_id
+            """.trimIndent(),
+            "CREATE TEMP TABLE IF NOT EXISTS ks_folder_ref (feed_id TEXT PRIMARY KEY, source_id TEXT NOT NULL)",
+            "DELETE FROM ks_folder_ref",
+            """
+            INSERT INTO ks_folder_ref (feed_id, source_id)
+            SELECT f.id, f.folder_id
+            FROM cloud.feeds f
+            JOIN $FOLDER_MAP m ON m.cloud_id = f.folder_id
+            JOIN $FOLDER_FREE free ON free.target_id = m.target_id
+            WHERE m.cloud_id <> m.target_id
+            """.trimIndent(),
+            // Clear the references so the source folders can be deleted, then restore them to the target ids.
+            "UPDATE cloud.feeds SET folder_id = NULL WHERE folder_id IN (SELECT source_id FROM ks_folder_ref)",
+            """
+            DELETE FROM cloud.folders
+            WHERE id IN (
+                SELECT m.cloud_id FROM $FOLDER_MAP m
+                JOIN $FOLDER_FREE free ON free.target_id = m.target_id
+                WHERE m.cloud_id <> m.target_id)
+            """.trimIndent(),
+            """
+            INSERT INTO cloud.folders (${FOLDER_COLUMNS.joinToString(", ")})
+            SELECT target_id, name, sort_order, deleted_at, updated_at, created_at, name_updated_at, sort_order_updated_at, v2_id
+            FROM ks_folder_stage
             """.trimIndent(),
             """
             UPDATE cloud.feeds
-            SET folder_id = (SELECT r.target_id FROM $FOLDER_MAP r WHERE r.cloud_id = cloud.feeds.folder_id)
-            WHERE folder_id IN (SELECT cloud_id FROM $FOLDER_MAP)
+            SET folder_id = (
+                SELECT m.target_id
+                FROM $FOLDER_MAP m
+                JOIN $FOLDER_FREE free ON free.target_id = m.target_id
+                WHERE m.cloud_id = ref.source_id)
+            FROM ks_folder_ref ref
+            WHERE cloud.feeds.id = ref.feed_id
             """.trimIndent(),
-            "DELETE FROM cloud.folders WHERE id IN (SELECT cloud_id FROM $FOLDER_MAP WHERE cloud_id <> target_id)",
         )
 
     private val reconcileTags: List<String> =
         canonicalSource("tags", TAG_SOURCE) +
             reconcileMap("tags", TAG_SOURCE, TAG_MAP) + listOf(
+            "CREATE TEMP TABLE IF NOT EXISTS $TAG_FREE (target_id TEXT PRIMARY KEY)",
+            "DELETE FROM $TAG_FREE",
+            """
+            INSERT INTO $TAG_FREE (target_id)
+            SELECT DISTINCT m.target_id
+            FROM $TAG_MAP m
+            WHERE m.cloud_id <> m.target_id
+              AND NOT EXISTS (
+                  SELECT 1 FROM cloud.tags x
+                  WHERE x.id = m.target_id
+                    AND x.id NOT IN (SELECT cloud_id FROM $TAG_MAP))
+            """.trimIndent(),
+            // Stage the canonical source rows that will move, then delete them before inserting at the target ids.
+            "CREATE TEMP TABLE IF NOT EXISTS ks_tag_stage (source_id TEXT PRIMARY KEY, target_id TEXT NOT NULL, name TEXT NOT NULL, color TEXT, sort_order INTEGER NOT NULL, deleted_at INTEGER, updated_at INTEGER NOT NULL, created_at INTEGER NOT NULL, name_updated_at INTEGER, color_updated_at INTEGER, sort_order_updated_at INTEGER, v2_id TEXT)",
+            "DELETE FROM ks_tag_stage",
+            """
+            INSERT INTO ks_tag_stage (source_id, target_id, name, color, sort_order, deleted_at, updated_at, created_at, name_updated_at, color_updated_at, sort_order_updated_at, v2_id)
+            SELECT t.id, r.target_id, t.name, t.color, t.sort_order, t.deleted_at, t.updated_at, t.created_at, t.name_updated_at, t.color_updated_at, t.sort_order_updated_at, t.v2_id
+            FROM cloud.tags t
+            JOIN $TAG_SOURCE s ON s.source_id = t.id
+            JOIN $TAG_MAP r ON r.cloud_id = t.id
+            JOIN $TAG_FREE free ON free.target_id = r.target_id
+            WHERE r.cloud_id <> r.target_id
+            """.trimIndent(),
             "CREATE TEMP TABLE IF NOT EXISTS $FEED_TAG_MAP (feed_id TEXT NOT NULL, tag_id TEXT NOT NULL, deleted_at INTEGER, updated_at INTEGER NOT NULL, PRIMARY KEY (feed_id, tag_id))",
             "DELETE FROM $FEED_TAG_MAP",
             """
             INSERT INTO $FEED_TAG_MAP (feed_id, tag_id, deleted_at, updated_at)
             SELECT ft.feed_id,
-                   COALESCE((SELECT r.target_id FROM $TAG_MAP r WHERE r.cloud_id = ft.tag_id), ft.tag_id),
+                   COALESCE((SELECT r.target_id FROM $TAG_MAP r JOIN $TAG_FREE free ON free.target_id = r.target_id WHERE r.cloud_id = ft.tag_id), ft.tag_id),
                    ft.deleted_at, ft.updated_at
             FROM cloud.feed_tags ft
             WHERE true
@@ -183,12 +267,16 @@ object MergeSql {
             """.trimIndent(),
             "DELETE FROM cloud.feed_tags",
             """
+            DELETE FROM cloud.tags
+            WHERE id IN (
+                SELECT m.cloud_id FROM $TAG_MAP m
+                JOIN $TAG_FREE free ON free.target_id = m.target_id
+                WHERE m.cloud_id <> m.target_id)
+            """.trimIndent(),
+            """
             INSERT INTO cloud.tags (${TAG_COLUMNS.joinToString(", ")})
-            SELECT r.target_id, ${TAG_COLUMNS.drop(1).joinToString(", ") { "t.$it" }}
-            FROM cloud.tags t
-            JOIN $TAG_SOURCE s ON s.source_id = t.id
-            JOIN $TAG_MAP r ON r.cloud_id = t.id
-            WHERE NOT EXISTS (SELECT 1 FROM cloud.tags x WHERE x.id = r.target_id)
+            SELECT target_id, name, color, sort_order, deleted_at, updated_at, created_at, name_updated_at, color_updated_at, sort_order_updated_at, v2_id
+            FROM ks_tag_stage
             """.trimIndent(),
             """
             INSERT INTO cloud.feed_tags (feed_id, tag_id, deleted_at, updated_at)
@@ -197,7 +285,6 @@ object MergeSql {
             WHERE EXISTS (SELECT 1 FROM cloud.feeds f WHERE f.id = m.feed_id)
               AND EXISTS (SELECT 1 FROM cloud.tags t WHERE t.id = m.tag_id)
             """.trimIndent(),
-            "DELETE FROM cloud.tags WHERE id IN (SELECT cloud_id FROM $TAG_MAP WHERE cloud_id <> target_id)",
         )
 
     // ---- tags / folders: per-field last-write-wins, matched by id ----

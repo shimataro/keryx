@@ -1356,6 +1356,219 @@ class SyncMergerTest {
         }
     }
 
+    /**
+     * Two devices renamed two synced v2 folders in opposite directions before upgrading, so each
+     * device's name-derived id for one folder equals the other's id for the *other* folder. The cloud
+     * file contains rows at the target ids main would reconcile onto, but those rows are themselves
+     * source rows that will be deleted. Reconciliation must still succeed and preserve the feed's
+     * folder assignment.
+     */
+    @Test
+    fun swappedV2FolderRenamesReconcileWhenBothTargetsAreFreedBySourceDeletion() {
+        val oldFolderId1 = "old-folder-1"
+        val oldFolderId2 = "old-folder-2"
+        val localFile = migratedSwappedDevice(
+            "local-", oldFolderId1, oldFolderId2,
+            folderNames = "Job" to "Work",
+            tagNames = "Job" to "Work",
+            assignChildren = true,
+            stamp = 100L,
+        )
+        val cloudFile = migratedSwappedDevice(
+            "cloud-", oldFolderId1, oldFolderId2,
+            folderNames = "Work" to "Job",
+            tagNames = "Work" to "Job",
+            assignChildren = true,
+            stamp = 300L,
+        )
+
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, KeryxDatabase.Schema.version, MergeSql.all)
+
+        val (_, verifyDriver, verifyDb) = reopen(localFile)
+        try {
+            val idJ = IdGenerator.folderId("Job")
+            val idW = IdGenerator.folderId("Work")
+            val jobFolder = verifyDb.foldersQueries.getById(idJ).executeAsOne()
+            val workFolder = verifyDb.foldersQueries.getById(idW).executeAsOne()
+            // Cloud names won because they are newer.
+            assertEquals("Work", jobFolder.name)
+            assertEquals("Job", workFolder.name)
+            assertEquals(oldFolderId1, jobFolder.v2_id)
+            assertEquals(oldFolderId2, workFolder.v2_id)
+            // f1 was assigned to cloud's folder for oldFolderId1, which reconciled onto main's Job id.
+            assertEquals(idJ, verifyDb.feedsQueries.getById("f1").executeAsOne().folder_id)
+            // Only the two reconciled identities remain.
+            assertEquals(setOf(idJ, idW), verifyDb.foldersQueries.watchAll().executeAsList().map { it.id }.toSet())
+        } finally {
+            verifyDriver.close()
+        }
+    }
+
+    /**
+     * A cloud folder's reconciliation target is occupied by a different identity that is *not* part
+     * of the reconciliation (it has no `v2_id`). The source row must be kept at its original id so
+     * both identities survive, and the feed's folder assignment must stay with the source identity.
+     */
+    @Test
+    fun folderReconciliationKeepsSourceIdentityWhenTargetIsOccupiedByAnUnrelatedRow() {
+        val oldFolderId = "old-folder"
+        val localFile = migratedRenamedDevice("local-", oldTagId = "old-tag", oldFolderId, "Job", "JobDir", stamp = 100, assignChildren = false)
+
+        val cloudFile = migratedRenamedDevice("cloud-", oldTagId = "old-tag", oldFolderId, "Work", "WorkDir", stamp = 200, assignChildren = true)
+        // Add an unrelated v3-created folder whose name-derived id collides with the target id.
+        JdbcSqliteDriver("jdbc:sqlite:${cloudFile.absolutePath}").use { driver ->
+            val db = KeryxDatabase(driver)
+            db.insertFolder(IdGenerator.folderId("JobDir"), "JobDir", now = 50)
+        }
+
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, KeryxDatabase.Schema.version, MergeSql.all)
+
+        val (_, verifyDriver, verifyDb) = reopen(localFile)
+        try {
+            val targetId = IdGenerator.folderId("JobDir")
+            val sourceId = IdGenerator.folderId("WorkDir")
+            // The reconciled source row could not move to the occupied target, so it stayed.
+            val sourceFolder = verifyDb.foldersQueries.getById(sourceId).executeAsOne()
+            assertEquals("WorkDir", sourceFolder.name)
+            assertEquals(oldFolderId, sourceFolder.v2_id)
+            // The unrelated target row was imported too.
+            assertNotNull(verifyDb.foldersQueries.getById(targetId).executeAsOneOrNull())
+            // f1 stays assigned to the source identity.
+            assertEquals(sourceId, verifyDb.feedsQueries.getById("f1").executeAsOne().folder_id)
+        } finally {
+            verifyDriver.close()
+        }
+    }
+
+    /**
+     * Same as [swappedV2FolderRenamesReconcileWhenBothTargetsAreFreedBySourceDeletion] for tags and
+     * their feed_tag links.
+     */
+    @Test
+    fun swappedV2TagRenamesReconcileWhenBothTargetsAreFreedBySourceDeletion() {
+        val oldTagId1 = "old-tag-1"
+        val oldTagId2 = "old-tag-2"
+        val localFile = migratedSwappedDevice(
+            "local-", oldTagId1, oldTagId2,
+            folderNames = "Job" to "Work",
+            tagNames = "Job" to "Work",
+            assignChildren = true,
+            stamp = 100L,
+        )
+        val cloudFile = migratedSwappedDevice(
+            "cloud-", oldTagId1, oldTagId2,
+            folderNames = "Work" to "Job",
+            tagNames = "Work" to "Job",
+            assignChildren = true,
+            stamp = 300L,
+        )
+
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, KeryxDatabase.Schema.version, MergeSql.all)
+
+        val (_, verifyDriver, verifyDb) = reopen(localFile)
+        try {
+            val idJ = IdGenerator.tagId("Job")
+            val idW = IdGenerator.tagId("Work")
+            val jobTag = verifyDb.tagsQueries.getById(idJ).executeAsOne()
+            val workTag = verifyDb.tagsQueries.getById(idW).executeAsOne()
+            assertEquals("Work", jobTag.name)
+            assertEquals("Job", workTag.name)
+            assertEquals(oldTagId1, jobTag.v2_id)
+            assertEquals(oldTagId2, workTag.v2_id)
+            assertEquals(listOf(idJ), verifyDb.feed_tagsQueries.watchTagIdsForFeed("f1").executeAsList())
+            assertEquals(setOf(idJ, idW), verifyDb.tagsQueries.watchAll().executeAsList().map { it.id }.toSet())
+        } finally {
+            verifyDriver.close()
+        }
+    }
+
+    /**
+     * Same as [folderReconciliationKeepsSourceIdentityWhenTargetIsOccupiedByAnUnrelatedRow] for tags
+     * and their feed_tag links.
+     */
+    @Test
+    fun tagReconciliationKeepsSourceIdentityWhenTargetIsOccupiedByAnUnrelatedRow() {
+        val oldTagId = "old-tag"
+        val localFile = migratedRenamedDevice("local-", oldTagId, oldFolderId = "old-folder", "Job", "JobDir", stamp = 100, assignChildren = false)
+
+        val cloudFile = migratedRenamedDevice("cloud-", oldTagId, oldFolderId = "old-folder", "Work", "WorkDir", stamp = 200, assignChildren = true)
+        JdbcSqliteDriver("jdbc:sqlite:${cloudFile.absolutePath}").use { driver ->
+            val db = KeryxDatabase(driver)
+            db.insertTag(IdGenerator.tagId("Job"), "Job", now = 50)
+        }
+
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, KeryxDatabase.Schema.version, MergeSql.all)
+
+        val (_, verifyDriver, verifyDb) = reopen(localFile)
+        try {
+            val targetId = IdGenerator.tagId("Job")
+            val sourceId = IdGenerator.tagId("Work")
+            val sourceTag = verifyDb.tagsQueries.getById(sourceId).executeAsOne()
+            assertEquals("Work", sourceTag.name)
+            assertEquals(oldTagId, sourceTag.v2_id)
+            assertNotNull(verifyDb.tagsQueries.getById(targetId).executeAsOneOrNull())
+            assertEquals(listOf(sourceId), verifyDb.feed_tagsQueries.watchTagIdsForFeed("f1").executeAsList())
+        } finally {
+            verifyDriver.close()
+        }
+    }
+
+    /**
+     * Builds a v2 database with two tags and two folders sharing the given old ids, renames them
+     * according to [tagNames] / [folderNames], then migrates it to v3. When [assignChildren] is true,
+     * feed f1 is placed in the first folder and linked to the first tag.
+     */
+    private fun migratedSwappedDevice(
+        prefix: String,
+        oldTagId1: String,
+        oldTagId2: String,
+        oldFolderId1: String = oldTagId1.replace("tag", "folder"),
+        oldFolderId2: String = oldTagId2.replace("tag", "folder"),
+        tagNames: Pair<String, String>,
+        folderNames: Pair<String, String>,
+        assignChildren: Boolean,
+        stamp: Long = 200L,
+    ): File {
+        val file = File.createTempFile(prefix, ".db").apply { deleteOnExit() }
+        JdbcSqliteDriver("jdbc:sqlite:${file.absolutePath}").use { driver ->
+            driver.createSchemaV2()
+            driver.execute(null, """
+                INSERT INTO feeds (id, url, title, etag, updated_at, created_at)
+                VALUES ('f1', 'https://a', 'Feed', '"e"', 100, 1)
+            """.trimIndent(), 0)
+            driver.execute(null, """
+                INSERT INTO tags (id, name, color, sort_order, updated_at, created_at)
+                VALUES ('$oldTagId1', '${tagNames.first}', '#f00', 0, $stamp, 1)
+            """.trimIndent(), 0)
+            driver.execute(null, """
+                INSERT INTO tags (id, name, color, sort_order, updated_at, created_at)
+                VALUES ('$oldTagId2', '${tagNames.second}', '#0f0', 0, $stamp, 1)
+            """.trimIndent(), 0)
+            driver.execute(null, """
+                INSERT INTO folders (id, name, sort_order, updated_at, created_at)
+                VALUES ('$oldFolderId1', '${folderNames.first}', 0, $stamp, 1)
+            """.trimIndent(), 0)
+            driver.execute(null, """
+                INSERT INTO folders (id, name, sort_order, updated_at, created_at)
+                VALUES ('$oldFolderId2', '${folderNames.second}', 0, $stamp, 1)
+            """.trimIndent(), 0)
+            if (assignChildren) {
+                driver.execute(null, """
+                    INSERT INTO feed_tags (feed_id, tag_id, updated_at)
+                    VALUES ('f1', '$oldTagId1', $stamp)
+                """.trimIndent(), 0)
+                driver.execute(null, """
+                    UPDATE feeds SET folder_id = '$oldFolderId1', folder_updated_at = $stamp WHERE id = 'f1'
+                """.trimIndent(), 0)
+            }
+        }
+        JdbcSqliteDriver("jdbc:sqlite:${file.absolutePath}").use { driver ->
+            KeryxDatabase.Schema.migrate(driver, 2, KeryxDatabase.Schema.version, *KERYX_SCHEMA_CALLBACKS)
+            driver.execute(null, "PRAGMA user_version=${KeryxDatabase.Schema.version}", 0)
+        }
+        return file
+    }
+
     @Test
     fun validateSchemaReturnsTrueForValidKeryxDb() {
         val (file, driver, _) = fileDb()
