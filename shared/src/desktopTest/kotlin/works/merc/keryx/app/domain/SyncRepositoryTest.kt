@@ -432,7 +432,7 @@ class SyncRepositoryTest {
         val other = ids()
         val (good, goodBytes) = SyncFiles.transportFile(TransportMeta(gen, TransportFileKind.DELTA, other, 1, now), feedRow("good"))
         cloud.put(good.fileName, goodBytes)
-        val (newer, newerBytes) = SyncFiles.transportFile(TransportMeta(gen, TransportFileKind.DELTA, other, 2, now), "PRAGMA user_version = 2")
+        val (newer, newerBytes) = SyncFiles.transportFile(TransportMeta(gen, TransportFileKind.DELTA, other, 3, now), "PRAGMA user_version = 3")
         cloud.put(newer.fileName, newerBytes)
         val cursorsBefore = a.db.sync_bookkeepingQueries.cursorAll().executeAsList()
 
