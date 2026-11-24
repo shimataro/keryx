@@ -157,7 +157,7 @@ object MergeSql {
         """
         INSERT INTO $map (cloud_id, target_id)
         SELECT c.id, COALESCE(
-            (SELECT MIN(m.id) FROM main.$table m WHERE m.v2_id = c.v2_id),
+            (SELECT m.id FROM main.$table m WHERE m.v2_id = c.v2_id ORDER BY m.updated_at DESC, m.id DESC LIMIT 1),
             (SELECT s.source_id FROM $source s WHERE s.v2_id = c.v2_id))
         FROM cloud.$table c
         WHERE c.v2_id IS NOT NULL
