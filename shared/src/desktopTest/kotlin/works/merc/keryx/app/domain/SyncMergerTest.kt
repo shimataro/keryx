@@ -1415,11 +1415,11 @@ class SyncMergerTest {
             val canonical = minOf(IdGenerator.folderId("Job"), IdGenerator.folderId("Work"))
             val folders = verifyDb.foldersQueries.watchAll().executeAsList()
             assertEquals(listOf(canonical), folders.map { it.id })
-            // The cloud's names are newer (300 against 100); of its two rows folded onto the canonical
-            // id the tie on the stamp is decided by value, so only the set of names is fixed here —
-            // V2IdentityMergeTest checks that every merge order gives the same one.
-            assertTrue(folders.single().name in setOf("Job", "Work"))
-            assertTrue(folders.single().v2_id in setOf(oldFolderId1, oldFolderId2))
+            // The cloud's names are newer (300 against 100); its two rows folded onto the canonical id
+            // tie on the stamp, which is decided by value — the greater name, "Work" — and the fold
+            // keeps the greater v2_id.
+            assertEquals("Work", folders.single().name)
+            assertEquals(oldFolderId2, folders.single().v2_id)
             assertEquals(canonical, verifyDb.feedsQueries.getById("f1").executeAsOne().folder_id)
         } finally {
             verifyDriver.close()
@@ -1494,8 +1494,10 @@ class SyncMergerTest {
             val canonical = minOf(IdGenerator.tagId("Job"), IdGenerator.tagId("Work"))
             val tags = verifyDb.tagsQueries.watchAll().executeAsList()
             assertEquals(listOf(canonical), tags.map { it.id })
-            assertTrue(tags.single().name in setOf("Job", "Work"))
-            assertTrue(tags.single().v2_id in setOf(oldTagId1, oldTagId2))
+            // As for folders: the tie on the cloud's stamp goes to the greater name, and the fold keeps
+            // the greater v2_id.
+            assertEquals("Work", tags.single().name)
+            assertEquals(oldTagId2, tags.single().v2_id)
             assertEquals(listOf(canonical), verifyDb.feed_tagsQueries.watchTagIdsForFeed("f1").executeAsList())
         } finally {
             verifyDriver.close()
