@@ -257,10 +257,13 @@ whether it is worth doing.
 
   An unreleased fix is still `Already resolved`, but its reply says it ships in the next release.
 - **Not valid** — the item rests on a misunderstanding of how the app behaves.
-- **Bug reports** — confirm the bug exists by reproducing it, per
-  `.claude/etc/temporary-instrumentation.md` (read it before inserting anything): a reproducing
-  test first, then temporary logging, and a manual run only as the last resort. A bug that cannot
-  be confirmed is `Needs info` (the reply asks for what would reproduce it), not a fix.
+- **Bug reports** — confirm the bug exists by reproducing it. The fork phase is read-only and
+  inserts no temporary code and creates no test files, so start with code-trace confirmation. If
+  runtime evidence is required to reach a verdict, record that in the item's Reasoning and have
+  the hand-off instruct the main conversation to gather it per
+  `.claude/etc/temporary-instrumentation.md` before the verdict is final and before plan approval
+  — evidence that refutes the item keeps it out of the plan. A bug that cannot be confirmed stays
+  `Needs info` (the reply asks for what would reproduce it), not a fix.
 
 `Already resolved` and `Not valid` end the item: its reasoning and reply say why.
 
@@ -286,10 +289,11 @@ than working from memory.
 
 Record **Validity** (Valid / Invalid / Partially Valid), **Confidence** (High / Medium / Low, as
 defined in `.claude/etc/review/common.md` §6) and **Reasoning**. A point whose Confidence is
-Medium or Low — whatever its Validity — must be backed by evidence gathered per
-`.claude/etc/temporary-instrumentation.md` before the verdict is final; record what was
-inserted and observed in the reasoning. Evidence that can neither confirm nor refute the point
-leaves the item unconfirmed: its outcome is `Needs info`, and no fix rests on it.
+Medium or Low — whatever its Validity — must be backed by evidence before the verdict is final.
+Because the fork phase is read-only, the fork records what evidence is needed and the hand-off
+has the main conversation gather it per `.claude/etc/temporary-instrumentation.md` before plan
+approval. Evidence that can neither confirm nor refute the point leaves the item unconfirmed:
+its outcome is `Needs info`, and no fix rests on it.
 
 An Invalid request is `Not valid`. A Partially Valid one proceeds with only its valid part, and
 its reply says which part and why.
