@@ -275,7 +275,9 @@ with it, so a failed indexing is retried by the next sync). Device-local; cleare
 None of these but `ks_v2_edge`, nor `sync_state`, `feed_fetch_state` or `articles_fts`, ever leaves the device: delta
 and base files are built from the synced tables only (see [sync-architecture.md](sync-architecture.md)) — except
 that a feed's `folder_id` / `folder_updated_at` are written from its `ks_feed_folder_raw` row, the value the table
-exists to hold, and that full sends and bases also carry the identity edges of `ks_v2_edge`.
+exists to hold, and that full sends and bases also carry the identity edges of `ks_v2_edge` — as does an ordinary
+delta whose raw folder assignment names an alias, for the folder edges of that alias's connected component (see
+"Sending" in [sync-architecture.md](sync-architecture.md)).
 
 ### articles_fts (FTS5 virtual table, outside SQLDelight management)
 

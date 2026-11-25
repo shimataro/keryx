@@ -280,7 +280,9 @@
 `ks_v2_edge` を除くこれらも、`sync_state`、`feed_fetch_state`、`articles_fts` も、端末の外に出ることは決してない:
 差分ファイルとベースは同期対象のテーブルだけから作る（[sync-architecture.ja.md](sync-architecture.ja.md) 参照）。
 ただしフィードの `folder_id` / `folder_updated_at` は、その `ks_feed_folder_raw` の行——この表が持つための値——から
-書き、全量送信とベースにはそれに加えて `ks_v2_edge` の同一性の辺を入れる。
+書き、全量送信とベースにはそれに加えて `ks_v2_edge` の同一性の辺を入れる。通常の差分も、送る生のフォルダー割り当てが
+別名を指すときは、その別名の連結成分のフォルダーの辺を運ぶ（[sync-architecture.ja.md](sync-architecture.ja.md) の
+「送信」参照）。
 
 ### articles_fts（FTS5 仮想テーブル、SQLDelight 管理外）
 

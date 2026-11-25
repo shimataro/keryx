@@ -182,7 +182,8 @@ time — so it can tell what a base covers without downloading it), `ks_legacy_s
 from a merge's commit until the search index has caught up with it — see "Receiving"; without the `ks_` prefix, since
 that work belongs to the local search index and survives a disconnect). `sync_state` and the tables
 above are device-local and never leave the device — except that a full send copies `ks_v2_edge`'s edges into its
-edge tables.
+edge tables, and an ordinary delta whose raw folder assignment names an alias copies the folder edges of that alias's
+connected component (see "Sending").
 
 ## Sync Flow (`SyncRepository.sync()`)
 
