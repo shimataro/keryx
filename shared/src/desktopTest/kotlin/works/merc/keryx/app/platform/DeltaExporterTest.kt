@@ -531,10 +531,8 @@ class DeltaExporterTest {
         val copy = newPath("ks-copy-")
         DeltaExporter.copyForFullSend(local.absolutePath, copy)
         val export = DeltaExporter.exportFull(copy, newPath(), meta(2), exceptPath = base)
-        assertEquals(0L, export.rowCounts["articles"])
-        assertEquals(0L, export.rowCounts["folder_v2_edges"])
-        assertEquals(1L, export.rowCounts["tag_v2_edges"])
-        assertFalse(export.rowCounts.values.all { it == 0L })
+        // The edge is the only row written: no unchanged feed, tag, folder, article or setting.
+        assertEquals(mapOf("tag_v2_edges" to 1L), export.rowCounts.filterValues { it != 0L })
     }
 
     @Test
