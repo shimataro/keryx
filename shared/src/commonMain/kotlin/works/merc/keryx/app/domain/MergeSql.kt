@@ -185,20 +185,37 @@ object MergeSql {
      * `ks_id_remap` is recorded as NULL: an older build's database can hold such an orphan, and a raw
      * value no send could ever carry a row or an identity edge for would fail every later send's
      * check 9. A transport file is validated to carry, for every folder it references, the row or the
-     * identity edges leading to one (check 9), so its value is kept as it is.
+     * identity edges leading to one (check 9), so its value is kept as it is. A pre-delta file's raw
+     * assignment is read from its `ks_feed_folder_raw` — the one device-local table of `cloud` the
+     * merge reads — since the migration resolved its `feeds.folder_id` to NULL for a soft-deleted
+     * folder, and recording that NULL would keep the feed out of the folder once it is revived.
      */
     private fun mergeFeedFolder(preDelta: Boolean): String {
-        val folderId = if (preDelta) {
-            "CASE WHEN EXISTS (SELECT 1 FROM main.folders mf WHERE mf.id = c.folder_id) " +
-                "OR EXISTS (SELECT 1 FROM main.ks_id_remap mr WHERE mr.kind = '$ID_REMAP_KIND_FOLDER' AND mr.old_id = c.folder_id) " +
-                "THEN c.folder_id END"
+        // A pre-delta file is migrated to the current schema, whose cloud.feeds.folder_id is a cache
+        // resolved to NULL for a soft-deleted folder; its raw assignment is in cloud.ks_feed_folder_raw
+        // (filled by the migration for every feed). A feed without a raw row falls back to its feeds
+        // columns, both read from the same source.
+        val (rawFolderId, rawStamp, rawJoin) = if (preDelta) {
+            Triple(
+                "CASE WHEN cr.feed_id IS NULL THEN c.folder_id ELSE cr.folder_id END",
+                "CASE WHEN cr.feed_id IS NULL THEN c.folder_updated_at ELSE cr.folder_updated_at END",
+                "LEFT JOIN cloud.ks_feed_folder_raw cr ON cr.feed_id = c.id",
+            )
         } else {
-            "c.folder_id"
+            Triple("c.folder_id", "c.folder_updated_at", "")
+        }
+        val folderId = if (preDelta) {
+            "CASE WHEN EXISTS (SELECT 1 FROM main.folders mf WHERE mf.id = $rawFolderId) " +
+                "OR EXISTS (SELECT 1 FROM main.ks_id_remap mr WHERE mr.kind = '$ID_REMAP_KIND_FOLDER' AND mr.old_id = $rawFolderId) " +
+                "THEN $rawFolderId END"
+        } else {
+            rawFolderId
         }
         return """
             INSERT INTO main.ks_feed_folder_raw (feed_id, folder_updated_at, folder_id)
-            SELECT c.id, c.folder_updated_at, $folderId
+            SELECT c.id, $rawStamp, $folderId
             FROM cloud.feeds c
+            $rawJoin
             WHERE EXISTS (SELECT 1 FROM main.feeds l WHERE l.id = c.id)
             ON CONFLICT(feed_id) DO UPDATE SET
                 ${SyncLww.upsertAssignments(SyncLww.FEED_FOLDER).joinToString(",\n                ")}
@@ -414,8 +431,9 @@ object MergeSql {
     /**
      * The merge statements, in order. They reference only `cloud` tables and columns present both in a
      * pre-delta database migrated to the current local schema and in a transport file, and no
-     * device-local table of `cloud`; [preDelta] picks how a feed's folder reference main cannot
-     * resolve is recorded ([mergeFeedFolder]). A pre-delta file's tags and folders carry `v2_id` from the migration as well,
+     * device-local table of `cloud` — except that with [preDelta] a feed's raw folder assignment is
+     * read from the migrated file's `ks_feed_folder_raw`; [preDelta] also picks how a feed's folder
+     * reference main cannot resolve is recorded ([mergeFeedFolder]). A pre-delta file's tags and folders carry `v2_id` from the migration as well,
      * so their edges join the identity step like any other file's.
      *
      * Applied in FK-safe order (parents before children): the cloud rows' and main's rows' identity

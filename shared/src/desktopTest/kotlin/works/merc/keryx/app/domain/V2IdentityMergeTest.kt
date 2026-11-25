@@ -428,6 +428,33 @@ class V2IdentityMergeTest {
         )
     }
 
+    /**
+     * A version-2 cloud file assigns the feed (at the newer stamp) to a folder it has soft-deleted.
+     * The migration resolves that file's `feeds.folder_id` to NULL, but its raw assignment keeps the
+     * folder: the merge records the raw value, so the feed shows as "no folder" while the folder is
+     * deleted and is back in it once the folder is recreated by name.
+     */
+    @Test
+    fun aPreDeltaMergeKeepsTheRawAssignmentToASoftDeletedFolder() {
+        val local = v2Device("local-", "News", "WorkDir", stamp = 100, migrate = true)
+        val cloud = v2Device("cloud-", "News", "WorkDir", stamp = 100, migrate = false)
+        exec(cloud, "UPDATE folders SET deleted_at = 300, updated_at = 300")
+        exec(cloud, "UPDATE feeds SET folder_updated_at = 300")
+
+        DatabaseMerger.merge(local.absolutePath, cloud.absolutePath, KeryxDatabase.Schema.version, MergeSql.all)
+
+        val folderId = IdGenerator.folderId("WorkDir")
+        assertEquals(listOf("300"), rows(local, "SELECT deleted_at FROM folders WHERE id = '$folderId'"))
+        // The raw assignment keeps the deleted folder at the cloud's stamp; the resolved one is NULL.
+        assertEquals(listOf("f1|null|$folderId"), feedFolders(local))
+        assertEquals(listOf("300"), rows(local, "SELECT folder_updated_at FROM ks_feed_folder_raw"))
+
+        JdbcSqliteDriver("jdbc:sqlite:${local.absolutePath}").use { driver ->
+            KeryxDatabase(driver).foldersQueries.reactivateByName(now = 400, name = "WorkDir")
+        }
+        assertEquals(listOf("f1|$folderId|$folderId"), feedFolders(local))
+    }
+
     // ---- (f) a main orphan link ----
 
     @Test
