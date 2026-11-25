@@ -86,6 +86,7 @@ import works.merc.keryx.app.setFeedFetchState
 import works.merc.keryx.app.insertFeedTag
 import works.merc.keryx.app.insertFolder
 import works.merc.keryx.app.insertTag
+import works.merc.keryx.app.rekeyTagForTest
 import works.merc.keryx.app.stampArticleDeleted
 import works.merc.keryx.app.platform.AppDirs
 import works.merc.keryx.app.platform.FileIO
@@ -314,6 +315,8 @@ class HomeViewModelTest {
         pendingLocalWrites: PendingLocalWrites = PendingLocalWrites(),
         // Where a failed write is reported; a test can pass one over its own NotificationCenter.
         localWriteFailureReporter: LocalWriteFailureReporter = LocalWriteFailureReporter(NotificationCenter(), clock),
+        // The tag/folder re-keys the ViewModel observes — a test publishes one through it.
+        idRemaps: works.merc.keryx.app.domain.TagFolderIdRemaps = works.merc.keryx.app.domain.TagFolderIdRemaps(db),
     ): HomeViewModel {
         val articleRepository = ArticleRepository(db, FtsSearch(ftsDriver), syncScheduler, clock, Dispatchers.Unconfined)
         // Mirror startup: ensureIndexed() creates articles_fts so the subscribe/refresh path's indexMissing() works.
@@ -328,7 +331,10 @@ class HomeViewModelTest {
         // Unconfined write dispatcher so saveLocalSettings persists inline (store.load() assertions
         // in these tests are synchronous).
         val settingsRepository =
-            SettingsRepository(db, LocalSettingsStore(dirOverride = dir), syncScheduler, clock, writeDispatcher = Dispatchers.Unconfined)
+            SettingsRepository(
+                db, LocalSettingsStore(dirOverride = dir), syncScheduler, clock, writeDispatcher = Dispatchers.Unconfined,
+                idRemaps = idRemaps,
+            )
         val syncRepository = SyncRepository(
             driver = driver,
             db = db,
@@ -1350,6 +1356,38 @@ class HomeViewModelTest {
         pumpUntil { !vm.pulling }
         assertEquals(emptySet(), vm.pullRefreshingFilters.value)
         assertEquals(1, fetches.get(), "only the first selection's feed is fetched")
+    }
+
+    @Test
+    fun aPullInFlightOnATagFollowsTheTagsReKeyAndEndsWithItsRefresh() = runTest {
+        db.insertFeed("f1")
+        db.insertTag("t-old", "News")
+        db.insertFeedTag("f1", "t-old")
+        val gate = CompletableDeferred<Unit>()
+        val fetches = java.util.concurrent.atomic.AtomicInteger(0)
+        val remaps = works.merc.keryx.app.domain.TagFolderIdRemaps(db)
+        val vm = newViewModel(feedFetcher = gatedCountingFetcher(gate, fetches), idRemaps = remaps)
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.Tag("t-old"))
+        testScheduler.advanceUntilIdle()
+
+        val baseline = vm.launchedJobs()
+        vm.pullToRefresh()
+        pumpUntil { fetches.get() >= 1 }
+        assertEquals(setOf<ArticleFilter>(ArticleFilter.Tag("t-old")), vm.pullRefreshingFilters.value)
+
+        driver.rekeyTagForTest("t-old", "t-new")
+        remaps.publishFromDb()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(ArticleFilter.Tag("t-new"), vm.filter.value)
+        assertEquals(setOf<ArticleFilter>(ArticleFilter.Tag("t-new")), vm.pullRefreshingFilters.value)
+        assertTrue(vm.filter.value in vm.pullRefreshingFilters.value, "the list still shows its pull")
+
+        gate.complete(Unit)
+        pumpUntil { !vm.pulling }
+        assertEquals(emptySet(), vm.pullRefreshingFilters.value)
+        pumpUntilSettled(vm, baseline)
     }
 
     @Test

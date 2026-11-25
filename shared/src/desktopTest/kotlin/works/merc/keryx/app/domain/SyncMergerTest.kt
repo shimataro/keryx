@@ -22,6 +22,7 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 /** Verifies the ATTACH-DATABASE merge (timestamp-last-wins) via [DatabaseMerger]. */
 class SyncMergerTest {
@@ -1199,14 +1200,12 @@ class SyncMergerTest {
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         try {
-            val expectedTagId = IdGenerator.tagId("Job")
-            val expectedFolderId = IdGenerator.folderId("JobDir")
-
-            // The reconciled row uses main's id (from the rename) and keeps the renamed values.
-            assertNotNull(verifyDb.tagsQueries.getById(expectedTagId).executeAsOneOrNull())
-            assertNull(verifyDb.tagsQueries.getById(IdGenerator.tagId("Work")).executeAsOneOrNull())
-            assertNotNull(verifyDb.foldersQueries.getById(expectedFolderId).executeAsOneOrNull())
-            assertNull(verifyDb.foldersQueries.getById(IdGenerator.folderId("WorkDir")).executeAsOneOrNull())
+            // One identity per kind, at the smaller of the two name-derived ids (not main's): the
+            // renamed values (newer stamps) win per field.
+            val expectedTagId = minOf(IdGenerator.tagId("Job"), IdGenerator.tagId("Work"))
+            val expectedFolderId = minOf(IdGenerator.folderId("JobDir"), IdGenerator.folderId("WorkDir"))
+            assertEquals(listOf(expectedTagId), verifyDb.tagsQueries.watchAll().executeAsList().map { it.id })
+            assertEquals(listOf(expectedFolderId), verifyDb.foldersQueries.watchAll().executeAsList().map { it.id })
 
             val tag = verifyDb.tagsQueries.getById(expectedTagId).executeAsOne()
             assertEquals("Job", tag.name)
@@ -1214,7 +1213,7 @@ class SyncMergerTest {
             val folder = verifyDb.foldersQueries.getById(expectedFolderId).executeAsOne()
             assertEquals("JobDir", folder.name)
 
-            // Feed references point at the reconciled id, not the cloud-derived id.
+            // Feed references point at the canonical id.
             val feed = verifyDb.feedsQueries.getById("f1").executeAsOne()
             assertEquals(expectedFolderId, feed.folder_id)
             val feedTagIds = verifyDb.feed_tagsQueries.watchTagIdsForFeed("f1").executeAsList()
@@ -1274,10 +1273,10 @@ class SyncMergerTest {
     /**
      * Two devices renamed the same pre-upgrade tag and folder differently before upgrading, so they
      * hold different name-derived ids under one `v2_id`. Device A sends its whole state as a base; B
-     * merges it. The base's rows must reconcile onto B's id — the identity B already established — and
-     * the feed-tag link and folder assignment, which only A's file carries, must move with them. A's
-     * newer name wins by the ordinary per-field last-write-wins, and A's derived id must not survive as
-     * a second row.
+     * merges it. Both rows are one identity whose canonical id is the smaller derived id (whichever
+     * device held it), the feed-tag link and folder assignment, which only A's file carries, follow it,
+     * A's newer name wins by the ordinary per-field last-write-wins, and the other id does not survive
+     * as a second row.
      */
     @Test
     fun preUpgradeRowsRenamedDifferentlyBeforeMigrationAreReconciledByV2Id() {
@@ -1299,21 +1298,22 @@ class SyncMergerTest {
 
         DatabaseMerger.mergeTransport(bFile.absolutePath, base.absolutePath, MergeSql.all)
 
-        val bTagId = IdGenerator.tagId("Work")
-        val bFolderId = IdGenerator.folderId("WorkDir")
+        // The canonical id is the smaller of the two derived ids, whichever device held it.
+        val bTagId = minOf(IdGenerator.tagId("Job"), IdGenerator.tagId("Work"))
+        val bFolderId = minOf(IdGenerator.folderId("JobDir"), IdGenerator.folderId("WorkDir"))
         val (_, verifyDriver, verifyDb) = reopen(bFile)
         try {
-            // One identity: B's id carries A's newer name, and A's derived id is gone.
+            // One identity: the canonical id carries A's newer name, and the other id is gone.
+            assertEquals(listOf(bTagId), verifyDb.tagsQueries.watchAll().executeAsList().map { it.id })
+            assertEquals(listOf(bFolderId), verifyDb.foldersQueries.watchAll().executeAsList().map { it.id })
             val tag = verifyDb.tagsQueries.getById(bTagId).executeAsOne()
             assertEquals("Job", tag.name)
             assertEquals(oldTagId, tag.v2_id)
-            assertNull(verifyDb.tagsQueries.getById(IdGenerator.tagId("Job")).executeAsOneOrNull())
             val folder = verifyDb.foldersQueries.getById(bFolderId).executeAsOne()
             assertEquals("JobDir", folder.name)
             assertEquals(oldFolderId, folder.v2_id)
-            assertNull(verifyDb.foldersQueries.getById(IdGenerator.folderId("JobDir")).executeAsOneOrNull())
 
-            // The link and folder assignment only A carried moved onto B's ids.
+            // The link and folder assignment only A carried follow the canonical ids.
             val feed = verifyDb.feedsQueries.getById("f1").executeAsOne()
             assertEquals(bFolderId, feed.folder_id)
             assertEquals(listOf(bTagId), verifyDb.feed_tagsQueries.watchTagIdsForFeed("f1").executeAsList())
@@ -1359,10 +1359,12 @@ class SyncMergerTest {
 
     /**
      * Two devices renamed two synced v2 folders in opposite directions before upgrading, so each
-     * device's name-derived id for one folder equals the other's id for the *other* folder. The cloud
-     * file contains rows at the target ids main would reconcile onto, but those rows are themselves
-     * source rows that will be deleted. Reconciliation must still succeed and preserve the feed's
-     * folder assignment.
+     * device's name-derived id for one folder equals the other's id for the *other* folder. The
+     * identity edges `(old1, Job)`, `(old2, Work)` (main) and `(old1, Work)`, `(old2, Job)` (cloud)
+     * connect all four ids, so under the identity rule — ids sharing a `v2_id` are one identity,
+     * transitively — the two folders are one identity whose canonical id is the smaller derived id.
+     * The merge must succeed with foreign keys enforced, leave one row and keep the feed's folder
+     * assignment on it.
      */
     @Test
     fun swappedV2FolderRenamesReconcileWhenBothTargetsAreFreedBySourceDeletion() {
@@ -1387,28 +1389,25 @@ class SyncMergerTest {
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         try {
-            val idJ = IdGenerator.folderId("Job")
-            val idW = IdGenerator.folderId("Work")
-            val jobFolder = verifyDb.foldersQueries.getById(idJ).executeAsOne()
-            val workFolder = verifyDb.foldersQueries.getById(idW).executeAsOne()
-            // Cloud names won because they are newer.
-            assertEquals("Work", jobFolder.name)
-            assertEquals("Job", workFolder.name)
-            assertEquals(oldFolderId1, jobFolder.v2_id)
-            assertEquals(oldFolderId2, workFolder.v2_id)
-            // f1 was assigned to cloud's folder for oldFolderId1, which reconciled onto main's Job id.
-            assertEquals(idJ, verifyDb.feedsQueries.getById("f1").executeAsOne().folder_id)
-            // Only the two reconciled identities remain.
-            assertEquals(setOf(idJ, idW), verifyDb.foldersQueries.watchAll().executeAsList().map { it.id }.toSet())
+            val canonical = minOf(IdGenerator.folderId("Job"), IdGenerator.folderId("Work"))
+            val folders = verifyDb.foldersQueries.watchAll().executeAsList()
+            assertEquals(listOf(canonical), folders.map { it.id })
+            // The cloud's names are newer (300 against 100); of its two rows folded onto the canonical
+            // id the tie on the stamp is decided by value, so only the set of names is fixed here —
+            // V2IdentityMergeTest checks that every merge order gives the same one.
+            assertTrue(folders.single().name in setOf("Job", "Work"))
+            assertTrue(folders.single().v2_id in setOf(oldFolderId1, oldFolderId2))
+            assertEquals(canonical, verifyDb.feedsQueries.getById("f1").executeAsOne().folder_id)
         } finally {
             verifyDriver.close()
         }
     }
 
     /**
-     * A cloud folder's reconciliation target is occupied by a different identity that is *not* part
-     * of the reconciliation (it has no `v2_id`). The source row must be kept at its original id so
-     * both identities survive, and the feed's folder assignment must stay with the source identity.
+     * A cloud folder row sits at the id main's renamed row derived (it has no `v2_id`, so it looks
+     * like an unrelated folder). A row at an id of an identity is that identity — rows are matched by
+     * id — so it folds into it: one folder at the smaller derived id, named by the newest stamp
+     * (the "Occupied" row's), holding both feeds. (The old design kept the two apart.)
      */
     @Test
     fun folderReconciliationKeepsSourceIdentityWhenTargetIsOccupiedByAnUnrelatedRow() {
@@ -1429,18 +1428,14 @@ class SyncMergerTest {
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         try {
-            val targetId = IdGenerator.folderId("JobDir")
-            val sourceId = IdGenerator.folderId("WorkDir")
-            // The reconciled source row could not move to the occupied target, so it stayed.
-            val sourceFolder = verifyDb.foldersQueries.getById(sourceId).executeAsOne()
-            assertEquals("WorkDir", sourceFolder.name)
-            assertEquals(oldFolderId, sourceFolder.v2_id)
-            // f1 stays assigned to the source identity.
-            assertEquals(sourceId, verifyDb.feedsQueries.getById("f1").executeAsOne().folder_id)
-            // The unrelated target row was imported too, keeping its own name and child.
-            val targetFolder = verifyDb.foldersQueries.getById(targetId).executeAsOne()
-            assertEquals("Occupied", targetFolder.name)
-            assertEquals(targetId, verifyDb.feedsQueries.getById("f2").executeAsOne().folder_id)
+            val canonical = minOf(IdGenerator.folderId("JobDir"), IdGenerator.folderId("WorkDir"))
+            val folder = verifyDb.foldersQueries.watchAll().executeAsList().single()
+            assertEquals(canonical, folder.id)
+            assertEquals("Occupied", folder.name) // stamp 300 beats 200 and 100
+            assertEquals(oldFolderId, folder.v2_id)
+            // Both feeds follow the canonical id.
+            assertEquals(canonical, verifyDb.feedsQueries.getById("f1").executeAsOne().folder_id)
+            assertEquals(canonical, verifyDb.feedsQueries.getById("f2").executeAsOne().folder_id)
         } finally {
             verifyDriver.close()
         }
@@ -1448,7 +1443,7 @@ class SyncMergerTest {
 
     /**
      * Same as [swappedV2FolderRenamesReconcileWhenBothTargetsAreFreedBySourceDeletion] for tags and
-     * their feed_tag links.
+     * their feed_tag links: the crossing renames make one identity, with its link on the canonical id.
      */
     @Test
     fun swappedV2TagRenamesReconcileWhenBothTargetsAreFreedBySourceDeletion() {
@@ -1473,16 +1468,12 @@ class SyncMergerTest {
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         try {
-            val idJ = IdGenerator.tagId("Job")
-            val idW = IdGenerator.tagId("Work")
-            val jobTag = verifyDb.tagsQueries.getById(idJ).executeAsOne()
-            val workTag = verifyDb.tagsQueries.getById(idW).executeAsOne()
-            assertEquals("Work", jobTag.name)
-            assertEquals("Job", workTag.name)
-            assertEquals(oldTagId1, jobTag.v2_id)
-            assertEquals(oldTagId2, workTag.v2_id)
-            assertEquals(listOf(idJ), verifyDb.feed_tagsQueries.watchTagIdsForFeed("f1").executeAsList())
-            assertEquals(setOf(idJ, idW), verifyDb.tagsQueries.watchAll().executeAsList().map { it.id }.toSet())
+            val canonical = minOf(IdGenerator.tagId("Job"), IdGenerator.tagId("Work"))
+            val tags = verifyDb.tagsQueries.watchAll().executeAsList()
+            assertEquals(listOf(canonical), tags.map { it.id })
+            assertTrue(tags.single().name in setOf("Job", "Work"))
+            assertTrue(tags.single().v2_id in setOf(oldTagId1, oldTagId2))
+            assertEquals(listOf(canonical), verifyDb.feed_tagsQueries.watchTagIdsForFeed("f1").executeAsList())
         } finally {
             verifyDriver.close()
         }
@@ -1490,7 +1481,7 @@ class SyncMergerTest {
 
     /**
      * Same as [folderReconciliationKeepsSourceIdentityWhenTargetIsOccupiedByAnUnrelatedRow] for tags
-     * and their feed_tag links.
+     * and their feed_tag links: one tag at the canonical id, both feeds linked to it.
      */
     @Test
     fun tagReconciliationKeepsSourceIdentityWhenTargetIsOccupiedByAnUnrelatedRow() {
@@ -1512,17 +1503,13 @@ class SyncMergerTest {
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         try {
-            val targetId = IdGenerator.tagId("Job")
-            val sourceId = IdGenerator.tagId("Work")
-            val sourceTag = verifyDb.tagsQueries.getById(sourceId).executeAsOne()
-            assertEquals("Work", sourceTag.name)
-            assertEquals(oldTagId, sourceTag.v2_id)
-            // f1 stays attached to the source identity.
-            assertEquals(listOf(sourceId), verifyDb.feed_tagsQueries.watchTagIdsForFeed("f1").executeAsList())
-            // The unrelated target tag was imported too, keeping its own name and child.
-            val targetTag = verifyDb.tagsQueries.getById(targetId).executeAsOne()
-            assertEquals("Occupied", targetTag.name)
-            assertEquals(listOf(targetId), verifyDb.feed_tagsQueries.watchTagIdsForFeed("f2").executeAsList())
+            val canonical = minOf(IdGenerator.tagId("Job"), IdGenerator.tagId("Work"))
+            val tag = verifyDb.tagsQueries.watchAll().executeAsList().single()
+            assertEquals(canonical, tag.id)
+            assertEquals("Occupied", tag.name) // stamp 300 beats 200 and 100
+            assertEquals(oldTagId, tag.v2_id)
+            assertEquals(listOf(canonical), verifyDb.feed_tagsQueries.watchTagIdsForFeed("f1").executeAsList())
+            assertEquals(listOf(canonical), verifyDb.feed_tagsQueries.watchTagIdsForFeed("f2").executeAsList())
         } finally {
             verifyDriver.close()
         }
@@ -1530,8 +1517,8 @@ class SyncMergerTest {
 
     /**
      * A local row whose id matches cloud but has no `v2_id` picks up the cloud `v2_id`, and a later
-     * cloud row with the same `v2_id` then reconciles onto that local row instead of remaining a
-     * separate identity.
+     * cloud row with the same `v2_id` is then the same identity: both ids are one row at the smaller
+     * of them (not necessarily the local one), under the newer name.
      */
     @Test
     fun v2IdIsCopiedOnIdMatchAndEnablesLaterReconciliation() {
@@ -1553,10 +1540,10 @@ class SyncMergerTest {
 
         val (_, verifyDriver, verifyDb) = reopen(local)
         try {
-            val folder = verifyDb.foldersQueries.getById(idA).executeAsOne()
+            val folder = verifyDb.foldersQueries.watchAll().executeAsList().single()
+            assertEquals(minOf(idA, idB), folder.id)
             assertEquals("B", folder.name)
             assertEquals("old-1", folder.v2_id)
-            assertNull(verifyDb.foldersQueries.getById(idB).executeAsOneOrNull())
         } finally {
             verifyDriver.close()
         }
@@ -1626,9 +1613,10 @@ class SyncMergerTest {
     }
 
     /**
-     * A blocked chain: cloud has `A(v2-old1) -> main B`, `B(v2-old2) -> main C`, but `C` is an
-     * unrelated v3-created row. Because `B` cannot move to the occupied `C`, `A` must not be moved
-     * to `B` either; otherwise the insert at `B` would collide with the still-present `B` row.
+     * The former "blocked chain": the cloud's `A(v2-old1)`, `B(v2-old2)` meet main's `B(v2-old1)`,
+     * `C(v2-old2)` plus a v3-created `C`. Every id is connected through the shared `v2_id`s, so there
+     * is no blocking any more: the whole chain is one identity at the smallest of A, B and C, and
+     * the merge succeeds with foreign keys enforced, leaving one row with the feed's assignment on it.
      */
     @Test
     fun blockedChainFolderReconciliationSkipsMoveWhenFinalTargetIsOccupiedByUnrelatedRow() {
@@ -1657,24 +1645,12 @@ class SyncMergerTest {
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         try {
-            val idA = IdGenerator.folderId("A")
-            val idB = IdGenerator.folderId("B")
-            val idC = IdGenerator.folderId("C")
-            // cloud B stays a separate identity and does not overwrite local B.
-            val folderB = verifyDb.foldersQueries.getById(idB).executeAsOne()
-            assertEquals("A", folderB.name)
-            assertEquals(oldFolderId1, folderB.v2_id)
-            val folderC = verifyDb.foldersQueries.getById(idC).executeAsOne()
-            assertEquals("B", folderC.name)
-            assertEquals(oldFolderId2, folderC.v2_id)
-            // The unrelated v3-created row survives.
-            assertNotNull(verifyDb.foldersQueries.getById(idC).executeAsOneOrNull())
-            // Blocked cloud identities A and B merge onto local identities B and C by v2_id, so they
-            // do not appear under their original derived ids.
-            assertNull(verifyDb.foldersQueries.getById(idA).executeAsOneOrNull())
-            // The feed's folder assignment stayed with the local identity B (cloud A's child was
-            // blocked and must not attach to B).
-            assertNull(verifyDb.feedsQueries.getById("f1").executeAsOne().folder_id)
+            val canonical = minOf(IdGenerator.folderId("A"), IdGenerator.folderId("B"), IdGenerator.folderId("C"))
+            val folder = verifyDb.foldersQueries.watchAll().executeAsList().single()
+            assertEquals(canonical, folder.id)
+            assertTrue(folder.v2_id in setOf(oldFolderId1, oldFolderId2))
+            // The cloud assigned f1 (stamp 200, main had none): it follows the canonical id.
+            assertEquals(canonical, verifyDb.feedsQueries.getById("f1").executeAsOne().folder_id)
         } finally {
             verifyDriver.close()
         }
@@ -1682,7 +1658,7 @@ class SyncMergerTest {
 
     /**
      * Same as [blockedChainFolderReconciliationSkipsMoveWhenFinalTargetIsOccupiedByUnrelatedRow]
-     * for tags and their feed_tag links.
+     * for tags and their feed_tag links: one tag at the smallest id, linked to f1.
      */
     @Test
     fun blockedChainTagReconciliationSkipsMoveWhenFinalTargetIsOccupiedByUnrelatedRow() {
@@ -1713,19 +1689,11 @@ class SyncMergerTest {
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         try {
-            val idA = IdGenerator.tagId("A")
-            val idB = IdGenerator.tagId("B")
-            val idC = IdGenerator.tagId("C")
-            val tagB = verifyDb.tagsQueries.getById(idB).executeAsOne()
-            assertEquals("A", tagB.name)
-            assertEquals(oldTagId1, tagB.v2_id)
-            val tagC = verifyDb.tagsQueries.getById(idC).executeAsOne()
-            assertEquals("B", tagC.name)
-            assertEquals(oldTagId2, tagC.v2_id)
-            assertNotNull(verifyDb.tagsQueries.getById(idC).executeAsOneOrNull())
-            assertNull(verifyDb.tagsQueries.getById(idA).executeAsOneOrNull())
-            // cloud A's child reference was blocked and must not attach to local B.
-            assertEquals(emptyList<String>(), verifyDb.feed_tagsQueries.watchTagIdsForFeed("f1").executeAsList())
+            val canonical = minOf(IdGenerator.tagId("A"), IdGenerator.tagId("B"), IdGenerator.tagId("C"))
+            val tag = verifyDb.tagsQueries.watchAll().executeAsList().single()
+            assertEquals(canonical, tag.id)
+            assertTrue(tag.v2_id in setOf(oldTagId1, oldTagId2))
+            assertEquals(listOf(canonical), verifyDb.feed_tagsQueries.watchTagIdsForFeed("f1").executeAsList())
         } finally {
             verifyDriver.close()
         }

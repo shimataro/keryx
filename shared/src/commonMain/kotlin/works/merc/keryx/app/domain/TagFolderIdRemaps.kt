@@ -80,9 +80,9 @@ class TagFolderIdRemaps(private val load: () -> TagFolderIdRemap) {
     /**
      * Re-reads `ks_id_remap` and publishes it when it changed. Called after a merge that re-keyed rows
      * has committed (never inside its transaction: a rolled-back re-key must not reach any holder).
-     * A failing read propagates to the caller, which is the sync that ran the merge; the holders
-     * then catch up at the next publish or launch, and every write in the meantime still resolves
-     * stale ids itself (tags.sq / folders.sq).
+     * A failing read propagates to the caller — the sync that ran the merge, which logs it and carries
+     * on (`DeltaSync.publishIdRemapsAfterCommit`): the holders then catch up at the next publish or
+     * launch, and every write in the meantime still resolves stale ids itself (tags.sq / folders.sq).
      */
     suspend fun publishFromDb() {
         publishLock.withLock { _current.value = load() }

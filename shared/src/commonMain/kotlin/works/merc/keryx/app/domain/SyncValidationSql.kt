@@ -97,6 +97,23 @@ object SyncValidationSql {
         ),
     )
 
+    /**
+     * Check 9 on a transport file (version 2 on, which has the identity edge tables): as
+     * [closureChecks], except that a feed's folder reference is also satisfied by reaching a folder row
+     * of the file through the file's folder edges (`folder_v2_edges`, either direction, transitively)
+     * — a raw assignment can name an alias of a folder identity whose row the sender no longer holds
+     * (`DeltaExportSql.closureStatements` then carries the identity's edges and rows).
+     */
+    val transportClosureChecks: List<ClosureCheck> = listOf(
+        ClosureCheck(
+            "feeds.folder_id",
+            "WITH RECURSIVE ks_adj(a, b) AS (SELECT v2_id, id FROM folder_v2_edges UNION SELECT id, v2_id FROM folder_v2_edges), " +
+                "ks_reach(node) AS (SELECT id FROM folders UNION SELECT j.b FROM ks_reach r JOIN ks_adj j ON j.a = r.node) " +
+                "SELECT 1 FROM feeds f WHERE f.folder_id IS NOT NULL " +
+                "AND NOT EXISTS (SELECT 1 FROM ks_reach r WHERE r.node = f.folder_id) LIMIT 1",
+        ),
+    ) + closureChecks.filter { it.description != "feeds.folder_id" }
+
     private val DECIMAL = Regex("^(0|[1-9][0-9]{0,17})$")
 
     /**

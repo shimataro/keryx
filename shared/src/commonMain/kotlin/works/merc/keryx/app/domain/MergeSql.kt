@@ -30,10 +30,10 @@ package works.merc.keryx.app.domain
  * that key — greatest `updated_at`, then greatest id ([winnerAmong]). Statements resolving a
  * reference by id (`mergeFeedFolder`, `feedTags`) still see every cloud row. Tag and folder rows
  * are matched by id only — their ids are name-derived (`IdGenerator.tagId` / `folderId`), so two
- * devices that created the same name hold the same id. A row the v2→v3 migration re-keyed also
- * carries its pre-upgrade id in `v2_id`: rows that shared that id but were renamed differently on
- * two devices before they upgraded are reconciled onto one id first ([reconcileFolders] /
- * [reconcileTags]), so the per-field merge converges them instead of keeping both. A tag or folder
+ * devices that created the same name hold the same id. Rows that are one identity under several ids
+ * (a pre-upgrade row renamed differently on two devices before they upgraded, linked by the identity
+ * edges in `ks_v2_edge`) are first moved onto the identity's canonical id on both sides
+ * ([V2IdentitySql]), so the per-field merge converges them instead of keeping both. A tag or folder
  * name two renames landed on simply imports both rows.
  */
 object MergeSql {
@@ -50,14 +50,8 @@ object MergeSql {
             "ROW_NUMBER() OVER (PARTITION BY $key ORDER BY updated_at DESC, id DESC) AS $RANK " +
             "FROM cloud.$table)"
 
-    private val FOLDER_COLUMNS = listOf(
-        "id", "name", "sort_order", "deleted_at", "updated_at", "created_at", "name_updated_at",
-        "sort_order_updated_at", "v2_id",
-    )
-    private val TAG_COLUMNS = listOf(
-        "id", "name", "color", "sort_order", "deleted_at", "updated_at", "created_at",
-        "name_updated_at", "color_updated_at", "sort_order_updated_at", "v2_id",
-    )
+    private val FOLDER_COLUMNS = V2IdentitySql.FOLDER_COLUMNS
+    private val TAG_COLUMNS = V2IdentitySql.TAG_COLUMNS
     private val FEED_COLUMNS = listOf(
         "id", "url", "site_url", "title", "description", "favicon_url", "custom_title", "folder_id",
         "deleted_at", "updated_at", "created_at", "sort_order",
@@ -69,421 +63,67 @@ object MergeSql {
         "updated_at", "created_at", "deleted_at", "deleted_updated_at", "body_updated_at",
     )
 
-    // ---- v2→v3 identity reconciliation: rows sharing a pre-upgrade id keep one identity ----
-
-    /**
-     * Before version 3 a tag's or folder's id was a random UUIDv4, and two devices that created the
-     * same name held different ids. The v2→v3 migration re-keyed every row onto the id its
-     * creation-time name derives from and kept the pre-upgrade id in `v2_id` ([TagFolderIdRekey]); a
-     * row created after the migration has no `v2_id`. If one device renames such a row and the
-     * rename has not propagated before both devices upgrade, each derives a different name-derived
-     * id, and an id-only merge would keep both rows. These statements reconcile them first, in every
-     * merge — delta, base and pre-delta — so the per-field last-write-wins merge then treats them as
-     * one row.
-     *
-     * For every cloud row with a non-null `v2_id`:
-     *
-     * 1. Its group is the cloud rows sharing that `v2_id`; the group's canonical cloud row is the
-     *    greatest `updated_at`, then greatest id ([canonicalSource]).
-     * 2. Its target id is main's row carrying the same `v2_id` when one exists (that is the identity
-     *    already established here), else the canonical cloud row's id ([reconcileMap]). A row whose
-     *    id already equals its target maps to itself.
-     * 3. The target row is copied into `cloud` when `cloud` lacks it, so the per-field statements
-     *    have one row per identity to match by id.
-     * 4. Child references move to the target id, then the rows mapped away are deleted. For tags,
-     *    `cloud.feed_tags` is resolved first: its links to the merged ids are folded into one link
-     *    per `(feed_id, tag_id)` by the same last-write-wins rule as any other link, so a feed linked
-     *    to both ids of a reconciled tag keeps one link.
-     *
-     * A target id is considered free only after the reconciled cloud rows that would be deleted are
-     * taken into account, including transitively: if a source row's target is occupied by another
-     * source row that cannot move because its own target is blocked, neither row moves. When a target
-     * id is still occupied by a cloud row that is **not** part of the reconciliation (a different
-     * identity with a NULL `v2_id`), the source row is kept at its original id instead: both
-     * identities and their child references are preserved, and the per-field merge handles them as
-     * distinct rows. This makes the reconciliation idempotent and keeps merge/fold behavior
-     * deterministic.
-     *
-     * The order is FK-safe with foreign keys enforced (a pre-delta cloud file is migrated to the
-     * full schema, which enforces them): a parent row is copied in before a child points at it, and
-     * children are moved before their old parent is deleted. A transport file carries no foreign
-     * keys, so the same statements simply run there. A dangling `cloud.feed_tags` row — one this
-     * merge would skip anyway — is not re-inserted, so the rebuild does not fail on it.
-     *
-     * A reconciled row whose target id is currently occupied by *another* reconciled source row
-     * (a swap/cycle of two pre-upgrade identities) is staged through a temporary copy: the source
-     * rows are deleted before the target rows are inserted, so the insert does not collide. Feeds'
-     * `folder_id` is nullable, so folder references are briefly cleared while the source folders are
-     * removed and then restored to the target ids. Tag references live in `feed_tags`, which is
-     * rebuilt after the source and target tag rows are in place.
-     *
-     * Running the statements twice changes nothing: after the first run every surviving cloud row's
-     * id is its target, so it maps to itself. Neither the canonical choice (`updated_at`, then id)
-     * nor [SyncLww]'s link comparison depends on the order the rows were folded into the file.
-     */
-    private const val TAG_SOURCE = "ks_tag_source"
-    private const val TAG_MAP = "ks_tag_reconcile"
-    private const val TAG_FREE = "ks_tag_reconcile_free"
-    private const val FEED_TAG_MAP = "ks_feed_tag_reconcile"
-    private const val FOLDER_SOURCE = "ks_folder_source"
-    private const val FOLDER_MAP = "ks_folder_reconcile"
-    private const val FOLDER_FREE = "ks_folder_reconcile_free"
-
-    /**
-     * The canonical cloud row per `v2_id` of [table] (greatest `updated_at`, then greatest id), into
-     * the temp table [source] (`v2_id` PRIMARY KEY, `source_id`).
-     */
-    private fun canonicalSource(table: String, source: String): List<String> = listOf(
-        "CREATE TEMP TABLE IF NOT EXISTS $source (v2_id TEXT PRIMARY KEY, source_id TEXT NOT NULL)",
-        "DELETE FROM $source",
-        """
-        INSERT INTO $source (v2_id, source_id)
-        SELECT v2_id, id FROM (
-            SELECT v2_id, id, ROW_NUMBER() OVER (PARTITION BY v2_id ORDER BY updated_at DESC, id DESC) AS rn
-            FROM cloud.$table
-            WHERE v2_id IS NOT NULL
-        ) WHERE rn = 1
-        """.trimIndent(),
-    )
-
-    /**
-     * The target id of every cloud row of [table] with a non-null `v2_id`, into the temp table [map]
-     * (`cloud_id` PRIMARY KEY, `target_id`): main's row carrying the same `v2_id` when one exists,
-     * else the canonical cloud row's id ([canonicalSource]).
-     */
-    private fun reconcileMap(table: String, source: String, map: String): List<String> = listOf(
-        "CREATE TEMP TABLE IF NOT EXISTS $map (cloud_id TEXT PRIMARY KEY, target_id TEXT NOT NULL)",
-        "DELETE FROM $map",
-        """
-        INSERT INTO $map (cloud_id, target_id)
-        SELECT c.id, COALESCE(
-            (SELECT m.id FROM main.$table m WHERE m.v2_id = c.v2_id ORDER BY m.updated_at DESC, m.id DESC LIMIT 1),
-            (SELECT s.source_id FROM $source s WHERE s.v2_id = c.v2_id))
-        FROM cloud.$table c
-        WHERE c.v2_id IS NOT NULL
-        """.trimIndent(),
-    )
-
-    private val reconcileFolders: List<String> =
-        canonicalSource("folders", FOLDER_SOURCE) +
-            reconcileMap("folders", FOLDER_SOURCE, FOLDER_MAP) + listOf(
-            // Determine which moving mappings are blocked because their target is occupied by a row
-            // that will remain in cloud (an unrelated identity, or a source row that is itself blocked).
-            // Anchor cases (target occupied by an unrelated row) keep their original id; chain cases
-            // (blocked because another blocked source occupies the target) merge by v2_id instead.
-            "CREATE TEMP TABLE IF NOT EXISTS ks_folder_blocked (cloud_id TEXT PRIMARY KEY)",
-            "DELETE FROM ks_folder_blocked",
-            "CREATE TEMP TABLE IF NOT EXISTS ks_folder_blocked_chain (cloud_id TEXT PRIMARY KEY)",
-            "DELETE FROM ks_folder_blocked_chain",
-            """
-            WITH RECURSIVE blocked(cloud_id, is_chain) AS (
-                SELECT m.cloud_id, 0 FROM $FOLDER_MAP m
-                JOIN cloud.folders x ON x.id = m.target_id
-                WHERE x.id NOT IN (SELECT cloud_id FROM $FOLDER_MAP)
-                  AND m.cloud_id <> m.target_id
-                UNION
-                SELECT m.cloud_id, 1 FROM $FOLDER_MAP m
-                JOIN cloud.folders x ON x.id = m.target_id
-                JOIN blocked b ON b.cloud_id = x.id
-                WHERE m.cloud_id <> m.target_id
-            )
-            INSERT INTO ks_folder_blocked (cloud_id)
-            SELECT cloud_id FROM blocked;
-            """.trimIndent(),
-            """
-            WITH RECURSIVE blocked(cloud_id, is_chain) AS (
-                SELECT m.cloud_id, 0 FROM $FOLDER_MAP m
-                JOIN cloud.folders x ON x.id = m.target_id
-                WHERE x.id NOT IN (SELECT cloud_id FROM $FOLDER_MAP)
-                  AND m.cloud_id <> m.target_id
-                UNION
-                SELECT m.cloud_id, 1 FROM $FOLDER_MAP m
-                JOIN cloud.folders x ON x.id = m.target_id
-                JOIN blocked b ON b.cloud_id = x.id
-                WHERE m.cloud_id <> m.target_id
-            )
-            INSERT INTO ks_folder_blocked_chain (cloud_id)
-            SELECT cloud_id FROM blocked WHERE is_chain = 1;
-            """.trimIndent(),
-            "CREATE TEMP TABLE IF NOT EXISTS $FOLDER_FREE (target_id TEXT PRIMARY KEY)",
-            "DELETE FROM $FOLDER_FREE",
-            """
-            INSERT INTO $FOLDER_FREE (target_id)
-            SELECT DISTINCT m.target_id
-            FROM $FOLDER_MAP m
-            WHERE m.cloud_id <> m.target_id
-              AND m.cloud_id NOT IN (SELECT cloud_id FROM ks_folder_blocked)
-            """.trimIndent(),
-            // Anchor-blocked rows whose original id collides with a main row of a different v2 identity
-            // cannot safely keep that id; treat them like chain-blocked rows and merge by v2_id instead.
-            """
-            INSERT OR IGNORE INTO ks_folder_blocked_chain (cloud_id)
-            SELECT b.cloud_id
-            FROM ks_folder_blocked b
-            JOIN $FOLDER_MAP m ON m.cloud_id = b.cloud_id
-            JOIN cloud.folders c ON c.id = b.cloud_id
-            JOIN main.folders l ON l.id = m.cloud_id
-            WHERE b.cloud_id NOT IN (SELECT cloud_id FROM ks_folder_blocked_chain)
-              AND (l.v2_id IS NULL OR l.v2_id <> c.v2_id)
-            """.trimIndent(),
-            // Chain-blocked source rows (including forced-chain anchors whose original id collides with a
-            // different main identity) stay in cloud and merge by v2_id. Their child refs are cleared so
-            // they do not attach to the wrong identity. Anchor-blocked sources keep their original id and
-            // child refs.
-            "UPDATE cloud.feeds SET folder_id = NULL WHERE folder_id IN (\n    SELECT m.cloud_id FROM $FOLDER_MAP m\n    JOIN ks_folder_blocked_chain b ON b.cloud_id = m.cloud_id\n    WHERE m.cloud_id <> m.target_id)",
-            // Stage the canonical source rows that will move, and the child refs that point at them.
-            "CREATE TEMP TABLE IF NOT EXISTS ks_folder_stage (source_id TEXT PRIMARY KEY, target_id TEXT NOT NULL, name TEXT NOT NULL, sort_order INTEGER NOT NULL, deleted_at INTEGER, updated_at INTEGER NOT NULL, created_at INTEGER NOT NULL, name_updated_at INTEGER, sort_order_updated_at INTEGER, v2_id TEXT)",
-            "DELETE FROM ks_folder_stage",
-            """
-            INSERT INTO ks_folder_stage (source_id, target_id, name, sort_order, deleted_at, updated_at, created_at, name_updated_at, sort_order_updated_at, v2_id)
-            SELECT f.id, r.target_id, f.name, f.sort_order, f.deleted_at, f.updated_at, f.created_at, f.name_updated_at, f.sort_order_updated_at, f.v2_id
-            FROM cloud.folders f
-            JOIN $FOLDER_SOURCE s ON s.source_id = f.id
-            JOIN $FOLDER_MAP r ON r.cloud_id = f.id
-            JOIN $FOLDER_FREE free ON free.target_id = r.target_id
-            WHERE r.cloud_id <> r.target_id
-            """.trimIndent(),
-            "CREATE TEMP TABLE IF NOT EXISTS ks_folder_ref (feed_id TEXT PRIMARY KEY, source_id TEXT NOT NULL)",
-            "DELETE FROM ks_folder_ref",
-            """
-            INSERT INTO ks_folder_ref (feed_id, source_id)
-            SELECT f.id, f.folder_id
-            FROM cloud.feeds f
-            JOIN $FOLDER_MAP m ON m.cloud_id = f.folder_id
-            JOIN $FOLDER_FREE free ON free.target_id = m.target_id
-            WHERE m.cloud_id <> m.target_id
-            """.trimIndent(),
-            // Clear the references so the source folders can be deleted, then restore them to the target ids.
-            "UPDATE cloud.feeds SET folder_id = NULL WHERE folder_id IN (SELECT source_id FROM ks_folder_ref)",
-            """
-            DELETE FROM cloud.folders
-            WHERE id IN (
-                SELECT m.cloud_id FROM $FOLDER_MAP m
-                JOIN $FOLDER_FREE free ON free.target_id = m.target_id
-                WHERE m.cloud_id <> m.target_id)
-            """.trimIndent(),
-            """
-            INSERT INTO cloud.folders (${FOLDER_COLUMNS.joinToString(", ")})
-            SELECT target_id, name, sort_order, deleted_at, updated_at, created_at, name_updated_at, sort_order_updated_at, v2_id
-            FROM ks_folder_stage
-            """.trimIndent(),
-            """
-            UPDATE cloud.feeds
-            SET folder_id = (
-                SELECT m.target_id
-                FROM $FOLDER_MAP m
-                JOIN $FOLDER_FREE free ON free.target_id = m.target_id
-                WHERE m.cloud_id = ref.source_id)
-            FROM ks_folder_ref ref
-            WHERE cloud.feeds.id = ref.feed_id
-            """.trimIndent(),
-        )
-
-    private val reconcileTags: List<String> =
-        canonicalSource("tags", TAG_SOURCE) +
-            reconcileMap("tags", TAG_SOURCE, TAG_MAP) + listOf(
-            // Determine which moving mappings are blocked because their target is occupied by a row
-            // that will remain in cloud (an unrelated identity, or a source row that is itself blocked).
-            // Anchor cases keep their original id; chain cases merge by v2_id instead.
-            "CREATE TEMP TABLE IF NOT EXISTS ks_tag_blocked (cloud_id TEXT PRIMARY KEY)",
-            "DELETE FROM ks_tag_blocked",
-            "CREATE TEMP TABLE IF NOT EXISTS ks_tag_blocked_chain (cloud_id TEXT PRIMARY KEY)",
-            "DELETE FROM ks_tag_blocked_chain",
-            """
-            WITH RECURSIVE blocked(cloud_id, is_chain) AS (
-                SELECT m.cloud_id, 0 FROM $TAG_MAP m
-                JOIN cloud.tags x ON x.id = m.target_id
-                WHERE x.id NOT IN (SELECT cloud_id FROM $TAG_MAP)
-                  AND m.cloud_id <> m.target_id
-                UNION
-                SELECT m.cloud_id, 1 FROM $TAG_MAP m
-                JOIN cloud.tags x ON x.id = m.target_id
-                JOIN blocked b ON b.cloud_id = x.id
-                WHERE m.cloud_id <> m.target_id
-            )
-            INSERT INTO ks_tag_blocked (cloud_id)
-            SELECT cloud_id FROM blocked;
-            """.trimIndent(),
-            """
-            WITH RECURSIVE blocked(cloud_id, is_chain) AS (
-                SELECT m.cloud_id, 0 FROM $TAG_MAP m
-                JOIN cloud.tags x ON x.id = m.target_id
-                WHERE x.id NOT IN (SELECT cloud_id FROM $TAG_MAP)
-                  AND m.cloud_id <> m.target_id
-                UNION
-                SELECT m.cloud_id, 1 FROM $TAG_MAP m
-                JOIN cloud.tags x ON x.id = m.target_id
-                JOIN blocked b ON b.cloud_id = x.id
-                WHERE m.cloud_id <> m.target_id
-            )
-            INSERT INTO ks_tag_blocked_chain (cloud_id)
-            SELECT cloud_id FROM blocked WHERE is_chain = 1;
-            """.trimIndent(),
-            "CREATE TEMP TABLE IF NOT EXISTS $TAG_FREE (target_id TEXT PRIMARY KEY)",
-            "DELETE FROM $TAG_FREE",
-            """
-            INSERT INTO $TAG_FREE (target_id)
-            SELECT DISTINCT m.target_id
-            FROM $TAG_MAP m
-            WHERE m.cloud_id <> m.target_id
-              AND m.cloud_id NOT IN (SELECT cloud_id FROM ks_tag_blocked)
-            """.trimIndent(),
-            """
-            INSERT OR IGNORE INTO ks_tag_blocked_chain (cloud_id)
-            SELECT b.cloud_id
-            FROM ks_tag_blocked b
-            JOIN $TAG_MAP m ON m.cloud_id = b.cloud_id
-            JOIN cloud.tags c ON c.id = b.cloud_id
-            JOIN main.tags l ON l.id = m.cloud_id
-            WHERE b.cloud_id NOT IN (SELECT cloud_id FROM ks_tag_blocked_chain)
-              AND (l.v2_id IS NULL OR l.v2_id <> c.v2_id)
-            """.trimIndent(),
-            // Chain-blocked source rows (including forced-chain anchors whose original id collides with a
-            // different main identity) stay in cloud and merge by v2_id; their child refs are cleared so
-            // they do not attach to the wrong identity. Anchor-blocked sources keep their original id and
-            // child refs.
-            "DELETE FROM cloud.feed_tags WHERE tag_id IN (\n    SELECT m.cloud_id FROM $TAG_MAP m\n    JOIN ks_tag_blocked_chain b ON b.cloud_id = m.cloud_id\n    WHERE m.cloud_id <> m.target_id)",
-            // Stage the canonical source rows that will move, then delete them before inserting at the target ids.
-            "CREATE TEMP TABLE IF NOT EXISTS ks_tag_stage (source_id TEXT PRIMARY KEY, target_id TEXT NOT NULL, name TEXT NOT NULL, color TEXT, sort_order INTEGER NOT NULL, deleted_at INTEGER, updated_at INTEGER NOT NULL, created_at INTEGER NOT NULL, name_updated_at INTEGER, color_updated_at INTEGER, sort_order_updated_at INTEGER, v2_id TEXT)",
-            "DELETE FROM ks_tag_stage",
-            """
-            INSERT INTO ks_tag_stage (source_id, target_id, name, color, sort_order, deleted_at, updated_at, created_at, name_updated_at, color_updated_at, sort_order_updated_at, v2_id)
-            SELECT t.id, r.target_id, t.name, t.color, t.sort_order, t.deleted_at, t.updated_at, t.created_at, t.name_updated_at, t.color_updated_at, t.sort_order_updated_at, t.v2_id
-            FROM cloud.tags t
-            JOIN $TAG_SOURCE s ON s.source_id = t.id
-            JOIN $TAG_MAP r ON r.cloud_id = t.id
-            JOIN $TAG_FREE free ON free.target_id = r.target_id
-            WHERE r.cloud_id <> r.target_id
-            """.trimIndent(),
-            "CREATE TEMP TABLE IF NOT EXISTS $FEED_TAG_MAP (feed_id TEXT NOT NULL, tag_id TEXT NOT NULL, deleted_at INTEGER, updated_at INTEGER NOT NULL, PRIMARY KEY (feed_id, tag_id))",
-            "DELETE FROM $FEED_TAG_MAP",
-            """
-            INSERT INTO $FEED_TAG_MAP (feed_id, tag_id, deleted_at, updated_at)
-            SELECT ft.feed_id,
-                   COALESCE((SELECT r.target_id FROM $TAG_MAP r JOIN $TAG_FREE free ON free.target_id = r.target_id WHERE r.cloud_id = ft.tag_id), ft.tag_id),
-                   ft.deleted_at, ft.updated_at
-            FROM cloud.feed_tags ft
-            WHERE EXISTS (
-                SELECT 1 FROM $TAG_MAP m
-                JOIN $TAG_FREE free ON free.target_id = m.target_id
-                WHERE m.cloud_id <> m.target_id)
-            ON CONFLICT(feed_id, tag_id) DO UPDATE SET
-                ${SyncLww.upsertAssignments(SyncLww.FEED_TAG).joinToString(",\n                ")}
-            WHERE ${SyncLww.wins("excluded", "", SyncLww.FEED_TAG)}
-            """.trimIndent(),
-            "DELETE FROM cloud.feed_tags WHERE EXISTS (\n    SELECT 1 FROM $TAG_MAP m\n    JOIN $TAG_FREE free ON free.target_id = m.target_id\n    WHERE m.cloud_id <> m.target_id)",
-            """
-            DELETE FROM cloud.tags
-            WHERE id IN (
-                SELECT m.cloud_id FROM $TAG_MAP m
-                JOIN $TAG_FREE free ON free.target_id = m.target_id
-                WHERE m.cloud_id <> m.target_id)
-            """.trimIndent(),
-            """
-            INSERT INTO cloud.tags (${TAG_COLUMNS.joinToString(", ")})
-            SELECT target_id, name, color, sort_order, deleted_at, updated_at, created_at, name_updated_at, color_updated_at, sort_order_updated_at, v2_id
-            FROM ks_tag_stage
-            """.trimIndent(),
-            """
-            INSERT INTO cloud.feed_tags (feed_id, tag_id, deleted_at, updated_at)
-            SELECT m.feed_id, m.tag_id, m.deleted_at, m.updated_at
-            FROM $FEED_TAG_MAP m
-            WHERE EXISTS (SELECT 1 FROM cloud.feeds f WHERE f.id = m.feed_id)
-              AND EXISTS (SELECT 1 FROM cloud.tags t WHERE t.id = m.tag_id)
-            """.trimIndent(),
-        )
-
     // ---- tags / folders: per-field last-write-wins, matched by id ----
 
     /**
      * The per-field statements of a tags/folders-shaped [table], in order: one UPDATE per group, then
-     * the INSERT of rows main does not have.
+     * the INSERT of rows main does not have, the earliest `created_at`, and the greatest `v2_id`.
      *
-     * Rows are matched by id only: a tag's or folder's id is derived from its creation-time name
-     * (`IdGenerator.tagId` / `folderId`), so the same name created on two devices carries the same id
-     * and per-field last-write-wins converges them into one row. A row whose id main does not hold is
-     * inserted as-is — a name main holds under another id (two renames that landed on one name) is
-     * allowed through, so same-named rows can coexist (the UI numbers them).
+     * They read the cloud rows from [V2IdentitySql.cloudTable] — `cloud.<table>` already mapped onto
+     * canonical ids and folded into one row per id by [V2IdentitySql] — so a row is matched by its
+     * canonical id only. The ids are name-derived (`IdGenerator.tagId` / `folderId`), so the same name
+     * created on two devices carries the same id and per-field last-write-wins converges them into one
+     * row; a row renamed differently on two devices before they upgraded is one identity through its
+     * edges and arrives here under the same canonical id. A row whose id main does not hold is inserted
+     * as-is — a name main holds under another id (two renames that landed on one name) is allowed
+     * through, so same-named rows can coexist (the UI numbers them).
      *
-     * When [blockedTable] is supplied, chain-blocked cloud rows (those that could not move to their
-     * reconciliation target) are additionally merged by matching `v2_id` onto the main identity they
-     * target. These updates run after the id-based updates so a persistent v2 identity wins over an
-     * unrelated row that happens to share the same id.
+     * `v2_id` decides nothing (the identity edges do), but it travels in sends, so it takes the
+     * greatest non-NULL value of the two sides, as [ReduceSql] folds it — every device converges on the
+     * same value.
      */
-    private fun perFieldStatements(
-        table: String,
-        columns: List<String>,
-        groups: List<LwwGroup>,
-        blockedTable: String? = null,
-    ): List<String> {
+    private fun perFieldStatements(table: String, columns: List<String>, groups: List<LwwGroup>): List<String> {
         val target = "main.$table"
-        val blockedFilter = if (blockedTable != null) {
-            "AND c.id NOT IN (SELECT cloud_id FROM $blockedTable)"
-        } else ""
+        val source = V2IdentitySql.cloudTable(table)
 
-        fun normalUpdate(group: LwwGroup): String = """
+        val updates = groups.map { group ->
+            """
             UPDATE $target
             SET ${group.columns.joinToString(", ") { "$it = c.$it" }}
-            FROM cloud.$table c
+            FROM $source c
             WHERE c.id = $target.id
-              $blockedFilter
               AND ${SyncLww.wins("c", target, group)};
-        """.trimIndent()
-
-        fun blockedUpdate(group: LwwGroup): String = if (blockedTable != null) """
-            UPDATE $target
-            SET ${group.columns.joinToString(", ") { "$it = c.$it" }}
-            FROM cloud.$table c
-            WHERE c.id IN (SELECT cloud_id FROM $blockedTable)
-              AND c.v2_id = $target.v2_id
-              AND ${SyncLww.wins("c", target, group)};
-        """.trimIndent() else ""
-
-        val updates = groups.flatMap { listOf(normalUpdate(it), blockedUpdate(it)) }.filter { it.isNotEmpty() }
-
+            """.trimIndent()
+        }
         val insert = """
             INSERT INTO $target (${columns.joinToString(", ")})
             SELECT ${columns.joinToString(", ") { "c.$it" }}
-            FROM cloud.$table c
-            WHERE NOT EXISTS (SELECT 1 FROM main.$table l WHERE l.id = c.id)
-              $blockedFilter;
+            FROM $source c
+            WHERE NOT EXISTS (SELECT 1 FROM main.$table l WHERE l.id = c.id);
         """.trimIndent()
         val earliestCreatedAt = """
             UPDATE $target
             SET created_at = c.created_at
-            FROM cloud.$table c
+            FROM $source c
             WHERE c.id = $target.id AND c.created_at < $target.created_at;
         """.trimIndent()
-        return updates + listOf(insert, earliestCreatedAt)
+        val greatestV2Id = """
+            UPDATE $target
+            SET v2_id = c.v2_id
+            FROM $source c
+            WHERE c.id = $target.id
+              AND c.v2_id IS NOT NULL
+              AND ($target.v2_id IS NULL OR c.v2_id > $target.v2_id);
+        """.trimIndent()
+        return updates + listOf(insert, earliestCreatedAt, greatestV2Id)
     }
 
     private val folders: List<String> = perFieldStatements(
         "folders", FOLDER_COLUMNS, listOf(SyncLww.FOLDER_NAME, SyncLww.FOLDER_SORT_ORDER, SyncLww.FOLDER_EXISTENCE),
-        blockedTable = "ks_folder_blocked_chain",
-    ) + listOf(
-        // A row whose id already matches but has no v2_id yet picks it up from cloud.
-        """
-        UPDATE main.folders
-        SET v2_id = c.v2_id
-        FROM cloud.folders c
-        WHERE c.id = main.folders.id
-          AND main.folders.v2_id IS NULL
-          AND c.v2_id IS NOT NULL;
-        """.trimIndent(),
     )
 
     private val tags: List<String> = perFieldStatements(
         "tags", TAG_COLUMNS, listOf(SyncLww.TAG_NAME, SyncLww.TAG_COLOR, SyncLww.TAG_SORT_ORDER, SyncLww.TAG_EXISTENCE),
-        blockedTable = "ks_tag_blocked_chain",
-    ) + listOf(
-        """
-        UPDATE main.tags
-        SET v2_id = c.v2_id
-        FROM cloud.tags c
-        WHERE c.id = main.tags.id
-          AND main.tags.v2_id IS NULL
-          AND c.v2_id IS NOT NULL;
-        """.trimIndent(),
     )
 
     // ---- feeds ----
@@ -500,6 +140,9 @@ object MergeSql {
     // the resolution triggers set folder_id from it, FK-safely (folders before feeds).
     // A feed's fetch state (feed_fetch_state: validators, error count) is device-local and never
     // merged: a feed new to this device starts with none, as if never fetched here.
+    /** The canonical-id map [V2IdentitySql] builds for tags, through which `feed_tags` is read. */
+    private val TAG_CANON = V2IdentitySql.canonTable(ID_REMAP_KIND_TAG)
+
     private val feeds = """
         INSERT INTO main.feeds (
             id, url, site_url, title, description, favicon_url,
@@ -529,26 +172,39 @@ object MergeSql {
      * A feed's assignment lives in `main.ks_feed_folder_raw` — its **raw** version, the folder id and
      * stamp as the winning version wrote them — and every file carries raw versions too
      * (`DeltaExportSql`), so the merge ranks raw against raw, exactly as [ReduceSql]'s fold does, and
-     * records the winner. A cloud reference to a folder `main` does not hold is recorded as NULL (a
-     * raw row only ever names an existing folder; check 9 and the folder statements make this
-     * unreachable for a valid file). `main.feeds.folder_id` / `folder_updated_at` are never written
-     * here: the schema's resolution triggers derive them from the raw row and the folder's liveness
-     * (`ks_feed_folder_resolved` in `sync_bookkeeping.sq`) whenever either changes — here, when this
-     * statement records a winner and when the `folders` statements revive or delete a folder — so the
-     * resolved value depends only on the final raw assignment and folder state, whatever order the
-     * files arrive in. `cloud.feeds` is keyed by id, so each feed meets at most one cloud version per
-     * merge.
+     * records the winner **as the file wrote it**: the folder id is never mapped onto a canonical id
+     * ([V2IdentitySql]) or replaced, here or later, so a tie between two assignments is settled by the
+     * same two values in every merge order and every fold. `main.feeds.folder_id` /
+     * `folder_updated_at` are never written here: the schema's resolution triggers derive them from the
+     * raw row through `ks_id_remap` and the folder's liveness (`ks_feed_folder_resolved` in
+     * `sync_bookkeeping.sq`) whenever any of them changes, so the resolved value depends only on the
+     * final raw assignment, the identity map and the folder state, whatever order the files arrive in.
+     * `cloud.feeds` is keyed by id, so each feed meets at most one cloud version per merge.
+     *
+     * With [preDelta], a reference to a folder that neither has a row in main nor an entry in
+     * `ks_id_remap` is recorded as NULL: an older build's database can hold such an orphan, and a raw
+     * value no send could ever carry a row or an identity edge for would fail every later send's
+     * check 9. A transport file is validated to carry, for every folder it references, the row or the
+     * identity edges leading to one (check 9), so its value is kept as it is.
      */
-    private val mergeFeedFolder = """
-        INSERT INTO main.ks_feed_folder_raw (feed_id, folder_updated_at, folder_id)
-        SELECT c.id, c.folder_updated_at,
-               CASE WHEN EXISTS (SELECT 1 FROM main.folders mf WHERE mf.id = c.folder_id) THEN c.folder_id END
-        FROM cloud.feeds c
-        WHERE EXISTS (SELECT 1 FROM main.feeds l WHERE l.id = c.id)
-        ON CONFLICT(feed_id) DO UPDATE SET
-            ${SyncLww.upsertAssignments(SyncLww.FEED_FOLDER).joinToString(",\n            ")}
-        WHERE ${SyncLww.wins("excluded", "", SyncLww.FEED_FOLDER)};
-    """.trimIndent()
+    private fun mergeFeedFolder(preDelta: Boolean): String {
+        val folderId = if (preDelta) {
+            "CASE WHEN EXISTS (SELECT 1 FROM main.folders mf WHERE mf.id = c.folder_id) " +
+                "OR EXISTS (SELECT 1 FROM main.ks_id_remap mr WHERE mr.kind = '$ID_REMAP_KIND_FOLDER' AND mr.old_id = c.folder_id) " +
+                "THEN c.folder_id END"
+        } else {
+            "c.folder_id"
+        }
+        return """
+            INSERT INTO main.ks_feed_folder_raw (feed_id, folder_updated_at, folder_id)
+            SELECT c.id, c.folder_updated_at, $folderId
+            FROM cloud.feeds c
+            WHERE EXISTS (SELECT 1 FROM main.feeds l WHERE l.id = c.id)
+            ON CONFLICT(feed_id) DO UPDATE SET
+                ${SyncLww.upsertAssignments(SyncLww.FEED_FOLDER).joinToString(",\n                ")}
+            WHERE ${SyncLww.wins("excluded", "", SyncLww.FEED_FOLDER)};
+        """.trimIndent()
+    }
 
     /** A feed's per-field statement for [group], matched by id. */
     private fun mergeFeedField(group: LwwGroup): String = """
@@ -689,12 +345,18 @@ object MergeSql {
      * entirely lacks is an orphan and is skipped). A link to a tag main holds only as a tombstone is
      * imported like any other: it rides its own `updated_at`, and the ON CONFLICT against the live
      * row settles two cloud links resolving to the same pair, so the result does not depend on their
-     * order.
+     * order. The cloud's tag id is read through the canonical-id map ([V2IdentitySql]), so links to
+     * aliases of one identity resolve to the same pair and fold by that same rule.
      */
     private val feedTags = """
         INSERT INTO main.feed_tags (feed_id, tag_id, deleted_at, updated_at)
         SELECT c.feed_id, c.tag_id, c.deleted_at, c.updated_at
-        FROM cloud.feed_tags c
+        FROM (
+            SELECT ft.feed_id,
+                   COALESCE((SELECT m.canonical_id FROM $TAG_CANON m WHERE m.id = ft.tag_id), ft.tag_id) AS tag_id,
+                   ft.deleted_at, ft.updated_at
+            FROM cloud.feed_tags ft
+        ) c
         WHERE EXISTS (SELECT 1 FROM main.feeds mf WHERE mf.id = c.feed_id)
           AND EXISTS (SELECT 1 FROM main.tags mt WHERE mt.id = c.tag_id)
         ON CONFLICT(feed_id, tag_id) DO UPDATE SET
@@ -723,8 +385,8 @@ object MergeSql {
     /**
      * Adds to `main.ks_v2_edge` the `(v2_id, id)` of every `cloud` tag or folder row that carries a
      * `v2_id` — the edges a pre-delta file (which has no edge tables, but whose rows carry `v2_id`
-     * after the migration's re-key) and every transport file's rows imply. Run first, before the
-     * reconciliation moves any `cloud` row to another id, so the edges are the file's own.
+     * after the migration's re-key) and every transport file's rows imply. Run before the identity
+     * step ([V2IdentitySql]), which reads the edges.
      */
     private val recordCloudRowEdges: List<String> = EDGE_SOURCES.map { (table, kind, _) ->
         "INSERT OR IGNORE INTO main.ks_v2_edge (kind, v2_id, id) SELECT '$kind', v2_id, id FROM cloud.$table WHERE v2_id IS NOT NULL"
@@ -741,37 +403,45 @@ object MergeSql {
 
     /**
      * Adds to `main.ks_v2_edge` the `(v2_id, id)` of every `main` tag or folder row that carries a
-     * `v2_id` (idempotent: the re-key and earlier merges recorded them already). Run last, so a
-     * `v2_id` this merge copied into main is covered too.
+     * `v2_id` (idempotent: the re-key and earlier merges recorded them already). Run before the
+     * identity step, so it sees every edge main's own rows imply, and again last, so a `v2_id` this
+     * merge brought into main is covered too.
      */
     private val recordMainRowEdges: List<String> = EDGE_SOURCES.map { (table, kind, _) ->
         "INSERT OR IGNORE INTO main.ks_v2_edge (kind, v2_id, id) SELECT '$kind', v2_id, id FROM main.$table WHERE v2_id IS NOT NULL"
     }
 
     /**
-     * The merge statements for a pre-delta database migrated to the current local schema
-     * (`DatabaseMerger.merge`). They reference only `cloud` tables and columns present both in such a
-     * database and in a transport file, so they also merge a delta or a base — [transport] is this
-     * list plus the transport files' identity edge tables. This list does not reference device-local
-     * tables of `cloud`. A pre-delta file's tags and folders carry `v2_id` from the migration as well,
-     * so the same reconciliation applies wherever a pre-upgrade id matches.
+     * The merge statements, in order. They reference only `cloud` tables and columns present both in a
+     * pre-delta database migrated to the current local schema and in a transport file, and no
+     * device-local table of `cloud`; [preDelta] picks how a feed's folder reference main cannot
+     * resolve is recorded ([mergeFeedFolder]). A pre-delta file's tags and folders carry `v2_id` from the migration as well,
+     * so their edges join the identity step like any other file's.
      *
-     * Applied in FK-safe order (parents before children): the cloud rows' identity edges, the v2→v3
-     * identity reconciliation, folders, feeds, the folder merge and the other three `mergeFeed*`,
-     * tags, articles (with the `ks_search_pending` / `ks_search_awaiting_body`
-     * registrations around it), feed_tags, global_settings, and finally main's own rows' identity
-     * edges.
+     * Applied in FK-safe order (parents before children): the cloud rows' and main's rows' identity
+     * edges, the identity step ([V2IdentitySql]: canonical ids, the cloud rows folded onto them, main's
+     * rows moved onto them), folders, feeds, the folder merge and the other three `mergeFeed*`, tags,
+     * articles (with the `ks_search_pending` / `ks_search_awaiting_body` registrations around it),
+     * feed_tags, global_settings, and finally main's own rows' identity edges again.
      */
-    val all: List<String> = recordCloudRowEdges + reconcileFolders + reconcileTags + folders + listOf(
-        feeds, mergeFeedFolder, mergeFeedSortOrder, mergeFeedCustomTitle, mergeFeedDeletedAt,
-    ) + tags + listOf(
-        registerChangedBodies, registerAwaitingBodies, articles, registerNewBodies, feedTags, globalSettings,
-    ) + recordMainRowEdges
+    private fun statements(preDelta: Boolean): List<String> =
+        recordCloudRowEdges + recordMainRowEdges + V2IdentitySql.statements + folders + listOf(
+            feeds, mergeFeedFolder(preDelta), mergeFeedSortOrder, mergeFeedCustomTitle, mergeFeedDeletedAt,
+        ) + tags + listOf(
+            registerChangedBodies, registerAwaitingBodies, articles, registerNewBodies, feedTags, globalSettings,
+        ) + recordMainRowEdges
+
+    /**
+     * The merge statements for a pre-delta database migrated to the current local schema
+     * (`DatabaseMerger.merge`) — see [statements].
+     */
+    val all: List<String> = statements(preDelta = true)
 
     /**
      * The merge statements for a transport file — a delta, a base, or the fold of several
      * (`DatabaseMerger.mergeTransport`): the identity edges of its edge tables
-     * (`folder_v2_edges`, `tag_v2_edges`), then [all].
+     * (`folder_v2_edges`, `tag_v2_edges`), then the same list as [all] — except that a feed's raw
+     * folder assignment is kept exactly as the file wrote it (see [mergeFeedFolder]).
      */
-    val transport: List<String> = recordCloudTransportEdges + all
+    val transport: List<String> = recordCloudTransportEdges + statements(preDelta = false)
 }

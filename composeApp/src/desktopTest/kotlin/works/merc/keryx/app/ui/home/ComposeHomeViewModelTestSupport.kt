@@ -10,6 +10,7 @@ import works.merc.keryx.app.data.cloud.TokenStorage
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.domain.ActivityCenter
 import works.merc.keryx.app.domain.SyncScheduler
+import works.merc.keryx.app.domain.TagFolderIdRemaps
 import works.merc.keryx.app.presentation.home.HomeViewModel
 import works.merc.keryx.app.presentation.home.HomeViewModelFixture
 import works.merc.keryx.app.presentation.home.HomeViewModelFixtureTokenStorage
@@ -38,10 +39,13 @@ internal suspend fun <T> ComposeUiTest.useHomeViewModel(
     manualSync: ManualSync? = null,
     // See newHomeViewModel's own parameter: lets a test hold a selection's body lookup.
     dispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
+    // See newHomeViewModel's own parameter: lets a test publish a tag/folder id re-key.
+    idRemaps: TagFolderIdRemaps = TagFolderIdRemaps(db),
     block: suspend (HomeViewModelFixture) -> T,
 ): T {
     val fixture = newHomeViewModel(
         driver, db, syncScheduler, clock, activityCenter, tokenStorage, appKey, manualSync = manualSync, dispatcher = dispatcher,
+        idRemaps = idRemaps,
     )
     return try {
         // waitForIdle only on the success path: it rethrows Compose's own uncaught exceptions, and

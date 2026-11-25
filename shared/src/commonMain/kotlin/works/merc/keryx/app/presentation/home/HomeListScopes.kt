@@ -27,6 +27,18 @@ internal data class ListScope(val filter: ArticleFilter, val narrowing: ListNarr
 internal data class ScopedRows<T>(val rows: List<T>, val scope: ListScope)
 
 /**
+ * The article list's selected [filter], with the [generation] of the user's selection that put it
+ * there ([HomeViewModel.filterSelection]). The generation moves only when the user switches to
+ * another filter; a merge moving the selected tag or folder onto another id ([HomeViewModel]'s
+ * re-key handling) changes [filter] and keeps [generation], since it is the same list under a new
+ * id. Every UI reaction to a switch — the list back to the top, a pull's indicator ending, the
+ * new-articles pill starting afresh — keys on [generation], so a re-key causes none of them
+ * (external-spec §9, "Least surprise"). The generation counts from 0 at each ViewModel's creation:
+ * it is meaningful only against an earlier value of the same ViewModel, never across a launch.
+ */
+data class FilterSelection(val filter: ArticleFilter, val generation: Long)
+
+/**
  * [HomeViewModel.articles] together with the filter its rows were produced from (null before the
  * list first loads). `filter` and `articles` are separate flows whose emissions can reach a UI in
  * either order, so a UI that acts on a filter switch against the rows — the iOS list scrolling back

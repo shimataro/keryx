@@ -72,8 +72,9 @@ object DeltaExportSql {
 
     /**
      * Where [name]'s rows are read from in the source, as a `FROM` item named [name]. For `feeds`, the
-     * folder assignment comes from the raw row (`ks_feed_folder_raw`) — the source of truth, possibly
-     * naming a folder that is soft-deleted here — not from the resolved `feeds.folder_id`, which is
+     * folder assignment comes from the raw row (`ks_feed_folder_raw`) exactly as stored — the source of
+     * truth, possibly naming a folder that is soft-deleted here, or an alias of a folder identity this
+     * device holds no row for ([closureStatements]) — not from the resolved `feeds.folder_id`, which is
      * NULL whenever that folder is not alive: a receiver ranks the version it gets against its own
      * raw one ([MergeSql]), and [ReduceSql] folds raw versions, so a file must carry the raw value.
      * Every other table is read as it is stored.
@@ -160,18 +161,20 @@ object DeltaExportSql {
 
     /**
      * Every identity edge of the source's `ks_v2_edge`, split by kind into `folder_v2_edges` /
-     * `tag_v2_edges` — less, with [withExcept], those the [EXCEPT] file carries. Written by full sends
-     * (and so by the bases uploaded from one) only. An ordinary delta carries none: an edge is created
-     * only by the v2→v3 re-key, while capture is still off, and by a merge, which brings it from a
-     * file the other devices receive too; and every device makes a full send when it joins, so each
-     * edge the re-key created reaches the cloud that way.
+     * `tag_v2_edges` — less, with [withExcept], those the [EXCEPT] file carries. Written in full by full
+     * sends (and so by the bases uploaded from one) only: an edge is created only by the v2→v3 re-key,
+     * while capture is still off, and by a merge, which brings it from a file the other devices
+     * receive too; and every device makes a full send when it joins, so each edge the re-key created
+     * reaches the cloud that way. An ordinary delta carries only the edges its folder references need
+     * ([closureStatements]).
      */
     fun edgeStatements(withExcept: Boolean): List<String> = listOf(
         ID_REMAP_KIND_FOLDER to "folder_v2_edges",
         ID_REMAP_KIND_TAG to "tag_v2_edges",
     ).map { (kind, edgeTable) ->
         val except = if (withExcept) " EXCEPT SELECT v2_id, id FROM $EXCEPT.$edgeTable" else ""
-        "INSERT INTO main.$edgeTable (v2_id, id) SELECT v2_id, id FROM $SOURCE.ks_v2_edge WHERE kind = '$kind'$except"
+        // OR IGNORE: the closure may already have written some of them (a folder reference's identity).
+        "INSERT OR IGNORE INTO main.$edgeTable (v2_id, id) SELECT v2_id, id FROM $SOURCE.ks_v2_edge WHERE kind = '$kind'$except"
     }
 
     /**
@@ -179,8 +182,16 @@ object DeltaExportSql {
      * articles and `feed_tags` rows), tags (of the `feed_tags` rows), then folders (of the feeds,
      * including those just added) — in that order, since a feed added here can bring its folder. A
      * feed's folder is its raw one ([source]), so a folder soft-deleted here that a feed is still
-     * assigned to is carried too: its row exists (folder rows are never physically deleted, and a raw
-     * assignment only ever names an existing folder — `sync_bookkeeping.sq`).
+     * assigned to is carried too.
+     *
+     * A raw assignment is kept as the file it came from wrote it, so it can name an id this device holds
+     * no row for: an alias of a folder identity that a merge moved onto its canonical id
+     * ([V2IdentitySql]), or one only another device's file used. For such a reference the file also
+     * carries the reference's identity — every folder edge of `ks_v2_edge` in its connected component —
+     * and the folder rows this device holds in that component, so the receiver can resolve it (check 9
+     * accepts a reference that reaches a folder row of the file through the file's edges). The edges
+     * first: the rows written after them would otherwise hide which references needed them. None of
+     * this is subject to a full send's except file, as no closure row is.
      */
     val closureStatements: List<String> = run {
         val feeds = table("feeds")
@@ -195,8 +206,26 @@ object DeltaExportSql {
             "INSERT INTO main.folders (${columns(folders)}) SELECT ${columns(folders)} FROM $SOURCE.folders " +
                 "WHERE id IN (SELECT folder_id FROM main.feeds WHERE folder_id IS NOT NULL) " +
                 "AND id NOT IN (SELECT id FROM main.folders)",
+            "$UNRESOLVED_FOLDER_IDENTITY INSERT OR IGNORE INTO main.folder_v2_edges (v2_id, id) " +
+                "SELECT v2_id, id FROM $SOURCE.ks_v2_edge " +
+                "WHERE kind = '$ID_REMAP_KIND_FOLDER' AND (id IN (SELECT node FROM ks_component) OR v2_id IN (SELECT node FROM ks_component))",
+            "$UNRESOLVED_FOLDER_IDENTITY INSERT INTO main.folders (${columns(folders)}) SELECT ${columns(folders)} FROM $SOURCE.folders " +
+                "WHERE id IN (SELECT node FROM ks_component) AND id NOT IN (SELECT id FROM main.folders)",
         )
     }
+
+    /**
+     * The connected component (`ks_component(node)`), over the source's folder edges, of every folder
+     * id a written feed references and the file holds no row for — see [closureStatements].
+     */
+    // A getter, not an initialized property: closureStatements, initialized above, reads it.
+    private val UNRESOLVED_FOLDER_IDENTITY: String get() =
+        "WITH RECURSIVE ks_adj(a, b) AS (" +
+            "SELECT v2_id, id FROM $SOURCE.ks_v2_edge WHERE kind = '$ID_REMAP_KIND_FOLDER' " +
+            "UNION SELECT id, v2_id FROM $SOURCE.ks_v2_edge WHERE kind = '$ID_REMAP_KIND_FOLDER'), " +
+            "ks_component(node) AS (" +
+            "SELECT folder_id FROM main.feeds WHERE folder_id IS NOT NULL AND folder_id NOT IN (SELECT id FROM main.folders) " +
+            "UNION SELECT j.b FROM ks_component c JOIN ks_adj j ON j.a = c.node)"
 
     /**
      * Run last: tables a platform's connection adds to every file it opens for writing — requery's
@@ -210,12 +239,12 @@ object DeltaExportSql {
      * a dangling reference left after [closureStatements] means the source holds a reference to a
      * row it does not have, and receivers would reject the file as corrupt.
      */
-    val closureChecks: List<SyncValidationSql.ClosureCheck> = SyncValidationSql.closureChecks.map { check ->
+    val closureChecks: List<SyncValidationSql.ClosureCheck> = SyncValidationSql.transportClosureChecks.map { check ->
         check.copy(query = qualifyMain(check.query))
     }
 
     private fun qualifyMain(query: String): String =
-        listOf("feeds", "folders", "articles", "feed_tags", "tags").fold(query) { sql, name ->
+        listOf("feeds", "folders", "articles", "feed_tags", "tags", "folder_v2_edges").fold(query) { sql, name ->
             sql.replace(Regex("\\bFROM $name\\b"), "FROM main.$name")
         }
 }

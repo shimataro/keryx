@@ -44,37 +44,47 @@ class DeltaExportSqlTest {
 
     @Test
     fun bothKindsEndWithTheClosureFeedsAndTagsBeforeFolders() {
-        assertEquals(DeltaExportSql.closureStatements, delta.takeLast(3))
+        val closure = DeltaExportSql.closureStatements
+        assertEquals(closure, delta.takeLast(closure.size))
         // A full send then writes the identity edges, which reference nothing.
         for (withExcept in listOf(false, true)) {
             assertEquals(
-                DeltaExportSql.closureStatements + DeltaExportSql.edgeStatements(withExcept),
-                DeltaExportSql.fullStatements(withExcept).takeLast(5),
+                closure + DeltaExportSql.edgeStatements(withExcept),
+                DeltaExportSql.fullStatements(withExcept).takeLast(closure.size + 2),
             )
         }
-        val closure = DeltaExportSql.closureStatements
         assertTrue(closure[0].startsWith("INSERT INTO main.feeds"))
         assertTrue(closure[1].startsWith("INSERT INTO main.tags"))
         assertTrue(closure[2].startsWith("INSERT INTO main.folders"))
+        // Then, for a folder reference the file still holds no row for, its identity's edges before
+        // the folder rows of that identity.
+        assertTrue("INSERT OR IGNORE INTO main.folder_v2_edges" in closure[3], closure[3])
+        assertTrue("INSERT INTO main.folders" in closure[4], closure[4])
+        assertEquals(5, closure.size)
         closure.forEach { assertTrue("NOT IN (SELECT id FROM main." in it, it) }
     }
 
     @Test
-    fun onlyAFullSendCarriesTheIdentityEdges() {
-        assertTrue(delta.none { "ks_v2_edge" in it || "_v2_edges" in it }, "a delta carries no identity edge")
+    fun onlyAFullSendCarriesEveryIdentityEdge() {
+        // A delta reads identity edges only in its closure (the folder edges its references need, and
+        // the rows of those identities), never the whole table or a tag edge.
+        val edgeStatements = delta.filter { "ks_v2_edge" in it || "_v2_edges" in it }
+        assertEquals(DeltaExportSql.closureStatements.filter { "ks_v2_edge" in it }, edgeStatements)
+        assertEquals(1, edgeStatements.count { "INTO main.folder_v2_edges" in it })
+        assertTrue(delta.none { "tag_v2_edges" in it })
         assertEquals(
             listOf(
-                "INSERT INTO main.folder_v2_edges (v2_id, id) SELECT v2_id, id FROM src.ks_v2_edge WHERE kind = 'folder'",
-                "INSERT INTO main.tag_v2_edges (v2_id, id) SELECT v2_id, id FROM src.ks_v2_edge WHERE kind = 'tag'",
+                "INSERT OR IGNORE INTO main.folder_v2_edges (v2_id, id) SELECT v2_id, id FROM src.ks_v2_edge WHERE kind = 'folder'",
+                "INSERT OR IGNORE INTO main.tag_v2_edges (v2_id, id) SELECT v2_id, id FROM src.ks_v2_edge WHERE kind = 'tag'",
             ),
             DeltaExportSql.edgeStatements(withExcept = false),
         )
         // With an except file, the edges it carries are left out, as its identical rows are.
         assertEquals(
             listOf(
-                "INSERT INTO main.folder_v2_edges (v2_id, id) SELECT v2_id, id FROM src.ks_v2_edge WHERE kind = 'folder' " +
+                "INSERT OR IGNORE INTO main.folder_v2_edges (v2_id, id) SELECT v2_id, id FROM src.ks_v2_edge WHERE kind = 'folder' " +
                     "EXCEPT SELECT v2_id, id FROM ex.folder_v2_edges",
-                "INSERT INTO main.tag_v2_edges (v2_id, id) SELECT v2_id, id FROM src.ks_v2_edge WHERE kind = 'tag' " +
+                "INSERT OR IGNORE INTO main.tag_v2_edges (v2_id, id) SELECT v2_id, id FROM src.ks_v2_edge WHERE kind = 'tag' " +
                     "EXCEPT SELECT v2_id, id FROM ex.tag_v2_edges",
             ),
             DeltaExportSql.edgeStatements(withExcept = true),

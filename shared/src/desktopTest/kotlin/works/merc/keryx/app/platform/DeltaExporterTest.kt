@@ -1,5 +1,9 @@
 package works.merc.keryx.app.platform
 
+import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
+import works.merc.keryx.app.createSchemaV2
+import works.merc.keryx.app.data.local.db.KeryxDatabase
+import works.merc.keryx.app.domain.MergeSql
 import works.merc.keryx.app.domain.TransportFileKind
 import works.merc.keryx.app.domain.TransportFixtures
 import works.merc.keryx.app.domain.TransportFixtures.DEV_A
@@ -323,6 +327,120 @@ class DeltaExporterTest {
         DeltaExporter.exportFull(copy, full, meta(2), exceptPath = null)
         assertEquals(TransportValidation.Valid, TransportFiles.validate(full, ValidationTarget.Transport(deltaName(DEV_A, 2))))
         assertEquals(listOf("d1", "100"), feedFolderIn(full))
+    }
+
+    // ---- A raw assignment that is an alias with no local row ----
+
+    /**
+     * After a re-key a feed's raw folder can be an alias this device holds no row of (the row moved to
+     * the canonical id). The file still carries the raw value, so it also carries the folder's identity
+     * edges (the component of the alias in the source's `ks_v2_edge`, and nothing of any other) and the
+     * source's folder rows of that component; it passes validation, and a device that merges it
+     * resolves the feed to the canonical folder while storing the raw alias.
+     */
+    @Test
+    fun aDeltaWhoseRawFolderIsAnAliasWithNoRowCarriesTheEdgesOfItsComponent() {
+        val local = capturingDb(folder("d-a", "A"), folder("d-y", "Y"), feed("f1"))
+        exec(
+            local,
+            "UPDATE ks_feed_folder_raw SET folder_id = 'x', folder_updated_at = 500 WHERE feed_id = 'f1'",
+            "INSERT INTO ks_id_remap (kind, old_id, new_id) VALUES ('folder', 'x', 'd-a')",
+            "INSERT INTO ks_v2_edge (kind, v2_id, id) VALUES ('folder', 'p', 'x')",
+            "INSERT INTO ks_v2_edge (kind, v2_id, id) VALUES ('folder', 'p', 'd-a')",
+            "INSERT INTO ks_v2_edge (kind, v2_id, id) VALUES ('folder', 'p', 'd-y')",
+            // Another component, which must not travel.
+            "INSERT INTO ks_v2_edge (kind, v2_id, id) VALUES ('folder', 'q', 'other-1')",
+            "INSERT INTO ks_v2_edge (kind, v2_id, id) VALUES ('folder', 'q', 'other-2')",
+        )
+        assertEquals(listOf("d-a", "500"), query(local, "SELECT folder_id, folder_updated_at FROM feeds WHERE id = 'f1'").single())
+        exec(local, "DELETE FROM sync_outbox", "INSERT INTO sync_outbox (tbl, pk, pk2, heavy) VALUES ('feeds', 'f1', NULL, 0)")
+
+        val dest = newPath()
+        assertNotNull(DeltaExporter.exportDelta(local.absolutePath, dest, meta()))
+        assertEquals(TransportValidation.Valid, TransportFiles.validate(dest, ValidationTarget.Transport(deltaName(DEV_A, 1))))
+        assertEquals(listOf("x", "500"), feedFolderIn(dest))
+        assertEquals(listOf("d-a", "d-y"), ids(dest, "folders"))
+        assertEquals(
+            listOf(listOf("p", "d-a"), listOf("p", "d-y"), listOf("p", "x")),
+            query(File(dest), "SELECT v2_id, id FROM folder_v2_edges ORDER BY v2_id, id"),
+        )
+
+        val other = TransportFixtures.localDb()
+        TransportFixtures.merge(other, File(dest))
+        assertEquals(listOf("d-a", "500"), query(other, "SELECT folder_id, folder_updated_at FROM feeds WHERE id = 'f1'").single())
+        assertEquals(listOf("x", "500"), query(other, "SELECT folder_id, folder_updated_at FROM ks_feed_folder_raw").single())
+        assertEquals(listOf("d-a"), query(other, "SELECT id FROM folders").map { it[0] })
+        assertEquals(listOf(listOf("x", "d-a")), query(other, "SELECT old_id, new_id FROM ks_id_remap WHERE kind = 'folder' AND old_id = 'x'"))
+    }
+
+    /**
+     * What a device stored as a feed's raw folder after a merge re-keyed its rows is exactly what it
+     * sends — never the canonical id the feed resolves to.
+     */
+    @Test
+    fun theSentFolderOfAFeedIsTheStoredRawValueAfterAMergeReKeyedItsRows() {
+        val local = TransportFixtures.localDb(
+            folder("d-b", "Folder b", v2Id = "q"),
+            feed("f1", folderId = "d-b", folderAt = 150),
+        )
+        val cloud = TransportFixtures.transportFile(
+            deltaName(DEV_A, 1),
+            "INSERT INTO folder_v2_edges (v2_id, id) VALUES ('q', 'd-a')",
+        )
+        TransportFixtures.merge(local, cloud)
+        assertEquals(listOf("d-a"), query(local, "SELECT id FROM folders").map { it[0] }, "the row moved")
+        assertEquals(listOf("d-a"), query(local, "SELECT folder_id FROM feeds WHERE id = 'f1'").map { it[0] })
+        val stored = query(local, "SELECT folder_id FROM ks_feed_folder_raw WHERE feed_id = 'f1'").single()[0]
+        assertEquals("d-b", stored)
+
+        exec(local, "UPDATE sync_capture SET enabled = 1", "INSERT INTO sync_outbox (tbl, pk, pk2, heavy) VALUES ('feeds', 'f1', NULL, 0)")
+        val delta = newPath()
+        assertNotNull(DeltaExporter.exportDelta(local.absolutePath, delta, meta()))
+        assertEquals(TransportValidation.Valid, TransportFiles.validate(delta, ValidationTarget.Transport(deltaName(DEV_A, 1))))
+        assertEquals(stored, feedFolderIn(delta)[0])
+
+        val copy = newPath("ks-copy-")
+        DeltaExporter.copyForFullSend(local.absolutePath, copy)
+        val full = newPath()
+        DeltaExporter.exportFull(copy, full, meta(2), exceptPath = null)
+        assertEquals(TransportValidation.Valid, TransportFiles.validate(full, ValidationTarget.Transport(deltaName(DEV_A, 2))))
+        assertEquals(stored, feedFolderIn(full)[0])
+    }
+
+    /**
+     * A pre-delta file's feed that references a folder with no row and no mapping is recorded with no
+     * folder (the one place a raw value is cleaned), so this device's next delta and full send pass the
+     * closure check. See `V2IdentityMergeTest.aPreDeltaFileReferenceToAnUnknownFolderIsRecordedAsNoFolder`.
+     */
+    @Test
+    fun aPreDeltaOrphanFolderReferenceIsRecordedAsNoFolderAndTheDeviceCanStillSend() {
+        val cloud = File.createTempFile("v2-orphan", ".db").apply { deleteOnExit() }
+        JdbcSqliteDriver("jdbc:sqlite:${cloud.absolutePath}").use { driver ->
+            driver.createSchemaV2()
+            driver.execute(
+                null,
+                "INSERT INTO feeds (id, url, title, etag, folder_id, folder_updated_at, updated_at, created_at) " +
+                    "VALUES ('f1', 'https://a', 'Feed', 'e', 'ghost', 500, 100, 1)",
+                0,
+            )
+        }
+        val local = TransportFixtures.localDb()
+        DatabaseMerger.merge(local.absolutePath, cloud.absolutePath, KeryxDatabase.Schema.version, MergeSql.all)
+        assertNull(query(local, "SELECT folder_id FROM ks_feed_folder_raw WHERE feed_id = 'f1'").single()[0])
+        assertNull(query(local, "SELECT folder_id FROM feeds WHERE id = 'f1'").single()[0])
+
+        exec(local, "UPDATE sync_capture SET enabled = 1", "UPDATE feeds SET title = 'Renamed', updated_at = 300 WHERE id = 'f1'")
+        val delta = newPath()
+        assertNotNull(DeltaExporter.exportDelta(local.absolutePath, delta, meta()))
+        assertEquals(TransportValidation.Valid, TransportFiles.validate(delta, ValidationTarget.Transport(deltaName(DEV_A, 1))))
+        assertNull(feedFolderIn(delta)[0])
+
+        val copy = newPath("ks-copy-")
+        DeltaExporter.copyForFullSend(local.absolutePath, copy)
+        val full = newPath()
+        DeltaExporter.exportFull(copy, full, meta(2), exceptPath = null)
+        assertEquals(TransportValidation.Valid, TransportFiles.validate(full, ValidationTarget.Transport(deltaName(DEV_A, 2))))
+        assertNull(feedFolderIn(full)[0])
     }
 
     /**

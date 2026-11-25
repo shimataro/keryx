@@ -16,8 +16,8 @@ import works.merc.keryx.app.domain.ColumnKind.TEXT
  * constraints** — a base folds rows from several devices, and two devices can legitimately hold
  * different ids for the same tag name — plus three metadata tables: `ks_meta`, `ks_vector` and
  * `ks_covered`. A tag's or folder's `v2_id` travels with it as well: the id it carried before the
- * v2→v3 migration re-keyed it, which lets every receiver reconcile rows renamed differently on two
- * devices before they upgraded (`MergeSql`). Version 2 also adds the identity edge tables
+ * v2→v3 migration re-keyed it, which gives every receiver the identity edge linking rows renamed
+ * differently on two devices before they upgraded (`V2IdentitySql`). Version 2 also adds the identity edge tables
  * `folder_v2_edges` / `tag_v2_edges` ([EDGE_TABLES]): the sender's `ks_v2_edge`, carried by full
  * sends and bases only and folded by union. `KeryxDatabase.Schema.migrate` is never run on a
  * transport file.

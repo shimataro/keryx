@@ -1106,21 +1106,26 @@ JVM ドライバがステートメントごとに開く接続で読むため、�
 
 ### タグ/フォルダー id の振り直し
 
-タグやフォルダーの id は変わりうる。v2→v3 移行はすべての行を名前由来の id へ振り直し、同期マージも同じ同一性の
-別の id へ行を移すことがある。移動はすべて `domain/IdRemapSql.kt` を通して `ks_id_remap` に記録され、連鎖を畳むので、
+タグやフォルダーの id は変わりうる。v2→v3 移行はすべての行を名前由来の id へ振り直し、同期マージは行をその同一性の
+正規の id へ移す（`domain/V2IdentitySql.kt`。[sync-architecture.ja.md](sync-architecture.ja.md) の「タグとフォルダーの
+同一性」）。移動はすべて `domain/IdRemapSql.kt` を通して `ks_id_remap` に記録され、連鎖を畳むので、
 旧 id はその行が今持つ id へ 1 回で写る（[db-schema.ja.md](db-schema.ja.md) を参照）。データベースの外でそうした id を
 保持しているものはこれに追従するので、振り直しによって選択やユーザーの書き込みが宙に浮くことはない:
 
 - **公開。** `domain/TagFolderIdRemaps`（Koin の single）は、畳んだ表全体を `StateFlow` として保持する
-  （`TagFolderIdRemap`: 種類ごとの旧 → 新）。行の id を振り直したマージは、コミット後に `publishFromDb()` を呼ぶ。
+  （`TagFolderIdRemap`: 種類ごとの旧 → 新）。`DeltaSync` は、すべてのマージ（受信のものと差分同期以前からの移行のもの）のコミット後——その中ではなく——に
+  `publishFromDb()` を呼ぶ。失敗はログに残すだけで同期を失敗させない。次のマージか起動時に追いつき、どの書き込みも
+  古い id を自分で解決するため。
   バッチの流れではなく対応表全体の `StateFlow` にしたのは意図的である: 遅れて収集を始めた保持側もそれまでの振り直しを
   すべて受け取り、置き換えられた値は新しい値に含まれ、同じ値を再適用しても何も変わらない（表は畳んであり、旧 id を
   持つ生きた行はない）ので、取りこぼしも二重適用もない。
 - **ローカル設定。** `SettingsRepository` は、構築時（表そのものを読む）と、公開された値ごとに、`lastFilter`・
   `collapsedFolderIds`・`expandedTagIds` にこの表を適用する。書き換えは両者で 1 つで、何かが変わったときだけ保存する。
-- **`HomeViewModel`。** 公開された値ごとに、選択中のフィルタと行（`_filter`、`_selectedRowInstance`。振り直された
+- **`HomeViewModel`。** 公開された値ごとに、選択中のフィルタと行（`filterSelection`、`_selectedRowInstance`。振り直された
   タグの下に入れ子になったフィード行も含む）を新しい id へ移す——`selectFilter` を通さず直接移すので、選択が
   「すべてのフィード」に戻ることはなく、記事・ピン・カーソルもそのまま残る（外部仕様 §9「Least surprise」）——。
+  進行中のプルのフィルタも一緒に移す（`HomeRefreshController.remapPulls`。プルはそれぞれのトークンで追うので、
+  プルの終わりは今も自分を取り除く）。
   さらに `FeedListExpansion` の折りたたみ/展開の集合を書き換え、保留中の削除フォールバック
   （`DeletedItemFallback.remapPending`）を削除対象が今持つ id へ移す。そのフォールバックは、その id で比較し、忘れる。
   振り直し前にフィードリストが描画した行は古い id のままクリックされうるので、`selectFilter`、フォルダー/タグの
@@ -1131,6 +1136,20 @@ JVM ドライバがステートメントごとに開く接続で読むため、�
   終わることも外部キー違反（ローカル書き込みの失敗になる）になることもない。解決は文の一部なので、トランザクションの
   最初の書き込みより前の読み取りは増えない。`FolderRepository.reorderFolders` は、新しい並びを計算する前に
   2 つの id も解決する（従来どおりトランザクションの外で）。
+- **選択に基づく読み取り。** 記事一覧のタグ・フォルダーのクエリ（`articles.sq` の `watchByTag` / `watchByFolder`）、
+  検索の範囲（`FtsSearch` の `articleScopeSql`）、プルが対象とするフィード（`feed_tags.sq` の `watchFeedIdsForTag`、
+  `feeds.sq` の `getByFolder`）も同じ方法で id を解決する。マージのコミットは、`publishFromDb()` が選択を移すより
+  前に一覧を再実行するので、これが無いと一覧は古い id のもとで一瞬空になり、新着ピルの件数とスクロール位置を
+  失う——2 つの処理のどちらが先に走っても。
+
+- **記事一覧はそのまま。** 選択中のフィルタは、ユーザーの選択の世代とともに運ばれる（`presentation/home/HomeListScopes.kt`
+  の `FilterSelection`、`HomeViewModel.filterSelection`）: `selectFilter` は新しい世代を始め、振り直しは世代を保つ。
+  別の一覧への切り替えに応じる処理はすべて、フィルタの値ではなく世代で判断する——ピルの裏の新着の追跡を作り直すのは
+  新しい世代のときだけ（`filteredArticles`）、Compose の `ArticleListPane` が先頭へ戻すのは別のフィルタへの新しい世代の
+  ときだけ（自分の世代を保存していたプロセスが復元されたときも切り替えではない）、SwiftUI の一覧の
+  `ArticleListTopReset` と macOS の表のリセットは `HomeObservable.filterGeneration` で判断し、iOS のプルの待ちを
+  終えるのも新しい世代だけ。そのため、選択中のタグやフォルダーが振り直されても、スクロール位置、ピル、プルの
+  表示は保たれる。
 
 Apple アプリは、`HomeViewModel` から読むものと一時的な UI 状態（インラインリネームの行キー、削除確認中の行、
 ドラッグ）以外に、タグやフォルダーの id を独自に保持しない。一時的な状態からの操作は、上の解決付きの書き込みを通る。

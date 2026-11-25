@@ -64,8 +64,9 @@ through it rather than composing `AppDirs.appDataDir()` with the filename themse
   under the new id (its `v2_id` carried along), `feed_tags.tag_id` / `feeds.folder_id` move with it, the old row is
   deleted, and each move is recorded in `ks_id_remap` so `SettingsRepository` rewrites the same ids in
   `local_settings.json` (`lastFilter`, `collapsedFolderIds`, `expandedTagIds`) at startup (see `ks_id_remap` below);
-  that table is kept, so the rewrite is idempotent. The old id also stays on the row as `v2_id`, which the sync merge uses to reconcile
-  two devices that renamed the same pre-upgrade row differently before upgrading (see "tags / feed_tags" below).
+  that table is kept, so the rewrite is idempotent. The old id also stays on the row as `v2_id`, and the pair is
+  recorded as an identity edge in `ks_v2_edge`, through which the sync merge links two devices that renamed the same
+  pre-upgrade row differently before upgrading (see "tags / feed_tags" below).
   Idempotent:
   running again changes nothing. Version 3 is unreleased; a pre-release development environment that already
   ran version 3 with the interim random ids is NOT re-keyed (the callback fires only when crossing version 2) —
@@ -100,9 +101,14 @@ the sync bookkeeping tables / `articles_fts` (virtual).
 - **`folder_id` / `folder_updated_at` are a cache.** A feed's folder assignment is stored raw in `ks_feed_folder_raw`
   (see "Sync bookkeeping" below) — the folder id and stamp as the winning version wrote them, even when that folder is
   soft-deleted — and that row is the source of truth: `updateFolder` / `updateFolderAndSortOrder` write it, the sync
-  merge records into it, and a send carries it. `feeds.folder_id` is resolved from it by the view
-  `ks_feed_folder_resolved` — the raw folder while it is alive, else NULL — and `folder_updated_at` is the raw stamp;
-  triggers rewrite both in the same statement whenever the raw row changes or a folder is deleted or revived, so a
+  merge records into it, and a send carries it. The raw value is never rewritten after it is written — not mapped
+  onto a canonical id when the merge moves a folder identity, not replaced when this device holds no row for it — so
+  a tie between two assignments is settled by the same values everywhere (see "Merge" in
+  [sync-architecture.md](sync-architecture.md)); only a pre-delta file's orphan reference is recorded as NULL.
+  `feeds.folder_id` is resolved from it by the view `ks_feed_folder_resolved` — the raw folder id mapped one hop
+  through `ks_id_remap`, while that folder exists and is alive, else NULL — and `folder_updated_at` is the raw stamp;
+  triggers rewrite both in the same statement whenever the raw row changes, a folder is inserted, deleted or revived,
+  or a folder entry of `ks_id_remap` changes, so a
   feed assigned to a deleted folder shows as "no folder" and is back in it when the folder is revived (by a merge or
   by recreating it by name). The capture trigger therefore ignores these two columns; a raw change is captured
   instead. `updateFolder` writes the feeds row first with the requested folder, so its FOREIGN KEY still rejects a
@@ -183,10 +189,14 @@ Indexes: `feed_id`, `is_read`, `is_starred`, and a composite `(published_at DESC
   `insertIfNameAbsent` treats an id `ks_id_remap` maps as held, so a new row never takes one, and the
   resolution can never be diverted onto a newly created row.
 - `v2_id` is the id the row carried before that re-key, set by the v2→v3 migration and NULL for a row
-  created afterwards; it never changes. Two devices that shared a v2 id derive different name-derived
-  ids if they renamed the row differently before upgrading, so `MergeSql` reconciles cloud rows by
-  `v2_id` onto the receiving device's id before the per-field merge — `ks_id_remap` is not consulted
-  for that, and transport files carry `v2_id` so the reconciliation works for deltas and bases too.
+  created afterwards. Two devices that shared a v2 id derive different name-derived ids if they renamed
+  the row differently before upgrading; the pair `(v2_id, id)` is an identity edge (`ks_v2_edge`), and
+  the sync merge moves every row of one identity — on both sides — onto its canonical id, the smallest
+  id the identity has been seen under (`domain/V2IdentitySql.kt`; "Identities of tags and folders" in
+  [sync-architecture.md](sync-architecture.md)). The column itself decides nothing: it is a source of
+  edges, carried in transport files so deltas and bases deliver them too, and a merge or fold keeps the
+  greatest non-NULL value of the rows it combines (the other one's edge stays in `ks_v2_edge`), so every
+  device converges on the same value.
   It is a temporary column: see "`tags.v2_id` / `folders.v2_id` are temporary and must be removed eventually" in
   [known-issues.md](known-issues.md) for when it can be removed.
 - `name` is **not** UNIQUE (schema version 3 dropped the constraint): same-named rows coexist where a
@@ -214,8 +224,8 @@ Indexes: `feed_id`, `is_read`, `is_starred`, and a composite `(published_at DESC
   `nextSortOrderInGroup`; `articles.markAllReadByFolder`), so a move, rename, reorder or delete made with a
   stale folder id applies to the folder it became.
 - `v2_id` is the same pre-upgrade id as `tags.v2_id` (see above): set by the v2→v3 migration, NULL for
-  a row created afterwards, and used by `MergeSql` to reconcile folders renamed differently on two
-  devices before they upgraded.
+  a row created afterwards, and a source of the identity edges through which the sync merge moves folders
+  renamed differently on two devices before they upgraded onto one canonical id.
 - `name` is **not** UNIQUE (schema version 3 dropped the constraint), for the same reason as `tags.name`: same-named
   rows coexist where a rename crosses a creation, shown with an ordinal, backed by the non-unique index `folders_name`, and every by-name
   lookup lands on the canonical row of the name (see `tags` above and `folders.getByName`).
@@ -255,9 +265,9 @@ with it, so a failed indexing is retried by the next sync). Device-local; cleare
 | `sync_cursor` | `device`(PK), `seq` — per device, the highest delta number up to which everything is merged |
 | `ks_search_pending` | `rowid`(PK) — articles whose `search_text` must be recomputed |
 | `ks_search_awaiting_body` | `id`(PK) — articles a merge inserted without a body (a light row), kept out of the search index until one arrives or the daily rebuild indexes them |
-| `ks_feed_folder_raw` | `feed_id`(PK), `folder_updated_at`, `folder_id` — per feed, its raw folder assignment (the folder id and stamp as the winning version wrote them, alive here or not): the source of truth `feeds.folder_id` / `folder_updated_at` are resolved from (view `ks_feed_folder_resolved`), what the merge ranks raw against raw and what a send carries. One row per feed, created with it (trigger) and filled for existing feeds by `2.sqm`; `folder_id` is NULL or names an existing folder row. Kept across joining and disconnect |
-| `ks_id_remap` | `kind` + `old_id`(composite PK), `new_id` — every tag/folder re-key: the id a row had and the id it was moved to — the v2→v3 migration's move onto the name-derived id (`domain/TagFolderIdRekey.kt`), and a sync merge's move onto another id of the same identity. Recorded only through `domain/IdRemapSql.kt`, which folds chains as it adds a move (`a → b` then `b → c` leaves `a → c`, `b → c`; a move back drops the entry of the id that is live again), so a lookup takes one hop, and no row ever carries an old id. It keeps ids held outside the database current: `SettingsRepository` rewrites `local_settings.json` (`lastFilter`, `collapsedFolderIds`, `expandedTagIds`) at startup and whenever the table is republished after a merge has re-keyed rows (`domain/TagFolderIdRemaps.kt`, a `StateFlow` of the whole folded map), `HomeViewModel` its selection, expansion and pending delete fallbacks; and every write that takes a tag or folder id resolves it through this table (see "tags / feed_tags" and "folders"). Kept indefinitely, so applying it again is a no-op. (The sync merge reconciles pre-upgrade identities by the row's `v2_id`, not by this table.) Empty on every fresh database until something re-keys |
-| `ks_v2_edge` | `kind` + `v2_id` + `id`(composite PK) — the identity edges of tags and folders (`kind` `tag` / `folder`): a pre-upgrade id and a row id the row carrying it was re-keyed to; rows connected by edges are one identity. A grow-only set: written by the v2→v3 re-key for every row carrying a `v2_id` and by every sync merge (the cloud file's edge tables and the `(v2_id, id)` of its and main's rows carrying a `v2_id`); never deleted, and not cleared on joining or disconnecting — an edge is a fact about two ids, not about the connection. Full sends carry it as the transport file's `folder_v2_edges` / `tag_v2_edges` (see "Transport schema" in [sync-architecture.md](sync-architecture.md)) |
+| `ks_feed_folder_raw` | `feed_id`(PK), `folder_updated_at`, `folder_id` — per feed, its raw folder assignment (the folder id and stamp as the winning version wrote them, alive here or not): the source of truth `feeds.folder_id` / `folder_updated_at` are resolved from (view `ks_feed_folder_resolved`), what the merge ranks raw against raw and what a send carries. One row per feed, created with it (trigger) and filled for existing feeds by `2.sqm`; `folder_id` is kept as written, so it can name an alias of a folder identity this device holds no row for (resolved through `ks_id_remap`), and is NULL only for no folder or a pre-delta file's orphan reference. Kept across joining and disconnect |
+| `ks_id_remap` | `kind` + `old_id`(composite PK), `new_id` — every tag/folder re-key: the id a row had and the id it was moved to — the v2→v3 migration's move onto the name-derived id (`domain/TagFolderIdRekey.kt`), and a sync merge's move onto another id of the same identity, recorded for every alias of the identity, including ones only another device's file used (a feed's raw folder assignment can name one; `ks_feed_folder_resolved` resolves it through this table). Recorded only through `domain/IdRemapSql.kt`, which folds chains as it adds a move (`a → b` then `b → c` leaves `a → c`, `b → c`; a move back drops the entry of the id that is live again), so a lookup takes one hop, and no row ever carries an old id. It keeps ids held outside the database current: `SettingsRepository` rewrites `local_settings.json` (`lastFilter`, `collapsedFolderIds`, `expandedTagIds`) at startup and whenever the table is republished after a merge has re-keyed rows (`domain/TagFolderIdRemaps.kt`, a `StateFlow` of the whole folded map), `HomeViewModel` its selection, expansion and pending delete fallbacks; and every write that takes a tag or folder id resolves it through this table (see "tags / feed_tags" and "folders"). Kept indefinitely, so applying it again is a no-op. The sync merge reads its moves as identity edges as well (they normally duplicate edges already in `ks_v2_edge`), so an id this device moved away from stays in the identity it moved to. Empty on every fresh database until something re-keys |
+| `ks_v2_edge` | `kind` + `v2_id` + `id`(composite PK) — the identity edges of tags and folders (`kind` `tag` / `folder`): a pre-upgrade id and a row id the row carrying it was re-keyed to; rows connected by edges are one identity. A grow-only set: written by the v2→v3 re-key for every row carrying a `v2_id` and by every sync merge (the cloud file's edge tables and the `(v2_id, id)` of its and main's rows carrying a `v2_id`); never deleted, and not cleared on joining or disconnecting — an edge is a fact about two ids, not about the connection. The merge's identity step takes the ids it connects as one identity and the smallest row id among them as its canonical id (see "Identities of tags and folders" in [sync-architecture.md](sync-architecture.md)). Full sends carry it as the transport file's `folder_v2_edges` / `tag_v2_edges` (see "Transport schema" in [sync-architecture.md](sync-architecture.md)) |
 
 None of these but `ks_v2_edge`, nor `sync_state`, `feed_fetch_state` or `articles_fts`, ever leaves the device: delta
 and base files are built from the synced tables only (see [sync-architecture.md](sync-architecture.md)) — except

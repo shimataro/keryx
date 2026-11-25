@@ -14,8 +14,11 @@ CREATE TABLE feed_tags (
 watchTagIdsForFeed:
 SELECT tag_id FROM feed_tags WHERE feed_id = ? AND deleted_at IS NULL;
 
+-- The tag id is resolved through ks_id_remap (see articles.sq's watchByTag).
 watchFeedIdsForTag:
-SELECT feed_id FROM feed_tags WHERE tag_id = ? AND deleted_at IS NULL;
+SELECT feed_id FROM feed_tags
+WHERE tag_id = COALESCE((SELECT id FROM tags WHERE id = :tagId), (SELECT new_id FROM ks_id_remap WHERE kind = 'tag' AND old_id = :tagId), :tagId)
+    AND deleted_at IS NULL;
 
 watchAllActive:
 SELECT feed_id, tag_id FROM feed_tags WHERE deleted_at IS NULL;

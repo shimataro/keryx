@@ -688,15 +688,16 @@ class SyncAlgebraTest {
     }
 
     /**
-     * A cloud reference to a folder main does not hold (never in a valid file — check 9 — but a merge
-     * must not depend on it) is recorded as "no folder": a raw assignment only ever names an existing
-     * folder, and the resolution never writes a dangling `feeds.folder_id`.
+     * A transport file's reference to a folder main does not hold (never in a valid file — check 9 —
+     * but a merge must not depend on it) is stored as the file wrote it — a raw assignment is never
+     * rewritten, so a tie is settled by the same values in every merge and fold — and resolves to "no
+     * folder": the resolution never writes a dangling `feeds.folder_id`.
      */
     @Test
-    fun aReferenceToAFolderMainLacksIsRecordedAsNoFolder() {
+    fun aReferenceToAFolderMainLacksIsKeptRawAndResolvesToNoFolder() {
         val db = localDb(feed("f1"))
         merge(db, transportFile(nameA, feed("f1", folderId = "gone", folderAt = 500)))
-        assertEquals("resolved=null@500 raw=null@500", feedFolder(db))
+        assertEquals("resolved=null@500 raw=gone@500", feedFolder(db))
         TransportFixtures.connect(db).use { conn ->
             conn.createStatement().use { st ->
                 st.executeQuery("SELECT COUNT(*) FROM pragma_foreign_key_check").use { rs -> rs.next(); assertEquals(0, rs.getInt(1)) }

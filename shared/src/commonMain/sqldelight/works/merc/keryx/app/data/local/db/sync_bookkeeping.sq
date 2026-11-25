@@ -25,23 +25,31 @@
 --                    (DeltaExportSql). Every feed has exactly one row: ks_feed_folder_raw_init
 --                    creates it with the feed, every local folder write (feeds.updateFolder,
 --                    updateFolderAndSortOrder) updates it, and the merge records the winning version
---                    into it (MergeSql, ranked raw against raw). A row's folder_id is NULL or names a
---                    folder row that exists here (alive or soft-deleted): a local write passes
---                    through feeds' FOREIGN KEY first, the merge records a reference to a folder it
---                    does not hold as NULL, and folder rows are never physically deleted (the
---                    v2->v3 re-key moves the references first). No FOREIGN KEY of its own: the
---                    merge's v2->v3 reconciliation rewrites folder ids in a downloaded pre-delta
---                    copy, whose own copy of this table it cannot see. Device-local data, kept
---                    across joining and disconnect.
+--                    into it (MergeSql, ranked raw against raw). The raw folder_id is kept exactly
+--                    as the write or the file wrote it — never mapped onto a canonical id or
+--                    replaced afterwards — so a tie between two assignments is settled by the same
+--                    values on every device and in every fold. It need not name a folder row here:
+--                    after a merge moved a folder onto its identity's canonical id (V2IdentitySql),
+--                    or when only another device's file used an alias, it names an id ks_id_remap
+--                    maps; a send carries that identity's edges and rows with it (DeltaExportSql).
+--                    Only a pre-delta file's orphan reference (no row, no mapping) is recorded as
+--                    NULL. A local write passes through feeds' FOREIGN KEY first. No FOREIGN KEY of
+--                    its own: a merge must only be able to violate a FOREIGN KEY through main's
+--                    synced rows (MergeFailureClassifier). Device-local data, kept across joining
+--                    and disconnect.
 -- ks_feed_folder_resolved
---                    (view) the one definition of a feed's resolved folder: the raw folder_id when
---                    that folder exists and is alive (deleted_at IS NULL), else NULL, with the raw
---                    stamp. The ks_feed_folder_resolve_* triggers write it into feeds whenever a raw
---                    row changes or a folder's liveness changes — in every transaction, the sync
+--                    (view) the one definition of a feed's resolved folder: the raw folder_id mapped
+--                    through ks_id_remap (one hop; chains are folded), when that folder exists and is
+--                    alive (deleted_at IS NULL), else NULL, with the raw stamp. The
+--                    ks_feed_folder_resolve_* triggers write it into feeds whenever a raw row
+--                    changes, a folder is inserted or its liveness changes, or a folder entry of
+--                    ks_id_remap is inserted, updated or deleted — in every transaction, the sync
 --                    merge's included — so feeds.folder_id never disagrees with it after a statement.
 -- ks_id_remap        every tag/folder re-key: kind ('tag' / 'folder'), the id a row had and the id
 --                    it was moved to — the v2->v3 migration's move onto the name-derived id
---                    (TagFolderIdRekey), and a merge's move onto another id of the same identity.
+--                    (TagFolderIdRekey), and a merge's move onto another id of the same identity —
+--                    for every alias of the identity, including ones only another device's file used,
+--                    which a feed's raw folder assignment can name (ks_feed_folder_resolved).
 --                    Chains are folded as each move is recorded (IdRemapSql), so an old id maps
 --                    straight to the id its row has now, and no row ever carries an old id (tags.sq
 --                    / folders.sq insertIfNameAbsent treat a mapped id as held). Used to keep ids held
@@ -124,19 +132,24 @@ CREATE TABLE ks_feed_folder_raw (
     folder_id         TEXT
 );
 
-CREATE VIEW ks_feed_folder_resolved AS
-SELECT r.feed_id AS feed_id,
-    CASE WHEN EXISTS (SELECT 1 FROM folders f WHERE f.id = r.folder_id AND f.deleted_at IS NULL)
-        THEN r.folder_id END AS folder_id,
-    r.folder_updated_at AS folder_updated_at
-FROM ks_feed_folder_raw r;
-
 CREATE TABLE ks_id_remap (
     kind   TEXT NOT NULL,
     old_id TEXT NOT NULL,
     new_id TEXT NOT NULL,
     PRIMARY KEY (kind, old_id)
 );
+
+CREATE VIEW ks_feed_folder_resolved AS
+SELECT r.feed_id AS feed_id,
+    CASE WHEN EXISTS (SELECT 1 FROM folders f WHERE f.id = r.target AND f.deleted_at IS NULL)
+        THEN r.target END AS folder_id,
+    r.folder_updated_at AS folder_updated_at
+FROM (
+    SELECT raw.feed_id AS feed_id, raw.folder_updated_at AS folder_updated_at,
+        COALESCE((SELECT m.new_id FROM ks_id_remap m WHERE m.kind = 'folder' AND m.old_id = raw.folder_id),
+            raw.folder_id) AS target
+    FROM ks_feed_folder_raw raw
+) r;
 
 CREATE TABLE ks_v2_edge (
     kind  TEXT NOT NULL,
@@ -296,10 +309,13 @@ BEGIN
 END;
 
 -- The resolution: feeds.folder_id / folder_updated_at take ks_feed_folder_resolved's value whenever
--- a raw row is written (one feed) or a folder becomes alive or deleted (the feeds whose raw row names
--- it). A folder row's insertion needs none — no raw row can name a folder before it exists — and no
--- folder row is physically deleted while a raw row names it. The value is always NULL or an alive,
--- existing folder, so it never violates feeds' FOREIGN KEY.
+-- a raw row is written (one feed), a folder is inserted or becomes alive or deleted (the feeds whose
+-- raw row names it or an id ks_id_remap maps to it — a raw row can name an alias before the canonical
+-- row exists), or a folder entry of ks_id_remap changes (the feeds whose raw row names its old id). A
+-- folder row is physically deleted only by a re-key, which records its move first, so these triggers
+-- have moved every feed off it. The value is always NULL or an alive, existing folder, so it never
+-- violates feeds' FOREIGN KEY. None of them records anything: the feeds capture trigger ignores
+-- folder_id.
 CREATE TRIGGER ks_feed_folder_resolve_raw_insert AFTER INSERT ON ks_feed_folder_raw
 BEGIN
     UPDATE feeds SET
@@ -326,7 +342,52 @@ BEGIN
     UPDATE feeds SET
         folder_id = (SELECT v.folder_id FROM ks_feed_folder_resolved v WHERE v.feed_id = feeds.id),
         folder_updated_at = (SELECT v.folder_updated_at FROM ks_feed_folder_resolved v WHERE v.feed_id = feeds.id)
-    WHERE id IN (SELECT r.feed_id FROM ks_feed_folder_raw r WHERE r.folder_id = new.id)
+    WHERE id IN (SELECT r.feed_id FROM ks_feed_folder_raw r WHERE r.folder_id = new.id
+            OR r.folder_id IN (SELECT m.old_id FROM ks_id_remap m WHERE m.kind = 'folder' AND m.new_id = new.id))
+        AND EXISTS (SELECT 1 FROM ks_feed_folder_resolved v WHERE v.feed_id = feeds.id
+            AND (v.folder_id IS NOT feeds.folder_id OR v.folder_updated_at IS NOT feeds.folder_updated_at));
+END;
+
+CREATE TRIGGER ks_feed_folder_resolve_folder_insert AFTER INSERT ON folders
+BEGIN
+    UPDATE feeds SET
+        folder_id = (SELECT v.folder_id FROM ks_feed_folder_resolved v WHERE v.feed_id = feeds.id),
+        folder_updated_at = (SELECT v.folder_updated_at FROM ks_feed_folder_resolved v WHERE v.feed_id = feeds.id)
+    WHERE id IN (SELECT r.feed_id FROM ks_feed_folder_raw r WHERE r.folder_id = new.id
+            OR r.folder_id IN (SELECT m.old_id FROM ks_id_remap m WHERE m.kind = 'folder' AND m.new_id = new.id))
+        AND EXISTS (SELECT 1 FROM ks_feed_folder_resolved v WHERE v.feed_id = feeds.id
+            AND (v.folder_id IS NOT feeds.folder_id OR v.folder_updated_at IS NOT feeds.folder_updated_at));
+END;
+
+CREATE TRIGGER ks_feed_folder_resolve_remap_insert AFTER INSERT ON ks_id_remap
+WHEN new.kind = 'folder'
+BEGIN
+    UPDATE feeds SET
+        folder_id = (SELECT v.folder_id FROM ks_feed_folder_resolved v WHERE v.feed_id = feeds.id),
+        folder_updated_at = (SELECT v.folder_updated_at FROM ks_feed_folder_resolved v WHERE v.feed_id = feeds.id)
+    WHERE id IN (SELECT r.feed_id FROM ks_feed_folder_raw r WHERE r.folder_id = new.old_id)
+        AND EXISTS (SELECT 1 FROM ks_feed_folder_resolved v WHERE v.feed_id = feeds.id
+            AND (v.folder_id IS NOT feeds.folder_id OR v.folder_updated_at IS NOT feeds.folder_updated_at));
+END;
+
+CREATE TRIGGER ks_feed_folder_resolve_remap_update AFTER UPDATE ON ks_id_remap
+WHEN old.kind = 'folder' OR new.kind = 'folder'
+BEGIN
+    UPDATE feeds SET
+        folder_id = (SELECT v.folder_id FROM ks_feed_folder_resolved v WHERE v.feed_id = feeds.id),
+        folder_updated_at = (SELECT v.folder_updated_at FROM ks_feed_folder_resolved v WHERE v.feed_id = feeds.id)
+    WHERE id IN (SELECT r.feed_id FROM ks_feed_folder_raw r WHERE r.folder_id IN (old.old_id, new.old_id))
+        AND EXISTS (SELECT 1 FROM ks_feed_folder_resolved v WHERE v.feed_id = feeds.id
+            AND (v.folder_id IS NOT feeds.folder_id OR v.folder_updated_at IS NOT feeds.folder_updated_at));
+END;
+
+CREATE TRIGGER ks_feed_folder_resolve_remap_delete AFTER DELETE ON ks_id_remap
+WHEN old.kind = 'folder'
+BEGIN
+    UPDATE feeds SET
+        folder_id = (SELECT v.folder_id FROM ks_feed_folder_resolved v WHERE v.feed_id = feeds.id),
+        folder_updated_at = (SELECT v.folder_updated_at FROM ks_feed_folder_resolved v WHERE v.feed_id = feeds.id)
+    WHERE id IN (SELECT r.feed_id FROM ks_feed_folder_raw r WHERE r.folder_id = old.old_id)
         AND EXISTS (SELECT 1 FROM ks_feed_folder_resolved v WHERE v.feed_id = feeds.id
             AND (v.folder_id IS NOT feeds.folder_id OR v.folder_updated_at IS NOT feeds.folder_updated_at));
 END;

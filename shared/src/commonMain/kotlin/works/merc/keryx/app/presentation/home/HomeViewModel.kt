@@ -255,7 +255,16 @@ class HomeViewModel(
     /** Whether the previous session's filter was restored at launch — see [initialHomePane]. */
     val filterRestoredOnLaunch: Boolean = launchFilter.second
 
-    private val _filter = MutableStateFlow<ArticleFilter>(launchFilter.first)
+    private val _filterSelection = MutableStateFlow(FilterSelection(launchFilter.first, generation = 0L))
+
+    /**
+     * The selected filter together with its selection's generation — see [FilterSelection]. One flow,
+     * so a UI reads the two in step: what tells a user's switch to another list (scroll back to the
+     * top, end a pull's wait) from a merge re-keying the selected tag or folder (keep both).
+     */
+    val filterSelection: StateFlow<FilterSelection> = _filterSelection.asStateFlow()
+
+    private val _filter: StateFlow<ArticleFilter> = _filterSelection.derived { it.filter }
     val filter: StateFlow<ArticleFilter> = _filter
 
     // Which *rendered row* of the feed list the selection is on — a feed renders once under its
@@ -385,17 +394,31 @@ class HomeViewModel(
     // null at that point (Kotlin initializes properties in declaration order).
     private val _newArticleTracking = MutableStateFlow(NewArticleTracking())
 
+    // The filter-selection generation [_newArticleTracking] was last reset for; -1 so the first list
+    // resets it. Read and written only in [filteredArticles]' onStart, which its one collector runs
+    // sequentially.
+    private var trackedGeneration = -1L
+
     // Only the filter keys the DB query: switching filters must switch queries, but the unread-only,
     // sort and pinned inputs are pure display transforms over whatever that query returned. Keeping
     // them in the flatMapLatest key made every article selection (which pins the article it marks
     // read) cancel and re-execute the whole unbounded list query.
     private val filteredArticles: Flow<Pair<ArticleFilter, List<ArticleListRow>>> =
-        _filter.flatMapLatest { filter ->
+        _filterSelection.flatMapLatest { (filter, generation) ->
             articleRepository.watchArticles(filter)
                 // A filter change re-keys flatMapLatest, so this runs before the new filter's first
-                // emission and resets tracking to a fresh, unseeded instance — otherwise the new
-                // filter's own existing articles would look "new" against the old filter's id set.
-                .onStart { resetNewArticleTracking() }
+                // emission. A user's switch to another list (a new generation) resets tracking to a
+                // fresh, unseeded instance — otherwise the new filter's own existing articles would
+                // look "new" against the old filter's id set. A merge re-keying the selected tag or
+                // folder keeps the generation: the list is the same one under its new id, so its
+                // tracking (and the pill) carries on; an article the re-key brings in is not new by
+                // insertion, so it is not counted.
+                .onStart {
+                    if (generation != trackedGeneration) {
+                        trackedGeneration = generation
+                        resetNewArticleTracking()
+                    }
+                }
                 .onEach { list ->
                     val ids = list.mapTo(HashSet(list.size)) { it.id }
                     // Only an id not seen before under this filter *and* inserted after the
@@ -984,7 +1007,7 @@ class HomeViewModel(
             _selectedRowInstance.value = currentInstance
             return
         }
-        _filter.value = current
+        _filterSelection.update { FilterSelection(current, it.generation + 1) }
         _selectedRowInstance.value = currentInstance
         _selectedArticle.value = null
         _pendingSelectedRow.value = null
@@ -2198,12 +2221,16 @@ class HomeViewModel(
      * state, so it needs no lock. Idempotent — the map is folded and no live id is a key — so the
      * value at hand when collection starts, which usually changes nothing, is applied harmlessly.
      * The filter is replaced directly rather than through [selectFilter]: the selection stays where it
-     * is, so its article, pins and cursor are kept.
+     * is, so its article, pins and cursor are kept, and its generation ([FilterSelection]) with them,
+     * so the article list neither scrolls back to the top nor loses its new-articles pill, and a pull
+     * in progress on it keeps its indicator ([HomeRefreshController.remapPulls]).
      */
     private fun applyIdRemap(remap: TagFolderIdRemap) {
         if (remap.isEmpty) return
-        val filter = remap.filter(_filter.value)
-        if (filter != _filter.value) _filter.value = filter
+        // The same selection under the tag's or folder's new id: the generation stays, so neither UI
+        // treats it as a switch (the list keeps its scroll position and its new-articles pill).
+        _filterSelection.update { it.remappedBy(remap) }
+        refreshController.remapPulls(remap)
         val instance = _selectedRowInstance.value.remappedBy(remap)
         if (instance != _selectedRowInstance.value) _selectedRowInstance.value = instance
         expansion.remap(remap)

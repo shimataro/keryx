@@ -1128,23 +1128,27 @@ not (a page with no body yet shows only the reader's background, as before).
 ### Tag/folder id re-keys
 
 A tag's or folder's id can move: the v2→v3 migration re-keys every row onto its name-derived id, and a sync merge
-may move a row onto another id of the same identity. Every move is recorded in `ks_id_remap` through
+moves a row onto its identity's canonical id (`domain/V2IdentitySql.kt`; "Identities of tags and folders" in
+[sync-architecture.md](sync-architecture.md)). Every move is recorded in `ks_id_remap` through
 `domain/IdRemapSql.kt`, which folds chains so an old id maps in one hop to the id its row has now (see
 [db-schema.md](db-schema.md)). What holds such an id outside the database follows it, so a re-key never strands a
 selection or a user's write:
 
 - **Publication.** `domain/TagFolderIdRemaps` (a Koin single) holds the whole folded table as a `StateFlow`
-  (`TagFolderIdRemap`: old → new, per kind). A merge that re-keyed rows calls `publishFromDb()` after its commit.
+  (`TagFolderIdRemap`: old → new, per kind). `DeltaSync` calls `publishFromDb()` after every merge's commit (a
+  receive's and the pre-delta migration's), never inside it; a failure is logged and does not fail the sync, since
+  the next merge or launch catches up and every write resolves a stale id itself.
   A whole-map `StateFlow` rather than a stream of batches is deliberate: a holder that starts collecting late still
   gets every re-key so far, a superseded value is contained in the newer one, and applying a value again changes
   nothing (the map is folded and no live row carries an old id), so nothing is lost and nothing is double-applied.
 - **Local settings.** `SettingsRepository` applies the table to `lastFilter`, `collapsedFolderIds` and
   `expandedTagIds` at construction (read from the table itself) and again for every published value — one rewrite
   for both, persisted only when it changes something.
-- **`HomeViewModel`.** On each published value it moves the selected filter and row (`_filter`,
+- **`HomeViewModel`.** On each published value it moves the selected filter and row (`filterSelection`,
   `_selectedRowInstance`, including a feed row nested under a re-keyed tag) onto the new ids — directly, not through
   `selectFilter`, so the selection does not fall back to All Feeds and its article, pins and cursor stay (external-spec
-  §9, "Least surprise") —, remaps `FeedListExpansion`'s collapsed/expanded sets, and moves pending delete fallbacks
+  §9, "Least surprise") —, moves a pending pull's filter with it (`HomeRefreshController.remapPulls`; pulls are
+  tracked by a token of their own, so the pull's end still removes it), remaps `FeedListExpansion`'s collapsed/expanded sets, and moves pending delete fallbacks
   (`DeletedItemFallback.remapPending`) onto the id the deleted item has now, whose fallback then compares and
   forgets that id. A row the feed list rendered before the re-key may still be clicked with its old id, so
   `selectFilter`, the folder/tag toggles and `revealFeedListRow` resolve the ids they are given through the current
@@ -1155,6 +1159,22 @@ selection or a user's write:
   nothing or failing a foreign key (which would be a local-write failure). Being part of the statement, the
   resolution adds no read ahead of a transaction's first write. `FolderRepository.reorderFolders` also resolves its
   two ids before computing the new order, outside its transaction as before.
+- **Reads keyed by the selection.** The article list's tag and folder queries (`articles.sq`'s `watchByTag` /
+  `watchByFolder`), the search scope (`FtsSearch`'s `articleScopeSql`) and the feeds a pull covers
+  (`feed_tags.sq`'s `watchFeedIdsForTag`, `feeds.sq`'s `getByFolder`) resolve the id the same way. A merge's commit
+  re-runs the list before `publishFromDb()` has moved the selection, so without it the list would briefly be
+  empty under the old id — dropping the new-articles pill's count and the scroll position — whichever of the two
+  steps runs first.
+
+- **The article list stays put.** The selected filter travels with the generation of the user's selection
+  (`FilterSelection` in `presentation/home/HomeListScopes.kt`, `HomeViewModel.filterSelection`): `selectFilter`
+  starts a new generation, a re-key keeps it. Everything that answers a switch to another list keys on the
+  generation rather than on the filter value — the new-articles tracking behind the pill restarts only for a new
+  generation (`filteredArticles`), Compose's `ArticleListPane` scrolls back to the top only for a new generation to
+  a different filter (a process restored with a saved generation of its own is not a switch either), the SwiftUI
+  list's `ArticleListTopReset` and macOS table reset key on `HomeObservable.filterGeneration`, and only a new
+  generation ends the iOS pull's wait. So a re-key of the selected tag or folder keeps the scroll position, the pill
+  and a pull's indicator.
 
 The Apple app holds no tag or folder id of its own beyond what it reads from `HomeViewModel` and transient UI state
 (an inline rename's row key, a pending delete confirmation's row, a drag), whose action goes through the resolving

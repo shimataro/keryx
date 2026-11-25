@@ -115,6 +115,12 @@ class SyncRepository(
     private val compactionAllowedFlow: () -> Flow<Boolean> = { flowOf(true) },
     /** Issues generation and device ids; [IdGenerator.newId] in production, deterministic in tests. */
     newId: () -> String = IdGenerator::newId,
+    /**
+     * Republishes the tag/folder id re-keys after a merge commits ([TagFolderIdRemaps.publishFromDb]);
+     * the app's one [TagFolderIdRemaps] in production. A lambda, like [cloudProvider], so resolving it
+     * stays lazy. The default (nothing) is for tests that do not observe re-keys.
+     */
+    publishIdRemaps: suspend () -> Unit = {},
 ) : SyncScheduler {
 
     private val mutex = Mutex()
@@ -131,6 +137,7 @@ class SyncRepository(
         newId = newId,
         compactionAllowed = { compactionAllowedFlow().first() },
         setPhase = { _syncPhase.value = it },
+        publishIdRemaps = publishIdRemaps,
     )
 
     /** Interrupts or observes a sync at a [SyncHookPoint]; for tests only. */

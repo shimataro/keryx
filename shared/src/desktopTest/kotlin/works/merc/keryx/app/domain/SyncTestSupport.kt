@@ -206,6 +206,7 @@ internal class SyncDevice(
     private val compactionAllowed: () -> Boolean = { true },
     private val automaticSyncAllowedFlow: () -> Flow<Boolean> = { flowOf(true) },
     existingDbFile: File? = null,
+    private val publishIdRemaps: suspend () -> Unit = {},
 ) : AutoCloseable {
     val file: File
     val driver: SqlDriver
@@ -252,6 +253,7 @@ internal class SyncDevice(
             automaticSyncAllowedFlow = automaticSyncAllowedFlow,
             compactionAllowedFlow = { flowOf(compactionAllowed()) },
             newId = newId,
+            publishIdRemaps = publishIdRemaps,
         )
     }
 

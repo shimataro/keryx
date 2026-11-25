@@ -233,17 +233,46 @@ fun ArticleListPane(
     // between them (typing/clearing a query) never disposes either one's scroll position — see
     // this file's own module KDoc. Reset to the top when the user switches feed/tag/folder/scope,
     // so a new list never opens scrolled to the previous one's offset; only fires on an actual
-    // filter change (not the first composition), so a restored last-selected article's
-    // scroll-into-view isn't clobbered.
+    // switch (not the first composition), so a restored last-selected article's
+    // scroll-into-view isn't clobbered. A switch is a new selection generation
+    // (HomeViewModel.filterSelection) to a different filter: a merge re-keying the selected tag or
+    // folder changes the filter but keeps the generation, so the list stays where it is; and the
+    // saved generation of a previous process (rememberSaveable outlives the ViewModel, whose
+    // generation restarts at 0) differs while the restored filter does not, so that is no switch
+    // either.
     val baseListState = rememberLazyListState()
     val searchListState = rememberLazyListState()
-    var lastFilter by rememberSaveable { mutableStateOf(filter.encode()) }
-    LaunchedEffect(filter) {
-        val encoded = filter.encode()
-        if (encoded != lastFilter) {
-            baseListState.scrollToItem(0)
-            searchListState.scrollToItem(0)
-            lastFilter = encoded
+    val filterSelection by vm.filterSelection.collectAsState()
+    var lastFilter by rememberSaveable { mutableStateOf(filterSelection.filter.encode()) }
+    var lastGeneration by rememberSaveable { mutableStateOf(filterSelection.generation) }
+    // A switch whose scroll to the top has not completed yet, per list. scrollToItem suspends until its
+    // list is measured — the search list's, while no search is showing, until one is — so a run of the
+    // effect below can be cancelled by the next selection value (a re-key arriving after the user's
+    // switch, say) before it has scrolled; that next run still owes the scroll, and only that one.
+    var baseTopResetPending by rememberSaveable { mutableStateOf(false) }
+    var searchTopResetPending by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(filterSelection) {
+        val encoded = filterSelection.filter.encode()
+        if (filterSelection.generation != lastGeneration && encoded != lastFilter) {
+            baseTopResetPending = true
+            searchTopResetPending = true
+        }
+        // Recorded before scrolling, for the same reason: a cancelled run must not leave this value
+        // unrecorded, or the next one would be compared against a stale generation and a re-key taken
+        // for a switch.
+        lastFilter = encoded
+        lastGeneration = filterSelection.generation
+        if (baseTopResetPending) {
+            launch {
+                baseListState.scrollToItem(0)
+                baseTopResetPending = false
+            }
+        }
+        if (searchTopResetPending) {
+            launch {
+                searchListState.scrollToItem(0)
+                searchTopResetPending = false
+            }
         }
     }
     // The search results list goes back to the top when the user changes the query, as it does for a

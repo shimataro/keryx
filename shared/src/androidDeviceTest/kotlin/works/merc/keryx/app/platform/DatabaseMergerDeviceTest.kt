@@ -159,6 +159,8 @@ class DatabaseMergerDeviceTest {
             .flatMap { listOf("ks_capture_${it}_insert", "ks_capture_${it}_update") } + listOf(
             "ks_capture_feed_folder_raw_update", "ks_feed_folder_raw_init", "ks_feed_folder_resolve_raw_insert",
             "ks_feed_folder_resolve_raw_update", "ks_feed_folder_resolve_folder",
+            "ks_feed_folder_resolve_folder_insert", "ks_feed_folder_resolve_remap_insert",
+            "ks_feed_folder_resolve_remap_update", "ks_feed_folder_resolve_remap_delete",
         )
 
         /** The views `2.sqm` creates, dropped before the tables they read. */

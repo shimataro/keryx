@@ -63,6 +63,10 @@ final class HomeObservable: ObservableAssignment {
     private(set) var starredUnreadCount: Int64 = 0
 
     private(set) var filter: ArticleFilter = ArticleFilterAll()
+    /// The generation of the user's selection that put `filter` there (`FilterSelection`): it moves on
+    /// a switch to another filter, and not when a merge re-keys the selected tag or folder (which
+    /// changes `filter` alone). What the article list keys its scroll-to-top on.
+    private(set) var filterGeneration: Int64 = 0
     /// The article list's pull in flight — see `pullToRefresh()`.
     @ObservationIgnored private let articleListPull = AbandonableRefresh()
     private(set) var selectedRowInstance: FeedListRowSelection = FeedListRowSelectionAll()
@@ -239,7 +243,7 @@ final class HomeObservable: ObservableAssignment {
         // The filter is restored synchronously in that init too. Waiting for the first delivery would
         // start the list on `All` and then switch it to the restored filter, which `ArticleListTopReset`
         // takes for the user's switch and answers with a scroll to the top, over the restored selection.
-        assignFilter(viewModel.filter.value)
+        assignFilterSelection(viewModel.filterSelection.value)
         // The sidebar's selected row is restored with it; mirroring only the filter would leave the
         // two disagreeing (the highlight follows both) until the first delivery.
         assignSelectedRowInstance(viewModel.selectedRowInstance.value)
@@ -252,7 +256,7 @@ final class HomeObservable: ObservableAssignment {
     /// between (a pane-focus change, say) would read the stale selection and flash it back.
     func selectFilter(_ filter: ArticleFilter, instance: FeedListRowSelection) {
         viewModel.selectFilter(filter: filter, instance: instance)
-        assignFilter(viewModel.filter.value)
+        assignFilterSelection(viewModel.filterSelection.value)
         assignSelectedRowInstance(viewModel.selectedRowInstance.value)
         updateFeedListSelectionTarget()
     }
@@ -327,24 +331,26 @@ final class HomeObservable: ObservableAssignment {
     /// (`ArticleListPane.kt`): while this filter is in `HomeViewModel.pullRefreshingFilters`, and
     /// for at least `PullRefreshHold.defaultMinimum`.
     ///
-    /// Selecting another filter meanwhile ends the wait (`assignFilter`): the list on screen is then
-    /// that filter's, which this refresh is not for.
+    /// Selecting another filter meanwhile ends the wait (`assignFilterSelection`): the list on screen
+    /// is then that filter's, which this refresh is not for. A merge re-keying the selected tag or
+    /// folder is no such switch: the pull is tracked under the new id from then on
+    /// (`HomeRefreshController.remapPulls`), so the wait follows `filter` as it is at each delivery.
     func pullToRefresh() async {
-        await articleListPull.run { await self.awaitPull(of: self.filter) { self.viewModel.pullToRefresh() } }
+        await articleListPull.run { await self.awaitPull(of: { self.filter }) { self.viewModel.pullToRefresh() } }
     }
 
     /// The iOS sidebar's pull: every feed, whatever the article list shows. Held up like
     /// `pullToRefresh()`, under the `All` filter it is tracked as.
     func pullToRefreshAll() async {
-        await awaitPull(of: ArticleFilterAll()) { viewModel.pullToRefreshAll() }
+        await awaitPull(of: { ArticleFilterAll() }) { viewModel.pullToRefreshAll() }
     }
 
-    private func awaitPull(of filter: ArticleFilter, start: () -> Void) async {
-        let filter = filter as AnyObject
+    private func awaitPull(of filter: () -> ArticleFilter, start: () -> Void) async {
         await PullRefreshHold.run {
             start()
             for await pending in viewModel.pullRefreshingFilters {
-                if !pending.contains(where: { kotlinValuesEqual($0 as AnyObject, filter) }) { return }
+                let current = filter() as AnyObject
+                if !pending.contains(where: { kotlinValuesEqual($0 as AnyObject, current) }) { return }
             }
         }
     }
@@ -500,19 +506,23 @@ final class HomeObservable: ObservableAssignment {
     }
 
     private func observeFilter() async {
-        for await v in viewModel.filter {
-            if assignFilter(v) { updateFeedListSelectionTarget() }
+        for await v in viewModel.filterSelection {
+            if assignFilterSelection(v) { updateFeedListSelectionTarget() }
         }
     }
 
     // `assignIfChanged` needs `Equatable`, which a Kotlin sealed type's bridged protocol is not —
     // see `FeedListSelectionEquality`.
+    /// Mirrors `HomeViewModel.filterSelection`. Only a new generation — the user's switch to another
+    /// filter — ends the article list's pull; a re-keyed filter under the same generation keeps it.
     @discardableResult
-    private func assignFilter(_ v: ArticleFilter) -> Bool {
-        guard !articleFiltersEqual(filter, v) else { return false }
-        filter = v
+    private func assignFilterSelection(_ v: FilterSelection) -> Bool {
+        let switched = v.generation != filterGeneration
+        if switched { filterGeneration = v.generation }
+        guard !articleFiltersEqual(filter, v.filter) else { return false }
+        filter = v.filter
         updateRowsMatchFilter()
-        articleListPull.abandon()
+        if switched { articleListPull.abandon() }
         return true
     }
 

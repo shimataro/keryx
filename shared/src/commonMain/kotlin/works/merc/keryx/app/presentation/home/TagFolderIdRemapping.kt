@@ -12,3 +12,7 @@ internal fun FeedListRowSelection.remappedBy(remap: TagFolderIdRemap): FeedListR
     is FeedListRowSelection.FeedInTag -> remap.tag(tagId).let { if (it == tagId) this else copy(tagId = it) }
     FeedListRowSelection.All, FeedListRowSelection.Starred, is FeedListRowSelection.FeedInFolderGroup -> this
 }
+
+/** This selection with its filter's tag or folder id brought up to date by [remap], keeping its generation. */
+internal fun FilterSelection.remappedBy(remap: TagFolderIdRemap): FilterSelection =
+    remap.filter(filter).let { if (it == filter) this else copy(filter = it) }

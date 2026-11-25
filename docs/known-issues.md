@@ -527,38 +527,51 @@ file cannot be rewritten, so devices can still diverge in those cases.
 ## `tags.v2_id` / `folders.v2_id` are temporary and must be removed eventually
 
 **Status**: not fixed — a deliberate transitional column. It is needed only while devices that ran schema
-version 2 are upgrading, and removing it needs one more one-time step (see "What a real fix would need").
+version 2 are upgrading, and removing it needs the steps under "What a real fix would need".
 
 ### Why it exists
 
 Before version 3 a tag's or folder's id was a random UUIDv4; the v2→v3 migration re-keyed each row onto the id its
 creation-time name derives from and kept the pre-upgrade id in `v2_id`. Two devices that shared that v2 id still
 recognise each other's row even if one renamed it before the rename reached the other, which would otherwise derive
-a different name-derived id on each device (see "Reconciliation of v2 identities" in
-[sync-architecture.md](sync-architecture.md)). The column travels in transport files and is NULL on a row created
-after the migration.
+a different name-derived id on each device: the pair `(v2_id, id)` is an identity edge (`ks_v2_edge`), and every merge
+moves all rows of one identity onto its canonical id, the smallest id it has been seen under (see "Identities of tags
+and folders" in [sync-architecture.md](sync-architecture.md)). The column travels in transport files, as do the edge
+tables in full sends and bases, and is NULL on a row created after the migration.
 
 ### Why it cannot simply be dropped once every device has upgraded
 
-The reconciliation rewrites the **cloud** row onto the receiving device's id; it does not rewrite the receiving
-device's own row. So after two devices have renamed the same pre-upgrade row differently, they keep different ids
-for it, reconciled on every merge by `v2_id`. Dropping the column before those ids are unified would let the next
-merge import each other's row under a second id, and both rows share the name (same-named rows are allowed) and
-are numbered by the UI — one logical tag or folder split in two.
+A device converges on the canonical id only once it has seen every edge of the identity — in practice, once every
+device that shared the v2 row has synced its full send (or a base containing it) and every other device has merged
+it. Until then two devices can still hold the identity under different ids, and the edges (from the column and from
+`ks_v2_edge`) are what lets the next merge move them together. Dropping the column, or the edges, before that would
+let a merge import the other device's row under a second id: both rows share the name (same-named rows are allowed)
+and are numbered by the UI — one logical tag or folder split in two.
 
 ### What a real fix would need
 
-`v2_id` may be removed only when the following technical condition holds:
+`v2_id` may be removed only when the following conditions hold:
 
+- **Every device has converged on the canonical ids.** Every device that ran schema version 2 has joined with a full
+  send (which carries its edges), and every device has merged a state containing all of them — so no two devices hold
+  one identity under different ids, and no cloud file still carries a row at a non-canonical id. This is an
+  operational assumption about which devices still exist and how old the cloud data is, not something one device can
+  verify; a version that drops the column should, for example, first ship a release that keeps the edges for a long
+  enough period, or reset the cloud data once (a new generation, which every device rejoins with a full send from its
+  converged state).
 - **SQLite `DROP COLUMN` is supported on every targeted platform.** SQLite ≥ 3.35.0 is required. Known bundled versions: desktop sqlite-jdbc 3.53.4 → SQLite 3.53.4; Android requery 3.49.0 → SQLite 3.49.0. Apple (iOS 17 / macOS 14) ships SQLite 3.39.x or later in practice and is expected to support it, but confirm on a real device before relying on it.
 
 The removal must be performed by a schema migration after version 3 (i.e., version 4 or later) and must follow this order:
 
-1. **Re-key any remaining v2 identities before dropping the column.** Any rows that still share a `v2_id` but are held under different name-derived ids must be collapsed onto one canonical id, moving `feed_tags.tag_id`, `feeds.folder_id` and `local_settings` references just as `TagFolderIdRekey` does.
-2. **Drop `v2_id` from `tags` and `folders`.**
-3. **Remove `v2_id` from the sync code and transport format:** `TransportSchema`, `MergeSchema`, `MergeSql`, `DeltaExport` and the re-key logic itself.
-
-**Caveat:** The re-key guarantees safety for local v2→v4 upgrades, but it cannot by itself prove that no folded cloud file still carries two rows sharing a `v2_id` under different ids. That is an operational assumption about the age of the cloud data, not a verifiable technical precondition.
+1. **Move any remaining row onto its canonical id before dropping anything**, by the same rule as the merge's identity
+   step (`V2IdentitySql`: smallest row id of each identity in `ks_v2_edge`), moving `feed_tags.tag_id`,
+   `ks_feed_folder_raw.folder_id` (and with it `feeds.folder_id`), unsent `sync_outbox` entries and — through
+   `ks_id_remap` — `local_settings` references.
+2. **Drop `v2_id` from `tags` and `folders`, and drop `ks_v2_edge`.**
+3. **Remove the identity step and the edges from the sync code and transport format:** `V2IdentitySql`, the edge
+   recording in `MergeSql`, `TransportSchema` (`v2_id` and `folder_v2_edges` / `tag_v2_edges`, with a transport
+   migration), `ReduceSql`'s edge fold, `DeltaExportSql`, `MergeSchema`, and the re-key logic itself. `ks_id_remap`
+   stays (stale ids held outside the database still resolve through it).
 
 ## Google Drive: an upload can overwrite another device's upload unnoticed
 

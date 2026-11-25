@@ -129,6 +129,9 @@ fun sharedModule(): Module = module {
                 NetworkUsagePolicy.compactionAllowedFlow(get<NetworkConditionMonitor>().condition)
             },
             pendingLocalWrites = get(),
+            // A merge can move tags or folders onto their canonical ids; once it commits, the ids held
+            // outside the database follow (TagFolderIdRemaps). Lazy like the lambdas above.
+            publishIdRemaps = { get<TagFolderIdRemaps>().publishFromDb() },
         )
     }
     single<SyncScheduler> { get<SyncRepository>() }

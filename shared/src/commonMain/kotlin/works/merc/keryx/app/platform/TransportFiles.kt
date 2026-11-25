@@ -185,7 +185,11 @@ object TransportFiles {
             SyncValidationSql.coverageProblem(target.name, devices, covered)?.let { return TransportValidation.Corrupt(it) }
         }
         // Check 9.
-        for (check in SyncValidationSql.closureChecks) {
+        val closureChecks = when (target) {
+            is ValidationTarget.Transport -> SyncValidationSql.transportClosureChecks
+            is ValidationTarget.PreDelta -> SyncValidationSql.closureChecks
+        }
+        for (check in closureChecks) {
             if (connection.queryRows(check.query).isNotEmpty()) {
                 return TransportValidation.Corrupt("dangling reference: ${check.description}")
             }

@@ -146,19 +146,24 @@ CREATE TABLE ks_feed_folder_raw (
     folder_id         TEXT
 );
 
-CREATE VIEW ks_feed_folder_resolved AS
-SELECT r.feed_id AS feed_id,
-    CASE WHEN EXISTS (SELECT 1 FROM folders f WHERE f.id = r.folder_id AND f.deleted_at IS NULL)
-        THEN r.folder_id END AS folder_id,
-    r.folder_updated_at AS folder_updated_at
-FROM ks_feed_folder_raw r;
-
 CREATE TABLE ks_id_remap (
     kind   TEXT NOT NULL,
     old_id TEXT NOT NULL,
     new_id TEXT NOT NULL,
     PRIMARY KEY (kind, old_id)
 );
+
+CREATE VIEW ks_feed_folder_resolved AS
+SELECT r.feed_id AS feed_id,
+    CASE WHEN EXISTS (SELECT 1 FROM folders f WHERE f.id = r.target AND f.deleted_at IS NULL)
+        THEN r.target END AS folder_id,
+    r.folder_updated_at AS folder_updated_at
+FROM (
+    SELECT raw.feed_id AS feed_id, raw.folder_updated_at AS folder_updated_at,
+        COALESCE((SELECT m.new_id FROM ks_id_remap m WHERE m.kind = 'folder' AND m.old_id = raw.folder_id),
+            raw.folder_id) AS target
+    FROM ks_feed_folder_raw raw
+) r;
 
 CREATE TABLE ks_v2_edge (
     kind  TEXT NOT NULL,
@@ -320,9 +325,8 @@ END;
 -- 6. A feed's raw folder assignment (sync_bookkeeping.sq): the triggers that create it with every new
 --    feed and resolve feeds.folder_id / folder_updated_at from it, then one raw row per existing feed
 --    from its current folder_id / folder_updated_at. A folder_id naming no folder row (written before
---    foreign keys were enforced) is recorded as NULL: a raw row only ever names an existing folder,
---    which every send's closure relies on (DeltaExportSql) — so the backfill's resolution clears that
---    dangling feeds.folder_id too. A feed assigned to a soft-deleted folder keeps that raw assignment
+--    foreign keys were enforced) is recorded as NULL — no send could carry a row or an identity for
+--    it (DeltaExportSql) — so the backfill's resolution clears that dangling feeds.folder_id too. A feed assigned to a soft-deleted folder keeps that raw assignment
 --    and resolves to "no folder" until the folder is alive again. Capture is off, so nothing is
 --    recorded. The re-key that follows (TagFolderIdRekey) moves the raw rows with the folders.
 CREATE TRIGGER ks_feed_folder_raw_init AFTER INSERT ON feeds
@@ -357,7 +361,52 @@ BEGIN
     UPDATE feeds SET
         folder_id = (SELECT v.folder_id FROM ks_feed_folder_resolved v WHERE v.feed_id = feeds.id),
         folder_updated_at = (SELECT v.folder_updated_at FROM ks_feed_folder_resolved v WHERE v.feed_id = feeds.id)
-    WHERE id IN (SELECT r.feed_id FROM ks_feed_folder_raw r WHERE r.folder_id = new.id)
+    WHERE id IN (SELECT r.feed_id FROM ks_feed_folder_raw r WHERE r.folder_id = new.id
+            OR r.folder_id IN (SELECT m.old_id FROM ks_id_remap m WHERE m.kind = 'folder' AND m.new_id = new.id))
+        AND EXISTS (SELECT 1 FROM ks_feed_folder_resolved v WHERE v.feed_id = feeds.id
+            AND (v.folder_id IS NOT feeds.folder_id OR v.folder_updated_at IS NOT feeds.folder_updated_at));
+END;
+
+CREATE TRIGGER ks_feed_folder_resolve_folder_insert AFTER INSERT ON folders
+BEGIN
+    UPDATE feeds SET
+        folder_id = (SELECT v.folder_id FROM ks_feed_folder_resolved v WHERE v.feed_id = feeds.id),
+        folder_updated_at = (SELECT v.folder_updated_at FROM ks_feed_folder_resolved v WHERE v.feed_id = feeds.id)
+    WHERE id IN (SELECT r.feed_id FROM ks_feed_folder_raw r WHERE r.folder_id = new.id
+            OR r.folder_id IN (SELECT m.old_id FROM ks_id_remap m WHERE m.kind = 'folder' AND m.new_id = new.id))
+        AND EXISTS (SELECT 1 FROM ks_feed_folder_resolved v WHERE v.feed_id = feeds.id
+            AND (v.folder_id IS NOT feeds.folder_id OR v.folder_updated_at IS NOT feeds.folder_updated_at));
+END;
+
+CREATE TRIGGER ks_feed_folder_resolve_remap_insert AFTER INSERT ON ks_id_remap
+WHEN new.kind = 'folder'
+BEGIN
+    UPDATE feeds SET
+        folder_id = (SELECT v.folder_id FROM ks_feed_folder_resolved v WHERE v.feed_id = feeds.id),
+        folder_updated_at = (SELECT v.folder_updated_at FROM ks_feed_folder_resolved v WHERE v.feed_id = feeds.id)
+    WHERE id IN (SELECT r.feed_id FROM ks_feed_folder_raw r WHERE r.folder_id = new.old_id)
+        AND EXISTS (SELECT 1 FROM ks_feed_folder_resolved v WHERE v.feed_id = feeds.id
+            AND (v.folder_id IS NOT feeds.folder_id OR v.folder_updated_at IS NOT feeds.folder_updated_at));
+END;
+
+CREATE TRIGGER ks_feed_folder_resolve_remap_update AFTER UPDATE ON ks_id_remap
+WHEN old.kind = 'folder' OR new.kind = 'folder'
+BEGIN
+    UPDATE feeds SET
+        folder_id = (SELECT v.folder_id FROM ks_feed_folder_resolved v WHERE v.feed_id = feeds.id),
+        folder_updated_at = (SELECT v.folder_updated_at FROM ks_feed_folder_resolved v WHERE v.feed_id = feeds.id)
+    WHERE id IN (SELECT r.feed_id FROM ks_feed_folder_raw r WHERE r.folder_id IN (old.old_id, new.old_id))
+        AND EXISTS (SELECT 1 FROM ks_feed_folder_resolved v WHERE v.feed_id = feeds.id
+            AND (v.folder_id IS NOT feeds.folder_id OR v.folder_updated_at IS NOT feeds.folder_updated_at));
+END;
+
+CREATE TRIGGER ks_feed_folder_resolve_remap_delete AFTER DELETE ON ks_id_remap
+WHEN old.kind = 'folder'
+BEGIN
+    UPDATE feeds SET
+        folder_id = (SELECT v.folder_id FROM ks_feed_folder_resolved v WHERE v.feed_id = feeds.id),
+        folder_updated_at = (SELECT v.folder_updated_at FROM ks_feed_folder_resolved v WHERE v.feed_id = feeds.id)
+    WHERE id IN (SELECT r.feed_id FROM ks_feed_folder_raw r WHERE r.folder_id = old.old_id)
         AND EXISTS (SELECT 1 FROM ks_feed_folder_resolved v WHERE v.feed_id = feeds.id
             AND (v.folder_id IS NOT feeds.folder_id OR v.folder_updated_at IS NOT feeds.folder_updated_at));
 END;

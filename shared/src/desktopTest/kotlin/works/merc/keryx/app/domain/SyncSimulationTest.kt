@@ -13,7 +13,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
+import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import works.merc.keryx.app.InMemoryFaviconMissStore
+import works.merc.keryx.app.createSchemaV2
+import works.merc.keryx.app.data.local.db.KeryxDatabase
+import java.io.File
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.CloudStorageException
@@ -133,6 +137,166 @@ class SyncSimulationTest {
     @Test
     fun devicesConvergeFromAPreDeltaCloudWithAnOlderBuildStillWriting() {
         runSimulation(53, operations = 300, legacyStart = true)
+    }
+
+    /**
+     * Devices that shared v2-era tag and folder rows and each renamed them differently before
+     * upgrading (every derived id differs, the pre-upgrade id is shared): whatever order they sync in,
+     * every device ends on the same single tag and folder — the smallest derived id — with the same
+     * link, folder assignment and values.
+     */
+    @Test
+    fun devicesThatRenamedSharedV2RowsDifferentlyConvergeOnTheSmallestIdInEveryOrder() = runBlocking {
+        val tagNames = listOf("Alpha", "Beta", "Gamma")
+        val folderNames = listOf("AlphaDir", "BetaDir", "GammaDir")
+        val tagId = tagNames.minOf { IdGenerator.tagId(it) }
+        val folderId = folderNames.minOf { IdGenerator.folderId(it) }
+        // Which devices sync first, and in what order: every permutation of the three, then a round of all.
+        val orders = listOf(listOf(0, 1, 2), listOf(0, 2, 1), listOf(1, 0, 2), listOf(1, 2, 0), listOf(2, 0, 1), listOf(2, 1, 0))
+        for (order in orders) {
+            val sim = Sim(61)
+            val devices = (0 until 3).map { i ->
+                SyncDevice("v2-$i", sim.cloud, sim.clock, sim.scope, sim.ids, existingDbFile = migratedV2Device(tagNames[i], folderNames[i], stamp = 100L * (i + 1)))
+            }
+            try {
+                for (i in order) {
+                    sim.tick(1_000)
+                    val result = devices[i].repo.sync()
+                    if (result is Result.Err) fail("order $order: device $i: ${result.exception}")
+                }
+                // Everyone syncs until a whole round changes nothing in the cloud.
+                var quiet = 0
+                repeat(10) {
+                    if (quiet == 2) return@repeat
+                    val before = sim.cloud.written.size + sim.cloud.deleteCount
+                    for (device in devices) {
+                        sim.tick(1_000)
+                        val result = device.repo.sync()
+                        if (result is Result.Err) fail("order $order: ${device.label}: ${result.exception}")
+                    }
+                    quiet = if (sim.cloud.written.size + sim.cloud.deleteCount == before) quiet + 1 else 0
+                }
+                val dumps = devices.map { TransportFixtures.dump(it.file, local = true) }
+                for (i in 1 until dumps.size) assertEquals(dumps[0], dumps[i], "order $order: device 0 and $i differ")
+                for (device in devices) {
+                    assertEquals(listOf(tagId), device.db.tagsQueries.watchAll().executeAsList().map { it.id }, "order $order: ${device.label}")
+                    assertEquals(listOf(folderId), device.db.foldersQueries.watchAll().executeAsList().map { it.id }, "order $order: ${device.label}")
+                    assertEquals(listOf(tagId), device.db.feed_tagsQueries.watchTagIdsForFeed("f1").executeAsList(), "order $order: ${device.label}")
+                    assertEquals(folderId, device.db.feedsQueries.getById("f1").executeAsOne().folder_id, "order $order: ${device.label}")
+                    // The newest rename (device 2's, stamp 300) is the one every device shows.
+                    assertEquals("Gamma", device.db.tagsQueries.getById(tagId).executeAsOne().name, "order $order: ${device.label}")
+                    assertTrue(device.outbox().isEmpty(), "order $order: ${device.label} has unsent changes")
+                }
+            } finally {
+                devices.forEach { it.close() }
+                sim.scope.cancel()
+                sim.client.close()
+                sim.failingClient.close()
+            }
+        }
+    }
+
+    /**
+     * The same shared v2 folder renamed differently on three devices (three aliases), and each device
+     * moves the one feed within the same millisecond — two into their own alias, one into a folder of
+     * its own. The assignments tie on their stamp, and the aliases are re-keyed onto the smallest id
+     * while they sync, so a tie settled on mapped ids would depend on the history. Whatever order the
+     * devices sync in, every device stores the same raw assignment (one the devices wrote, as written),
+     * resolves the same folder, and holds the same folders and remaining synced state.
+     */
+    @Test
+    fun sameStampFolderMovesIntoV2AliasesConvergeInEveryOrder() = runBlocking {
+        val tagNames = listOf("Alpha", "Beta", "Gamma")
+        val folderNames = listOf("AlphaDir", "BetaDir", "GammaDir")
+        val canonical = folderNames.minOf { IdGenerator.folderId(it) }
+        val ownFolder = "zz-own-folder"
+        // What each device writes as the feed's raw folder, all at one stamp.
+        val written = folderNames.mapIndexed { i, name -> if (i == 2) ownFolder else IdGenerator.folderId(name) }.toSet()
+        val orders = listOf(listOf(0, 1, 2), listOf(0, 2, 1), listOf(1, 0, 2), listOf(1, 2, 0), listOf(2, 0, 1), listOf(2, 1, 0))
+        for (order in orders) {
+            val sim = Sim(67)
+            val devices = (0 until 3).map { i ->
+                SyncDevice("same-stamp-$i", sim.cloud, sim.clock, sim.scope, sim.ids, existingDbFile = migratedV2Device(tagNames[i], folderNames[i], stamp = 100L * (i + 1)))
+            }
+            try {
+                // The same-millisecond moves, before any device has synced (capture is still off, so the
+                // first sync sends each device's whole state).
+                devices.forEachIndexed { i, device ->
+                    if (i == 2) {
+                        device.driver.execute(
+                            null,
+                            "INSERT INTO folders (id, name, sort_order, updated_at, created_at, name_updated_at, sort_order_updated_at) " +
+                                "VALUES ('$ownFolder', 'Own', 9, 400, 400, 400, 400)",
+                            0,
+                        )
+                    }
+                    val target = if (i == 2) ownFolder else IdGenerator.folderId(folderNames[i])
+                    device.driver.execute(
+                        null,
+                        "UPDATE ks_feed_folder_raw SET folder_id = '$target', folder_updated_at = 500 WHERE feed_id = 'f1'",
+                        0,
+                    )
+                }
+                for (i in order) {
+                    sim.tick(1_000)
+                    val result = devices[i].repo.sync()
+                    if (result is Result.Err) fail("order $order: device $i: ${result.exception}")
+                }
+                var quiet = 0
+                repeat(10) {
+                    if (quiet == 2) return@repeat
+                    val before = sim.cloud.written.size + sim.cloud.deleteCount
+                    for (device in devices) {
+                        sim.tick(1_000)
+                        val result = device.repo.sync()
+                        if (result is Result.Err) fail("order $order: ${device.label}: ${result.exception}")
+                    }
+                    quiet = if (sim.cloud.written.size + sim.cloud.deleteCount == before) quiet + 1 else 0
+                }
+                val dumps = devices.map { TransportFixtures.dump(it.file, local = true) }
+                for (i in 1 until dumps.size) assertEquals(dumps[0], dumps[i], "order $order: device 0 and $i differ")
+                val raw = devices.map { it.rawFolders() }
+                for (i in 1 until raw.size) assertEquals(raw[0], raw[i], "order $order: raw assignments of device 0 and $i differ")
+                val rawFolder = raw[0].single().split("|")
+                assertEquals("500", rawFolder[1], "order $order")
+                assertTrue(rawFolder[2] in written, "order $order: raw ${rawFolder[2]} is not a value a device wrote")
+                for (device in devices) {
+                    assertEquals(setOf(canonical, ownFolder), device.db.foldersQueries.watchAll().executeAsList().map { it.id }.toSet(), "order $order: ${device.label}")
+                    val resolved = device.db.feedsQueries.getById("f1").executeAsOne().folder_id
+                    assertEquals(if (rawFolder[2] == ownFolder) ownFolder else canonical, resolved, "order $order: ${device.label}")
+                    assertTrue(device.outbox().isEmpty(), "order $order: ${device.label} has unsent changes")
+                }
+            } finally {
+                devices.forEach { it.close() }
+                sim.scope.cancel()
+                sim.client.close()
+                sim.failingClient.close()
+            }
+        }
+    }
+
+    /**
+     * A version-2 database holding the shared pre-upgrade tag "old-tag" and folder "old-folder", renamed
+     * to [tagName] / [folderName] at [stamp], with feed f1 in the folder and linked to the tag — migrated
+     * to the current schema, which re-keys both onto the ids their names derive and keeps the old id as `v2_id`.
+     */
+    private fun migratedV2Device(tagName: String, folderName: String, stamp: Long): File {
+        val file = File.createTempFile("v2sim", ".db").apply { deleteOnExit() }
+        JdbcSqliteDriver("jdbc:sqlite:${file.absolutePath}").use { driver ->
+            driver.createSchemaV2()
+            listOf(
+                "INSERT INTO folders (id, name, sort_order, updated_at, created_at) VALUES ('old-folder', '$folderName', 0, $stamp, 1)",
+                "INSERT INTO tags (id, name, color, sort_order, updated_at, created_at) VALUES ('old-tag', '$tagName', NULL, 0, $stamp, 1)",
+                "INSERT INTO feeds (id, url, title, etag, folder_id, folder_updated_at, updated_at, created_at) " +
+                    "VALUES ('f1', 'https://feeds.example/v2.xml', 'Feed', 'e', 'old-folder', 50, 100, 1)",
+                "INSERT INTO feed_tags (feed_id, tag_id, updated_at) VALUES ('f1', 'old-tag', 50)",
+            ).forEach { driver.execute(null, it, 0) }
+        }
+        JdbcSqliteDriver("jdbc:sqlite:${file.absolutePath}").use { driver ->
+            KeryxDatabase.Schema.migrate(driver, 2, KeryxDatabase.Schema.version, *KERYX_SCHEMA_CALLBACKS)
+            driver.execute(null, "PRAGMA user_version=${KeryxDatabase.Schema.version}", 0)
+        }
+        return file
     }
 
     private fun runSimulation(seed: Int, operations: Int, legacyStart: Boolean = false) = runBlocking {

@@ -27,6 +27,7 @@ import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotEquals
 
 /**
  * A merge that re-keys a tag or folder onto another id publishes the move ([TagFolderIdRemaps]), and
@@ -189,5 +190,134 @@ class HomeViewModelIdRemapTest {
 
         assertEquals(ArticleFilter.Tag("t-old"), vm.filter.value)
         assertEquals(setOf("d-old"), vm.collapsedFolderIds.value)
+    }
+
+    // ---- The selection's identity across a re-key (generation) ----
+
+    /**
+     * Seeds three articles in f1 (display order s3, s2, s1), selects [selected], reports a viewport on
+     * s2 only, and lets an article newer than the viewport land: one unseen article beyond it, which
+     * the "new articles" pill counts.
+     */
+    private fun TestScope.selectWithOneUnseenArticle(vm: HomeViewModel, selected: ArticleFilter) {
+        backgroundScope.launch { vm.newArticleCount.collect {} }
+        vm.selectFilter(selected)
+        testScheduler.advanceUntilIdle()
+        vm.markArticlesSeen(listOf("s2"))
+        testScheduler.advanceUntilIdle()
+        db.insertArticle("fresh", "f1", publishedAt = 4000L)
+        testScheduler.advanceUntilIdle()
+        assertEquals(1, vm.newArticleCount.value, "precondition: one unseen article beyond the viewport")
+    }
+
+    private fun KeryxDatabase.insertArticle(id: String, feedId: String, publishedAt: Long) {
+        articlesQueries.insert(
+            id = id, feed_id = feedId, guid = id, url = "https://article/$id", title = "Title $id",
+            summary = null, content = null, author = null, published_at = publishedAt,
+            thumbnail_url = null, is_read = 0L, read_at = null, is_starred = 0L, starred_at = null,
+            cached_at = 0L, search_text = "", updated_at = 0L, created_at = 0L,
+        )
+    }
+
+    private fun seedArticles() {
+        db.insertArticle("s1", "f1", publishedAt = 1000L)
+        db.insertArticle("s2", "f1", publishedAt = 2000L)
+        db.insertArticle("s3", "f1", publishedAt = 3000L)
+    }
+
+    @Test
+    fun aReKeyOfTheSelectedTagKeepsTheGeneration() = runVmTest {
+        seedArticles()
+        val vm = newViewModel().vm
+        selectWithOneUnseenArticle(vm, ArticleFilter.Tag("t-old"))
+        val before = vm.filterSelection.value
+
+        driver.rekeyTagForTest("t-old", "t-new")
+        testScheduler.advanceUntilIdle()
+        remaps.publishFromDb()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(FilterSelection(ArticleFilter.Tag("t-new"), before.generation), vm.filterSelection.value)
+        assertEquals(ArticleFilter.Tag("t-new"), vm.filter.value)
+    }
+
+    /**
+     * KNOWN PRODUCTION GAP (reported, not fixed here): the merge's commit re-runs the old id's list
+     * query, which is empty once the row has moved, BEFORE [TagFolderIdRemaps] publishes the move and
+     * the selection follows. That emission drops every unseen id ([withList] narrows them to the
+     * emitted ids), so the pill's count is already 0 when the filter switches to the new id.
+     */
+    @Test
+    fun aReKeyOfTheSelectedTagKeepsThePillsUnseenCount() = runVmTest {
+        seedArticles()
+        val vm = newViewModel().vm
+        selectWithOneUnseenArticle(vm, ArticleFilter.Tag("t-old"))
+
+        driver.rekeyTagForTest("t-old", "t-new")
+        remaps.publishFromDb()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(1, vm.newArticleCount.value)
+    }
+
+    @Test
+    fun aReKeyOfTheSelectedFolderKeepsTheGeneration() = runVmTest {
+        seedArticles()
+        val vm = newViewModel().vm
+        selectWithOneUnseenArticle(vm, ArticleFilter.Folder("d-old"))
+        val before = vm.filterSelection.value
+
+        driver.rekeyFolderForTest("d-old", "d-new")
+        remaps.publishFromDb()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(FilterSelection(ArticleFilter.Folder("d-new"), before.generation), vm.filterSelection.value)
+    }
+
+    @Test
+    fun aReKeyOfTheSelectedFolderKeepsThePillsUnseenCount() = runVmTest {
+        seedArticles()
+        val vm = newViewModel().vm
+        selectWithOneUnseenArticle(vm, ArticleFilter.Folder("d-old"))
+
+        driver.rekeyFolderForTest("d-old", "d-new")
+        remaps.publishFromDb()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(1, vm.newArticleCount.value)
+    }
+
+    /** The contrast: a switch the user makes does bump the generation and re-seed the tracking. */
+    @Test
+    fun aUserSwitchBumpsTheGenerationAndResetsTheTracking() = runVmTest {
+        seedArticles()
+        val vm = newViewModel().vm
+        selectWithOneUnseenArticle(vm, ArticleFilter.Tag("t-old"))
+        val before = vm.filterSelection.value
+
+        vm.selectFilter(ArticleFilter.All)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(ArticleFilter.All, vm.filterSelection.value.filter)
+        assertNotEquals(before.generation, vm.filterSelection.value.generation)
+        assertEquals(0, vm.newArticleCount.value, "the new list's first emission is the new baseline")
+    }
+
+    /** Selecting the row the selection already is (by its stale or new id) changes nothing, generation included. */
+    @Test
+    fun reSelectingTheReKeyedRowKeepsTheGeneration() = runVmTest {
+        val vm = newViewModel().vm
+        vm.selectFilter(ArticleFilter.Tag("t-old"))
+        testScheduler.advanceUntilIdle()
+        val before = vm.filterSelection.value.generation
+        driver.rekeyTagForTest("t-old", "t-new")
+        remaps.publishFromDb()
+        testScheduler.advanceUntilIdle()
+        assertEquals(before, vm.filterSelection.value.generation)
+
+        vm.selectFilter(ArticleFilter.Tag("t-old"))
+        vm.selectFilter(ArticleFilter.Tag("t-new"))
+
+        assertEquals(before, vm.filterSelection.value.generation)
     }
 }

@@ -105,10 +105,11 @@ class SchemaV3MigrationTest {
         assertEquals(created.keys, migrated.keys)
         for (key in created.keys) assertEquals(created[key], migrated[key], "schema differs at $key")
         assertTrue("feed_fetch_state" in (created["tables"] as List<*>))
-        // The twelve capture triggers plus the raw folder row's capture trigger, and the four that keep
-        // feeds.folder_id resolved from ks_feed_folder_raw (its creation with the feed and the three
-        // resolution triggers); the one view is ks_feed_folder_resolved.
-        assertEquals(17, (created["triggers"] as List<*>).size)
+        // The twelve capture triggers plus the raw folder row's capture trigger, and the eight that keep
+        // feeds.folder_id resolved from ks_feed_folder_raw (its creation with the feed, and resolution
+        // on a raw row's insert/update, a folder's insert and liveness change, and a folder entry of
+        // ks_id_remap's insert/update/delete); the one view is ks_feed_folder_resolved.
+        assertEquals(21, (created["triggers"] as List<*>).size)
         assertEquals(listOf("ks_feed_folder_resolved"), (created["views"] as List<*>).map { (it as List<*>)[0] })
     }
 

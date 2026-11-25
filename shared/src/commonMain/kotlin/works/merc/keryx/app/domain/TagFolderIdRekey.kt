@@ -38,8 +38,8 @@ val KERYX_SCHEMA_CALLBACKS: Array<AfterVersion> = arrayOf(
  * `ks_feed_folder_raw`, which `2.sqm` has just filled) are moved, the old row is deleted, and the
  * move is recorded in `ks_id_remap` ([IdRemapSql.record]) so `SettingsRepository` can rewrite the
  * same ids in `local_settings.json` at startup. The row's `v2_id` (set by `2.sqm` to its pre-upgrade id)
- * is copied along, so `MergeSql` can reconcile two devices that renamed the same pre-upgrade row
- * differently before upgrading. Every row that carries a `v2_id` afterwards — re-keyed here or already
+ * is copied along, so the merge ([V2IdentitySql]) can tell two devices that renamed the same
+ * pre-upgrade row differently before upgrading are holding one identity. Every row that carries a `v2_id` afterwards — re-keyed here or already
  * at its derived id — also gets its identity edge `(kind, v2_id, id)` in `ks_v2_edge`, the grow-only
  * record of which ids are one identity that full sends and bases carry. The insert-children-delete order
  * keeps every foreign key satisfied with foreign keys enforced, as they are on every platform's
@@ -49,8 +49,8 @@ val KERYX_SCHEMA_CALLBACKS: Array<AfterVersion> = arrayOf(
  * feed (`ks_feed_folder_resolve_raw_update`) under the copy, which carries the old row's
  * `deleted_at`, so the resolved folder is the same as before, under the new id.
  * A pre-delta cloud file migrated by `DatabaseMerger` runs the same step on the downloaded copy; its
- * rows then meet an already-migrated device under the same `v2_id`, and `MergeSql` reconciles rows
- * that were renamed before the migration.
+ * rows then meet an already-migrated device under the same `v2_id`, and the merge moves rows that
+ * were renamed before the migration onto their identity's canonical id ([V2IdentitySql]).
  * Running again changes nothing: every row's id is already the derived one.
  */
 fun rekeyTagAndFolderIds(driver: SqlDriver) {

@@ -105,6 +105,12 @@ internal class DeltaSync(
     /** Whether folding may run now ([NetworkUsagePolicy.compactionAllowed]). */
     private val compactionAllowed: suspend () -> Boolean,
     private val setPhase: (SyncPhase) -> Unit,
+    /**
+     * Republishes `ks_id_remap` to the ids held outside the database ([TagFolderIdRemaps.publishFromDb])
+     * after a merge has committed — a merge may have moved tags or folders onto their canonical ids
+     * ([V2IdentitySql]). Never called inside the merge's transaction.
+     */
+    private val publishIdRemaps: suspend () -> Unit = {},
 ) {
     /** Called at each [SyncHookPoint] with the file name concerned; for tests only. */
     var testHook: (suspend (SyncHookPoint, String) -> Unit)? = null
@@ -769,7 +775,26 @@ internal class DeltaSync(
         // Committed. The merge wrote through its own connection, bypassing SQLDelight's listeners, so
         // the UI is told at once — whatever happens to the indexing after it.
         driver.notifyListeners(*SYNCED_TABLES)
+        publishIdRemapsAfterCommit()
         return finishIndexing()
+    }
+
+    /**
+     * Brings the ids held outside the database (the selection, the feed list's expansion, the local
+     * settings) onto any canonical ids the committed merge moved tags or folders to. A failure is
+     * logged, not returned: the merge is committed and the database is the source of truth — every
+     * write resolves a stale id itself (tags.sq / folders.sq), the next merge publishes again, and the
+     * next launch re-reads the table — so failing the sync for it would only report a fault that
+     * leaves nothing wrong behind.
+     */
+    private suspend fun publishIdRemapsAfterCommit() {
+        try {
+            publishIdRemaps()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            Log.warn(TAG, "Publishing tag/folder id re-keys failed; the next merge or launch catches up: ${e.message}")
+        }
     }
 
     /**

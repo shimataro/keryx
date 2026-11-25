@@ -37,6 +37,15 @@ internal data class ArticleScopeSql(val clause: String, val args: List<String>)
  * parameter regardless of how many feeds it contains — relevant because this is combined with the
  * short-term `LIKE` bindings in the same query, and SQLite's bound-parameter limit is shared.
  */
+// The scope's tag or folder id, resolved through ks_id_remap as articles.sq's watchByTag /
+// watchByFolder resolve it — so a search re-run when a merge moved the selected tag or folder onto
+// another id still finds the same rows. The bound value is read once into `r.v`, so the clause still
+// binds exactly the one argument `args` holds.
+private const val RESOLVED_TAG_ID =
+    "(SELECT COALESCE((SELECT id FROM tags WHERE id = r.v), (SELECT new_id FROM ks_id_remap WHERE kind = 'tag' AND old_id = r.v), r.v) FROM (SELECT ? AS v) r)"
+private const val RESOLVED_FOLDER_ID =
+    "(SELECT COALESCE((SELECT id FROM folders WHERE id = r.v), (SELECT new_id FROM ks_id_remap WHERE kind = 'folder' AND old_id = r.v), r.v) FROM (SELECT ? AS v) r)"
+
 internal fun articleScopeSql(scope: ArticleFilter): ArticleScopeSql = when (scope) {
     ArticleFilter.All -> ArticleScopeSql(
         clause = "EXISTS (SELECT 1 FROM feeds f WHERE f.id = a.feed_id AND f.deleted_at IS NULL)",
@@ -49,13 +58,13 @@ internal fun articleScopeSql(scope: ArticleFilter): ArticleScopeSql = when (scop
             EXISTS (
                 SELECT 1 FROM feed_tags ft
                 INNER JOIN feeds f ON f.id = ft.feed_id
-                WHERE ft.feed_id = a.feed_id AND ft.tag_id = ? AND ft.deleted_at IS NULL AND f.deleted_at IS NULL
+                WHERE ft.feed_id = a.feed_id AND ft.tag_id = $RESOLVED_TAG_ID AND ft.deleted_at IS NULL AND f.deleted_at IS NULL
             )
         """.trimIndent(),
         args = listOf(scope.tagId),
     )
     is ArticleFilter.Folder -> ArticleScopeSql(
-        clause = "EXISTS (SELECT 1 FROM feeds f WHERE f.id = a.feed_id AND f.folder_id = ? AND f.deleted_at IS NULL)",
+        clause = "EXISTS (SELECT 1 FROM feeds f WHERE f.id = a.feed_id AND f.folder_id = $RESOLVED_FOLDER_ID AND f.deleted_at IS NULL)",
         args = listOf(scope.folderId),
     )
 }

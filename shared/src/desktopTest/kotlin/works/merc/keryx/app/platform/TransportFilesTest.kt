@@ -315,6 +315,49 @@ class TransportFilesTest {
         }
     }
 
+    /**
+     * A transport file's feed folder reference is satisfied by a folder row of the file or one reached
+     * from it through the file's identity edges (either direction, transitively). A reference no row
+     * and no edge path reaches is a dangling reference.
+     */
+    @Test
+    fun aFeedFolderReferenceIsSatisfiedByAFolderRowReachedThroughEdges() {
+        fun file(folderId: String, vararg extra: String) = transportFile(
+            delta, folder("d-a", "A"), feed("f1", folderId = folderId, folderAt = 100), *extra,
+        )
+        fun edge(table: String, v2Id: String, id: String) = "INSERT INTO $table (v2_id, id) VALUES ('$v2Id', '$id')"
+        // No row, no edge: dangling.
+        assertCorrupt(validate(file("X")), "feeds.folder_id")
+        // Edges that reach no row of the file: still dangling.
+        assertCorrupt(validate(file("X", edge("folder_v2_edges", "p", "X"), edge("folder_v2_edges", "p", "Y"))), "feeds.folder_id")
+        // Reaching the row directly.
+        assertEquals(
+            TransportValidation.Valid,
+            validate(file("X", edge("folder_v2_edges", "p", "X"), edge("folder_v2_edges", "p", "d-a"))),
+        )
+        // Transitively: X - p - Y - q - d-a.
+        assertEquals(
+            TransportValidation.Valid,
+            validate(
+                file(
+                    "X",
+                    edge("folder_v2_edges", "p", "X"), edge("folder_v2_edges", "p", "Y"),
+                    edge("folder_v2_edges", "q", "Y"), edge("folder_v2_edges", "q", "d-a"),
+                ),
+            ),
+        )
+        // The row's id referenced from the other end: the reference is the canonical id's alias row.
+        assertEquals(
+            TransportValidation.Valid,
+            validate(file("d-a", edge("folder_v2_edges", "p", "d-a"))),
+        )
+        // A tag's edges do not stand in for a folder's.
+        assertCorrupt(
+            validate(file("X", edge("tag_v2_edges", "p", "X"), edge("tag_v2_edges", "p", "d-a"))),
+            "feeds.folder_id",
+        )
+    }
+
     @Test
     fun aNewerVersionIsTooNew() {
         val file = validFile()
