@@ -58,21 +58,11 @@ the end of Step 8) if more than one URL was given.
 
 ## Steps
 
-### Step 1 — Validate presence of argument(s)
+### Step 1 — Arguments
 
-Check whether one or more URL arguments (space-separated) were passed to the skill.
-
-- **If none**: ask the user for one, then proceed to Step 2 with it:
-
-  ```text
-  Please provide a GitHub PR review URL.
-  Usage: /evaluate-review <github-pr-review-url>
-  ```
-
-- **If one or more**: run each URL through Steps 2–8 as its own independent pass — its own
-  branch check, fetch, evaluation, plan approval, fixes and commits. Process them **one at a
-  time, strictly in the order given** — never reorder, batch, or run two URLs concurrently —
-  and fully finish one URL's Step 8 before starting the next at Step 2.
+With no URL, ask the user for one. With several, run each through Steps 2–8 as its own
+independent pass, **one at a time, in the order given**, finishing one URL's Step 8 before
+starting the next — their plans, fixes and commits must not interleave.
 
 ### Step 2 — Validate URL format
 
@@ -94,12 +84,7 @@ Parse the URL. It must match one of the following patterns:
   from the API, never retyping the value. The one exception is the PR head SHA 8.6 compares
   against, which is the value Step 3.1 printed (hex, so written in directly).
 - Determine `comment_type`: `review_comment` for `#discussion_r`, `pr_review` for `#pullrequestreview`.
-- If the URL does **not** match either pattern, output exactly the line below, then end this URL
-  (`Invalid URL`):
-
-  ```text
-  The provided URL does not appear to be a GitHub PR review comment or review link.
-  ```
+- If the URL matches neither pattern, say so and end this URL (`Invalid URL`).
 
 ### Step 3 — Verify branch alignment
 
@@ -168,14 +153,8 @@ comment's current position, not what the reviewer saw.
 
 **PR membership check** — right after fetching the comment or review, and before anything else,
 confirm its `pull_request_url` equals
-`https://api.github.com/repos/{owner}/{repo}/pulls/{pull_number}`. If not, output the block below
-(`<kind>` is `comment` or `review`) and end this URL (`Not in this PR`):
-
-```text
-The fetched <kind> does not belong to the requested PR.
-Expected: <expected_url>
-Got:      <pull_request_url>
-```
+`https://api.github.com/repos/{owner}/{repo}/pulls/{pull_number}`. If not, report both URLs and
+end this URL (`Not in this PR`).
 
 #### If `review_comment`
 
@@ -333,27 +312,23 @@ later commit. If so, note this in its evaluation reasoning.
 
 ### Step 7 — Evaluate validity
 
-Evaluate **every item independently** against the code and project conventions, producing a
-separate verdict per item. Consider:
+Evaluate **every item independently** — is its claim true of the code it points at (a line
+comment: its lines; a review body: the PR diff or the files it names), and is the change it asks
+for worth making? A vague review body that only asks questions may need no code change. Beyond
+that, hold each item to:
 
-1. **Accuracy** — Is the factual claim correct? (e.g., a reported bug must actually exist)
-2. **Relevance** — Does the item apply to the code at the stated location?
-   - Line-comment item: the specific line(s).
-   - Review-body item: the overall PR diff (or the specific files/areas explicitly named in the body).
-3. **Constructiveness** — Does it clearly identify a problem or suggest a valid improvement?
-   - Review-body item: if the body is vague or only asks questions without requesting changes, the evaluation may conclude that no code change is required.
-4. **Project conventions** — Does it align with the project's documented rules (check `.claude/CLAUDE.md` and `docs/*.md`)?
-5. **Language / library / framework / external-service correctness** — When the item concerns usage
+1. **Project conventions** — Does it align with the project's documented rules (check `.claude/CLAUDE.md` and `docs/*.md`)?
+2. **Language / library / framework / external-service correctness** — When the item concerns usage
    of a language runtime, library, framework, or external service (e.g., REST API, cloud SDK),
    verify the claim against the **official documentation of the exact version the project uses**.
    Prefer official docs (API reference, language spec, release notes, vendor API docs) over blog
    posts or Stack Overflow. If the docs do not cover the point, inspect the source code or make a
    controlled test request directly. Do not rely on memory or general assumptions.
-6. **Regression / security / data-integrity risk** — If the item proposes or implies a code change, consider whether adopting it could break existing behavior (regression), weaken security boundaries, or corrupt data. Focus especially on:
+3. **Regression / security / data-integrity risk** — If the item proposes or implies a code change, consider whether adopting it could break existing behavior (regression), weaken security boundaries, or corrupt data. Focus especially on:
    - **Security**: authorization checks, input validation, secrets handling, injection vectors, and race conditions (e.g., TOCTOU).
    - **Data integrity**: transaction boundaries, unique / foreign-key constraints, merge semantics (`DatabaseMerger`, `MergeSql`, `SyncRepository`), FTS index consistency (`articles_fts` lifetime rules), and logical-deletion timestamps.
    - Verify the proposal does not violate documented critical constraints (e.g., `.claude/CLAUDE.md` "Critical constraints", `docs/sync-architecture.md`).
-7. **Likelihood is not a verdict** — An item reporting a reachable failure path or race is not Invalid, or only Partially Valid, because its window is narrow or it "practically never happens" (`.claude/CLAUDE.md` "Error handling and race conditions"). Judge whether the interleaving or failure is reachable, not how often.
+4. **Likelihood is not a verdict** — An item reporting a reachable failure path or race is not Invalid, or only Partially Valid, because its window is narrow or it "practically never happens" (`.claude/CLAUDE.md` "Error handling and race conditions"). Judge whether the interleaving or failure is reachable, not how often.
 
 A review-body item is evaluated only for what it raises **beyond** the review's line-comment
 items. If everything it says is already covered by them, its verdict is **No action needed —
@@ -448,23 +423,7 @@ holds):
   the reply's language: `In reply to <url>:` in English, `<url> への返信です：` in Japanese, and an
   equally natural lead-in for any other language.
 
-For example:
-
-````markdown
-**Reply to**: https://github.com/<owner>/<repo>/pull/<number>#discussion_r<id>
-
-```markdown
-Thanks for the review. After checking, I've concluded no change is needed here because 〈reason〉.
-```
-````
-
-````markdown
-**Reply to**: https://github.com/<owner>/<repo>/pull/<number>#discussion_r<id>
-
-```markdown
-ご指摘ありがとうございます。確認した結果、〈理由〉のため、現状のコードに変更は不要と判断しました。
-```
-````
+For example, for a review-body item:
 
 ````markdown
 **Reply to**: https://github.com/<owner>/<repo>/pull/<number>#pullrequestreview-<id>
@@ -478,12 +437,7 @@ Thanks for the review. 〈Which part is being fixed, and why the rest is left as
 
 #### 8.3 — Nothing to fix
 
-If no item is **Fix & commit**, output the line below and end this URL
-(`No implementation plan needed`):
-
-```text
-No implementation plan is needed.
-```
+If no item is **Fix & commit**, say so and end this URL (`No implementation plan needed`).
 
 #### 8.4 — Guards
 
@@ -497,8 +451,7 @@ Before planning anything:
 #### 8.5 — Plan, refine, approve
 
 1. Call `EnterPlanMode`.
-2. Explore the codebase to understand the surrounding architecture of every **Fix & commit** item.
-3. Write the plan to `~/.claude/plans/evaluate-review-{id}.md` (`{id}` = the URL's trailing
+2. Write the plan to `~/.claude/plans/evaluate-review-{id}.md` (`{id}` = the URL's trailing
    numeric ID) with:
    - **Context** — what the review pointed out and why it matters.
    - **One section per Fix & commit item**, in item order, each with:
@@ -509,9 +462,9 @@ Before planning anything:
        is measurable, add "re-measure per 8.6".
    - **Commit Strategy** — one commit per item, in item order, per
      `.claude/etc/per-item-commit.md` §4, made after that item's verification passes.
-4. Invoke the `refine-plan` skill with the plan file path as its argument, and resolve any
+3. Invoke the `refine-plan` skill with the plan file path as its argument, and resolve any
    question it asks before proceeding.
-5. Call `ExitPlanMode` to submit the refined plan for user approval. This approval is the
+4. Call `ExitPlanMode` to submit the refined plan for user approval. This approval is the
    whole URL's one-time run confirmation (`.claude/etc/per-item-commit.md` §1). If the user rejects it, implement nothing, commit nothing, and end this URL
    (`Plan rejected`); revise the plan instead if the user asks for changes.
 
