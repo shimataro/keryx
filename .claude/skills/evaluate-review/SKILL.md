@@ -30,15 +30,20 @@ per item (Step 8).
 
 ```text
 /evaluate-review <github-pr-review-url> [<github-pr-review-url> ...]
+/evaluate-review --continue-unaligned <github-pr-review-url> [<github-pr-review-url> ...]
 ```
 
 Examples:
 
 ```text
 /evaluate-review https://github.com/shimataro/keryx/pull/3#discussion_r3618156689
-/evaluate-review https://github.com/shimataro/keryx/pull/3#pullrequestreview-2183723456
-/evaluate-review https://github.com/shimataro/keryx/pull/3#discussion_r3618156689 https://github.com/shimataro/keryx/pull/3#pullrequestreview-2183723456
+/evaluate-review --continue-unaligned https://github.com/shimataro/keryx/pull/3#pullrequestreview-2183723456
 ```
+
+The optional `--continue-unaligned` flag is used when the main conversation has decided to run
+the evaluation on the current checkout despite a checkout-alignment warning recorded by Step 3.
+It is stripped before URL validation and honored only by Step 3, which skips the alignment checks
+for this run and reports which check was skipped.
 
 ## Outcomes
 
@@ -77,9 +82,13 @@ executes each URL's hand-off in that same order, finishing one URL's implementat
 next URL's plan approval; because a later plan is written before earlier fixes are committed, the
 8.5 hand-off re-checks each later plan against the current tree.
 
+If the first argument is `--continue-unaligned`, strip it and record it for Step 3. Do not pass
+it to URL validation; the flag applies to the whole run, not to any URL.
+
 ### Step 2 — Validate URL format
 
-Parse the URL. It must match one of the following patterns:
+Any leading `--continue-unaligned` flag has already been stripped in Step 1. Parse the remaining
+arguments as URLs. Each must match one of the following patterns:
 
 1. **Review comment** (line-level):
    `https://github.com/<owner>/<repo>/pull/<number>#discussion_r<comment_id>`
@@ -119,14 +128,20 @@ into a shell variable and only ever use the variable, never the retyped name.
    If this fails (e.g. network error, bad credentials), output a warning and proceed to Step 4.
 2. Get the current local branch with `git branch --show-current`. If the directory is not a git
    repository, output a warning and proceed to Step 4.
-3. If the branches do not match, or if `git merge-base --is-ancestor "$pr_head_sha" HEAD` fails
-   (HEAD is behind, diverged, or the commit is not available), the fork **does not continue**.
-   Instead, report the observed state precisely (PR branch, current branch, HEAD/ancestor state)
-   and append a **hand-off block** that tells the main conversation what decision is needed and
-   how to proceed. Include any relevant warnings (e.g. for a fork PR, the evaluation cannot switch
-   branches; for a same-repo PR, options are switch to the PR branch, fast-forward to the PR head
-   when possible, stay on the current HEAD with a warning, or cancel). End this URL with the
-   outcome `Needs checkout alignment` so the main conversation can realign the checkout and re-run if desired.
+3. If the `--continue-unaligned` flag was recorded in Step 1, report which checkout-alignment
+   check is being skipped (branch mismatch, or PR head not an ancestor of HEAD), include the usual
+   warning, and continue with the evaluation for this run only. The guard is unchanged for runs
+   without the flag.
+
+   If the flag is **not** set and the branches do not match, or if
+   `git merge-base --is-ancestor "$pr_head_sha" HEAD` fails (HEAD is behind, diverged, or the
+   commit is not available), the fork **does not continue**. Instead, report the observed state
+   precisely (PR branch, current branch, HEAD/ancestor state) and append a **hand-off block**
+   that tells the main conversation what decision is needed and how to proceed. The executable
+   options are: realign the checkout (switch to the PR branch, or fast-forward to the PR head when
+   possible; never on a fork PR) and re-run the skill; or cancel. If the main conversation decides
+   to evaluate on the current checkout anyway, it re-runs the skill with `--continue-unaligned`.
+   End this URL with the outcome `Needs checkout alignment`.
 
 ### Step 4 — Fetch the comment or review
 
