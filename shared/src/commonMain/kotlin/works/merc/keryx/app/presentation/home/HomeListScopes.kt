@@ -3,6 +3,7 @@ package works.merc.keryx.app.presentation.home
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.domain.ArticleListRow
 import works.merc.keryx.app.domain.ArticleSearchResult
+import works.merc.keryx.app.domain.TagFolderIdRemap
 
 // The list-scope and snapshot types HomeViewModel's article list and search flows are built from.
 
@@ -21,7 +22,11 @@ internal data class SearchSnapshot(
  * filter or mode change asynchronously, so for a moment the rows on screen can still belong to the
  * previous one — [HomeViewModel.markAllRead] waits until this matches the current selection.
  */
-internal data class ListScope(val filter: ArticleFilter, val narrowing: ListNarrowing)
+internal data class ListScope(val filter: ArticleFilter, val narrowing: ListNarrowing) {
+    /** This scope with its tag or folder id brought up to date on [remap]. */
+    fun remappedBy(remap: TagFolderIdRemap): ListScope =
+        remap.filter(filter).let { if (it == filter) this else copy(filter = it) }
+}
 
 /** Rows tagged with the [ListScope] that produced them. */
 internal data class ScopedRows<T>(val rows: List<T>, val scope: ListScope)

@@ -78,9 +78,12 @@ class HomeViewModelIdRemapTest {
         }
     }
 
-    private fun TestScope.newViewModel(): HomeViewModelFixture {
+    private fun TestScope.newViewModel(
+        dispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.Unconfined,
+    ): HomeViewModelFixture {
         val fixture = newHomeViewModel(
             driver, db,
+            dispatcher = dispatcher,
             clock = Clock { 100L },
             localWriteFailureReporter = LocalWriteFailureReporter(notifications, Clock { 100L }),
             idRemaps = remaps,
@@ -420,6 +423,44 @@ class HomeViewModelIdRemapTest {
 
         assertEquals(ArticleFilter.All, vm.filter.value)
         assertEquals(emptySet(), vm.collapsedFolderIds.value)
+    }
+
+    private fun unreadIds(): List<String> =
+        db.articlesQueries.watchAll().executeAsList().filter { it.is_read == 0L }.map { it.id }.sorted()
+
+    /**
+     * Mark All as Read made right after selecting a tag waits for the tag's list; a merge re-keys the
+     * tag meanwhile and publishes the move before Home applies it. The selection following the
+     * re-key is not a switch, so the articles are still marked read.
+     */
+    @Test
+    fun markAllReadWaitingAcrossAReKeyOfItsTagStillMarks() = runVmTest {
+        seedArticles()
+        // The list's flows on the test scheduler, so Mark All as Read waits for the tag's list.
+        val vm = newViewModel(dispatcher = StandardTestDispatcher(testScheduler)).vm
+        vm.selectFilter(ArticleFilter.Tag("t-old"))
+        vm.markAllRead()
+        rekeyAndPublishWithoutApplying(folder = false)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(ArticleFilter.Tag("t-new"), vm.filter.value)
+        assertEquals(emptyList(), unreadIds())
+    }
+
+    /** The contrast: a switch the user makes while it waits still cancels it, re-key or not. */
+    @Test
+    fun markAllReadWaitingAcrossAReKeyIsStillCancelledByAUserSwitch() = runVmTest {
+        seedArticles()
+        // The list's flows on the test scheduler, so Mark All as Read waits for the tag's list.
+        val vm = newViewModel(dispatcher = StandardTestDispatcher(testScheduler)).vm
+        vm.selectFilter(ArticleFilter.Tag("t-old"))
+        vm.markAllRead()
+        rekeyAndPublishWithoutApplying()
+        vm.selectFilter(ArticleFilter.Folder("d-old"))
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(ArticleFilter.Folder("d-new"), vm.filter.value)
+        assertEquals(listOf("s1", "s2", "s3"), unreadIds())
     }
 
     /** Selecting the row the selection already is (by its stale or new id) changes nothing, generation included. */

@@ -1508,7 +1508,9 @@ class HomeViewModel(
      * Acts once the rows on screen belong to the current filter and mode ([ListScope]): right after
      * a switch they can still be the previous list's, and marking (or pinning) those would reach
      * articles the current list does not show. If the selection moves on again before the list
-     * catches up, nothing is marked — the list the action was made for is gone.
+     * catches up, nothing is marked — the list the action was made for is gone. A merge moving the
+     * requested tag or folder onto another id meanwhile is not such a move: the scopes are compared
+     * with the current re-keys applied to both.
      */
     fun markAllRead() {
         val requested = currentScope()
@@ -1525,7 +1527,11 @@ class HomeViewModel(
             ) { shown, filter, unread, unreadStarred, starred ->
                 shown == scopeOf(filter, unread, unreadStarred, starred)
             }.first { it }
-            if (currentScope() == requested) markShownRead()
+            // A merge may have re-keyed the requested tag or folder while this waited: compare both
+            // scopes in the current id space, so the selection following the re-key is not mistaken
+            // for the user switching away (which still cancels the action).
+            val remap = catchUpIdRemap()
+            if (currentScope().remappedBy(remap) == requested.remappedBy(remap)) markShownRead()
         }.invokeOnCompletion { pendingLocalWrites.end() }
     }
 
