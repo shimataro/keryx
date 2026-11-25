@@ -39,6 +39,19 @@ SELECT * FROM folders WHERE deleted_at IS NULL ORDER BY sort_order ASC, name COL
 getById:
 SELECT * FROM folders WHERE id = ?;
 
+-- The live folders in display order (as watchAll), each flagged whether it is the folder :dragged
+-- resolves to and whether it is the one :target resolves to (see the note above; a NULL :target flags
+-- none). One statement, so the order and both resolutions are read from the same folder state: a
+-- re-key that commits around it is either wholly before it or wholly after it
+-- (FolderRepository.reorderFolders).
+orderForReorder:
+SELECT id, sort_order,
+    id = COALESCE((SELECT f.id FROM folders f WHERE f.id = :dragged), (SELECT m.new_id FROM ks_id_remap m WHERE m.kind = 'folder' AND m.old_id = :dragged), :dragged) AS is_dragged,
+    CASE WHEN :target IS NULL THEN 0
+        ELSE id = COALESCE((SELECT f.id FROM folders f WHERE f.id = :target), (SELECT m.new_id FROM ks_id_remap m WHERE m.kind = 'folder' AND m.old_id = :target), :target)
+    END AS is_target
+FROM folders WHERE deleted_at IS NULL ORDER BY sort_order ASC, name COLLATE NOCASE ASC;
+
 -- The id a folder id given to a write resolves to (see the note above): the id itself while a row
 -- has it, else the id ks_id_remap maps it to, else the id unchanged.
 resolveId:

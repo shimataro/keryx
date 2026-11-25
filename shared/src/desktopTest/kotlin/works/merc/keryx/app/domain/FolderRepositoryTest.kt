@@ -24,6 +24,7 @@ import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
 import works.merc.keryx.app.insertFolder
+import works.merc.keryx.app.rekeyFolderForTest
 import works.merc.keryx.app.ftsManagerIndexed
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -345,6 +346,83 @@ class FolderRepositoryTest {
             repo.reorderFolders(draggedFolderId = "d2", targetFolderId = "d3")
 
             assertEquals(0L, db.foldersQueries.getById("d1").executeAsOne().updated_at)
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
+     * Re-keys the folder [oldId] onto [newId] (as a merge does, [rekeyFolderForTest]) right after the
+     * first query that reads the reorder state (`orderForReorder`) has run — the interval between
+     * [FolderRepository.reorderFolders]'s read and its transaction, where a merge can commit.
+     */
+    private class RekeyAfterReorderReadDriver(
+        private val delegate: SqlDriver,
+        private val oldId: String,
+        private val newId: String,
+    ) : SqlDriver by delegate {
+        var fired = false
+            private set
+
+        override fun <R> executeQuery(
+            identifier: Int?,
+            sql: String,
+            mapper: (app.cash.sqldelight.db.SqlCursor) -> app.cash.sqldelight.db.QueryResult<R>,
+            parameters: Int,
+            binders: (app.cash.sqldelight.db.SqlPreparedStatement.() -> Unit)?,
+        ): app.cash.sqldelight.db.QueryResult<R> {
+            val result = delegate.executeQuery(identifier, sql, mapper, parameters, binders)
+            if (!fired && sql.contains("AS is_dragged")) {
+                fired = true
+                delegate.rekeyFolderForTest(oldId, newId)
+            }
+            return result
+        }
+    }
+
+    private fun reorderAcrossARekey(oldId: String, newId: String, dragged: String, target: String?): List<String> {
+        val (base, _) = inMemoryDb()
+        try {
+            val seed = KeryxDatabase(base)
+            seed.insertFolder("d1", "A", sortOrder = 0L)
+            seed.insertFolder("d2", "B", sortOrder = 1L)
+            seed.insertFolder("d3", "C", sortOrder = 2L)
+            val driver = RekeyAfterReorderReadDriver(base, oldId, newId)
+            val db = KeryxDatabase(driver)
+
+            newRepo(db, driver, clock = Clock { 500L }).reorderFolders(dragged, target)
+
+            assertTrue(driver.fired)
+            return db.foldersQueries.watchAll().executeAsList().map { it.id }
+        } finally {
+            base.close()
+        }
+    }
+
+    @Test
+    fun reorderFoldersMovesADraggedFolderReKeyedAfterTheReadOntoItsNewId() {
+        assertEquals(listOf("d3-new", "d1", "d2"), reorderAcrossARekey("d3", "d3-new", dragged = "d3", target = "d1"))
+    }
+
+    @Test
+    fun reorderFoldersPlacesBeforeATargetReKeyedAfterTheRead() {
+        assertEquals(listOf("d3", "d1-new", "d2"), reorderAcrossARekey("d1", "d1-new", dragged = "d3", target = "d1"))
+    }
+
+    /** A dragged folder that is not live is skipped rather than failing the whole reorder. */
+    @Test
+    fun reorderFoldersWithADraggedFolderThatIsNotLiveLeavesTheOrderAlone() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFolder("d1", "A", sortOrder = 0L)
+            db.insertFolder("d2", "B", sortOrder = 1L)
+            db.insertFolder("gone", "G", sortOrder = 2L, deletedAt = 1L)
+
+            newRepo(db, driver, clock = Clock { 500L }).reorderFolders(draggedFolderId = "gone", targetFolderId = "d1")
+
+            assertEquals(listOf("d1", "d2"), db.foldersQueries.watchAll().executeAsList().map { it.id })
+            assertEquals(0L, db.foldersQueries.getById("d1").executeAsOne().updated_at)
+            assertEquals(0L, db.foldersQueries.getById("d2").executeAsOne().updated_at)
         } finally {
             driver.close()
         }

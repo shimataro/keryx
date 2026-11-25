@@ -124,26 +124,33 @@ class FolderRepository(
     /**
      * Moves a folder directly before the target folder, or to the end when no target is provided.
      *
-     * Both ids are resolved first (`ks_id_remap`, see folders.sq), so a drag that started before a
-     * merge re-keyed either folder still moves the folder it became, before the one it became. The
-     * resolution and the order are read outside the transaction, as before, so the transaction
-     * starts with a write (the lock upgrade `docs/known-issues.md` describes); a re-key landing
-     * between that read and the transaction is still applied correctly, since each `updateSortOrder`
-     * resolves its id again.
+     * Both ids are resolved (`ks_id_remap`, see folders.sq), so a drag that started before a merge
+     * re-keyed either folder still moves the folder it became, before the one it became. The order
+     * and both resolutions come from one statement (`orderForReorder`), so they always describe the
+     * same folder state — a re-key can never leave the dragged or target id resolved against one
+     * state and missing from the order read from another. That read stays outside the transaction,
+     * so the transaction starts with a write (the lock upgrade `docs/known-issues.md` describes); a
+     * re-key landing between the read and the transaction is still applied correctly, since each
+     * `updateSortOrder` resolves its id again. A dragged folder that is not live (deleted, or gone)
+     * is not moved, and a target that is not live places the dragged folder at the end.
      *
      * @param draggedFolderId The ID of the folder to move.
      * @param targetFolderId The ID of the folder to place the dragged folder before, or `null` to place it at the end.
      */
     fun reorderFolders(draggedFolderId: String, targetFolderId: String?) {
-        val dragged = folders.resolveId(draggedFolderId).executeAsOne()
-        val target = targetFolderId?.let { folders.resolveId(it).executeAsOne() }
-        val current = folders.watchAll().executeAsList()
+        val current = folders.orderForReorder(dragged = draggedFolderId, target = targetFolderId).executeAsList()
+        val dragged = current.firstOrNull { it.is_dragged }?.id ?: draggedFolderId
+        val target = current.firstOrNull { it.is_target != 0L }?.id
+        val sortOrders = current.associate { it.id to it.sort_order }
         val newOrder = reorderIds(current.map { it.id }, dragged, target)
         val now = clock.nowMillis()
         db.transaction {
-            newOrder.forEachIndexed { index, id ->
-                val existing = current.first { it.id == id }
-                if (existing.sort_order != index.toLong()) folders.updateSortOrder(index.toLong(), now, id)
+            var index = 0L
+            for (id in newOrder) {
+                // An id the order does not hold (a dragged folder that is not live) is skipped.
+                val existing = sortOrders[id] ?: continue
+                if (existing != index) folders.updateSortOrder(index, now, id)
+                index++
             }
         }
         syncScheduler.scheduleSync()
