@@ -21,7 +21,9 @@
   （1 つずつマージしても、畳み込んでからマージしても同じ）である。そのため、ファイルの重複、順序の逆転、クラッシュ
   後の再適用はすべて無害であり、この文書の残りはこの性質に依拠している。
   まだ塞いでいない既知の例外は [known-issues.ja.md](known-issues.ja.md) に記録してある: URL が同じで id が違う
-  フィード、そしてフォルダーの削除と復活をまたいでフィードが削除済みフォルダーを指し続けること。（3 つ目にあった
+  フィード。（2 つ目にあった「フォルダーの削除と復活をまたいでフィードが削除済みフォルダーを指し続けること」は、
+  フィードの生のフォルダー割り当てを正とし、`feeds.folder_id` をそれとフォルダーの最終状態から解決したキャッシュに
+  したことで塞がれた。「マージ」を参照。3 つ目にあった
   「名前が同じで id が違う行」は、タグとフォルダーの id が名前から決まるようになって塞がれた:
   `IdGenerator.tagId` / `folderId`。v2→v3 移行が一度だけ振り直すので、2 台が同じ名前を独立に作れば同じ id となり、
   マージはタグとフォルダーを id だけで照合する。振り直された行は移行前の id を `v2_id` に保つ。移行前に別々の名前へ
@@ -126,7 +128,8 @@ Depth 1 の `PROPFIND`。既にたどったページ指定（カーソル、ペ�
 | `sync_cursor(device, seq)` | 端末ごとに、すべての差分をマージし終えている最大の `seq` |
 | `ks_search_pending(rowid)` | `search_text` の再計算が必要な記事（「FTS5 の扱い」参照） |
 | `ks_search_awaiting_body(id)` | マージが本文なし（軽量行）で挿入した記事。本文が届くまで検索索引に入れない（「FTS5 の扱い」参照） |
-| `ks_feed_folder_raw(feed_id, folder_updated_at, folder_id)` | フィードごとに、`feeds.folder_id` の解決後の値の元になった生のフォルダー版（勝ったファイルが持っていたままのもの）。スタンプがフィードの `folder_updated_at` と等しい間だけ有効（「マージ」参照） |
+| `ks_feed_folder_raw(feed_id, folder_updated_at, folder_id)` | フィードごとの生のフォルダー割り当て——勝った版が書いたままのフォルダー id とスタンプで、そのフォルダーがこの端末で生きているかは問わない。フィードのフォルダーの正（source of truth）であり、ローカルの移動はすべてこれを書き、マージは勝者をこれに記録し、送信はこれを運ぶ。`feeds.folder_id` / `folder_updated_at` はこれから解決したキャッシュである（「マージ」参照）。どのフィードもちょうど 1 行持ち、行はフィードと一緒に作られる。`folder_id` は NULL か、存在するフォルダー行を指す。この端末のデータであり、参加でも接続解除でも残す |
+| `ks_feed_folder_resolved`（ビュー） | フィードの解決後のフォルダーの唯一の定義: 生の `folder_id` のフォルダーが存在して生きていればそれ、そうでなければ NULL。スタンプは生のもの。生の行が変わったとき、またはフォルダーが削除・復活したとき、トリガーがこれを `feeds` に書く——マージを含め、どのトランザクションでも |
 | `ks_id_remap(kind, old_id, new_id)` | v2→v3 移行が走らせたタグ/フォルダー id の振り直し（`domain/TagFolderIdRekey.kt`）の記録。`SettingsRepository` が移行後の最初の起動時に `local_settings.json` の同じ id を書き換える。その書き換えをべき等に保つため表は無期限に保持する。同期マージは事前アップグレード行の同一性をこの表ではなく行の `v2_id` で再統合する（[db-schema.ja.md](db-schema.ja.md) 参照） |
 | `feed_fetch_state(feed_id, etag, last_modified, error_count, last_error)` | この端末でのフィードの取得状態——同期しない |
 
@@ -143,6 +146,12 @@ Depth 1 の `PROPFIND`。既にたどったページ指定（カーソル、ペ�
   すべての記事でこれを更新するので、30 分ごとに送るとほかのすべての変更を圧倒してしまう（キャッシュ削除への影響は
   「同期対象の記事範囲」参照）。
 - `updated_at` だけ、`search_text` だけの変更は記録しない。
+
+feeds については、`folder_id` / `folder_updated_at` を feeds のトリガーから外している: これらは
+`ks_feed_folder_raw` から解決したもので、送信は生の値を運ぶので、そのテーブルのトリガーが、フィードの生の割り当ての
+変更をそのフィード自身の記録として残す。解決し直しだけ——フォルダーが削除・復活し、それに割り当てられたフィードが
+解決し直される——では、それらのフィードについて送信が運ぶものは何も変わらないので、何も記録しない（フォルダー自身の
+変更は記録する）。
 
 同期対象テーブルの行を物理削除することはない（削除はすべて論理削除）ので、`DELETE` トリガーはない。
 
@@ -251,7 +260,9 @@ Depth 1 の `PROPFIND`。既にたどったページ指定（カーソル、ペ�
    - **通常の差分**——1 つの読み取りトランザクションの中で: `S = MAX(sync_outbox.seq)` を読み、`≤ S` の outbox の
      記録を持つすべてのキーについて**現在の**行を書き出す。それらの行が参照する行（フィードのフォルダー、記事の
      フィード、`feed_tags` の行のタグとフィード）も含めるので、受信側のマージが参照先の行を見つけられないことは
-     ない。`heavy` の記録が無い記事は軽い行として書く。`S` と行は 1 つのスナップショットから読まれるので、その後の
+     ない。`heavy` の記録が無い記事は軽い行として書く。フィードの `folder_id` / `folder_updated_at` は、解決後の
+     `feeds.folder_id` ではなく生の割り当て（`ks_feed_folder_raw`）から書く。受信側は生と生を比べるからである。
+     それが指すフォルダーは、この端末で論理削除されていても運ぶ（その行は必ず存在する）。`S` と行は 1 つのスナップショットから読まれるので、その後の
      書き込みはすべて `seq > S` を持ち、次の差分に入る。
    - **全量送信**（参加時）——差分同期以前のアップロードと同じく `VACUUM INTO` のコピーから書き出すので、ライブ
      DB の読み取りロックはコピーの間しか保持しない。`S` もコピーから読む。直前にマージしたベースと同一の行
@@ -321,7 +332,7 @@ Depth 1 の `PROPFIND`。既にたどったページ指定（カーソル、ペ�
 ### 参加・リセット・接続解除
 
 - **参加**（接続、プロバイダーの切り替え、世代の変化、複製の検出）: 新しい `ks_device_id` を発行し、カーソル、
-  `sync_applied`、`ks_feed_folder_raw`、outbox、`ks_attempt` を消し、同じトランザクションで `sync_capture = (enabled 1, full_pending 1)`
+  `sync_applied`、outbox、`ks_attempt` を消し、同じトランザクションで `sync_capture = (enabled 1, full_pending 1)`
   にするので、以後のすべての書き込みが記録される。そのうえですべてを受信し、全量送信を行う。結果は、差分同期以前の
   「マージしてからデータベース全体をアップロード」と同じになる。
 - **最初の端末**は新しい世代に参加し、全量送信を最初のベースとしてアップロードしてから、ポインタを作る（`create`）
@@ -336,11 +347,11 @@ Depth 1 の `PROPFIND`。既にたどったページ指定（カーソル、ペ�
   くる——以前、ほかの端末が作り直されたファイルをマージしていたのと同じである。ポインタを置き換えた後、スタブで
   ない差分同期以前の `keryx.db.gz` は退避してスタブに置き換える（「クラウドデータのリセット（退避）」を参照）。
 - **接続解除・切り替え**（`clearSyncFailureState()`、同じ mutex の内側）: `sync_capture.enabled = 0`（ローカル
-  のみで使う間は何も記録しない）にし、`ks_*` キー、outbox、`sync_applied`、カーソル、`ks_feed_folder_raw`、
+  のみで使う間は何も記録しない）にし、`ks_*` キー、outbox、`sync_applied`、カーソル、
   保存中のファイルすべて（手順 0 の best effort の掃除）を消す。`ks_search_pending` と `ks_search_awaiting_body` は残す——ローカルの検索索引のものだからである。
-  `ks_feed_folder_raw` を `sync_applied` と一緒に消すのは、これがこの端末がマージしたファイルのうちどの生の版が
-  各フィードのフォルダーで勝ったかを表すものであり、新しい世代のファイルは改めて比べる——この端末自身の全量送信が
-  持つ値（main の解決後の値）と比べる。ほかの端末の畳み込みが比べるのと同じである——からである。
+  `ks_feed_folder_raw` も、参加のときと同じく接続解除でも残す: これはこの端末のデータ——各フィードのフォルダー
+  割り当てで、`feeds.folder_id` はこれから解決され、次の全量送信はこれを運ぶ——であって、マージしたファイルの
+  記録ではないので、新しい世代のファイルは、この端末が送るのと同じ値と比べられる。
 
 ### クラウドファイルの検証
 
@@ -547,27 +558,31 @@ SQLDelight コードの `getLong` がそれを読むときに例外を投げ、�
 - **`cloud` 内の重複は決定的に解決する。** 畳み込んだファイルは、同じ一意キー（`feeds.url`、
   `articles(feed_id, guid)`）を持つ行を、別々の端末から 2 つ持ちうる。そうしたキーで照合する
   文は、その中の勝者——`updated_at` が最大、次に id が最大——だけを対象にする。参照を id で解決する文
-  （`mergeFeedFolderId`、`feedTags`）は、引き続きすべての行を見る。（タグとフォルダーの名前は一意キーではなくなった:
+  （`mergeFeedFolder`、`feedTags`）は、引き続きすべての行を見る。（タグとフォルダーの名前は一意キーではなくなった:
   id は作成時の名前から導かれるので、独立に作成された同名の行は同じ id に収束する。ただしリネームが交差すると、
   異なる id が同じ現在の名前を持つこともあり、UI が番号を振る。）
 - **`cloud` に行が無いことは何も意味しない。** 差分は一部の行しか持たない。参照先の行によって結果が変わる文
-  （`mergeFeedFolderId` の「フォルダーが `cloud` で生きていなければ NULL」、`feedTags` のタグ解決）も、これまでと同じ
-  答えになる。どの差分も、自分の行が参照する行を含んでいるからである（検証の手順 9 で確認する）。
+  （`mergeFeedFolder` の「main が持たないフォルダー → NULL」、`feedTags` のタグ解決）も、これまでと同じ
+  答えになる。どの差分も、自分の行が参照する行を含んでいるからである（検証の手順 9 で確認する）。フィードの
+  解決後のフォルダーは `cloud` をまったく読まない: main の最終的な生の割り当てとフォルダーの状態だけで決まる。
 - feeds / tags / folders / global_settings: 後勝ち（論理削除を含む）。feeds の文の `ON CONFLICT` は内容系の
   フィールド（url / title / description / … + `updated_at`）だけを扱い、利用者が編集するフィールドはそれぞれの
-  スタンプを使う専用の文でマージする: `mergeFeedFolderId`（`folder_id` / `folder_updated_at`）、
-  `mergeFeedSortOrder`、`mergeFeedCustomTitle`、`mergeFeedDeletedAt`。`folder_id` は 3 分岐で解決する: クラウドが
-  参照するフォルダーが `cloud.folders` で生きていなければ NULL、そのフォルダーが `main` で生きていればクラウドの
-  `folder_id`、それ以外は NULL。（フォルダーの id は名前から導かれるので、同じフォルダーはどの端末でも同じ id となり、
-  同名検索はもう残っていない。）
-  保存される `folder_id` は解決後の値——この端末の id で、勝ったファイルが持っていた id とは限らない——なので、
-  マージはクラウドの生の `folder_id` をそれと比べない: `folder_updated_at` が等しいとき、2 つの id は別々の id 空間に
-  属し、マージの順序が結果を決めてしまう（一方 `ReduceSql` の畳み込みは生の最大値を残す）。勝った生の版を
-  `ks_feed_folder_raw` に並べて保持し、フォルダーのマージは 3 つの文で行う: フィードの生の行が無いか、そのスタンプが
-  main のものでない（その後ローカルで移動した——ローカルのフォルダーの書き込みはすべて `MAX(now, previous + 1)` で
-  打刻するので、古くなった行が main のスタンプを持つことはない）ときは main 自身の値で置き直す。生の行より順位が
-  高いクラウドの版を、上の解決で適用する。同じ比較でクラウドの版を生の行に記録する。こうして、どのマージの順序でも
-  どの畳み込みでも、同じ生の勝者が選ばれる。フィードの取得状態（`feed_fetch_state`）は端末ローカルで、マージしない。
+  スタンプを使う専用の文でマージする: `mergeFeedFolder`（`folder_id` / `folder_updated_at`）、
+  `mergeFeedSortOrder`、`mergeFeedCustomTitle`、`mergeFeedDeletedAt`。
+  **フィードのフォルダー割り当ては生のまま保存する。** `ks_feed_folder_raw` は各フィードの生の割り当て——勝った版が
+  書いたままのフォルダー id とスタンプで、そのフォルダーがこの端末で生きているかは問わない——を持ち、これが正で
+  ある: ローカルの移動はすべてこれを書き（`feeds.updateFolder` / `updateFolderAndSortOrder`。削除するフォルダーから
+  出す移動を含む）、どのファイルもこれを運び（「送信」参照）、`mergeFeedFolder` は届いた生の版を保存済みの生の版と
+  `SyncLww.FEED_FOLDER` で比べて勝者を記録する——`ReduceSql` の畳み込みと同じく生と生を比べるので、どのマージの
+  順序でもどの畳み込みでも同じ勝者が選ばれる。main が持たないフォルダーへのクラウドの参照（正しいファイルでは
+  チェック 9 とフォルダーの文により起こり得ない）は NULL として記録するので、生の行は存在するフォルダーしか指さない。
+  `feeds.folder_id` / `folder_updated_at` は、ビュー `ks_feed_folder_resolved`——生のフォルダーが生きていればそれ、
+  そうでなければ NULL、スタンプは生のもの——から導いたキャッシュで、生の行が変わったとき、またはフォルダーが
+  削除・復活したとき、誰が書いたかにかかわらず同じ文の中でスキーマのトリガーが `feeds` に書く: マージ（その
+  `folders` の文と `mergeFeedFolder`）、ローカルの移動、フォルダーの削除、名前による再有効化。したがって解決後の値は
+  最終的な生の割り当てとフォルダーの状態だけで決まり——あるファイルが削除し後のファイルが復活させたフォルダーには、
+  どの順序でもフィードが戻る——存在しないフォルダーを指すことはないので外部キーにも違反しない。（フォルダーの id は
+  名前から導かれるので、同じフォルダーはどの端末でも同じ id となり、同名検索はもう残っていない。）フィードの取得状態（`feed_fetch_state`）は端末ローカルで、マージしない。
   feeds は **`id`** で照合する。id は `url` から **UUIDv5** で決定的に生成する（`IdGenerator.feedId`）ので、同じ
   フィードはどの端末でも同じ id になる。
 - **tags / folders: フィールドごとの後勝ち。** feeds と同じく、名前（`name_updated_at`）、色（`color_updated_at`、
@@ -638,11 +653,12 @@ SQLDelight コードの `getLong` がそれを読むときに例外を投げ、�
 - `NOT EXISTS` / `EXISTS` のガードは、main と衝突する行（別の ID で同じ URL や `(feed_id, guid)` を持つ行、main が
   持たない参照先の行）を飛ばすので、UNIQUE / FK 違反でトランザクション全体が失敗することはない。タグとフォルダーの
   行には追加のガードはない: 別の id が同じ名前を持っていても通し、同名の行は共存する。
-- `MergeSql.all` の順序: folders（id ごとのフィールド文、次に insert）、feeds、フォルダーのマージの 3 つの文と残り
+- `MergeSql.all` の順序: folders（id ごとのフィールド文、次に insert）、feeds、フォルダーのマージと残り
   3 つの `mergeFeed*`、tags（フィールドごと、insert）、articles、feed_tags、global_settings。folders は feeds より前
   （`feeds.folder_id` のため）、`mergeFeed*` はその両方の後。
 - 管理用の表（`sync_outbox`、`ks_search_pending`、`ks_feed_folder_raw`、`sync_merging` など）は主キー以外の制約を
-  持たないので、後述の分類が前提とする
+  持たず、それらと `feeds` / `folders` のトリガーは outbox への追記、フィードの生の行の作成、存在するフォルダーの
+  解決後の値の書き込みしかしないので、後述の分類が前提とする
   「main が既存の状態で違反しうるのは FOREIGN KEY 制約だけ」は引き続き成り立つ。
 
 `ReduceSql` は、同じフィールドごとの規則と同着の決め方で、転送ファイルを 1 つに畳み込む。キーは主キーだけで、
@@ -687,7 +703,7 @@ ATTACH する前に、Apple の `migrateCloudIfOlder` は古いクラウドフ�
 | SQLite の主エラーコード | 分類 |
 | --- | --- |
 | `SQLITE_NOTADB`、`SQLITE_CORRUPT`、`SQLITE_FORMAT`、`SQLITE_EMPTY` | **クラウドファイルが壊れていると確かめられたときだけ永続。** ロールバックの後、ダウンロードしたクラウドファイル（他から書き込まれない一時ファイル）を作成せずに開き、`PRAGMA quick_check` で調べる：問題が報告される、または開くか調べるときに `SQLITE_NOTADB`／`SQLITE_CORRUPT` で失敗する → `CloudDataIncompatibleException`。`ok` → 壊れているのは*ローカル*の DB なので、そのまま再 throw。それ以外（判定不能）→ そのまま再 throw。したがってローカル DB の破損にクラウドデータのリセットで応じることはない。 |
-| `SQLITE_CONSTRAINT`（`_UNIQUE`／`_NOTNULL`／`_FOREIGNKEY` 等、全ての拡張 `SQLITE_CONSTRAINT_*` を含む — 拡張コードの下位バイトは常にその主コードに一致する） | ***main* が原因でないと確かめられたときだけ永続** → `CloudDataIncompatibleException`。`MergeSql` の `NOT EXISTS`/`EXISTS` ガード（前述）が main 側の行との衝突は既にすべて潰しており、UNIQUE／NOT NULL は main で常に強制されている。残るのは、クラウド DB 自身の行集合が制約に違反している場合（クラウド DB 内部の url 重複、クラウド側の（より緩い）スキーマが許していた NULL 等）と、**main に元からある外部キー違反**（外部キーを強制する前のデータや移行によるもの）を、文がその行を変更したときにマージの `PRAGMA foreign_keys=ON` が表に出す場合である。今の `MergeSql` が外部キー列に書くのは、main に存在すると保証された値か NULL だけで（`mergeFeedFolderId`）、親も削除しないので、これは今後追加される文への備えである。ドライバが拡張リザルトコードで UNIQUE・PRIMARY KEY・NOT NULL の違反と報告した失敗は、書き込みのたびに強制されている種類なので main の既存の状態が原因になり得ず、以下のチェックや再実行をせずにその場で分類する。再実行しても同じ判定にしかならず、マージの書き込みロックを長く持つだけだからである。desktop と Apple はこのコードを読めるが、Android の requery は公開していないので、Android は常に以下の全経路を通る（main が元から違反しうるのは外部キー制約だけで、スキーマに CHECK 制約やトリガーを足すときはこの判定を見直す必要がある）。以下はすべて、**失敗したマージのトランザクションがまだ開いているうちに**マージの接続で行うので、途中で他の書き込みが main を変えることはない（例: 再購読で孤立した記事の親が補われる）。(1) `PRAGMA main.foreign_key_check` の結果を V0 とする。それより前の文は外部キーの即時チェックを通っているので、V0 は main に元からあった違反である。V0 が空なら main は原因でない → `CloudDataIncompatibleException`。(2) そうでなければ、`PRAGMA defer_foreign_keys=ON` にして、失敗した文とそれ以降のすべての文（`MergeFailureClassifier.remainingStatements`）を同じトランザクションの中で再実行する。こうすると即時に失敗するのは外部キー以外の制約だけになる。失敗した文から続けても、最初からやり直すのと同じ状態になる — それより前の文は外部キーの即時チェックを通っており、制約違反は失敗した文自身の変更を取り消すためである。また Android ではこれしか方法がない。requery は `ROLLBACK` で始まる文をすべてトランザクション全体のロールバックとして扱うので、セーブポイントへの `ROLLBACK TO` を発行できないためである（理由は `MergeFailureClassifier.mainRuledOut` の KDoc にある）。再実行が制約違反で失敗した → クラウドの行による外部キー以外の制約違反 → `CloudDataIncompatibleException`。再実行が成功し、その後の `foreign_key_check`（V1）に V0 になかった行がある → クラウドの行が新しい外部キー違反を持ち込んだ → `CloudDataIncompatibleException`。再実行が成功し、V1 に新しい行がない → 失敗は元からある手元の違反によるもの → そのまま再 throw。それ以外（別の失敗、SQLite がトランザクションを既に終えていた、チェック自体の失敗）→ そのまま再 throw。どの場合もその後トランザクション全体をロールバックし、何もコミットしない。したがって手元の孤児行が、クラウド由来の制約違反を隠すことはない。クラウドファイルだけに触れる `migrateCloudIfOlder` で起きた制約違反は、構造上 main が原因になり得ないので分類する。 |
+| `SQLITE_CONSTRAINT`（`_UNIQUE`／`_NOTNULL`／`_FOREIGNKEY` 等、全ての拡張 `SQLITE_CONSTRAINT_*` を含む — 拡張コードの下位バイトは常にその主コードに一致する） | ***main* が原因でないと確かめられたときだけ永続** → `CloudDataIncompatibleException`。`MergeSql` の `NOT EXISTS`/`EXISTS` ガード（前述）が main 側の行との衝突は既にすべて潰しており、UNIQUE／NOT NULL は main で常に強制されている。残るのは、クラウド DB 自身の行集合が制約に違反している場合（クラウド DB 内部の url 重複、クラウド側の（より緩い）スキーマが許していた NULL 等）と、**main に元からある外部キー違反**（外部キーを強制する前のデータや移行によるもの）を、文がその行を変更したときにマージの `PRAGMA foreign_keys=ON` が表に出す場合である。今のマージが外部キー列に書くのは、main に存在すると保証された値か NULL だけで（解決トリガーが `ks_feed_folder_resolved` から書く `feeds.folder_id`）、親も削除しないので、これは今後追加される文への備えである。ドライバが拡張リザルトコードで UNIQUE・PRIMARY KEY・NOT NULL の違反と報告した失敗は、書き込みのたびに強制されている種類なので main の既存の状態が原因になり得ず、以下のチェックや再実行をせずにその場で分類する。再実行しても同じ判定にしかならず、マージの書き込みロックを長く持つだけだからである。desktop と Apple はこのコードを読めるが、Android の requery は公開していないので、Android は常に以下の全経路を通る（main が元から違反しうるのは外部キー制約だけで、スキーマに CHECK 制約やトリガーを足すときはこの判定を見直す必要がある。既存のトリガーはこれに照らして確かめてあり、outbox への追記、フィードの生のフォルダー行の作成、存在するフォルダーの解決後の値の書き込みしかしないので、main の状態によって失敗することはない）。以下はすべて、**失敗したマージのトランザクションがまだ開いているうちに**マージの接続で行うので、途中で他の書き込みが main を変えることはない（例: 再購読で孤立した記事の親が補われる）。(1) `PRAGMA main.foreign_key_check` の結果を V0 とする。それより前の文は外部キーの即時チェックを通っているので、V0 は main に元からあった違反である。V0 が空なら main は原因でない → `CloudDataIncompatibleException`。(2) そうでなければ、`PRAGMA defer_foreign_keys=ON` にして、失敗した文とそれ以降のすべての文（`MergeFailureClassifier.remainingStatements`）を同じトランザクションの中で再実行する。こうすると即時に失敗するのは外部キー以外の制約だけになる。失敗した文から続けても、最初からやり直すのと同じ状態になる — それより前の文は外部キーの即時チェックを通っており、制約違反は失敗した文自身の変更を取り消すためである。また Android ではこれしか方法がない。requery は `ROLLBACK` で始まる文をすべてトランザクション全体のロールバックとして扱うので、セーブポイントへの `ROLLBACK TO` を発行できないためである（理由は `MergeFailureClassifier.mainRuledOut` の KDoc にある）。再実行が制約違反で失敗した → クラウドの行による外部キー以外の制約違反 → `CloudDataIncompatibleException`。再実行が成功し、その後の `foreign_key_check`（V1）に V0 になかった行がある → クラウドの行が新しい外部キー違反を持ち込んだ → `CloudDataIncompatibleException`。再実行が成功し、V1 に新しい行がない → 失敗は元からある手元の違反によるもの → そのまま再 throw。それ以外（別の失敗、SQLite がトランザクションを既に終えていた、チェック自体の失敗）→ そのまま再 throw。どの場合もその後トランザクション全体をロールバックし、何もコミットしない。したがって手元の孤児行が、クラウド由来の制約違反を隠すことはない。クラウドファイルだけに触れる `migrateCloudIfOlder` で起きた制約違反は、構造上 main が原因になり得ないので分類する。 |
 | `SQLITE_ERROR`（`no such table`／`no such column`） | **曖昧** — これは外部・レガシーなクラウドスキーマの見た目でもあり、（無関係なアプリのバグによる）ローカル側スキーマの破損の見た目でもある。ダウンロードしたクラウドファイルに対して `validateSchema` を呼んで解決する：`false` なら `CloudDataIncompatibleException`、`true` または `null`（判定不能）ならどちらもクラウド起因と確信できないためそのまま再 throw。 |
 | それ以外（`SQLITE_CANTOPEN`、`SQLITE_IOERR`、`SQLITE_FULL`、`SQLITE_BUSY`、`SQLITE_LOCKED`、`SQLITE_READONLY`、`SQLiteException` が見つからない場合、等） | **一時的／アプリ側** — そのまま再 throw。 |
 

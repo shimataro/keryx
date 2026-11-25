@@ -20,8 +20,10 @@ pre-delta migration and the legacy watch), `domain/MergeSql.kt`,
   arrive in does not matter) and **associative** (merging files one by one or after folding them together gives the
   same result). Duplicate files, files arriving out of order, and re-applying a file after a crash are therefore all
   harmless — the rest of this document relies on that.
-  Known exceptions, not yet closed, are recorded in [known-issues.md](known-issues.md): feeds sharing one URL under
-  different ids, and a feed left pointing at a folder across the folder's deletion and revival. (A former third —
+  A known exception, not yet closed, is recorded in [known-issues.md](known-issues.md): feeds sharing one URL under
+  different ids. (A former second — a feed left pointing at a folder across the folder's deletion and revival —
+  closed when a feed's raw folder assignment became the source of truth and `feeds.folder_id` a cache resolved from
+  it and the folders' final state; see "Merge". A former third —
   rows that shared a name under different ids — closed when the tag and folder ids became name-derived:
   `IdGenerator.tagId` / `folderId`, re-keyed once by the v2→v3 migration, so the same name created on two devices
   carries the same id and the merge matches tags and folders by id alone. A row re-keyed by that migration also
@@ -131,7 +133,8 @@ extend).
 | `sync_cursor(device, seq)` | Per device, the highest `seq` up to which every delta has been merged |
 | `ks_search_pending(rowid)` | Articles whose `search_text` must be recomputed (see "FTS5 Handling") |
 | `ks_search_awaiting_body(id)` | Articles a merge inserted without a body (a light row), kept out of the search index until one arrives (see "FTS5 Handling") |
-| `ks_feed_folder_raw(feed_id, folder_updated_at, folder_id)` | Per feed, the raw folder version (as the winning file carried it) that `feeds.folder_id`'s resolved value came from; valid only while its stamp equals the feed's `folder_updated_at` (see "Merge") |
+| `ks_feed_folder_raw(feed_id, folder_updated_at, folder_id)` | Per feed, its raw folder assignment — the folder id and stamp as the winning version wrote them, whether or not that folder is alive here. The source of truth for a feed's folder: every local move writes it, the merge records the winner into it, and a send carries it; `feeds.folder_id` / `folder_updated_at` are a cache resolved from it (see "Merge"). Every feed has exactly one row, created with the feed; its `folder_id` is NULL or names an existing folder row. This device's data, kept across joining and disconnect |
+| `ks_feed_folder_resolved` (view) | The one definition of a feed's resolved folder: the raw `folder_id` while that folder exists and is alive, else NULL, with the raw stamp. Triggers write it into `feeds` whenever a raw row changes or a folder is deleted or revived — in every transaction, the merge's included |
 | `ks_id_remap(kind, old_id, new_id)` | The tag/folder id re-key the v2→v3 migration ran (`domain/TagFolderIdRekey.kt`), so `SettingsRepository` rewrites the same ids in `local_settings.json` once at startup. The table is kept indefinitely so that rewrite stays idempotent; the sync merge reconciles pre-upgrade identities by the row's `v2_id`, not by this table (see `db-schema.md`) |
 | `feed_fetch_state(feed_id, etag, last_modified, error_count, last_error)` | A feed's fetch state on this device — never synced |
 
@@ -148,6 +151,12 @@ records what it writes. An `UPDATE` is recorded only when a synced column actual
   still in the feed, and sending that every 30 minutes would dwarf every other change (see "Sync Target Article
   Range" for what this means for cache cleanup);
 - a change to `updated_at` or `search_text` alone is not recorded.
+
+For feeds, `folder_id` / `folder_updated_at` are left out of the feeds trigger: they are resolved from
+`ks_feed_folder_raw`, and a send carries the raw value, so a trigger on that table records a change of a feed's raw
+assignment as the feed's own entry. A re-resolution alone — a folder deleted or revived, re-resolving the feeds
+assigned to it — changes nothing a send carries for those feeds and records nothing for them (the folder's own
+change is recorded).
 
 No row of a synced table is ever physically deleted (every delete is a tombstone), so there are no `DELETE`
 triggers.
@@ -261,7 +270,9 @@ only the retries of a revision-checked write (the pointer, the stub); delta and 
    - **Ordinary delta** — inside one read transaction: `S = MAX(sync_outbox.seq)`, then the **current** row for
      every key with an outbox entry `≤ S`, plus every row those rows reference (a feed's folder, an article's feed,
      a `feed_tags` row's tag and feed), so the receiving merge never finds a referenced row missing. An article
-     with no `heavy` entry is written as a light row. Because `S` and the rows come from one snapshot, any write
+     with no `heavy` entry is written as a light row. A feed's `folder_id` / `folder_updated_at` are written from its
+     raw assignment (`ks_feed_folder_raw`), not the resolved `feeds.folder_id`, since receivers rank raw against raw;
+     the folder it names is carried even when it is soft-deleted here (its row always exists). Because `S` and the rows come from one snapshot, any write
      after it carries a `seq > S` and goes into the next delta.
    - **Full send** (when joining) — from a `VACUUM INTO` copy, as the pre-delta upload did, so the live database's
      read lock is held only for the copy; `S` is read from the copy too. Rows identical to the base just merged
@@ -331,7 +342,7 @@ thresholds; deltas a base covers are not downloaded. That is at most about 1.25�
 ### Joining, Reset, Disconnect
 
 - **Joining** (connecting, switching provider, a generation change, a detected clone): issue a new `ks_device_id`
-  and clear the cursors, `sync_applied`, `ks_feed_folder_raw`, the outbox and `ks_attempt` — in the same transaction, set
+  and clear the cursors, `sync_applied`, the outbox and `ks_attempt` — in the same transaction, set
   `sync_capture = (enabled 1, full_pending 1)`, so every write from then on is recorded. Then receive everything and
   make the full send. The result is what the pre-delta "merge, then upload the whole database" produced.
 - **The first device** joins a new generation, uploads its full send as the first base, and only then creates the
@@ -346,11 +357,11 @@ thresholds; deltas a base covers are not downloaded. That is at most about 1.25�
   back, as it did when other devices merged the re-created file before. Once the pointer is replaced, a pre-delta
   `keryx.db.gz` that is not the stub is archived and replaced by it (see "Resetting (Archiving) Cloud Data").
 - **Disconnect / switch** (`clearSyncFailureState()`, under the same mutex): `sync_capture.enabled = 0` (nothing is
-  recorded while local-only), and the `ks_*` keys, the outbox, `sync_applied`, the cursors, `ks_feed_folder_raw`
+  recorded while local-only), and the `ks_*` keys, the outbox, `sync_applied`, the cursors
   and every saved pending file (the best-effort sweep of step 0) are cleared. `ks_search_pending` and `ks_search_awaiting_body` stay — they belong to the local search index.
-  `ks_feed_folder_raw` goes with `sync_applied`: it describes which raw version, among the files this device has
-  merged, won each feed's folder, and the files of a new generation are compared afresh — against the value this
-  device's own full send carries (main's resolved one), as every other device's fold compares them.
+  `ks_feed_folder_raw` stays too, on a disconnect as on joining: it is this device's data — each feed's folder
+  assignment, which `feeds.folder_id` is resolved from and the next full send carries — not a record of the files
+  merged, so a new generation's files are ranked against the same value this device sends.
 
 ### Validating Cloud Files
 
@@ -528,28 +539,32 @@ Merge SQL (`MergeSql`) key points:
 - **Duplicates inside `cloud` are resolved deterministically.** A folded file can hold two rows with the same key
   (`feeds.url`, `articles(feed_id, guid)`) from different devices. Statements that match
   by such a key consider only the winner among them — greatest `updated_at`, then greatest id. Statements that
-  resolve a reference by id (`mergeFeedFolderId`, `feedTags`) still see every row. (Tag and folder names are no
+  resolve a reference by id (`mergeFeedFolder`, `feedTags`) still see every row. (Tag and folder names are no
   longer unique keys: their ids derive from the creation-time name, so independently-created same-named rows converge
   to the same id, but renames can leave different ids sharing the same current name. The UI numbers such rows.)
 - **Rows absent from `cloud` mean nothing.** A delta holds only some rows; the statements whose outcome depends on a
-  referenced row (`mergeFeedFolderId`'s "the folder is not alive in `cloud` → NULL", `feedTags`' tag resolution)
-  get the same answer as before because every delta carries the rows its rows reference (checked by validation
-  step 9).
+  referenced row (`mergeFeedFolder`'s "a folder main lacks → NULL", `feedTags`' tag resolution) get the same answer
+  as before because every delta carries the rows its rows reference (checked by validation step 9). A feed's
+  resolved folder never reads `cloud` at all: it depends only on main's final raw assignment and folder state.
 - feeds / tags / folders / global_settings: last-write-wins (including logical deletion). The `ON CONFLICT` in the
   feeds statement handles only content fields (url/title/description/… + `updated_at`); the user-edited fields are
-  merged by dedicated statements using their own stamps: `mergeFeedFolderId` (`folder_id` / `folder_updated_at`),
-  `mergeFeedSortOrder`, `mergeFeedCustomTitle`, `mergeFeedDeletedAt`. `folder_id` is resolved in three branches:
-  NULL if the cloud's referenced folder isn't alive in `cloud.folders`; else the cloud's `folder_id` if that folder
-  is alive in `main`; else NULL. (Folder ids are name-derived, so the same folder carries the same id on every
-  device and no same-name lookup remains.)
-  Because the stored `folder_id` is resolved — this device's id, not necessarily the one the winning file carried —
-  the merge never ranks the cloud's raw `folder_id` against it: on an equal `folder_updated_at` the two ids would be
-  from different id spaces, and the merge order would decide (while `ReduceSql`'s fold keeps the raw maximum). The
-  winning raw version is kept beside it in `ks_feed_folder_raw`, and the folder merge is three statements: refresh a
-  feed's raw row from main's own value when it is missing or its stamp is not main's (a local move happened since —
-  every local folder write stamps `MAX(now, previous + 1)`, so a stale row can never carry main's stamp); apply the
-  cloud version where it outranks the raw row, resolving as above; record the cloud version in the raw row under the
-  same comparison. Every merge order and every fold then picks the same raw winner. A
+  merged by dedicated statements using their own stamps: `mergeFeedFolder` (`folder_id` / `folder_updated_at`),
+  `mergeFeedSortOrder`, `mergeFeedCustomTitle`, `mergeFeedDeletedAt`.
+  **A feed's folder assignment is stored raw.** `ks_feed_folder_raw` holds each feed's raw assignment — the folder id
+  and stamp as the winning version wrote them, whether or not that folder is alive here — and is the source of
+  truth: every local move writes it (`feeds.updateFolder` / `updateFolderAndSortOrder`, including the moves out of
+  a deleted folder), every file carries it (see "Sending"), and `mergeFeedFolder` ranks the incoming raw version
+  against the stored raw one by `SyncLww.FEED_FOLDER` and records the winner — raw against raw, exactly as
+  `ReduceSql`'s fold ranks them, so every merge order and every fold picks the same winner. A cloud reference to a
+  folder main does not hold (unreachable for a valid file, by check 9 and the folder statements) is recorded as NULL,
+  so a raw row only ever names an existing folder. `feeds.folder_id` / `folder_updated_at` are a cache derived from
+  it by the view `ks_feed_folder_resolved` — the raw folder while that folder is alive, else NULL, with the raw
+  stamp — which schema triggers write into `feeds` whenever a raw row changes or a folder is deleted or revived, in
+  the same statement, whoever writes: the merge (its `folders` statements and `mergeFeedFolder`), a local move, a
+  folder's deletion or its reactivation by name. The resolved value therefore depends only on the final raw
+  assignment and folder state — a folder deleted by one file and revived by a later one puts its feeds back, in
+  any order — and never names a folder that does not exist, so it cannot violate the foreign key. (Folder ids
+  are name-derived, so the same folder carries the same id on every device and no same-name lookup remains.) A
   feed's fetch state (`feed_fetch_state`) is device-local and never merged.
   feeds are matched by **`id`**, which is deterministically generated from `url` as **UUIDv5**
   (`IdGenerator.feedId`), so the same feed has the same id on every device.
@@ -627,13 +642,14 @@ Merge SQL (`MergeSql`) key points:
   a different id, a referenced row main lacks) so UNIQUE / FK violations do not fail the whole transaction. Tag and
   folder rows carry no extra guard: a name main holds under another id is allowed through, and same-named rows
   coexist.
-- `MergeSql.all` order: folders (per-field statements by id, then the insert), feeds, the folder merge's
-  three statements and the other three `mergeFeed*`,
+- `MergeSql.all` order: folders (per-field statements by id, then the insert), feeds, the folder merge and the
+  other three `mergeFeed*`,
   tags (per field, insert), articles, feed_tags, global_settings. Folders precede feeds (for
   `feeds.folder_id`), and the `mergeFeed*` statements follow both.
 - The bookkeeping tables (`sync_outbox`, `ks_search_pending`, `ks_feed_folder_raw`, `sync_merging`, …) carry no
-  constraints beyond their primary keys, so the
-  classification below still holds that main can only already violate FOREIGN KEY constraints.
+  constraints beyond their primary keys, and the triggers on them and on `feeds` / `folders` only append to the
+  outbox, create a feed's raw row, or write a resolved folder that exists, so the classification below still holds
+  that main can only already violate FOREIGN KEY constraints.
 
 `ReduceSql` folds transport files into one with the same per-field rules and tie-break, keyed by primary key only —
 no local guards, which belong to each device's own merge.
@@ -651,7 +667,7 @@ Before attaching, the Apple `migrateCloudIfOlder` brings an older cloud file up 
 | SQLite primary result code | Classification |
 | --- | --- |
 | `SQLITE_NOTADB`, `SQLITE_CORRUPT`, `SQLITE_FORMAT`, `SQLITE_EMPTY` | **Permanent only once the cloud file is shown to be broken.** After the rollback, the downloaded cloud file — a temp file nothing else writes — is opened without creating it and checked with `PRAGMA quick_check`: problems reported, or opening/checking it fails with `SQLITE_NOTADB`/`SQLITE_CORRUPT` → `CloudDataIncompatibleException`; `ok` → the corruption is in the *local* DB, so rethrown unchanged; anything else (undetermined) → rethrown unchanged. A corrupt local DB is therefore never answered with a cloud-data reset. |
-| `SQLITE_CONSTRAINT` (covers every extended `SQLITE_CONSTRAINT_*` variant — `_UNIQUE`, `_NOTNULL`, `_FOREIGNKEY`, etc. — since an extended code's low byte is always its primary code) | **Permanent only once *main* is ruled out** → `CloudDataIncompatibleException`. `MergeSql`'s `NOT EXISTS`/`EXISTS` guards already rule out every collision with *main*'s own rows (see above), and UNIQUE / NOT NULL are always enforced on main, so what remains is the cloud DB's own row set violating a constraint — a duplicate `url` inside the cloud DB, a NULL where the cloud's own (laxer) schema allowed one, etc. — or a **foreign-key violation already present in main** (data from before foreign keys were enforced, or a migration), which the merge's `PRAGMA foreign_keys=ON` would expose if a statement modified that row. Today's `MergeSql` only ever writes a foreign-key column with a value guarded to exist in main, or NULL (`mergeFeedFolderId`), and never deletes a parent, so this guards statements added later. A failure the driver reports, by its extended result code, as a UNIQUE, PRIMARY KEY or NOT NULL violation cannot come from main's existing state — those are enforced on every write — so it is classified at once, without the check or the re-run below, which could only reach the same verdict while holding the merge's write lock longer. Desktop and Apple read that code; Android's requery exposes none, so Android always takes the full path. (main can only already violate FOREIGN KEY constraints; adding CHECK constraints or triggers to the schema must revisit this.) Everything below runs on the merge's connection **inside the failed merge's still-open transaction**, so no other writer can change main in between (a re-subscribe supplying an orphaned article's missing parent, say). (1) `PRAGMA main.foreign_key_check` gives V0, what main already held — earlier statements ran under immediate FK checking, so they added nothing. An empty V0 rules main out → `CloudDataIncompatibleException`. (2) Otherwise it sets `PRAGMA defer_foreign_keys=ON` and re-runs the failed statement and every one after it (`MergeFailureClassifier.remainingStatements`) in the same transaction, so only a non-FK constraint fails immediately. Continuing from the failed statement reaches the same state as starting over — the statements before it already passed immediate FK checking, and a constraint failure undoes the failed statement's own changes — and it is the only option on Android, where requery turns any statement starting with `ROLLBACK` into a rollback of its whole transaction, so a `ROLLBACK TO` savepoint cannot be issued (the reasoning is in `MergeFailureClassifier.mainRuledOut`'s KDoc). A constraint failure in the re-run → a non-FK constraint from the cloud rows → `CloudDataIncompatibleException`. A clean re-run whose `foreign_key_check` (V1) holds a row V0 did not → the cloud rows brought in a new FK violation → `CloudDataIncompatibleException`. A clean re-run with nothing new in V1 → the failure came from a pre-existing local violation → rethrown unchanged. Anything else — another failure, a transaction SQLite had already ended, a check that fails — → rethrown unchanged. Either way the whole transaction is then rolled back; nothing is committed. A local orphan therefore never hides a constraint violation that comes from the cloud. A constraint failure from `migrateCloudIfOlder`, which touches only the cloud file, has main ruled out by construction and is classified. |
+| `SQLITE_CONSTRAINT` (covers every extended `SQLITE_CONSTRAINT_*` variant — `_UNIQUE`, `_NOTNULL`, `_FOREIGNKEY`, etc. — since an extended code's low byte is always its primary code) | **Permanent only once *main* is ruled out** → `CloudDataIncompatibleException`. `MergeSql`'s `NOT EXISTS`/`EXISTS` guards already rule out every collision with *main*'s own rows (see above), and UNIQUE / NOT NULL are always enforced on main, so what remains is the cloud DB's own row set violating a constraint — a duplicate `url` inside the cloud DB, a NULL where the cloud's own (laxer) schema allowed one, etc. — or a **foreign-key violation already present in main** (data from before foreign keys were enforced, or a migration), which the merge's `PRAGMA foreign_keys=ON` would expose if a statement modified that row. Today a merge only ever writes a foreign-key column with a value guarded to exist in main, or NULL (the resolution triggers' `feeds.folder_id`, from `ks_feed_folder_resolved`), and never deletes a parent, so this guards statements added later. A failure the driver reports, by its extended result code, as a UNIQUE, PRIMARY KEY or NOT NULL violation cannot come from main's existing state — those are enforced on every write — so it is classified at once, without the check or the re-run below, which could only reach the same verdict while holding the merge's write lock longer. Desktop and Apple read that code; Android's requery exposes none, so Android always takes the full path. (main can only already violate FOREIGN KEY constraints; adding CHECK constraints or triggers to the schema must revisit this. The existing triggers were checked against it: they append to the outbox, create a feed's raw folder row, or write a resolved folder that exists, none of which can fail on main's state.) Everything below runs on the merge's connection **inside the failed merge's still-open transaction**, so no other writer can change main in between (a re-subscribe supplying an orphaned article's missing parent, say). (1) `PRAGMA main.foreign_key_check` gives V0, what main already held — earlier statements ran under immediate FK checking, so they added nothing. An empty V0 rules main out → `CloudDataIncompatibleException`. (2) Otherwise it sets `PRAGMA defer_foreign_keys=ON` and re-runs the failed statement and every one after it (`MergeFailureClassifier.remainingStatements`) in the same transaction, so only a non-FK constraint fails immediately. Continuing from the failed statement reaches the same state as starting over — the statements before it already passed immediate FK checking, and a constraint failure undoes the failed statement's own changes — and it is the only option on Android, where requery turns any statement starting with `ROLLBACK` into a rollback of its whole transaction, so a `ROLLBACK TO` savepoint cannot be issued (the reasoning is in `MergeFailureClassifier.mainRuledOut`'s KDoc). A constraint failure in the re-run → a non-FK constraint from the cloud rows → `CloudDataIncompatibleException`. A clean re-run whose `foreign_key_check` (V1) holds a row V0 did not → the cloud rows brought in a new FK violation → `CloudDataIncompatibleException`. A clean re-run with nothing new in V1 → the failure came from a pre-existing local violation → rethrown unchanged. Anything else — another failure, a transaction SQLite had already ended, a check that fails — → rethrown unchanged. Either way the whole transaction is then rolled back; nothing is committed. A local orphan therefore never hides a constraint violation that comes from the cloud. A constraint failure from `migrateCloudIfOlder`, which touches only the cloud file, has main ruled out by construction and is classified. |
 | `SQLITE_ERROR` (`no such table`, `no such column`) | **Ambiguous** — this is what a foreign/legacy cloud schema looks like, but also what a broken *local* schema (an unrelated app bug) looks like. Resolved by calling `validateSchema` against the downloaded cloud file: `false` → `CloudDataIncompatibleException`; `true` or `null` (undetermined) → rethrown unchanged, since neither confidently pins the failure on the cloud. |
 | Anything else (`SQLITE_CANTOPEN`, `SQLITE_IOERR`, `SQLITE_FULL`, `SQLITE_BUSY`, `SQLITE_LOCKED`, `SQLITE_READONLY`, no `SQLiteException` found, …) | **Transient / app-side** — rethrown unchanged. |
 

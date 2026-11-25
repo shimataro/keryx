@@ -73,7 +73,7 @@ internal object TransportFixtures {
     /**
      * Every synced column of every synced table (plus the coverage tables when [coverage]), ordered by
      * key. With [local] (a local database only), also the merge's own state that later merges read:
-     * `ks_feed_folder_raw`, the raw folder version each feed's resolved folder came from.
+     * `ks_feed_folder_raw`, each feed's raw folder assignment (what its resolved folder comes from).
      */
     fun dump(file: File, coverage: Boolean = false, local: Boolean = false): Map<String, List<String>> = connect(file).use { conn ->
         fun rows(sql: String, columnCount: Int): List<String> = conn.createStatement().use { st ->

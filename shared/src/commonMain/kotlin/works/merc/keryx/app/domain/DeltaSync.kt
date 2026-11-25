@@ -290,10 +290,11 @@ internal class DeltaSync(
 
     /**
      * Disconnect / switch: recording off, and everything tied to the connection gone — the `ks_*` keys,
-     * the outbox, `sync_applied`, the cursors, the raw folder versions (`ks_feed_folder_raw`, which
-     * describe the old connection's files) and every saved send file ([sweepPendingFiles] — including
+     * the outbox, `sync_applied`, the cursors and every saved send file ([sweepPendingFiles] — including
      * one a commit left behind, which no record names any more). `ks_search_pending` stays (it belongs
-     * to the local search index).
+     * to the local search index), and so do the feeds' raw folder assignments (`ks_feed_folder_raw`):
+     * they are this device's data — the source of truth `feeds.folder_id` is resolved from — not a
+     * record of the connection's files.
      */
     fun clearConnectionState() {
         db.transaction {
@@ -301,7 +302,6 @@ internal class DeltaSync(
             db.sync_bookkeepingQueries.clearOutbox()
             db.sync_bookkeepingQueries.clearApplied()
             db.sync_bookkeepingQueries.clearCursors()
-            db.sync_bookkeepingQueries.clearFeedFolderRaw()
             db.sync_bookkeepingQueries.setCapture(enabled = 0, fullPending = 0)
         }
         sweepPendingFiles()
@@ -365,8 +365,7 @@ internal class DeltaSync(
 
     /**
      * Joins [generation] ("Joining"): a new sync identity, and — in the same transaction — the cursors,
-     * `sync_applied`, the raw folder versions (`ks_feed_folder_raw`, which describe the files merged
-     * before), the outbox, the base cache and a pending send cleared, recording on and a full send
+     * `sync_applied`, the outbox, the base cache and a pending send cleared, recording on and a full send
      * due, so every write from then on is recorded and everything before it is in the full send. Every
      * saved send file goes afterwards ([sweepPendingFiles]), orphans included.
      */
@@ -382,7 +381,6 @@ internal class DeltaSync(
             deleteState(SYNC_STATE_KS_BASES)
             db.sync_bookkeepingQueries.clearCursors()
             db.sync_bookkeepingQueries.clearApplied()
-            db.sync_bookkeepingQueries.clearFeedFolderRaw()
             db.sync_bookkeepingQueries.clearOutbox()
             db.sync_bookkeepingQueries.setCapture(enabled = 1, fullPending = 1)
         }

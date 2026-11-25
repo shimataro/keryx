@@ -560,39 +560,6 @@ The removal must be performed by a schema migration after version 3 (i.e., versi
 
 **Caveat:** The re-key guarantees safety for local v2→v4 upgrades, but it cannot by itself prove that no folded cloud file still carries two rows sharing a `v2_id` under different ids. That is an operational assumption about the age of the cloud data, not a verifiable technical precondition.
 
-## A feed can be left pointing at a deleted folder across the folder's deletion and revival
-
-**Status**: not fixed — closing it needs a re-resolution of a feed's folder under the final folder state, a
-redesign outside the scope of the change that found it (see "What a real fix would need"). It breaks the
-merge's commutativity (see "Design Philosophy" in [sync-architecture.md](sync-architecture.md)) for feeds'
-folder assignments.
-
-What its earlier, broader form covered — two devices settling on different folders for the same feed when two
-folder moves carry the same `folder_updated_at` and each held a same-named folder under a different id — is
-closed: folder ids are now derived from the folder's creation-time name (`IdGenerator.folderId`, re-keyed by the
-v2→v3 migration), so independently created same-named folders share an id and the tie is decided between the raw
-ids as the fold decides it. What remains is the plain tie below, which the id scheme does not touch.
-
-### Symptom
-
-A feed keeps pointing at a deleted folder. With folder `d` live and feed `f` assigned to `d` at stamp 500,
-merging a file with `d` live and then one with `d` deleted (both still assigning `f` to `d` at 500) leaves
-`f.folder_id = d`; the other order leaves NULL. The UI already shows a deleted folder as "no folder", but
-the stored and uploaded values differ.
-
-### Diagnosis
-
-`mergeFeedFolderId` resolves a feed's folder only when an incoming raw assignment strictly wins, so a later
-file that deletes the folder but carries the same assignment never re-resolves it. A feed's `folder_id` holds a
-**resolved** id — this device's, which can differ from the one the winning file carried — and `MergeSql` keeps
-the raw winning version beside it (`ks_feed_folder_raw`) so merges rank raw against raw; but the upload — a
-snapshot of the local database — carries only the resolved id, which the receiver then ranks as if it were raw.
-
-### What a real fix would need
-
-Re-resolving the feed's folder under the final folder state, in a way that stays order-independent across a
-folder's deletion and revival — a rule that does not depend on which file arrived last.
-
 ## Google Drive: an upload can overwrite another device's upload unnoticed
 
 **Status**: not fixed — external (Google Drive API) limitation: Drive offers no conditional content

@@ -341,17 +341,24 @@ class SyncSimulationTest {
 
     private fun checkOracle(sim: Sim, device: Device, seed: Int) {
         val current = groups(device).associate { (key, stamp, value) -> key to (stamp to value) }
-        // A feed's folder is what the feed list shows: the folder while it is alive, else none. (A merge
-        // may null a reference to a folder deleted elsewhere without a stamp of its own.)
-        fun effectiveFolder(folderId: String): String =
-            if (folderId != "null" && sim.oracle["folder $folderId alive"]?.second == "1") folderId else "null"
+        // A feed's folder group is its raw assignment (ks_feed_folder_raw), compared exactly: the newest
+        // write survives whatever happened to the folder since.
         for ((key, expected) in sim.oracle) {
             val actual = current[key]
-            val isFolder = key.endsWith(" folder")
-            val want = expected.first to (if (isFolder) effectiveFolder(expected.second) else expected.second)
-            val got = actual?.let { (it.first ?: -1L) to (if (isFolder) effectiveFolder(it.second) else it.second) }
-            assertEquals(want, got, "seed $seed: ${device.sync.label}: $key lost its newest write")
+            val got = actual?.let { (it.first ?: -1L) to it.second }
+            assertEquals(expected, got, "seed $seed: ${device.sync.label}: $key lost its newest write")
         }
+        // feeds.folder_id is the cache resolved from it: the raw folder while that folder is alive, else
+        // none — for every feed, each of which has exactly one raw row.
+        val driver = device.sync.driver
+        val mismatches = driver.executeQuery(
+            null,
+            "SELECT COUNT(*) FROM feeds f LEFT JOIN ks_feed_folder_resolved v ON v.feed_id = f.id " +
+                "WHERE v.feed_id IS NULL OR f.folder_id IS NOT v.folder_id OR f.folder_updated_at IS NOT v.folder_updated_at",
+            { c -> c.next(); QueryResult.Value(c.getLong(0)!!) },
+            0,
+        ).value
+        assertEquals(0L, mismatches, "seed $seed: ${device.sync.label}: a feed's folder disagrees with its raw assignment")
     }
 
     private data class Group(val key: String, val stamp: Long?, val value: String)
@@ -362,7 +369,12 @@ class SyncSimulationTest {
         fun rows(sql: String): List<List<String?>> = driver.executeQuery(null, sql, { c ->
             QueryResult.Value(buildList { while (c.next().value) add((0 until COLUMNS).map { i -> runCatching { c.getString(i) }.getOrNull() }) })
         }, 0).value
-        for (r in rows("SELECT id, deleted_updated_at, deleted_at IS NULL, custom_title_updated_at, custom_title, folder_updated_at, folder_id FROM feeds")) {
+        for (
+            r in rows(
+                "SELECT f.id, f.deleted_updated_at, f.deleted_at IS NULL, f.custom_title_updated_at, f.custom_title, " +
+                    "r.folder_updated_at, r.folder_id FROM feeds f JOIN ks_feed_folder_raw r ON r.feed_id = f.id",
+            )
+        ) {
             add(Group("feed ${r[0]} deleted", r[1]?.toLong(), r[2]!!))
             add(Group("feed ${r[0]} title", r[3]?.toLong(), r[4].toString()))
             add(Group("feed ${r[0]} folder", r[5]?.toLong(), r[6].toString()))
@@ -404,6 +416,12 @@ class SyncSimulationTest {
             "feeds" to rows(
                 "SELECT f.id, f.url, f.title, f.custom_title, f.deleted_at IS NULL, f.sort_order, " +
                     "(SELECT d.name FROM folders d WHERE d.id = f.folder_id AND d.deleted_at IS NULL) FROM feeds f",
+            ),
+            // The stored folder assignment, raw and resolved, compared exactly (not just as the folder name a
+            // user sees), so a device storing or sending a different value than another is caught.
+            "feed_folders" to rows(
+                "SELECT f.id, f.folder_id, f.folder_updated_at, r.folder_id, r.folder_updated_at " +
+                    "FROM feeds f JOIN ks_feed_folder_raw r ON r.feed_id = f.id",
             ),
             "folders" to rows("SELECT id, name, sort_order, deleted_at IS NULL FROM folders"),
             "tags" to rows("SELECT id, name, color, sort_order, deleted_at IS NULL FROM tags"),

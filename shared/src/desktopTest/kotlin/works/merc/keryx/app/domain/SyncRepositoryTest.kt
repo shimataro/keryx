@@ -48,6 +48,7 @@ import works.merc.keryx.app.data.local.FtsSearch
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.fileDb
 import works.merc.keryx.app.insertFeed
+import works.merc.keryx.app.insertFolder
 import works.merc.keryx.app.platform.ExternalAppLaunch
 import works.merc.keryx.app.platform.FakeNetworkConditionMonitor
 import java.io.File
@@ -301,15 +302,20 @@ class SyncRepositoryTest {
         assertTrue(a.db.hasFeed("fx"))
     }
 
+    /**
+     * A feed's raw folder assignment is this device's data, not a record of the old generation's
+     * files: a rejoin keeps it — a feed in a folder soft-deleted here stays assigned to it — and the
+     * full send that follows carries it.
+     */
     @Test
-    fun joiningAGenerationClearsTheRawFolderVersionsOfTheFilesMergedBefore() = runTest {
+    fun joiningAGenerationKeepsTheRawFolderAssignments() = runTest {
         val cloud = FakeCloudStorage()
         val a = device("a", cloud)
-        a.db.insertFeed("fa", now = 1)
+        a.db.insertFolder("dz", "Z", now = 1)
+        a.db.insertFeed("fa", now = 1, folderId = "dz")
+        a.db.foldersQueries.softDelete(2, 2, "dz")
         a.syncOk()
-        // A raw folder version recorded from the old generation's files would outrank the new
-        // generation's equal-stamped version in the merge, so it must not survive the rejoin.
-        a.driver.execute(null, "INSERT INTO ks_feed_folder_raw (feed_id, folder_updated_at, folder_id) VALUES ('fa', 500, 'dz')", 0)
+        assertEquals(listOf("fa|1|dz"), a.rawFolders())
         val newGeneration = ids()
         val (base, bytes) = SyncFiles.transportFile(TransportMeta(newGeneration, TransportFileKind.BASE, ids(), 1, now), feedRow("fx"))
         cloud.put(base.fileName, bytes)
@@ -318,8 +324,8 @@ class SyncRepositoryTest {
         a.syncOk()
 
         assertEquals(newGeneration, a.state(SYNC_STATE_KS_GENERATION))
-        // The new generation's merge seeds rows of its own (for the feeds its files carry); the old one's must be gone.
-        assertEquals(0L, a.driver.executeQuery(null, "SELECT COUNT(*) FROM ks_feed_folder_raw WHERE feed_id = 'fa'", { c -> c.next(); QueryResult.Value(c.getLong(0)!!) }, 0).value)
+        assertEquals(listOf("fa|1|dz", "fx||"), a.rawFolders())
+        assertNull(a.db.feedsQueries.getById("fa").executeAsOne().folder_id, "the folder is still deleted here")
     }
 
     // ---- Pointer and pre-delta data ----
@@ -1148,9 +1154,9 @@ class SyncRepositoryTest {
         a.repo.testHook = { p, _ -> if (p == SyncHookPoint.BEFORE_SEND_UPLOAD) throw SimulatedCrash() }
         assertFailsWith<SimulatedCrash> { a.repo.sync() }
         a.driver.execute(null, "INSERT INTO ks_search_pending (rowid) VALUES (77)", 0)
-        // A raw folder version from the old connection's files would outrank the next provider's
-        // equal-stamped version in the merge, so it must not survive the disconnect.
-        a.driver.execute(null, "INSERT INTO ks_feed_folder_raw (feed_id, folder_updated_at, folder_id) VALUES ('f2', 500, 'dz')", 0)
+        // A feed's raw folder assignment is this device's data, kept across the disconnect.
+        a.db.insertFolder("dz", "Z", now = 500)
+        a.db.feedsQueries.updateFolder(folderId = "dz", updatedAt = 500, folderUpdatedAt = 500, id = "f2")
         assertTrue(a.pendingFile(2).exists())
 
         a.repo.clearSyncFailureState()
@@ -1166,7 +1172,8 @@ class SyncRepositoryTest {
         assertTrue(a.db.sync_bookkeepingQueries.cursorAll().executeAsList().isEmpty())
         assertFalse(a.pendingFile(2).exists())
         assertEquals(listOf(77L), a.db.sync_bookkeepingQueries.searchPendingAll().executeAsList())
-        assertEquals(0L, a.driver.executeQuery(null, "SELECT COUNT(*) FROM ks_feed_folder_raw", { c -> c.next(); QueryResult.Value(c.getLong(0)!!) }, 0).value)
+        assertEquals(listOf("f2|500|dz"), a.rawFolders())
+        assertEquals("dz", a.db.feedsQueries.getById("f2").executeAsOne().folder_id)
 
         a.db.insertFeed("f3", now = 6)
         assertTrue(a.outbox().isEmpty(), "nothing is recorded while local-only")

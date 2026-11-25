@@ -844,12 +844,12 @@ class SyncMergerTest {
         }
 
     @Test
-    fun aLocalMoveAfterAMergeInvalidatesTheRawFolderVersion() {
+    fun aLocalMoveAfterAMergeWritesTheRawFolderAssignment() {
         // The cloud's folder d-cloud is imported under its own id (names are not unique), so the feed
-        // takes it directly and the raw version (100, d-cloud) is kept beside it. A local move in the
-        // same millisecond stamps 101, so the raw row no longer describes the feed's folder: neither
-        // re-merging the same file nor a file carrying the stamp 101 with a raw id below the local one
-        // (d-aaa < d-other) may undo the move.
+        // takes it and the raw assignment (100, d-cloud) is recorded. A local move in the same
+        // millisecond writes the raw row itself, stamped 101: neither re-merging the same file nor a
+        // file carrying the stamp 101 with a raw id below the local one (d-aaa < d-other) may undo
+        // the move.
         val (cloudFile, cloudDriver, cloudDb) = fileDb()
         cloudDb.insertFolder("d-cloud", "IT", now = 100)
         cloudDb.insertFeed("f1", now = 100, folderId = "d-cloud") // folder_updated_at = 100
@@ -874,12 +874,13 @@ class SyncMergerTest {
         assertEquals("100|d-cloud", folderRaw(localFile, "f1"))
 
         reopen(localFile).let { (_, driver, db) ->
-            db.feedsQueries.updateFolder("d-other", 100L, 100L, "f1") // stamps MAX(100, 100 + 1) = 101
+            db.feedsQueries.updateFolder(folderId = "d-other", updatedAt = 100L, folderUpdatedAt = 100L, id = "f1") // stamps MAX(100, 100 + 1) = 101
             driver.close()
         }
+        assertEquals("101|d-other", folderRaw(localFile, "f1"), "the local move writes the raw assignment")
 
         DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
-        assertEquals("101|d-other", folderRaw(localFile, "f1"), "a stale raw row is refreshed from main's own value")
+        assertEquals("101|d-other", folderRaw(localFile, "f1"))
         DatabaseMerger.merge(localFile.absolutePath, tieFile.absolutePath, 1L, MergeSql.all)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
@@ -896,7 +897,7 @@ class SyncMergerTest {
         // still has it assigned. The removal must propagate.
         val (cloudFile, cloudDriver, cloudDb) = fileDb()
         cloudDb.insertFeed("f1", now = 50)
-        cloudDb.feedsQueries.updateFolder(null, 200L, 200L, "f1") // removed at folder_updated_at = 200
+        cloudDb.feedsQueries.updateFolder(folderId = null, updatedAt = 200L, folderUpdatedAt = 200L, id = "f1") // removed at folder_updated_at = 200
         cloudDriver.close()
 
         val (localFile, localDriver, localDb) = fileDb()
@@ -2159,13 +2160,13 @@ class SyncMergerTest {
             it.insertFolder("d1", "One", now = 100)
             it.insertFolder("d2", "Two", now = 100)
             it.insertFeed("f1", now = 500)
-            it.feedsQueries.updateFolder("d1", 500L, 100L, "f1")
+            it.feedsQueries.updateFolder(folderId = "d1", updatedAt = 500L, folderUpdatedAt = 100L, id = "f1")
         },
         cloud = {
             it.insertFolder("d1", "One", now = 100)
             it.insertFolder("d2", "Two", now = 100)
             it.insertFeed("f1", now = 400)
-            it.feedsQueries.updateFolder("d2", 400L, 100L, "f1")
+            it.feedsQueries.updateFolder(folderId = "d2", updatedAt = 400L, folderUpdatedAt = 100L, id = "f1")
         },
         verify = { assertEquals("d2", it.feedsQueries.getById("f1").executeAsOne().folder_id) },
     )
@@ -2345,6 +2346,8 @@ class SyncMergerTest {
         }
         // An older folder stamp for the second one: its assignment must not be adopted.
         cloudDriver.execute(null, "UPDATE feeds SET folder_updated_at = 50 WHERE id = 'f-orphan-old'", 0)
+        // The schema resolves a missing folder to NULL, so the dangling references are written directly.
+        cloudDriver.execute(null, "UPDATE feeds SET folder_id = 'gone-folder' WHERE id IN ('f-orphan-new', 'f-valid')", 0)
         cloudDb.insertFeed("f-ok", now = 100)
         // The local orphan articles' ids, newer read / star / deleted stamps; one with a valid feed in cloud.
         insertArticle(cloudDb, "a-orphan", "f-ok", "g1", isRead = 1, readAt = 500, updatedAt = 500, isStarred = 1, starredAt = 500)
@@ -2363,6 +2366,9 @@ class SyncMergerTest {
         localDb.insertFeed("f-orphan-new", now = 100, folderId = "gone-folder")
         localDb.insertFeed("f-orphan-old", now = 100, folderId = "gone-folder")
         localDriver.execute(null, "UPDATE feeds SET folder_updated_at = 400 WHERE id = 'f-orphan-old'", 0)
+        // A pre-existing orphan written behind the resolution's back (the schema resolves a missing
+        // folder to NULL, as data written before foreign keys were enforced would not be).
+        localDriver.execute(null, "UPDATE feeds SET folder_id = 'gone-folder' WHERE id IN ('f-orphan-new', 'f-orphan-old')", 0)
         // A valid assignment: copying the cloud's dangling folder_id here would add a violation.
         localDb.insertFeed("f-valid", now = 100, folderId = "folder-ok")
         insertArticle(localDb, "a-orphan", "gone-feed", "g1", isRead = 0, readAt = 100, updatedAt = 100)
@@ -2498,9 +2504,9 @@ class SyncMergerTest {
             it.insertFolder("d1", "One", now = 100)
             it.insertFolder("d2", "Two", now = 100)
             it.insertFeed("f1", now = 100)
-            it.feedsQueries.updateFolder("d1", 500L, 500L, "f1")
+            it.feedsQueries.updateFolder(folderId = "d1", updatedAt = 500L, folderUpdatedAt = 500L, id = "f1")
         },
-        write = { it.feedsQueries.updateFolder("d2", 500L, 500L, "f1") },
+        write = { it.feedsQueries.updateFolder(folderId = "d2", updatedAt = 500L, folderUpdatedAt = 500L, id = "f1") },
         afterWrite = { db, _ -> assertEquals(501L, db.feedsQueries.getById("f1").executeAsOne().folder_updated_at) },
         verify = { db, _ ->
             val feed = db.feedsQueries.getById("f1").executeAsOne()
@@ -2530,9 +2536,9 @@ class SyncMergerTest {
             it.insertFolder("d1", "One", now = 100)
             it.insertFolder("d2", "Two", now = 100)
             it.insertFeed("f1", now = 100)
-            it.feedsQueries.updateFolderAndSortOrder("d1", 5L, 500L, 500L, 500L, "f1")
+            it.feedsQueries.updateFolderAndSortOrder(folderId = "d1", sortOrder = 5L, updatedAt = 500L, folderUpdatedAt = 500L, sortOrderUpdatedAt = 500L, id = "f1")
         },
-        write = { it.feedsQueries.updateFolderAndSortOrder("d2", 9L, 500L, 500L, 500L, "f1") },
+        write = { it.feedsQueries.updateFolderAndSortOrder(folderId = "d2", sortOrder = 9L, updatedAt = 500L, folderUpdatedAt = 500L, sortOrderUpdatedAt = 500L, id = "f1") },
         afterWrite = { db, _ ->
             val feed = db.feedsQueries.getById("f1").executeAsOne()
             assertEquals(501L, feed.folder_updated_at)

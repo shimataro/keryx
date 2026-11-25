@@ -9,7 +9,8 @@ package works.merc.keryx.app.domain
  * database for a delta, a `VACUUM INTO` copy of it for a full send — attached as [SOURCE] and, for a
  * full send, the file to leave out attached as [EXCEPT]. Only the transport columns
  * ([TransportSchema.SYNCED_TABLES]) are copied, listed explicitly, so `search_text`, the fetch
- * state and the bookkeeping never leave the device.
+ * state and the bookkeeping never leave the device. A feed's `folder_id` / `folder_updated_at` are
+ * the one exception to "as stored": they are taken from its raw assignment (see [source]).
  *
  * Both kinds end with [closureStatements]: every row a written row references (a feed's folder, an
  * article's feed, a `feed_tags` row's feed and tag) is written too, so the file passes "Validating
@@ -59,6 +60,25 @@ object DeltaExportSql {
     private fun columns(table: TableSpec, alias: String? = null): String =
         table.columnNames.joinToString(", ") { if (alias == null) it else "$alias.$it" }
 
+    /** A feed's folder columns, which a file carries from the feed's raw assignment. */
+    private val FEED_FOLDER_COLUMNS = setOf("folder_id", "folder_updated_at")
+
+    /**
+     * Where [name]'s rows are read from in the source, as a `FROM` item named [name]. For `feeds`, the
+     * folder assignment comes from the raw row (`ks_feed_folder_raw`) — the source of truth, possibly
+     * naming a folder that is soft-deleted here — not from the resolved `feeds.folder_id`, which is
+     * NULL whenever that folder is not alive: a receiver ranks the version it gets against its own
+     * raw one ([MergeSql]), and [ReduceSql] folds raw versions, so a file must carry the raw value.
+     * Every other table is read as it is stored.
+     */
+    private fun source(name: String): String {
+        if (name != "feeds") return "$SOURCE.$name"
+        val selected = table(name).columnNames.joinToString(", ") {
+            if (it in FEED_FOLDER_COLUMNS) "r.$it AS $it" else "f.$it AS $it"
+        }
+        return "(SELECT $selected FROM $SOURCE.feeds f LEFT JOIN $SOURCE.ks_feed_folder_raw r ON r.feed_id = f.id) AS feeds"
+    }
+
     /** The keys of [tbl]'s outbox entries up to [s] (`pk`; [column] picks `pk2` for `feed_tags`' tag). */
     private fun outboxKeys(tbl: String, s: Long, column: String = "pk"): String =
         "SELECT $column FROM $SOURCE.sync_outbox WHERE tbl = '$tbl' AND seq <= $s"
@@ -80,7 +100,7 @@ object DeltaExportSql {
                 val spec = table(name)
                 add(
                     "INSERT INTO main.$name (${columns(spec)}) " +
-                        "SELECT ${columns(spec)} FROM $SOURCE.$name WHERE id IN (${outboxKeys(name, s)})",
+                        "SELECT ${columns(spec)} FROM ${source(name)} WHERE id IN (${outboxKeys(name, s)})",
                 )
             }
             add(deltaArticles(s))
@@ -124,7 +144,7 @@ object DeltaExportSql {
     fun fullStatements(withExcept: Boolean): List<String> = buildList {
         for (spec in TransportSchema.SYNCED_TABLES) {
             val except = if (withExcept) " EXCEPT SELECT ${columns(spec)} FROM $EXCEPT.${spec.name}" else ""
-            add("INSERT INTO main.${spec.name} (${columns(spec)}) SELECT ${columns(spec)} FROM $SOURCE.${spec.name}$except")
+            add("INSERT INTO main.${spec.name} (${columns(spec)}) SELECT ${columns(spec)} FROM ${source(spec.name)}$except")
         }
         addAll(closureStatements)
     }
@@ -132,14 +152,17 @@ object DeltaExportSql {
     /**
      * Writes every row the written rows reference and the file does not hold yet: feeds (of the
      * articles and `feed_tags` rows), tags (of the `feed_tags` rows), then folders (of the feeds,
-     * including those just added) — in that order, since a feed added here can bring its folder.
+     * including those just added) — in that order, since a feed added here can bring its folder. A
+     * feed's folder is its raw one ([source]), so a folder soft-deleted here that a feed is still
+     * assigned to is carried too: its row exists (folder rows are never physically deleted, and a raw
+     * assignment only ever names an existing folder — `sync_bookkeeping.sq`).
      */
     val closureStatements: List<String> = run {
         val feeds = table("feeds")
         val tags = table("tags")
         val folders = table("folders")
         listOf(
-            "INSERT INTO main.feeds (${columns(feeds)}) SELECT ${columns(feeds)} FROM $SOURCE.feeds " +
+            "INSERT INTO main.feeds (${columns(feeds)}) SELECT ${columns(feeds)} FROM ${source("feeds")} " +
                 "WHERE id IN (SELECT feed_id FROM main.articles UNION SELECT feed_id FROM main.feed_tags) " +
                 "AND id NOT IN (SELECT id FROM main.feeds)",
             "INSERT INTO main.tags (${columns(tags)}) SELECT ${columns(tags)} FROM $SOURCE.tags " +

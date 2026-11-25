@@ -39,8 +39,8 @@ class SchemaV3MigrationTest {
 
     /**
      * Everything that defines the schema, in a form a created and a migrated database can be compared
-     * in: per table its columns (`table_info`), foreign keys and indexes; the explicit indexes' and
-     * the triggers' SQL. A table's own `CREATE TABLE` text is left out on purpose — `ALTER TABLE`
+     * in: per table its columns (`table_info`), foreign keys and indexes; the explicit indexes', the
+     * views' and the triggers' SQL. A table's own `CREATE TABLE` text is left out on purpose — `ALTER TABLE`
      * rewrites it differently from how the `.sq` file spells the same table.
      */
     private fun schemaOf(file: File): Map<String, Any?> = withConnection(file) { conn ->
@@ -57,6 +57,11 @@ class SchemaV3MigrationTest {
             put(
                 "indexes",
                 conn.rows("SELECT name, sql FROM sqlite_master WHERE type = 'index' AND sql IS NOT NULL ORDER BY name")
+                    .map { listOf(it[0], (it[1] as String?).normalized()) },
+            )
+            put(
+                "views",
+                conn.rows("SELECT name, sql FROM sqlite_master WHERE type = 'view' ORDER BY name")
                     .map { listOf(it[0], (it[1] as String?).normalized()) },
             )
             put(
@@ -100,7 +105,11 @@ class SchemaV3MigrationTest {
         assertEquals(created.keys, migrated.keys)
         for (key in created.keys) assertEquals(created[key], migrated[key], "schema differs at $key")
         assertTrue("feed_fetch_state" in (created["tables"] as List<*>))
-        assertEquals(12, (created["triggers"] as List<*>).size)
+        // The twelve capture triggers plus the raw folder row's capture trigger, and the four that keep
+        // feeds.folder_id resolved from ks_feed_folder_raw (its creation with the feed and the three
+        // resolution triggers); the one view is ks_feed_folder_resolved.
+        assertEquals(17, (created["triggers"] as List<*>).size)
+        assertEquals(listOf("ks_feed_folder_resolved"), (created["views"] as List<*>).map { (it as List<*>)[0] })
     }
 
     @Test
@@ -167,10 +176,11 @@ class SchemaV3MigrationTest {
      * AfterVersion(2) re-key ([rekeyTagAndFolderIds]) runs as it does on every platform: UNIQUE(name)
      * is dropped (same-named rows are allowed from here on), the per-field stamps arrive with the
      * rebuild, every row's id becomes the one its name derives from, the children are re-attached
-     * under the new ids, and each move is recorded in ks_id_remap. A child whose parent was never
-     * there (written before foreign keys were enforced) survives untouched — it was already a
-     * violation, and nothing here deletes a row it points at — while a link whose feed is gone is
-     * the only row lost: it cannot be restored, because feeds is not rebuilt. Seeded with foreign
+     * under the new ids, and each move is recorded in ks_id_remap. A link whose tag was never there
+     * (written before foreign keys were enforced) survives untouched — it was already a violation,
+     * and nothing here deletes a row it points at — while a link whose feed is gone is the only row
+     * lost: it cannot be restored, because feeds is not rebuilt. A feed's folder reference naming no
+     * folder becomes a NULL raw assignment, and the resolved feeds.folder_id follows. Seeded with foreign
      * keys off (as the v2 app left them) and migrated through the production factory, whose
      * connections enforce them.
      */
@@ -187,6 +197,8 @@ class SchemaV3MigrationTest {
                 // An orphan: d-orphan does not exist (data from before foreign keys were enforced).
                 "INSERT INTO feeds (id, url, title, folder_id, updated_at, created_at) VALUES ('f2', 'https://b', 'B', 'd-orphan', 10, 1)",
                 "INSERT INTO feeds (id, url, title, updated_at, created_at) VALUES ('f3', 'https://c', 'C', 10, 1)",
+                // Assigned to the soft-deleted folder (a v2 sync could leave a feed there).
+                "INSERT INTO feeds (id, url, title, folder_id, folder_updated_at, updated_at, created_at) VALUES ('f4', 'https://d', 'D', 'd2', 30, 10, 1)",
                 "INSERT INTO tags (id, name, updated_at, created_at) VALUES ('t1', 'T', 10, 1)",
                 "INSERT INTO tags (id, name, updated_at, created_at, deleted_at) VALUES ('t2', 'Gone', 20, 2, 20)",
                 "INSERT INTO feed_tags (feed_id, tag_id, updated_at) VALUES ('f1', 't1', 10)",
@@ -236,12 +248,27 @@ class SchemaV3MigrationTest {
                 setOf(listOf<Any?>(tId, "t1"), listOf<Any?>(tGoneId, "t2")),
                 conn.rows("SELECT id, v2_id FROM tags").toSet(),
             )
-            // The folder assignment and the links moved to the new ids; the orphans are untouched.
+            // The raw folder assignments are filled from the feeds and moved to the new ids with the
+            // folders. The orphan's reference names no folder row, so its raw assignment is NULL (a raw
+            // row only ever names an existing folder — every send's closure relies on it); the feed
+            // assigned to the soft-deleted folder keeps that assignment.
+            assertEquals(
+                listOf(
+                    listOf<Any?>("f1", null, dId),
+                    listOf<Any?>("f2", null, null),
+                    listOf<Any?>("f3", null, null),
+                    listOf<Any?>("f4", 30, dGoneId),
+                ),
+                conn.rows("SELECT feed_id, folder_updated_at, folder_id FROM ks_feed_folder_raw ORDER BY feed_id"),
+            )
+            // feeds.folder_id is resolved from them: the live folder under its new id, and "no folder"
+            // for the soft-deleted folder and for the orphan, whose dangling reference is cleared.
             assertEquals(
                 listOf(
                     listOf<Any?>("f1", dId),
-                    listOf<Any?>("f2", "d-orphan"),
+                    listOf<Any?>("f2", null),
                     listOf<Any?>("f3", null),
+                    listOf<Any?>("f4", null),
                 ),
                 conn.rows("SELECT id, folder_id FROM feeds ORDER BY id"),
             )
@@ -278,8 +305,9 @@ class SchemaV3MigrationTest {
                 listOf(listOf<Any?>("folders_name")),
                 conn.rows("SELECT name FROM pragma_index_list('folders') WHERE name = 'folders_name' AND \"unique\" = 0"),
             )
-            // The orphans were violations before and still are; the only violation that went away is
-            // the dropped feed-less link. Nothing new appeared.
+            // The tag-less link was a violation before and still is; the violations that went away are
+            // the dropped feed-less link and the feed's dangling folder reference, which the resolution
+            // cleared. Nothing new appeared.
             assertEquals(
                 listOf(
                     listOf<Any?>("feed_tags", "feeds"),
@@ -288,10 +316,7 @@ class SchemaV3MigrationTest {
                 ),
                 violationsBefore,
             )
-            assertEquals(
-                listOf(listOf<Any?>("feed_tags", "tags"), listOf<Any?>("feeds", "folders")),
-                violations(),
-            )
+            assertEquals(listOf(listOf<Any?>("feed_tags", "tags")), violations())
         }
     }
 

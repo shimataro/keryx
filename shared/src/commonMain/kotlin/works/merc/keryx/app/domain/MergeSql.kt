@@ -28,7 +28,7 @@ package works.merc.keryx.app.domain
  * the same unique key from different devices) are resolved first: a statement that matches by
  * `feeds.url` or `articles(feed_id, guid)` considers only the winner among the cloud rows sharing
  * that key — greatest `updated_at`, then greatest id ([winnerAmong]). Statements resolving a
- * reference by id (`mergeFeedFolderId`, `feedTags`) still see every cloud row. Tag and folder rows
+ * reference by id (`mergeFeedFolder`, `feedTags`) still see every cloud row. Tag and folder rows
  * are matched by id only — their ids are name-derived (`IdGenerator.tagId` / `folderId`), so two
  * devices that created the same name hold the same id. A row the v2→v3 migration re-keyed also
  * carries its pre-upgrade id in `v2_id`: rows that shared that id but were renamed differently on
@@ -495,9 +495,9 @@ object MergeSql {
     // custom_title / deleted_at are still carried in the INSERT's column list so a brand-new feed
     // gets its initial values. folder_id / folder_updated_at are the one exception: they are
     // deliberately absent from the column list entirely (a brand-new feed is inserted with no
-    // folder), because their value can't just be copied verbatim like the others — cloud.folder_id
-    // may reference a folder this device has never seen, and only mergeFeedFolderId's FK-safe
-    // resolution (folders before feeds, mergeFeedFolderId after both) is allowed to set it.
+    // folder, and ks_feed_folder_raw_init gives it a NULL raw row), because feeds.folder_id is a
+    // cache resolved from the feed's raw assignment — mergeFeedFolder records the raw version, and
+    // the resolution triggers set folder_id from it, FK-safely (folders before feeds).
     // A feed's fetch state (feed_fetch_state: validators, error count) is device-local and never
     // merged: a feed new to this device starts with none, as if never fetched here.
     private val feeds = """
@@ -519,76 +519,35 @@ object MergeSql {
            OR excluded.created_at < created_at;
     """.trimIndent()
 
-    /** The raw folder version each feed's resolved `folder_id` came from (`sync_bookkeeping.sq`). */
-    private const val FOLDER_RAW = "main.ks_feed_folder_raw"
-
     /**
      * Merges a feed's folder assignment independently of its content row, by `folder_updated_at`
-     * ([SyncLww.FEED_FOLDER]). Runs after `feeds` (so both the folder rows and the feed rows exist in
-     * `main`), and applies whether or not the `feeds` statement rewrote the row — this is what lets a
-     * folder move propagate even when the local feed is newer for content reasons.
+     * ([SyncLww.FEED_FOLDER]). Runs after `folders` and `feeds`, so every folder and feed row the
+     * file carries exists in `main`, and applies whether or not the `feeds` statement rewrote the row
+     * — this is what lets a folder move propagate even when the local feed is newer for content
+     * reasons.
      *
-     * `main.feeds.folder_id` holds a **resolved** id — this device's folder, which can differ from the
-     * id the winning file carried — while every file carries its writer's raw id. Ranking a cloud raw
-     * id against a stored resolved one would compare two id spaces, so on an equal stamp the result
-     * would depend on the merge order (and disagree with [ReduceSql]'s fold, which keeps the raw
-     * maximum). So the raw winning version is kept beside the resolved one, in [FOLDER_RAW], and the
-     * merge ranks raw against raw, in three statements:
-     *
-     * 1. [normalizeFeedFolderRaw]: for each feed `cloud` carries, a missing or stale raw row (its
-     *    stamp is not main's — a local move happened since) is replaced by main's own value, which a
-     *    local write stored unresolved.
-     * 2. [mergeFeedFolderId]: the cloud version replaces the feed's folder when it outranks the raw
-     *    row. The resolved folder_id: NULL when the cloud's folder isn't alive in `cloud.folders`;
-     *    else the cloud's id when that folder is alive in `main` (a folder's id is name-derived, so
-     *    the same folder carries the same id everywhere); else NULL.
-     * 3. [recordFeedFolderRaw]: the raw row takes the cloud version under the same comparison. Step 2
-     *    does not touch the raw rows, so both steps pick the same winners, and afterwards each raw row
-     *    carries the stamp just written to its feed.
-     *
-     * A raw row is valid only while its stamp IS main's: a local folder write (`updateFolder`,
-     * `updateFolderAndSortOrder`) stamps `MAX(now, previous + 1)`, strictly above the stamp it
-     * replaces, and a merge only ever writes both together — so a stale row can never carry main's
-     * stamp, and comparing the stamp alone detects it. `cloud.feeds` is keyed by id, so each feed
-     * meets at most one cloud version per merge.
+     * A feed's assignment lives in `main.ks_feed_folder_raw` — its **raw** version, the folder id and
+     * stamp as the winning version wrote them — and every file carries raw versions too
+     * (`DeltaExportSql`), so the merge ranks raw against raw, exactly as [ReduceSql]'s fold does, and
+     * records the winner. A cloud reference to a folder `main` does not hold is recorded as NULL (a
+     * raw row only ever names an existing folder; check 9 and the folder statements make this
+     * unreachable for a valid file). `main.feeds.folder_id` / `folder_updated_at` are never written
+     * here: the schema's resolution triggers derive them from the raw row and the folder's liveness
+     * (`ks_feed_folder_resolved` in `sync_bookkeeping.sq`) whenever either changes — here, when this
+     * statement records a winner and when the `folders` statements revive or delete a folder — so the
+     * resolved value depends only on the final raw assignment and folder state, whatever order the
+     * files arrive in. `cloud.feeds` is keyed by id, so each feed meets at most one cloud version per
+     * merge.
      */
-    private val normalizeFeedFolderRaw = """
-        INSERT INTO $FOLDER_RAW (feed_id, folder_updated_at, folder_id)
-        SELECT m.id, m.folder_updated_at, m.folder_id
-        FROM main.feeds m
-        WHERE m.id IN (SELECT id FROM cloud.feeds)
+    private val mergeFeedFolder = """
+        INSERT INTO main.ks_feed_folder_raw (feed_id, folder_updated_at, folder_id)
+        SELECT c.id, c.folder_updated_at,
+               CASE WHEN EXISTS (SELECT 1 FROM main.folders mf WHERE mf.id = c.folder_id) THEN c.folder_id END
+        FROM cloud.feeds c
+        WHERE EXISTS (SELECT 1 FROM main.feeds l WHERE l.id = c.id)
         ON CONFLICT(feed_id) DO UPDATE SET
-            folder_updated_at = excluded.folder_updated_at,
-            folder_id = excluded.folder_id
-        WHERE folder_updated_at IS NOT excluded.folder_updated_at;
-    """.trimIndent()
-
-    /** Step 2 of the folder merge (see [normalizeFeedFolderRaw]). */
-    private val mergeFeedFolderId = """
-        UPDATE main.feeds
-        SET folder_id = (
-                CASE
-                    WHEN NOT EXISTS (SELECT 1 FROM cloud.folders cf WHERE cf.id = c.folder_id AND cf.deleted_at IS NULL)
-                        THEN NULL
-                    WHEN EXISTS (SELECT 1 FROM main.folders mf WHERE mf.id = c.folder_id AND mf.deleted_at IS NULL)
-                        THEN c.folder_id
-                    ELSE NULL
-                END),
-            folder_updated_at = c.folder_updated_at
-        FROM cloud.feeds c
-        INNER JOIN $FOLDER_RAW w ON w.feed_id = c.id
-        WHERE main.feeds.id = c.id
-          AND ${SyncLww.wins("c", "w", SyncLww.FEED_FOLDER)};
-    """.trimIndent()
-
-    /** Step 3 of the folder merge (see [normalizeFeedFolderRaw]). */
-    private val recordFeedFolderRaw = """
-        UPDATE $FOLDER_RAW
-        SET folder_updated_at = c.folder_updated_at,
-            folder_id = c.folder_id
-        FROM cloud.feeds c
-        WHERE c.id = $FOLDER_RAW.feed_id
-          AND ${SyncLww.wins("c", FOLDER_RAW, SyncLww.FEED_FOLDER)};
+            ${SyncLww.upsertAssignments(SyncLww.FEED_FOLDER).joinToString(",\n            ")}
+        WHERE ${SyncLww.wins("excluded", "", SyncLww.FEED_FOLDER)};
     """.trimIndent()
 
     /** A feed's per-field statement for [group], matched by id. */
@@ -761,12 +720,12 @@ object MergeSql {
      * a pre-upgrade id matches.
      *
      * Applied in FK-safe order (parents before children): the v2→v3 identity reconciliation,
-     * folders, feeds, the folder merge's three statements and the other three `mergeFeed*`, tags,
+     * folders, feeds, the folder merge and the other three `mergeFeed*`, tags,
      * articles (with the `ks_search_pending` / `ks_search_awaiting_body` registrations around it),
      * feed_tags, global_settings.
      */
     val all: List<String> = reconcileFolders + reconcileTags + folders + listOf(
-        feeds, normalizeFeedFolderRaw, mergeFeedFolderId, recordFeedFolderRaw, mergeFeedSortOrder, mergeFeedCustomTitle, mergeFeedDeletedAt,
+        feeds, mergeFeedFolder, mergeFeedSortOrder, mergeFeedCustomTitle, mergeFeedDeletedAt,
     ) + tags + listOf(
         registerChangedBodies, registerAwaitingBodies, articles, registerNewBodies, feedTags, globalSettings,
     )

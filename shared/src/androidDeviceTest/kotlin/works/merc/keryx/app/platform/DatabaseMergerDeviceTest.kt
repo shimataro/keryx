@@ -114,6 +114,7 @@ class DatabaseMergerDeviceTest {
         // would fail).
         SQLiteDatabase.openOrCreateDatabase(cloudFile.absolutePath, null, NoOpDatabaseErrorHandler).use { db ->
             VERSION_3_TRIGGERS.forEach { db.execSQL("DROP TRIGGER $it") }
+            VERSION_3_VIEWS.forEach { db.execSQL("DROP VIEW $it") }
             VERSION_3_TABLES.forEach { db.execSQL("DROP TABLE $it") }
             db.execSQL("ALTER TABLE feeds ADD COLUMN etag TEXT")
             db.execSQL("ALTER TABLE feeds ADD COLUMN last_modified TEXT")
@@ -153,9 +154,15 @@ class DatabaseMergerDeviceTest {
             "ks_search_awaiting_body", "ks_feed_folder_raw", "ks_id_remap",
         )
 
-        /** The capture triggers `2.sqm` creates, dropped before the tables they write to. */
+        /** The triggers `2.sqm` creates, dropped before the tables they read and write. */
         val VERSION_3_TRIGGERS = listOf("feeds", "articles", "tags", "folders", "feed_tags", "global_settings")
-            .flatMap { listOf("ks_capture_${it}_insert", "ks_capture_${it}_update") }
+            .flatMap { listOf("ks_capture_${it}_insert", "ks_capture_${it}_update") } + listOf(
+            "ks_capture_feed_folder_raw_update", "ks_feed_folder_raw_init", "ks_feed_folder_resolve_raw_insert",
+            "ks_feed_folder_resolve_raw_update", "ks_feed_folder_resolve_folder",
+        )
+
+        /** The views `2.sqm` creates, dropped before the tables they read. */
+        val VERSION_3_VIEWS = listOf("ks_feed_folder_resolved")
 
         /** Must stay a version actually registered in [works.merc.keryx.app.domain.MergeSchema.EXPECTED_SCHEMAS]. */
         val SCHEMA_VERSION = works.merc.keryx.app.data.local.db.KeryxDatabase.Schema.version

@@ -146,6 +146,13 @@ CREATE TABLE ks_feed_folder_raw (
     folder_id         TEXT
 );
 
+CREATE VIEW ks_feed_folder_resolved AS
+SELECT r.feed_id AS feed_id,
+    CASE WHEN EXISTS (SELECT 1 FROM folders f WHERE f.id = r.folder_id AND f.deleted_at IS NULL)
+        THEN r.folder_id END AS folder_id,
+    r.folder_updated_at AS folder_updated_at
+FROM ks_feed_folder_raw r;
+
 CREATE TABLE ks_id_remap (
     kind   TEXT NOT NULL,
     old_id TEXT NOT NULL,
@@ -176,15 +183,22 @@ WHEN (SELECT enabled FROM sync_capture WHERE id = 1) = 1 AND NOT EXISTS (SELECT 
         OR old.description IS NOT new.description
         OR old.favicon_url IS NOT new.favicon_url
         OR old.custom_title IS NOT new.custom_title
-        OR old.folder_id IS NOT new.folder_id
         OR old.deleted_at IS NOT new.deleted_at
         OR old.sort_order IS NOT new.sort_order
-        OR old.folder_updated_at IS NOT new.folder_updated_at
         OR old.sort_order_updated_at IS NOT new.sort_order_updated_at
         OR old.custom_title_updated_at IS NOT new.custom_title_updated_at
         OR old.deleted_updated_at IS NOT new.deleted_updated_at)
 BEGIN
     INSERT INTO sync_outbox (tbl, pk) VALUES ('feeds', new.id);
+END;
+
+CREATE TRIGGER ks_capture_feed_folder_raw_update AFTER UPDATE ON ks_feed_folder_raw
+WHEN (SELECT enabled FROM sync_capture WHERE id = 1) = 1 AND NOT EXISTS (SELECT 1 FROM sync_merging)
+    AND (old.feed_id IS NOT new.feed_id
+        OR old.folder_id IS NOT new.folder_id
+        OR old.folder_updated_at IS NOT new.folder_updated_at)
+BEGIN
+    INSERT INTO sync_outbox (tbl, pk) VALUES ('feeds', new.feed_id);
 END;
 
 CREATE TRIGGER ks_capture_articles_insert AFTER INSERT ON articles
@@ -295,3 +309,53 @@ WHEN (SELECT enabled FROM sync_capture WHERE id = 1) = 1 AND NOT EXISTS (SELECT 
 BEGIN
     INSERT INTO sync_outbox (tbl, pk) VALUES ('global_settings', new.key);
 END;
+
+-- 6. A feed's raw folder assignment (sync_bookkeeping.sq): the triggers that create it with every new
+--    feed and resolve feeds.folder_id / folder_updated_at from it, then one raw row per existing feed
+--    from its current folder_id / folder_updated_at. A folder_id naming no folder row (written before
+--    foreign keys were enforced) is recorded as NULL: a raw row only ever names an existing folder,
+--    which every send's closure relies on (DeltaExportSql) — so the backfill's resolution clears that
+--    dangling feeds.folder_id too. A feed assigned to a soft-deleted folder keeps that raw assignment
+--    and resolves to "no folder" until the folder is alive again. Capture is off, so nothing is
+--    recorded. The re-key that follows (TagFolderIdRekey) moves the raw rows with the folders.
+CREATE TRIGGER ks_feed_folder_raw_init AFTER INSERT ON feeds
+BEGIN
+    INSERT INTO ks_feed_folder_raw (feed_id, folder_updated_at, folder_id)
+    VALUES (new.id, new.folder_updated_at, new.folder_id);
+END;
+
+CREATE TRIGGER ks_feed_folder_resolve_raw_insert AFTER INSERT ON ks_feed_folder_raw
+BEGIN
+    UPDATE feeds SET
+        folder_id = (SELECT v.folder_id FROM ks_feed_folder_resolved v WHERE v.feed_id = feeds.id),
+        folder_updated_at = (SELECT v.folder_updated_at FROM ks_feed_folder_resolved v WHERE v.feed_id = feeds.id)
+    WHERE id = new.feed_id
+        AND EXISTS (SELECT 1 FROM ks_feed_folder_resolved v WHERE v.feed_id = feeds.id
+            AND (v.folder_id IS NOT feeds.folder_id OR v.folder_updated_at IS NOT feeds.folder_updated_at));
+END;
+
+CREATE TRIGGER ks_feed_folder_resolve_raw_update AFTER UPDATE ON ks_feed_folder_raw
+BEGIN
+    UPDATE feeds SET
+        folder_id = (SELECT v.folder_id FROM ks_feed_folder_resolved v WHERE v.feed_id = feeds.id),
+        folder_updated_at = (SELECT v.folder_updated_at FROM ks_feed_folder_resolved v WHERE v.feed_id = feeds.id)
+    WHERE id = new.feed_id
+        AND EXISTS (SELECT 1 FROM ks_feed_folder_resolved v WHERE v.feed_id = feeds.id
+            AND (v.folder_id IS NOT feeds.folder_id OR v.folder_updated_at IS NOT feeds.folder_updated_at));
+END;
+
+CREATE TRIGGER ks_feed_folder_resolve_folder AFTER UPDATE OF deleted_at ON folders
+WHEN (old.deleted_at IS NULL) IS NOT (new.deleted_at IS NULL)
+BEGIN
+    UPDATE feeds SET
+        folder_id = (SELECT v.folder_id FROM ks_feed_folder_resolved v WHERE v.feed_id = feeds.id),
+        folder_updated_at = (SELECT v.folder_updated_at FROM ks_feed_folder_resolved v WHERE v.feed_id = feeds.id)
+    WHERE id IN (SELECT r.feed_id FROM ks_feed_folder_raw r WHERE r.folder_id = new.id)
+        AND EXISTS (SELECT 1 FROM ks_feed_folder_resolved v WHERE v.feed_id = feeds.id
+            AND (v.folder_id IS NOT feeds.folder_id OR v.folder_updated_at IS NOT feeds.folder_updated_at));
+END;
+
+INSERT INTO ks_feed_folder_raw (feed_id, folder_updated_at, folder_id)
+SELECT f.id, f.folder_updated_at,
+    CASE WHEN EXISTS (SELECT 1 FROM folders d WHERE d.id = f.folder_id) THEN f.folder_id END
+FROM feeds f;

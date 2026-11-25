@@ -266,6 +266,10 @@ internal class SyncDevice(
 
     fun capture() = db.sync_bookkeepingQueries.captureState().executeAsOne()
 
+    /** Every feed's raw folder assignment (`ks_feed_folder_raw`), as `feed_id|folder_updated_at|folder_id`. */
+    fun rawFolders(): List<String> = db.sync_bookkeepingQueries.feedFolderRawAll().executeAsList()
+        .map { "${it.feed_id}|${it.folder_updated_at ?: ""}|${it.folder_id ?: ""}" }
+
     override fun close() {
         driver.close()
         tempDir.deleteRecursively()

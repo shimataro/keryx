@@ -610,4 +610,97 @@ class SyncAlgebraTest {
         assertEquals(folderId, folderOf(deviceA))
         assertEquals(folderOf(deviceA), folderOf(deviceB))
     }
+
+    // ---- A feed's folder across its folder's deletion and revival ----
+
+    private fun feedFolder(db: File, feedId: String = "f1"): String = TransportFixtures.connect(db).use { conn ->
+        conn.createStatement().use { st ->
+            st.executeQuery(
+                "SELECT f.folder_id, f.folder_updated_at, r.folder_id, r.folder_updated_at " +
+                    "FROM feeds f JOIN ks_feed_folder_raw r ON r.feed_id = f.id WHERE f.id = '$feedId'",
+            ).use { rs -> rs.next(); "resolved=${rs.getString(1)}@${rs.getObject(2)} raw=${rs.getString(3)}@${rs.getObject(4)}" }
+        }
+    }
+
+    /** Every merge and fold order of [p] and [q] into a fresh [local], each with its label. */
+    private fun everyOrder(local: Array<String>, p: File, q: File): List<Pair<String, File>> = listOf(
+        "P then Q" to localDb(*local).also { merge(it, p); merge(it, q) },
+        "Q then P" to localDb(*local).also { merge(it, q); merge(it, p) },
+        "fold(P, Q)" to localDb(*local).also { merge(it, fold(p to nameA, q to nameB)) },
+        "fold(Q, P)" to localDb(*local).also { merge(it, fold(q to nameB, p to nameA)) },
+    )
+
+    /**
+     * The former known issue "A feed can be left pointing at a deleted folder across the folder's
+     * deletion and revival": with folder d live and f assigned to d at 500, one file keeps d live and
+     * one deletes it, both assigning f to d at 500. The assignment's tie is no change, and the
+     * folder's deletion re-resolves the feed whichever file arrives last, so every order stores — and
+     * exports, as the raw value — the same thing: raw d@500, resolved "no folder".
+     */
+    @Test
+    fun aFolderDeletionAndAnEqualAssignmentConvergeWhateverTheOrder() {
+        val local = arrayOf(folder("d", "D", updatedAt = 100), feed("f1", folderId = "d", folderAt = 500))
+        val p = transportFile(nameA, folder("d", "D", updatedAt = 100), feed("f1", folderId = "d", folderAt = 500))
+        val q = transportFile(nameB, folder("d", "D", updatedAt = 600, deletedAt = 600), feed("f1", folderId = "d", folderAt = 500))
+        val results = everyOrder(local, p, q)
+        for ((label, db) in results) assertEquals("resolved=null@500 raw=d@500", feedFolder(db), label)
+        val dumps = results.map { (_, db) -> dump(db, local = true) }
+        dumps.drop(1).forEach { assertEquals(dumps.first(), it) }
+    }
+
+    /**
+     * A folder deleted by one file and revived by a newer one: the feed still assigned to it is back
+     * in it in every order — the revival re-resolves the feeds whose raw assignment names the folder,
+     * even when no file carries the feed again.
+     */
+    @Test
+    fun aFolderRevivedByAMergeRestoresItsFeedsWhateverTheOrder() {
+        val local = arrayOf(folder("d", "D", updatedAt = 100), feed("f1", folderId = "d", folderAt = 500))
+        val p = transportFile(nameA, folder("d", "D", updatedAt = 600, deletedAt = 600), feed("f1", folderId = "d", folderAt = 500))
+        val q = transportFile(nameB, folder("d", "D", updatedAt = 700))
+        val results = everyOrder(local, p, q)
+        for ((label, db) in results) assertEquals("resolved=d@500 raw=d@500", feedFolder(db), label)
+        val dumps = results.map { (_, db) -> dump(db, local = true) }
+        dumps.drop(1).forEach { assertEquals(dumps.first(), it) }
+
+        // Merged alone, the deletion leaves the feed in "no folder" — and the revival restores it.
+        val db = localDb(*local)
+        merge(db, p)
+        assertEquals("resolved=null@500 raw=d@500", feedFolder(db))
+        merge(db, q)
+        assertEquals("resolved=d@500 raw=d@500", feedFolder(db))
+    }
+
+    /**
+     * An assignment to a folder that is deleted here is recorded raw: the feed shows no folder, but a
+     * later revival of the folder by a file that does not carry the feed puts it back, and a newer
+     * move elsewhere still wins.
+     */
+    @Test
+    fun anAssignmentToADeletedFolderIsKeptRawAndResolvedLater() {
+        val db = localDb(folder("d", "D", updatedAt = 600, deletedAt = 600), feed("f1"))
+        merge(db, transportFile(nameA, folder("d", "D", updatedAt = 100), feed("f1", folderId = "d", folderAt = 500)))
+        assertEquals("resolved=null@500 raw=d@500", feedFolder(db), "the local deletion is newer")
+        merge(db, transportFile(nameB, folder("d", "D", updatedAt = 700)))
+        assertEquals("resolved=d@500 raw=d@500", feedFolder(db))
+        merge(db, transportFile(nameC, folder("e", "E", updatedAt = 100), feed("f1", folderId = "e", folderAt = 800)))
+        assertEquals("resolved=e@800 raw=e@800", feedFolder(db))
+    }
+
+    /**
+     * A cloud reference to a folder main does not hold (never in a valid file — check 9 — but a merge
+     * must not depend on it) is recorded as "no folder": a raw assignment only ever names an existing
+     * folder, and the resolution never writes a dangling `feeds.folder_id`.
+     */
+    @Test
+    fun aReferenceToAFolderMainLacksIsRecordedAsNoFolder() {
+        val db = localDb(feed("f1"))
+        merge(db, transportFile(nameA, feed("f1", folderId = "gone", folderAt = 500)))
+        assertEquals("resolved=null@500 raw=null@500", feedFolder(db))
+        TransportFixtures.connect(db).use { conn ->
+            conn.createStatement().use { st ->
+                st.executeQuery("SELECT COUNT(*) FROM pragma_foreign_key_check").use { rs -> rs.next(); assertEquals(0, rs.getInt(1)) }
+            }
+        }
+    }
 }

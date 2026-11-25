@@ -256,6 +256,66 @@ class DeltaExporterTest {
         assertEquals(1L, export.rowCounts["articles"])
     }
 
+    // ---- A feed's folder is sent as its raw assignment ----
+
+    private fun feedFolderIn(file: String): List<String?> =
+        query(File(file), "SELECT folder_id, folder_updated_at FROM feeds WHERE id = 'f1'").single()
+
+    private fun outboxEntries(local: File): List<String> =
+        query(local, "SELECT tbl || ':' || pk FROM sync_outbox ORDER BY seq").map { it[0]!! }
+
+    /**
+     * A folder's deletion and revival only re-resolve the feeds still assigned to it: the folder's own
+     * change is recorded, but nothing for the feeds, whose sent (raw) value did not change. A change
+     * of a feed's raw assignment is recorded as the feed's entry, and sent.
+     */
+    @Test
+    fun aReResolutionAloneRecordsNothingAndARawChangeIsRecordedForTheFeed() {
+        val local = capturingDb(*seedRows)
+        exec(local, "DELETE FROM sync_outbox", "UPDATE folders SET deleted_at = 200, updated_at = 200 WHERE id = 'd1'")
+        assertNull(query(local, "SELECT folder_id FROM feeds WHERE id = 'f1'").single()[0], "resolved to no folder")
+        exec(local, "UPDATE folders SET deleted_at = NULL, updated_at = 300 WHERE id = 'd1'")
+        assertEquals("d1", query(local, "SELECT folder_id FROM feeds WHERE id = 'f1'").single()[0])
+        assertEquals(listOf("folders:d1", "folders:d1"), outboxEntries(local))
+
+        exec(local, "DELETE FROM sync_outbox", "UPDATE ks_feed_folder_raw SET folder_id = 'd2', folder_updated_at = 400 WHERE feed_id = 'f1'")
+        assertEquals(listOf("feeds:f1"), outboxEntries(local))
+        val dest = newPath()
+        assertNotNull(DeltaExporter.exportDelta(local.absolutePath, dest, meta()))
+        assertEquals(listOf("d2", "400"), feedFolderIn(dest))
+        assertEquals(listOf("d2"), ids(dest, "folders"))
+    }
+
+    /**
+     * A feed assigned to a folder that is deleted here is sent with that raw assignment, not the
+     * resolved "no folder" — and the closure carries the deleted folder's row — in a delta and in a
+     * full send alike.
+     */
+    @Test
+    fun aFeedInADeletedFolderIsSentWithItsRawAssignmentAndTheFoldersRow() {
+        val local = capturingDb(*seedRows)
+        exec(
+            local,
+            "UPDATE folders SET deleted_at = 200, updated_at = 200 WHERE id = 'd1'",
+            "DELETE FROM sync_outbox",
+            "UPDATE feeds SET title = 'Renamed', updated_at = 300 WHERE id = 'f1'",
+        )
+        assertEquals(listOf(null, "100"), query(local, "SELECT folder_id, folder_updated_at FROM feeds WHERE id = 'f1'").single())
+
+        val delta = newPath()
+        assertNotNull(DeltaExporter.exportDelta(local.absolutePath, delta, meta()))
+        assertEquals(TransportValidation.Valid, TransportFiles.validate(delta, ValidationTarget.Transport(deltaName(DEV_A, 1))))
+        assertEquals(listOf("d1", "100"), feedFolderIn(delta))
+        assertEquals(listOf(listOf("d1", "200")), query(File(delta), "SELECT id, deleted_at FROM folders"))
+
+        val copy = newPath("ks-copy-")
+        DeltaExporter.copyForFullSend(local.absolutePath, copy)
+        val full = newPath()
+        DeltaExporter.exportFull(copy, full, meta(2), exceptPath = null)
+        assertEquals(TransportValidation.Valid, TransportFiles.validate(full, ValidationTarget.Transport(deltaName(DEV_A, 2))))
+        assertEquals(listOf("d1", "100"), feedFolderIn(full))
+    }
+
     @Test
     fun theCopyKeepsTheOutbox() {
         val local = capturingDb(*seedRows)

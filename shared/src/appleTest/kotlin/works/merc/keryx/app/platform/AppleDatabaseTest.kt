@@ -151,6 +151,7 @@ class AppleDatabaseTest {
         drivers -= cloud
         RawSqliteConnection.open(path(name)).use { db ->
             VERSION_3_TRIGGERS.forEach { db.exec("DROP TRIGGER $it") }
+            VERSION_3_VIEWS.forEach { db.exec("DROP VIEW $it") }
             VERSION_3_TABLES.forEach { db.exec("DROP TABLE $it") }
             db.exec("ALTER TABLE feeds ADD COLUMN etag TEXT")
             db.exec("ALTER TABLE feeds ADD COLUMN last_modified TEXT")
@@ -517,9 +518,15 @@ class AppleDatabaseTest {
             "ks_search_awaiting_body", "ks_feed_folder_raw", "ks_id_remap",
         )
 
-        /** The capture triggers `2.sqm` creates, dropped before the tables they write to. */
+        /** The triggers `2.sqm` creates, dropped before the tables they read and write. */
         val VERSION_3_TRIGGERS = listOf("feeds", "articles", "tags", "folders", "feed_tags", "global_settings")
-            .flatMap { listOf("ks_capture_${it}_insert", "ks_capture_${it}_update") }
+            .flatMap { listOf("ks_capture_${it}_insert", "ks_capture_${it}_update") } + listOf(
+            "ks_capture_feed_folder_raw_update", "ks_feed_folder_raw_init", "ks_feed_folder_resolve_raw_insert",
+            "ks_feed_folder_resolve_raw_update", "ks_feed_folder_resolve_folder",
+        )
+
+        /** The views `2.sqm` creates, dropped before the tables they read. */
+        val VERSION_3_VIEWS = listOf("ks_feed_folder_resolved")
 
         /** Copies every cloud folder without MergeSql's guards, so a shared id hits the PRIMARY KEY. */
         const val UNGUARDED_FOLDER_INSERT =

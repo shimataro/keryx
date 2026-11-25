@@ -105,15 +105,36 @@ UPDATE feeds SET site_url = ?, title = ?, description = ?, updated_at = ? WHERE 
 updateUrl:
 UPDATE feeds SET url = ?, updated_at = ? WHERE id = ?;
 
-updateFolder:
-UPDATE feeds SET folder_id = ?, updated_at = ?, folder_updated_at = MAX(:folder_updated_at, COALESCE(folder_updated_at, 0) + 1) WHERE id = ?;
+-- A folder move writes the feed's raw assignment (ks_feed_folder_raw, the source of truth — see
+-- sync_bookkeeping.sq); the resolution trigger then derives feeds.folder_id / folder_updated_at from
+-- it. The feeds row is written first with the requested folder so feeds' FOREIGN KEY rejects a folder
+-- id that does not exist: a raw row therefore only ever names an existing folder, which every send's
+-- closure relies on (DeltaExportSql). Moving into a soft-deleted folder (a delete that raced the move)
+-- keeps that raw assignment, resolved to "no folder" until the folder is alive again.
+updateFolder {
+    UPDATE feeds SET folder_id = :folderId, updated_at = :updatedAt WHERE id = :id;
+    UPDATE ks_feed_folder_raw SET
+        folder_id = :folderId,
+        folder_updated_at = MAX(:folderUpdatedAt, COALESCE(folder_updated_at, 0) + 1)
+    WHERE feed_id = :id;
+}
 
 updateSortOrder:
 UPDATE feeds SET sort_order = ?, updated_at = ?, sort_order_updated_at = MAX(:sort_order_updated_at, COALESCE(sort_order_updated_at, 0) + 1) WHERE id = ?;
 
--- Updates a moved feed's own folder_id and sort_order together.
-updateFolderAndSortOrder:
-UPDATE feeds SET folder_id = ?, sort_order = ?, updated_at = ?, folder_updated_at = MAX(:folder_updated_at, COALESCE(folder_updated_at, 0) + 1), sort_order_updated_at = MAX(:sort_order_updated_at, COALESCE(sort_order_updated_at, 0) + 1) WHERE id = ?;
+-- Updates a moved feed's own folder assignment and sort_order together (the folder as in updateFolder).
+updateFolderAndSortOrder {
+    UPDATE feeds SET
+        folder_id = :folderId,
+        sort_order = :sortOrder,
+        updated_at = :updatedAt,
+        sort_order_updated_at = MAX(:sortOrderUpdatedAt, COALESCE(sort_order_updated_at, 0) + 1)
+    WHERE id = :id;
+    UPDATE ks_feed_folder_raw SET
+        folder_id = :folderId,
+        folder_updated_at = MAX(:folderUpdatedAt, COALESCE(folder_updated_at, 0) + 1)
+    WHERE feed_id = :id;
+}
 
 -- All surviving feeds belonging to the given folder (NULL = "no folder"), in display order.
 getByFolder:

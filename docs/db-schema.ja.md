@@ -44,7 +44,8 @@
   create/migrate を自前で駆動するが、Android では `AndroidSqliteDriver` が自身の `onCreate`/`onUpgrade` コールバック内で
   内部的に駆動する。バージョン 2 は `1.sqm` で `articles.deleted_at` / `deleted_updated_at` を追加する。バージョン 3
   （`2.sqm`）は、同期の管理情報（`sync_outbox`、`sync_capture`、`sync_merging`、`sync_applied`、`sync_cursor`、
-  `ks_search_pending`、`ks_search_awaiting_body`、`ks_feed_folder_raw` と記録用トリガー）を追加し、`feeds` の `etag` / `last_modified` / `error_count` / `last_error` を
+  `ks_search_pending`、`ks_search_awaiting_body`、`ks_feed_folder_raw` とそこから `feeds.folder_id` を解決するビューと
+  トリガー、記録用トリガー）を追加し、`feeds` の `etag` / `last_modified` / `error_count` / `last_error` を
   `feed_fetch_state` に移し（`ALTER TABLE … DROP COLUMN`、SQLite 3.35 以上）、**`tags` / `folders` を作り直す**——
   フィールドごとのスタンプの追加（初期値は `updated_at`）、`UNIQUE(name)` の廃止、そして各行の移行前 id を
   `v2_id` に保持することを 1 回のテーブル差し替えで行い、
@@ -95,6 +96,15 @@
   独立した分類軸。`feeds.upsert`（購読・リフレッシュ用）はこの列に一切触れない設計にしており、
   フォルダー割り当ての変更は `feeds.updateFolder` / `updateFolderAndSortOrder` 経由でのみ行う（購読・
   リフレッシュで上書きされない）。
+- **`folder_id` / `folder_updated_at` はキャッシュである。** フィードのフォルダー割り当ては `ks_feed_folder_raw`
+  （下の「同期の管理情報」参照）に生のまま——勝った版が書いたままのフォルダー id とスタンプで、そのフォルダーが論理
+  削除されていても——保存し、その行が正である: `updateFolder` / `updateFolderAndSortOrder` がそれを書き、同期マージが
+  それに記録し、送信がそれを運ぶ。`feeds.folder_id` はビュー `ks_feed_folder_resolved`——生のフォルダーが生きていれば
+  それ、そうでなければ NULL——で解決したもので、`folder_updated_at` は生のスタンプである。生の行が変わったとき、
+  またはフォルダーが削除・復活したとき、トリガーが同じ文の中で両方を書き直すので、削除されたフォルダーに割り当て
+  られたフィードは「フォルダーなし」と表示され、そのフォルダーが（マージで、または同じ名前で作り直して）復活すると
+  そこに戻る。そのため記録用トリガーはこの 2 列を見ず、生の行の変更を記録する。`updateFolder` は要求された
+  フォルダーで feeds の行を先に書くので、存在しないフォルダーは引き続きその FOREIGN KEY が拒む。
 - `folder_updated_at` / `sort_order_updated_at` / `custom_title_updated_at` / `deleted_updated_at` は
   **ユーザー編集フィールド（フォルダー割り当て・並び順・手動リネーム・購読状態）それぞれの後勝ち専用
   タイムスタンプ**（記事の `read_at` / `starred_at` と同じ考え方）。行全体の `updated_at`（内容リフレッシュで
@@ -240,11 +250,12 @@
 | `sync_cursor` | `device`(PK), `seq` — 端末ごとに、すべてをマージし終えている差分の最大番号 |
 | `ks_search_pending` | `rowid`(PK) — `search_text` の再計算が必要な記事 |
 | `ks_search_awaiting_body` | `id`(PK) — マージが本文なし（軽量行）で挿入した記事。本文が届くか、日次 rebuild が索引するまで検索索引に入れない |
-| `ks_feed_folder_raw` | `feed_id`(PK), `folder_updated_at`, `folder_id` — フィードごとに、`feeds.folder_id` の解決後の値の元になった生のフォルダー版（勝った同期ファイルが持っていたままのもの）。マージが生の値どうしで順位を比べるためのもの。`folder_updated_at` がフィード自身の値と等しい間だけ有効 |
+| `ks_feed_folder_raw` | `feed_id`(PK), `folder_updated_at`, `folder_id` — フィードごとの生のフォルダー割り当て（勝った版が書いたままのフォルダー id とスタンプ。この端末で生きているかは問わない）: `feeds.folder_id` / `folder_updated_at` の解決元となる正（ビュー `ks_feed_folder_resolved`）であり、マージが生と生で比べる値、送信が運ぶ値でもある。フィードごとに 1 行で、フィードと一緒に（トリガーで）作られ、既存のフィードの分は `2.sqm` が埋める。`folder_id` は NULL か、存在するフォルダー行を指す。参加でも接続解除でも残す |
 | `ks_id_remap` | `kind` + `old_id`（複合 PK）, `new_id` — v2→v3 移行が走らせたタグ/フォルダー id の振り直し（`domain/TagFolderIdRekey.kt`）の記録: 旧ランダム id と、それが変わった名前由来の id。`SettingsRepository` は移行後の最初の起動時に `local_settings.json` の同じ id（`lastFilter`、`collapsedFolderIds`、`expandedTagIds`）を書き換える。その書き換えをべき等に保つため表は無期限に保持する（同期マージは事前アップグレード行の同一性をこの表ではなく行の `v2_id` で再統合する）。この移行だけが書き込む。新規作成 DB では常に空 |
 
 これらも、`sync_state`、`feed_fetch_state`、`articles_fts` も、端末の外に出ることは決してない: 差分ファイルと
-ベースは同期対象のテーブルだけから作る（[sync-architecture.ja.md](sync-architecture.ja.md) 参照）。
+ベースは同期対象のテーブルだけから作る（[sync-architecture.ja.md](sync-architecture.ja.md) 参照）。ただしフィードの
+`folder_id` / `folder_updated_at` は、その `ks_feed_folder_raw` の行——この表が持つための値——から書く。
 
 ### articles_fts（FTS5 仮想テーブル、SQLDelight 管理外）
 

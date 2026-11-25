@@ -477,7 +477,7 @@ class FolderRepositoryTest {
 
             val delete = launch(start = CoroutineStart.UNDISPATCHED) { repo.deleteFolder("d1") }
             // A move commits while the delete waits for the lock.
-            db.feedsQueries.updateFolder("d1", 600L, 600L, "f1")
+            db.feedsQueries.updateFolder(folderId = "d1", updatedAt = 600L, folderUpdatedAt = 600L, id = "f1")
             now = 900L
             placement.unlock()
             delete.join()
@@ -797,7 +797,58 @@ class FolderRepositoryTest {
             val id = repo.createFolderAndMoveFeed("Kotlin", "f1")
 
             assertEquals("d1", id)
+            // The reactivation re-resolved f0 from its raw assignment, so f1 is appended after it.
+            assertEquals("d1", db.feedsQueries.getById("f0").executeAsOne().folder_id)
             assertEquals(1L, db.feedsQueries.getById("f1").executeAsOne().sort_order)
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
+     * A feed whose raw assignment still names a folder that is deleted here (a sync from another
+     * device can leave it so) shows as "no folder"; recreating the folder by name reactivates it, and
+     * the feed is back in it — in the same transaction, with its raw assignment and stamp unchanged.
+     */
+    @Test
+    fun reactivatingAFolderRestoresTheFeedsStillAssignedToIt() = runTest {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFolder("d1", "Kotlin", now = 10L)
+            db.insertFeed("f1", now = 50L, folderId = "d1")
+            db.foldersQueries.softDelete(20L, 20L, "d1")
+            assertNull(db.feedsQueries.getById("f1").executeAsOne().folder_id)
+            val repo = newRepo(db, driver, clock = Clock { 100L })
+
+            assertEquals("d1", repo.createFolder("Kotlin"))
+
+            val feed = db.feedsQueries.getById("f1").executeAsOne()
+            assertEquals("d1", feed.folder_id)
+            assertEquals(50L, feed.folder_updated_at)
+            val raw = db.sync_bookkeepingQueries.feedFolderRawAll().executeAsList().single()
+            assertEquals("d1", raw.folder_id)
+            assertEquals(50L, raw.folder_updated_at)
+        } finally {
+            driver.close()
+        }
+    }
+
+    /** Deleting a folder moves its feeds out: their raw assignment becomes "no folder", stamped by the delete. */
+    @Test
+    fun deleteFolderWritesTheMovedFeedsRawAssignment() = runTest {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFolder("d1", "Kotlin", now = 10L)
+            db.insertFeed("f1", now = 50L, folderId = "d1")
+            val repo = newRepo(db, driver, clock = Clock { 100L })
+
+            repo.deleteFolder("d1")
+
+            val raw = db.sync_bookkeepingQueries.feedFolderRawAll().executeAsList().single()
+            assertNull(raw.folder_id)
+            assertEquals(100L, raw.folder_updated_at)
+            assertNull(db.feedsQueries.getById("f1").executeAsOne().folder_id)
+            assertEquals(100L, db.feedsQueries.getById("f1").executeAsOne().folder_updated_at)
         } finally {
             driver.close()
         }

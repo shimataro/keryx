@@ -179,7 +179,7 @@ fun KeryxDatabase.insertFeed(
         sort_order = sortOrder,
     )
     if (folderId != null) {
-        feedsQueries.updateFolder(folderId, now, now, id)
+        feedsQueries.updateFolder(folderId = folderId, updatedAt = now, folderUpdatedAt = now, id = id)
     }
     // A deleted fixture carries its subscription-state timestamp (deleted_updated_at), matching
     // what unsubscribeFeed does, so merge tests resolve deleted_at by that field.

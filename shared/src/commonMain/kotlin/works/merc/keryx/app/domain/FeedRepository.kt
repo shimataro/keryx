@@ -440,7 +440,7 @@ class FeedRepository(
             val now = clock.nowMillis()
             db.transaction {
                 applyReorderUpdates(newOrder, sortOrderOf, feedId, now, feeds) { index ->
-                    feeds.updateFolderAndSortOrder(folderId, index.toLong(), now, now, now, feedId)
+                    feeds.updateFolderAndSortOrder(folderId = folderId, sortOrder = index.toLong(), updatedAt = now, folderUpdatedAt = now, sortOrderUpdatedAt = now, id = feedId)
                 }
             }
         }
@@ -464,7 +464,7 @@ class FeedRepository(
         val startOrder = feeds.nextSortOrderInGroup(null).executeAsOne()
         db.transaction {
             feedsInFolder.forEachIndexed { index, feed ->
-                feeds.updateFolderAndSortOrder(null, startOrder + index, now, now, now, feed.id)
+                feeds.updateFolderAndSortOrder(folderId = null, sortOrder = startOrder + index, updatedAt = now, folderUpdatedAt = now, sortOrderUpdatedAt = now, id = feed.id)
             }
         }
     }
@@ -566,7 +566,7 @@ class FeedRepository(
             // Files a brand-new feed into the folder selected in the feed list at add time. A
             // re-subscribed feed (current != null) keeps its prior folder instead — upsert never
             // touches folder_id, so there's nothing to do for that case.
-            if (current == null && folderId != null) feeds.updateFolder(folderId, now, now, feedId)
+            if (current == null && folderId != null) feeds.updateFolder(folderId = folderId, updatedAt = now, folderUpdatedAt = now, id = feedId)
             // Re-subscribing (feed was soft-deleted) is a subscription-state change: stamp its
             // last-wins timestamp so it propagates over another device's refresh on the next sync.
             if (current?.deleted_at != null) {

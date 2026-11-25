@@ -77,7 +77,7 @@ class FolderRepository(
             db.transactionWithResult {
                 val id = upsertFolderByName(name, now)
                 val feedSortOrder = db.feedsQueries.nextSortOrderInGroup(id).executeAsOne()
-                db.feedsQueries.updateFolderAndSortOrder(id, feedSortOrder, now, now, now, feedId)
+                db.feedsQueries.updateFolderAndSortOrder(folderId = id, sortOrder = feedSortOrder, updatedAt = now, folderUpdatedAt = now, sortOrderUpdatedAt = now, id = feedId)
                 id
             }
         }

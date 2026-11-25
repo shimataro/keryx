@@ -131,10 +131,13 @@ object MergeFailureClassifier {
      * duration, which would push other writers toward `busy_timeout` for no information.
      *
      * This rests on `main` only ever already violating FOREIGN KEY constraints. Adding CHECK
-     * constraints or triggers to the schema (it has none today) breaks that assumption — a CHECK added
-     * by a migration need not hold for existing rows, and a trigger can fail a statement for reasons
-     * of `main`'s state — so such a change must revisit both this shortcut and the re-run verdict
-     * below ([DeferredRerunOutcome.ConstraintFailed] → `true`).
+     * constraints (there are none today) or triggers to the schema can break that assumption — a
+     * CHECK added by a migration need not hold for existing rows, and a trigger can fail a statement
+     * for reasons of `main`'s state — so such a change must revisit both this shortcut and the re-run
+     * verdict below ([DeferredRerunOutcome.ConstraintFailed] → `true`). The triggers there are
+     * (`sync_bookkeeping.sq`) keep it: they append to `sync_outbox`, create a feed's
+     * `ks_feed_folder_raw` row, or write `feeds.folder_id` with a folder that exists and is alive, or
+     * NULL — none of which can fail on `main`'s state.
      *
      * Every merge statement runs with immediate FOREIGN KEY checking, so the violations
      * `PRAGMA main.foreign_key_check` reports right after the failure ([readViolationsBefore]) are ones

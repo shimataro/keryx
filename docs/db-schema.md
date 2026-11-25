@@ -47,7 +47,8 @@ through it rather than composing `AppDirs.appDataDir()` with the filename themse
   drives create/migrate manually off this pragma; on Android, `AndroidSqliteDriver` drives it internally via its own
   `onCreate`/`onUpgrade` callbacks. Version 2 adds `articles.deleted_at` / `deleted_updated_at` via `1.sqm`.
   Version 3 (`2.sqm`) adds the sync bookkeeping (`sync_outbox`, `sync_capture`, `sync_merging`, `sync_applied`,
-  `sync_cursor`, `ks_search_pending`, `ks_search_awaiting_body`, `ks_feed_folder_raw`, and the capture triggers), moves `feeds`' `etag` / `last_modified` /
+  `sync_cursor`, `ks_search_pending`, `ks_search_awaiting_body`, `ks_feed_folder_raw` with the view and triggers that
+  resolve `feeds.folder_id` from it, and the capture triggers), moves `feeds`' `etag` / `last_modified` /
   `error_count` / `last_error` into `feed_fetch_state` (`ALTER TABLE … DROP COLUMN`, SQLite 3.35+), **rebuilds
   `tags` / `folders`** — adding their per-field stamps (initialized from `updated_at`), dropping `UNIQUE(name)` and
   keeping each row's pre-upgrade id in `v2_id` in
@@ -96,6 +97,16 @@ the sync bookkeeping tables / `articles_fts` (virtual).
 - `id` is deterministically generated from (redirect-resolved) `url` as **UUIDv5** at subscription time (`IdGenerator.feedId`). The same feed gets the same id on all devices, so sync merge (`feeds` matched by `id`) can converge independently subscribed feeds, and article ids (derived from `feed_id`) also match. Re-subscribing to an existing URL reuses the existing id, so the existing row is left in place (deterministic generation only applies to new rows).
 - Logical deletion via `deleted_at`. Re-subscribing resets it to NULL.
 - `folder_id` is the folder a feed belongs to (1 feed = max 1 folder). This is an independent classification axis from tags (`feed_tags`, many-to-many). `feeds.upsert` (for subscription/refresh) does not touch this column at all; folder assignment changes are only made via `feeds.updateFolder` / `updateFolderAndSortOrder` (so they are not overwritten by subscription/refresh).
+- **`folder_id` / `folder_updated_at` are a cache.** A feed's folder assignment is stored raw in `ks_feed_folder_raw`
+  (see "Sync bookkeeping" below) — the folder id and stamp as the winning version wrote them, even when that folder is
+  soft-deleted — and that row is the source of truth: `updateFolder` / `updateFolderAndSortOrder` write it, the sync
+  merge records into it, and a send carries it. `feeds.folder_id` is resolved from it by the view
+  `ks_feed_folder_resolved` — the raw folder while it is alive, else NULL — and `folder_updated_at` is the raw stamp;
+  triggers rewrite both in the same statement whenever the raw row changes or a folder is deleted or revived, so a
+  feed assigned to a deleted folder shows as "no folder" and is back in it when the folder is revived (by a merge or
+  by recreating it by name). The capture trigger therefore ignores these two columns; a raw change is captured
+  instead. `updateFolder` writes the feeds row first with the requested folder, so its FOREIGN KEY still rejects a
+  folder that does not exist.
 - `folder_updated_at` / `sort_order_updated_at` / `custom_title_updated_at` / `deleted_updated_at` are
   **per-field timestamps for user-edited fields (folder assignment, sort order, manual rename, subscription state)**
   (same concept as `read_at` / `starred_at` for articles). Separated from the row-level `updated_at` (updated by content refresh) so that a refresh on another device cannot overwrite these manual operations in sync merge. Each field-updating query only updates its corresponding column, and `upsert` (refresh) touches none of them — except that a re-subscribe, which moves the feed to the end of its group, stamps `sort_order_updated_at` along with the new `sort_order`, so the new position reaches other devices. In sync merge, each field is independently last-write-wins using these columns (see [sync-architecture.md](sync-architecture.md)). NULL means "no such event" (distinct from "happened at time 0"). Unsubscription is `softDelete`; re-subscription uses `stampResubscribed` inside `subscribeFeed` to stamp `deleted_updated_at`.
@@ -230,11 +241,12 @@ with it, so a failed indexing is retried by the next sync). Device-local; cleare
 | `sync_cursor` | `device`(PK), `seq` — per device, the highest delta number up to which everything is merged |
 | `ks_search_pending` | `rowid`(PK) — articles whose `search_text` must be recomputed |
 | `ks_search_awaiting_body` | `id`(PK) — articles a merge inserted without a body (a light row), kept out of the search index until one arrives or the daily rebuild indexes them |
-| `ks_feed_folder_raw` | `feed_id`(PK), `folder_updated_at`, `folder_id` — per feed, the raw folder version (as the winning sync file carried it) that `feeds.folder_id`'s resolved value came from, so the merge ranks raw against raw; valid only while `folder_updated_at` equals the feed's own |
+| `ks_feed_folder_raw` | `feed_id`(PK), `folder_updated_at`, `folder_id` — per feed, its raw folder assignment (the folder id and stamp as the winning version wrote them, alive here or not): the source of truth `feeds.folder_id` / `folder_updated_at` are resolved from (view `ks_feed_folder_resolved`), what the merge ranks raw against raw and what a send carries. One row per feed, created with it (trigger) and filled for existing feeds by `2.sqm`; `folder_id` is NULL or names an existing folder row. Kept across joining and disconnect |
 | `ks_id_remap` | `kind` + `old_id`(composite PK), `new_id` — the tag/folder id re-key the v2→v3 migration ran (`domain/TagFolderIdRekey.kt`): the old random id and the name-derived one it became, so `SettingsRepository` rewrites the same ids in `local_settings.json` (`lastFilter`, `collapsedFolderIds`, `expandedTagIds`) once at startup. Kept indefinitely so that rewrite stays idempotent. (The sync merge reconciles pre-upgrade identities by the row's `v2_id`, not by this table.) Populated only by that migration; empty on every fresh database |
 
 None of these, nor `sync_state`, `feed_fetch_state` or `articles_fts`, ever leaves the device: delta and base files
-are built from the synced tables only (see [sync-architecture.md](sync-architecture.md)).
+are built from the synced tables only (see [sync-architecture.md](sync-architecture.md)) — except that a feed's
+`folder_id` / `folder_updated_at` are written from its `ks_feed_folder_raw` row, the value the table exists to hold.
 
 ### articles_fts (FTS5 virtual table, outside SQLDelight management)
 
