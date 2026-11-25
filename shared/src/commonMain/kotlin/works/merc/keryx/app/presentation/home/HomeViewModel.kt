@@ -881,18 +881,21 @@ class HomeViewModel(
         structuralFeeds,
         dispatcher,
         isLive = { id -> feedRepository.getFeedById(id).let { it != null && it.deleted_at == null } },
+        currentRemap = { { it } },
     ) { it.id }
     private val deletedTagFallback = DeletedItemFallback(
         viewModelScope,
         tags,
         dispatcher,
         isLive = { id -> tagRepository.getTagById(id).let { it != null && it.deleted_at == null } },
+        currentRemap = { idRemaps.current.value::tag },
     ) { it.id }
     private val deletedFolderFallback = DeletedItemFallback(
         viewModelScope,
         folders,
         dispatcher,
         isLive = { id -> folderRepository.getFolderById(id).let { it != null && it.deleted_at == null } },
+        currentRemap = { idRemaps.current.value::folder },
     ) { it.id }
 
     /** Runs [fallback] once the feed list stops showing [target] — see [DeletedItemFallback]. */

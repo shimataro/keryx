@@ -56,6 +56,13 @@ and lose more than the access itself is worth. The accesses that are, today:
   whole `busy_timeout`. A failure is treated as "not live": the pending selection
   fallback stays pending and the next list value decides it. Propagating it would end the app on Android and
   Apple.
+- The `ks_id_remap` read that publishes a merge's tag/folder re-keys (`DeltaSync.publishIdRemapsAfterCommit` →
+  `TagFolderIdRemaps.publishFromDb`). It runs right after the merge has committed, so it can wait out the whole
+  `busy_timeout` behind another write lock, and what it feeds is only ids held outside the database (selection,
+  expansion, `local_settings.json`). A failure is logged and carried on from: every write that takes a tag or
+  folder id resolves a stale one itself in the same statement, and the next merge's publish or the next launch's
+  read catches the holders up. Propagating it would turn a merge that committed into a failed sync (and a
+  reset offer for a local fault).
 
 Any other DB access propagates as before; a new best-effort one is added to this list, with its reason. (An
 operation the user started — an OPML import or export — that fails is not an exception to this: it is reported

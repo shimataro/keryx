@@ -772,10 +772,14 @@ internal class DeltaSync(
             Log.error(TAG, "Merge failed", e)
             return Result.Err(CloudStorageException("Merge failed: ${e.message}"))
         }
-        // Committed. The merge wrote through its own connection, bypassing SQLDelight's listeners, so
-        // the UI is told at once — whatever happens to the indexing after it.
-        driver.notifyListeners(*SYNCED_TABLES)
+        // Committed. Ids held outside the database are brought onto any re-key first, so a list query
+        // that the notification below re-runs is never delivered to a holder (the feed list's delete
+        // fallback, say) that still knows the old ids. The holders also read the published map at each
+        // decision, so this order is a reinforcement, not the only guard.
         publishIdRemapsAfterCommit()
+        // The merge wrote through its own connection, bypassing SQLDelight's listeners, so the UI is
+        // told at once — whatever happens to the indexing after it.
+        driver.notifyListeners(*SYNCED_TABLES)
         return finishIndexing()
     }
 

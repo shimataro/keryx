@@ -140,6 +140,64 @@ class DeletedItemFallbackTest {
         scope.cancel()
     }
 
+    // --- a list that shows the re-keyed item under its new id before remapPending reaches the request ---
+
+    /**
+     * The merge publishes the re-key map before it notifies the list queries, so the list can deliver
+     * the row under its new id while the request still holds the old one (the move is applied on
+     * another coroutine). The request is judged in the current map's id space: the row is still
+     * shown, so it does not fall back — for a tag or a folder alike, since both pass their own map.
+     */
+    @Test
+    fun aListShowingTheNewIdBeforeTheRequestIsMovedDoesNotFallBack() = runTest {
+        for (kind in listOf("tag", "folder")) {
+            val shown = MutableStateFlow(listOf(Row("$kind-old", "News"), Row("other", "Other")))
+            var published: Map<String, String> = emptyMap()
+            val dispatcher = UnconfinedTestDispatcher(testScheduler)
+            val scope = CoroutineScope(SupervisorJob() + dispatcher)
+            val checked = mutableListOf<String>()
+            val fallback = DeletedItemFallback(
+                scope, shown, dispatcher,
+                isLive = { id -> checked += id; id == "$kind-new" },
+                currentRemap = { { id -> published[id] ?: id } },
+            ) { it.id }
+            var fellBack = 0
+
+            fallback.fallBackOnceHidden("$kind-old") { fellBack++ }
+            // The merge: the map is published first, then the list re-runs and shows the new id ...
+            published = mapOf("$kind-old" to "$kind-new")
+            shown.value = listOf(Row("$kind-new", "News"), Row("other", "Other"))
+            // ... before remapPending has been delivered to the request.
+            assertEquals(0, fellBack, kind)
+
+            fallback.remapPending { published[it] ?: it }
+            // Moved onto the new id, which is live: the request is dropped without falling back, and a
+            // later list lacking the row moves nothing.
+            shown.value = listOf(Row("other", "Other"))
+            assertEquals(0, fellBack, kind)
+            scope.cancel()
+        }
+    }
+
+    /** Without a re-key, a list lacking the item still falls back — the map changes nothing else. */
+    @Test
+    fun theCurrentMapDoesNotHideARealDeletion() = runTest {
+        val shown = MutableStateFlow(listOf(Row("t1", "A"), Row("t2", "B")))
+        val dispatcher = UnconfinedTestDispatcher(testScheduler)
+        val scope = CoroutineScope(SupervisorJob() + dispatcher)
+        val fallback = DeletedItemFallback(
+            scope, shown, dispatcher, isLive = { false },
+            currentRemap = { { id -> if (id == "t9") "t2" else id } },
+        ) { it.id }
+        var fellBack = 0
+
+        fallback.fallBackOnceHidden("t1") { fellBack++ }
+        shown.value = listOf(Row("t2", "B"))
+
+        assertEquals(1, fellBack)
+        scope.cancel()
+    }
+
     // --- remapPending: the deleted item was re-keyed onto another id by a merge ---
 
     /**

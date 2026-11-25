@@ -47,6 +47,13 @@ internal sealed interface DeletedTarget {
  * to arrive — is logged and treated as "not live", so the request stays pending and the next value of
  * [shown] decides it. Propagated, the failure would end the app on Android and Apple.
  *
+ * Whether [shown] has the item is decided in the id space of [currentRemap], read afresh at each
+ * decision: the request's id and every shown id are both mapped through the current re-key map
+ * (`TagFolderIdRemaps`) before they are compared. A merge that re-keys the deleted item's row
+ * publishes the map before it notifies the list queries, so a list value that shows the row under its
+ * new id is never taken for "the item is gone" merely because this class has not yet been told to move
+ * the request ([remapPending] is delivered on another coroutine, in no fixed order against [shown]).
+ *
  * Once dropped, a request is gone, so a deletion that arrives later from elsewhere (a sync merge)
  * never moves the selection (external-spec §9, "Least surprise").
  *
@@ -59,6 +66,7 @@ internal class DeletedItemFallback<T>(
     private val shown: StateFlow<List<T>>,
     private val checkDispatcher: CoroutineDispatcher,
     private val isLive: suspend (id: String) -> Boolean,
+    private val currentRemap: () -> (String) -> String = { { it } },
     private val idOf: (T) -> String,
 ) {
     /**
@@ -87,7 +95,7 @@ internal class DeletedItemFallback<T>(
      */
     fun fallBackOnceHidden(id: String, fallback: () -> Unit) {
         val current = shown.value
-        if (current.none { idOf(it) == id }) {
+        if (!shows(current, id)) {
             fallback()
             return
         }
@@ -129,11 +137,18 @@ internal class DeletedItemFallback<T>(
         }
     }
 
+    /** Whether [list] has the item [id], both compared after the current re-key map. */
+    private fun shows(list: List<T>, id: String): Boolean {
+        val remap = currentRemap()
+        val target = remap(id)
+        return list.any { remap(idOf(it)) == target }
+    }
+
     private fun onShown(list: List<T>) {
         if (pending.isEmpty()) return
         // A StateFlow collector can still be handed the value a request last saw; only a newer one counts.
         for (request in pending.filter { it.reference !== list }) {
-            if (list.none { idOf(it) == request.id }) {
+            if (!shows(list, request.id)) {
                 pending.remove(request)
                 request.fallback()
             } else {
