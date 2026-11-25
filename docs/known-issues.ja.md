@@ -542,8 +542,12 @@ UI で番号を振られ、1 つの論理的なタグやフォルダーが 2 つ
 削除は、v3 より後のマイグレーション（つまり v4 以降）で行い、以下の順序で実施する必要がある。
 
 1. **何かを削除する前に、残っている行をその正規の id へ移す。** マージの同一性の処理と同じ規則（`V2IdentitySql`:
-   `ks_v2_edge` の各同一性の最小の行 id）で、`feed_tags.tag_id`、`ks_feed_folder_raw.folder_id`（それとともに
-   `feeds.folder_id`）、未送信の `sync_outbox` の項目、`ks_id_remap` を通した `local_settings` の参照を一緒に移す。
+   `ks_v2_edge` の各同一性の最小の行 id）で、`feed_tags.tag_id`、未送信の `sync_outbox` の項目、`ks_id_remap` を
+   通した `local_settings` の参照を一緒に移し、**`ks_v2_edge` の各同一性の正規でない id がすべて、`ks_id_remap` で
+   正規の id へ対応付けられていることを保証する**——他の端末だけが使った id や、v2 時代の id も含む。
+   `ks_feed_folder_raw.folder_id` は書き換え**ない**: 生の割り当ては正規化で変えない（割り当ての同着はこの値で決まる）
+   ので、別名はそのまま残り、remap のトリガーが `ks_id_remap` を通して `feeds.folder_id` を決め直す——だからこそ、
+   別名を明らかにする辺を削除する前に、すべての別名の項目がそろっている必要がある。
 2. **`tags` / `folders` から `v2_id` を削除し、`ks_v2_edge` も削除する。**
 3. **同期コードと transport 形式から同一性の処理と辺を取り除く:** `V2IdentitySql`、`MergeSql` の辺の記録、
    `TransportSchema`（`v2_id` と `folder_v2_edges` / `tag_v2_edges`。transport の移行とともに）、`ReduceSql` の辺の

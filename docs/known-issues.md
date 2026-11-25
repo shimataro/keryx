@@ -564,9 +564,13 @@ and are numbered by the UI — one logical tag or folder split in two.
 The removal must be performed by a schema migration after version 3 (i.e., version 4 or later) and must follow this order:
 
 1. **Move any remaining row onto its canonical id before dropping anything**, by the same rule as the merge's identity
-   step (`V2IdentitySql`: smallest row id of each identity in `ks_v2_edge`), moving `feed_tags.tag_id`,
-   `ks_feed_folder_raw.folder_id` (and with it `feeds.folder_id`), unsent `sync_outbox` entries and — through
-   `ks_id_remap` — `local_settings` references.
+   step (`V2IdentitySql`: smallest row id of each identity in `ks_v2_edge`), moving `feed_tags.tag_id`, unsent
+   `sync_outbox` entries and — through `ks_id_remap` — `local_settings` references, and **ensure `ks_id_remap` maps
+   every non-canonical id of every identity in `ks_v2_edge` onto its canonical id** — including ids only another
+   device used, and pre-upgrade ids. `ks_feed_folder_raw.folder_id` is **not** rewritten: a raw assignment is never
+   changed by canonicalization (it is what ties between assignments are settled on), so an alias stays there, and the
+   remap triggers re-resolve `feeds.folder_id` through `ks_id_remap` — which is why every alias must have its entry
+   before the edges that would otherwise reveal it are dropped.
 2. **Drop `v2_id` from `tags` and `folders`, and drop `ks_v2_edge`.**
 3. **Remove the identity step and the edges from the sync code and transport format:** `V2IdentitySql`, the edge
    recording in `MergeSql`, `TransportSchema` (`v2_id` and `folder_v2_edges` / `tag_v2_edges`, with a transport
