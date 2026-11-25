@@ -69,7 +69,12 @@ class HomeViewModelIdRemapTest {
         try {
             body()
         } finally {
-            fixtures.forEach { it.close() }
+            // The fixtures share one driver: stop every one of them before closing it, once.
+            try {
+                fixtures.forEach { it.stop() }
+            } finally {
+                driver.close()
+            }
         }
     }
 

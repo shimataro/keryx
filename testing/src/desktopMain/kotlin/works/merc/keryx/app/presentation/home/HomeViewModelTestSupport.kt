@@ -109,11 +109,21 @@ class HomeViewModelFixture(
      * `SettingsViewModelTest.tearDown`.
      */
     suspend fun close() {
+        stop()
+        driver.close()
+    }
+
+    /**
+     * Everything [close] does except closing [driver]: cancels and joins every scope this fixture
+     * owns and closes its HTTP clients. For several fixtures over one shared driver — stop every one
+     * of them first, then close the driver once, so no fixture's queued DB continuation can resume
+     * against a driver another fixture's teardown already closed.
+     */
+    suspend fun stop() {
         vm.viewModelScope.coroutineContext.job.cancelAndJoin()
         ownedManualSync?.viewModelScope?.coroutineContext?.job?.cancelAndJoin()
         syncScope.coroutineContext.job.cancelAndJoin()
         httpClients.forEach { it.close() }
-        driver.close()
     }
 }
 
