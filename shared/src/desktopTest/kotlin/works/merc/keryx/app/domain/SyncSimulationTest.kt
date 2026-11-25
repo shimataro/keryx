@@ -200,18 +200,23 @@ class SyncSimulationTest {
      * The same shared v2 folder renamed differently on three devices (three aliases), and each device
      * moves the one feed within the same millisecond — two into their own alias, one into a folder of
      * its own. The assignments tie on their stamp, and the aliases are re-keyed onto the smallest id
-     * while they sync, so a tie settled on mapped ids would depend on the history. Whatever order the
-     * devices sync in, every device stores the same raw assignment (one the devices wrote, as written),
-     * resolves the same folder, and holds the same folders and remaining synced state.
+     * while they sync, so a tie settled on mapped ids would depend on the history. The folder of its
+     * own sorts between the canonical id and the greater alias written, so a tie settled on mapped ids
+     * would pick it, while one settled on the raw values picks that alias. Whatever order the devices
+     * sync in, every device stores the greatest raw value written (that alias, as written), resolves it
+     * to the canonical folder, and holds the same folders and remaining synced state.
      */
     @Test
     fun sameStampFolderMovesIntoV2AliasesConvergeInEveryOrder() = runBlocking {
         val tagNames = listOf("Alpha", "Beta", "Gamma")
         val folderNames = listOf("AlphaDir", "BetaDir", "GammaDir")
         val canonical = folderNames.minOf { IdGenerator.folderId(it) }
-        val ownFolder = "zz-own-folder"
+        // Between the canonical id and the greater of the aliases devices 0 and 1 write.
+        val ownFolder = "$canonical~own"
         // What each device writes as the feed's raw folder, all at one stamp.
         val written = folderNames.mapIndexed { i, name -> if (i == 2) ownFolder else IdGenerator.folderId(name) }.toSet()
+        val greatestAlias = written.filter { it != ownFolder }.max()
+        assertTrue(canonical < ownFolder && ownFolder < greatestAlias, "precondition: the own folder sorts between them")
         val orders = listOf(listOf(0, 1, 2), listOf(0, 2, 1), listOf(1, 0, 2), listOf(1, 2, 0), listOf(2, 0, 1), listOf(2, 1, 0))
         for (order in orders) {
             val sim = Sim(67)
@@ -259,11 +264,11 @@ class SyncSimulationTest {
                 for (i in 1 until raw.size) assertEquals(raw[0], raw[i], "order $order: raw assignments of device 0 and $i differ")
                 val rawFolder = raw[0].single().split("|")
                 assertEquals("500", rawFolder[1], "order $order")
-                assertTrue(rawFolder[2] in written, "order $order: raw ${rawFolder[2]} is not a value a device wrote")
+                assertEquals(greatestAlias, rawFolder[2], "order $order: the tie goes to the greatest raw value")
                 for (device in devices) {
                     assertEquals(setOf(canonical, ownFolder), device.db.foldersQueries.watchAll().executeAsList().map { it.id }.toSet(), "order $order: ${device.label}")
                     val resolved = device.db.feedsQueries.getById("f1").executeAsOne().folder_id
-                    assertEquals(if (rawFolder[2] == ownFolder) ownFolder else canonical, resolved, "order $order: ${device.label}")
+                    assertEquals(canonical, resolved, "order $order: ${device.label}")
                     assertTrue(device.outbox().isEmpty(), "order $order: ${device.label} has unsent changes")
                 }
             } finally {
