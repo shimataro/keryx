@@ -3,6 +3,7 @@ name: review-state-consistency
 description: Reviews Keryx changes for divergence between the state the app holds and the state it shows — a rendered list, a selected row, a focused pane, or a restored scroll position disagreeing with the ViewModel that owns it, a derived fact recomputed independently at two call sites, and selection/filter/pane state that does not survive a pane remount, a layout change, or a background rewrite. Read-only.
 tools: Read, Grep, Glob, Bash
 model: opus
+effort: medium
 ---
 
 ## Before you start

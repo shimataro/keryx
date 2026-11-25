@@ -1,15 +1,31 @@
 ---
 name: refactor
 description: Refactor the Keryx source code for internal quality — reduce duplication, split oversized files/functions/composables, remove dead code, clarify naming, hoist magic numbers, flatten deep nesting, and modernize non-idiomatic Kotlin — behavior-preservingly, keeping the test suite green and never altering the sync/merge/FTS/error-taxonomy invariants or feature behavior. Works across the whole codebase or a single given path. After a one-time scope approval, each approved batch is verified and committed independently (one commit per batch) with no further per-batch confirmation. Invoke explicitly with /refactor (optionally /refactor <path>), or when asked to "refactor the source code", "clean up the code", "reduce duplication", "improve code quality".
+model: opus
+effort: medium
+context: fork
 ---
 
 # Refactor
 
 > This skill involves **high-accuracy judgments** — proving a change is genuinely
 > behavior-preserving, and not silently altering the sync / merge / FTS / error-taxonomy
-> invariants. **Run it in an opus session.** Skills inherit the caller session's model and
-> cannot pin one in frontmatter, so verify the session model is opus before executing;
-> if it is not, tell the user and ask whether to continue.
+> invariants. It runs in a forked subagent context so its frontmatter pins `model: opus` at
+> `effort: medium` for the whole workflow.
+>
+> **Two-phase workflow.** `context: fork` removes `AskUserQuestion`, `EnterPlanMode` and
+> `ExitPlanMode` from this subagent, so the fork phase runs **Steps 1–2** only: it establishes a
+> green baseline and inventories refactoring candidates (plus test debt). It returns a prioritized
+> batch list and a plan file as one report. **The Step 3 scope-approval gate and Steps 4–7
+> (apply, test, doc consistency, constraint review) run in the main conversation** after it
+> receives the report, following the hand-off instructions at the end of the fork's output.
+>
+> **Default scope is a starting point.** When `/refactor` is invoked without a path argument, the
+> fork phase inventories the default scope listed below. That inventory is a proposal. If the main
+> conversation has already agreed on a different scope — or if the user specifies one when
+> re-running the skill — that agreed scope is applied at the Step 3 gate in the main conversation
+> (or passed as the skill argument so the fork phase inventories exactly that scope). A
+> domain-limited agreement is never silently widened back to the default.
 
 Improve the internal quality of Keryx's source **without changing observable
 behavior**. The existing test suite is the oracle: it must stay green from the
@@ -81,12 +97,8 @@ Pick the items that genuinely apply; don't churn code that is already clean.
   to report`), not applied.
 - **Magic numbers / literals** → named constants in `core/Constants.kt` where a
   name adds clarity. Don't over-abstract one-off literals.
-- **Deep nesting / complex conditionals** → guard clauses, early return, `when`,
-  extract-method.
-- **Non-idiomatic Kotlin** → scope functions (`let`/`also`/`apply`/`run`),
-  null-safety operators (`?.`/`?:`/`requireNotNull`), exhaustive `when` over
-  sealed types, immutability (`val`, immutable collections). Leave
-  already-idiomatic code alone.
+- **Deep nesting / complex conditionals, non-idiomatic Kotlin** → flatten and use
+  the idiomatic construct. Leave already-idiomatic code alone.
 - **Comment / KDoc hygiene** → drop stale/redundant comments; ensure English
   (constraint #9 — except a comment in a localized message file such as
   `values-ja/strings.xml`, which follows that file's own language; never translate it).
@@ -141,35 +153,23 @@ skill hands its performance findings off to.
 
 ## Do NOT touch (invariants)
 
-These are hard stops — see `.claude/CLAUDE.md` "Critical constraints" #1–#10 and
-`docs/*.md`. A refactor that crosses one of these is a redesign; stop and ask.
+`.claude/CLAUDE.md` "Critical constraints" #1–#10 and `docs/*.md` are hard stops; a
+refactor that crosses one is a redesign — stop and ask. Two need a refactoring-specific
+reading:
 
 1. **No behavior / API / feature change** (#5). Don't alter the sync algorithm,
    `MergeSql` statement semantics or application order, the error taxonomy, or
    feature scope (`docs/sync-architecture.md`, `docs/error-design.md`).
-2. **FTS rules** (#1): never add `articles_fts` to a `.sq` file, never DROP the
-   live index, never swap `FtsManager.indexMissing()` for a full `'rebuild'` on a
-   hot path.
-3. **Merge stays on `DatabaseMerger`'s dedicated JDBC connection** (#2) — not the
-   SQLDelight driver.
-4. **No hardcoded user-facing strings** (#3) — keep Compose Resources
-   (`values/strings.xml`, `getString`, `NotificationMessages`).
-5. **Platform code stays behind `expect`/`actual`** (#4); desktop `actual`s in
-   `desktopMain`.
-6. **No new architecture / patterns** (#6, `docs/app-architecture.md`): keep the
-   layered UI → ViewModel → Repository → DataSource shape, use SQLDelight
-   generated classes as-is (no separate domain model classes), no Riverpod.
-7. **English source** (#9) for comments, KDoc, and non-UI string literals (comments in a localized
-   message file follow that file's own language).
-8. **License attribution** (#8): only relevant if a shipped runtime dependency is
-   removed as dead — then update `THIRD-PARTY-LICENSES.md`.
+2. **No new architecture / patterns** (#6, `docs/app-architecture.md`): keep the
+   layered UI → ViewModel → Repository → DataSource shape, and use SQLDelight
+   generated classes as-is (no separate domain model classes).
 
 When a batch touches `ui/`, read the **`ui-guidelines` skill** first (pane tones,
 divider policy, article card style, flat native-feel components, dialog rules).
 
 ## Steps
 
-### Step 1 — Establish a green baseline
+### Step 1 — Establish a green baseline (fork)
 
 Check `git status --porcelain` before anything else: if it prints anything,
 warn and stop — proceeding would
@@ -190,7 +190,7 @@ module's `build/reports/tests/desktopTest/`). This recorded set is the oracle
 checked in Step 4. If the baseline is **red**, stop and report — never refactor
 on top of failing tests.
 
-### Step 2 — Inventory candidates
+### Step 2 — Inventory candidates (fork)
 
 Survey the in-scope files with read-only tools (Grep / Read, plus compiler
 warnings from a build). Optionally run the **`review-quality` agent** to surface
@@ -213,7 +213,27 @@ wall-clock assertion, or `runTest` mixed with real IO / `HttpTimeout` per
 the pass finds none, note **None** explicitly, so an empty result reads as
 deliberate rather than a forgotten check.
 
+#### Fork-phase report
+
+Return a single report containing:
+- The Step 1 baseline result (pass/fail, passing count, baseline test set).
+- The prioritized batch list. For each batch: category, files, why it is
+  behavior-preserving, and any risk/invariant it touches.
+- A plan file written to `~/.claude/plans/refactor-{timestamp}.md` with:
+  - **Context** — scope and goal.
+  - **One section per batch**, in priority order, each with:
+    - **Files to modify**
+    - **Changes** — concrete actions
+    - **Verification** — tests, build targets, manual checks
+    - **Commit message suggestion**
+  - **Commit Strategy** — one commit per approved batch, in priority order, per
+    `.claude/etc/per-item-commit.md` §4, made after that batch's verification passes.
+- A **hand-off block** that tells the main conversation exactly what to do (see
+  Steps 3–7 below).
+
 ### Step 3 — Confirm scope (the single gate)
+
+**Executed in the main conversation** per the hand-off block from Step 2.
 
 Present the prioritized batch list and use **`AskUserQuestion`** once to
 confirm or narrow what to apply (e.g. all of it, only `domain/`, or exclude
@@ -224,6 +244,8 @@ This approval is also the **one-time run confirmation**
 worktree check is the clean baseline.
 
 ### Step 4 — Apply batches (behavior-preserving, verified)
+
+**Executed in the main conversation** per the hand-off block from Step 2.
 
 For each approved batch:
 
@@ -258,6 +280,8 @@ failure there means a DB/merge/sync regression slipped in.
 
 ### Step 5 — Tests
 
+**Executed in the main conversation** inline inside Step 4's loop.
+
 Existing tests are the oracle: they must stay green, and a refactor must
 **never delete or weaken coverage** (no removed or loosened assertions). Two
 kinds of test change are allowed, each in its **own batch, never mixed with the
@@ -277,6 +301,8 @@ mixed with real IO/`HttpTimeout` per `docs/testing.md`'s known gotchas) — is
 below.
 
 ### Step 6 — Doc consistency check (targeted, auto-fix)
+
+**Executed in the main conversation** inline inside Step 4's loop.
 
 This check is applied **inline inside Step 4's loop**, immediately before the
 commit for the batch that triggered it — not as a separate later pass — so the
@@ -306,6 +332,8 @@ twin: update it in the same step (`.claude/rules/docs-translation.md`). **Do NOT
 of every doc.
 
 ### Step 7 — Constraint review + closing summary
+
+**Executed in the main conversation** after Step 4–6 finish.
 
 Optionally review the accumulated diff (`git diff`) for constraint violations
 before finishing. Launch these five specialist agents **in parallel, in one

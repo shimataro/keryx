@@ -3,6 +3,7 @@ name: review-sync-merge
 description: Reviews Keryx cloud-sync changes — the ATTACH-DATABASE merge structure (explicit column lists, NOT-EXISTS/EXISTS guards, FK-safe statement order), per-table conflict-resolution semantics (LWW, OR-merge, logical-deletion propagation), the rev-check/retry/schema gate, and the sync-time FTS invariants. Read-only.
 tools: Read, Grep, Glob, Bash
 model: opus
+effort: medium
 ---
 
 ## Before you start

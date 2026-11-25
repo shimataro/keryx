@@ -2,7 +2,8 @@
 name: review-docs
 description: Reviews whether Keryx documentation still matches the code after a change, whether the English and Japanese doc pairs moved together, whether THIRD-PARTY-LICENSES.md tracks libs.versions.toml, and the quality of user-facing prose in docs, README, and the ja/en string resources. Read-only.
 tools: Read, Grep, Glob, Bash
-model: sonnet
+model: opus
+effort: medium
 ---
 
 ## Before you start

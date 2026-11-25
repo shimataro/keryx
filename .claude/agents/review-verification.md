@@ -3,6 +3,7 @@ name: review-verification
 description: Reviews Keryx changes for test coverage against the project's testing conventions, for code generation that needs to be re-run after a .sq or resource change, and for impact on the CI, packaging, and release workflows. Read-only.
 tools: Read, Grep, Glob, Bash
 model: sonnet
+effort: medium
 ---
 
 ## Before you start

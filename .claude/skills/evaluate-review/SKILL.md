@@ -1,15 +1,25 @@
 ---
 name: evaluate-review
 description: Evaluate a GitHub PR review comment or review summary for technical validity. Each finding (a discussion comment, or a review's line comments and body) is evaluated on its own; the ones needing a change go into one implementation plan for user approval, and once approved each is fixed, verified and committed independently. Accepts multiple URLs, processed one at a time in the order given. Invoke with /evaluate-review <url> [<url> ...].
+model: opus
+effort: medium
+context: fork
 ---
 
 # Evaluate Review
 
 > This skill involves **high-accuracy judgments** — deciding whether a reviewer's claim is
 > actually correct against this codebase, and committing fixes for the ones that are.
-> **Run it in an opus session.** Skills inherit the caller session's model and cannot pin
-> one in frontmatter, so verify the session model is opus before executing;
-> if it is not, tell the user and ask whether to continue.
+> It runs in a forked subagent context so its frontmatter pins `model: opus` at `effort: medium`
+> for the whole workflow.
+>
+> **Two-phase workflow.** `context: fork` removes `AskUserQuestion`, `EnterPlanMode` and
+> `ExitPlanMode` from this subagent, so the fork phase is **read-only / non-interactive**: it
+> validates URLs, fetches the review, gathers thread and code context, evaluates every item,
+> produces the summary table, detail blocks, drafted replies, a plan file and a hand-off, then
+> returns all of that as one report. **User decisions, plan approval and implementation happen in
+> the main conversation** after it receives the report, following the hand-off instructions at the
+> end of the fork's output.
 
 Evaluate a GitHub pull-request review comment or review summary for technical validity, then act
 on it: each URL is broken into **items** (Step 4), every item is evaluated on its own, and the
@@ -20,15 +30,20 @@ per item (Step 8).
 
 ```text
 /evaluate-review <github-pr-review-url> [<github-pr-review-url> ...]
+/evaluate-review --continue-unaligned <github-pr-review-url> [<github-pr-review-url> ...]
 ```
 
 Examples:
 
 ```text
 /evaluate-review https://github.com/shimataro/keryx/pull/3#discussion_r3618156689
-/evaluate-review https://github.com/shimataro/keryx/pull/3#pullrequestreview-2183723456
-/evaluate-review https://github.com/shimataro/keryx/pull/3#discussion_r3618156689 https://github.com/shimataro/keryx/pull/3#pullrequestreview-2183723456
+/evaluate-review --continue-unaligned https://github.com/shimataro/keryx/pull/3#pullrequestreview-2183723456
 ```
+
+The optional `--continue-unaligned` flag is used when the main conversation has decided to run
+the evaluation on the current checkout despite a checkout-alignment warning recorded by Step 3.
+It is stripped before URL validation and honored only by Step 3, which skips the alignment checks
+for this run and reports which check was skipped.
 
 ## Outcomes
 
@@ -50,6 +65,7 @@ Every place that reports a result uses only these labels — plus the suffix
 | URL | `No actionable feedback` | A review with no body and no line comments (Step 4) |
 | URL | `No implementation plan needed` | No item needs a fix (8.3) |
 | URL | `N committed, M failed` | Summary of a URL whose plan ran (8.6) |
+| URL | `Needs checkout alignment` | Step 3, or the pre-implementation check in 8.5, found a mismatch that requires a main-conversation decision before evaluation can continue |
 | Run | `Cancelled` | The user cancelled at Step 3 |
 
 **End this URL** (used throughout): print the reason, record the URL's outcome from the table,
@@ -58,25 +74,21 @@ the end of Step 8) if more than one URL was given.
 
 ## Steps
 
-### Step 1 — Validate presence of argument(s)
+### Step 1 — Arguments
 
-Check whether one or more URL arguments (space-separated) were passed to the skill.
+With no URL, ask the user for one. With several, the fork runs each URL through Steps 2–8.5 as
+its own independent pass, **one at a time, in the order given**. The main conversation then
+executes each URL's hand-off in that same order, finishing one URL's implementation before the
+next URL's plan approval; because a later plan is written before earlier fixes are committed, the
+8.5 hand-off re-checks each later plan against the current tree.
 
-- **If none**: ask the user for one, then proceed to Step 2 with it:
-
-  ```text
-  Please provide a GitHub PR review URL.
-  Usage: /evaluate-review <github-pr-review-url>
-  ```
-
-- **If one or more**: run each URL through Steps 2–8 as its own independent pass — its own
-  branch check, fetch, evaluation, plan approval, fixes and commits. Process them **one at a
-  time, strictly in the order given** — never reorder, batch, or run two URLs concurrently —
-  and fully finish one URL's Step 8 before starting the next at Step 2.
+If the first argument is `--continue-unaligned`, strip it and record it for Step 3. Do not pass
+it to URL validation; the flag applies to the whole run, not to any URL.
 
 ### Step 2 — Validate URL format
 
-Parse the URL. It must match one of the following patterns:
+Any leading `--continue-unaligned` flag has already been stripped in Step 1. Parse the remaining
+arguments as URLs. Each must match one of the following patterns:
 
 1. **Review comment** (line-level):
    `https://github.com/<owner>/<repo>/pull/<number>#discussion_r<comment_id>`
@@ -94,14 +106,9 @@ Parse the URL. It must match one of the following patterns:
   from the API, never retyping the value. The one exception is the PR head SHA 8.6 compares
   against, which is the value Step 3.1 printed (hex, so written in directly).
 - Determine `comment_type`: `review_comment` for `#discussion_r`, `pr_review` for `#pullrequestreview`.
-- If the URL does **not** match either pattern, output exactly the line below, then end this URL
-  (`Invalid URL`):
+- If the URL matches neither pattern, say so and end this URL (`Invalid URL`).
 
-  ```text
-  The provided URL does not appear to be a GitHub PR review comment or review link.
-  ```
-
-### Step 3 — Verify branch alignment
+### Step 3 — Verify branch alignment (read-only in fork; decisions in main conversation)
 
 The PR's head branch name is PR-controlled, like a review `path` (Step 6): bind it from the API
 into a shell variable and only ever use the variable, never the retyped name.
@@ -119,39 +126,22 @@ into a shell variable and only ever use the variable, never the retyped name.
    The printed `PR head` SHA is the one 8.6 compares against, so it stays in the transcript.
 
    If this fails (e.g. network error, bad credentials), output a warning and proceed to Step 4.
-2. Get the current local branch with `git branch --show-current`. If the directory is not a git
-   repository, output a warning and proceed to Step 4.
-3. If the branches match, go to 4. Otherwise output the mismatch
-   (`PR branch: <pr_branch>, Current branch: <current>`), then:
-   - **Fork PR** (`$pr_head_repo` is not `{owner}/{repo}`): `origin` does not carry that branch,
-     so do not offer to switch; warn that the evaluation runs against the current branch and
-     go to 4.
-   - **Otherwise** ask via `AskUserQuestion`. If `git status --porcelain` is not empty, say in the
-     question that those uncommitted changes travel with a switch and will make 8.4 skip this URL.
-     Options:
-     - **Switch to PR branch** (Recommended) — `git fetch origin "$pr_branch"`, then
-       `git switch "$pr_branch"`, then go to 4. `git switch` carries uncommitted changes along
-       (no stash); if it refuses because of a conflict, report that and go to 4 on the
-       current branch.
-     - **Stay on current branch** — go to 4 with the warning still displayed.
-     - **Cancel evaluation** — stop the whole run (`Cancelled`); remaining URLs are not processed.
-4. **Head check** — the branch name alone does not prove the checkout carries the PR's code, and
-   a stale one would receive Step 8's fixes against the wrong revision. If `$pr_head_sha` is not
-   present locally (`git cat-file -e "$pr_head_sha^{commit}"` fails) and this is not a fork PR,
-   run `git fetch origin "$pr_branch"` first. Then:
-   - `git merge-base --is-ancestor "$pr_head_sha" HEAD` succeeds (HEAD is the PR head or ahead
-     of it) → proceed to Step 4.
-   - Otherwise (behind, diverged, or the commit is not available) output the state and ask via
-     `AskUserQuestion`:
-     - **Fast-forward to the PR head** (Recommended) — offered only when the current branch is
-       `$pr_branch` (the names matched, or the switch succeeded) and HEAD is an ancestor of
-       `$pr_head_sha` (simply behind): `git merge --ff-only "$pr_head_sha"`, then proceed to
-       Step 4. If git refuses (e.g. uncommitted changes in the way), report that and ask again
-       without this option. Never offer it after **Stay**, on a fork PR or after a failed
-       switch: the checkout is then a branch the user chose to keep, and must not be moved.
-     - **Continue on the current HEAD** — proceed to Step 4 with a warning that fixes will be
-       made against older code and may conflict with the PR head when pushed.
-     - **Cancel evaluation** — stop the whole run (`Cancelled`).
+2. Get the current local branch with `git branch --show-current`, print it, and save it for the
+   8.5 hand-off. If the directory is not a git repository, output a warning and proceed to Step 4.
+3. If the `--continue-unaligned` flag was recorded in Step 1, report which checkout-alignment
+   check is being skipped (branch mismatch, or PR head not an ancestor of HEAD), include the usual
+   warning, and continue with the evaluation for this run only. The guard is unchanged for runs
+   without the flag.
+
+   If the flag is **not** set and the branches do not match, or if
+   `git merge-base --is-ancestor "$pr_head_sha" HEAD` fails (HEAD is behind, diverged, or the
+   commit is not available), the fork **does not continue**. Instead, report the observed state
+   precisely (PR branch, current branch, HEAD/ancestor state) and append a **hand-off block**
+   that tells the main conversation what decision is needed and how to proceed. The executable
+   options are: realign the checkout (switch to the PR branch, or fast-forward to the PR head when
+   possible; never on a fork PR) and re-run the skill; or cancel. If the main conversation decides
+   to evaluate on the current checkout anyway, it re-runs the skill with `--continue-unaligned`.
+   End this URL with the outcome `Needs checkout alignment`.
 
 ### Step 4 — Fetch the comment or review
 
@@ -168,14 +158,8 @@ comment's current position, not what the reviewer saw.
 
 **PR membership check** — right after fetching the comment or review, and before anything else,
 confirm its `pull_request_url` equals
-`https://api.github.com/repos/{owner}/{repo}/pulls/{pull_number}`. If not, output the block below
-(`<kind>` is `comment` or `review`) and end this URL (`Not in this PR`):
-
-```text
-The fetched <kind> does not belong to the requested PR.
-Expected: <expected_url>
-Got:      <pull_request_url>
-```
+`https://api.github.com/repos/{owner}/{repo}/pulls/{pull_number}`. If not, report both URLs and
+end this URL (`Not in this PR`).
 
 #### If `review_comment`
 
@@ -333,27 +317,23 @@ later commit. If so, note this in its evaluation reasoning.
 
 ### Step 7 — Evaluate validity
 
-Evaluate **every item independently** against the code and project conventions, producing a
-separate verdict per item. Consider:
+Evaluate **every item independently** — is its claim true of the code it points at (a line
+comment: its lines; a review body: the PR diff or the files it names), and is the change it asks
+for worth making? A vague review body that only asks questions may need no code change. Beyond
+that, hold each item to:
 
-1. **Accuracy** — Is the factual claim correct? (e.g., a reported bug must actually exist)
-2. **Relevance** — Does the item apply to the code at the stated location?
-   - Line-comment item: the specific line(s).
-   - Review-body item: the overall PR diff (or the specific files/areas explicitly named in the body).
-3. **Constructiveness** — Does it clearly identify a problem or suggest a valid improvement?
-   - Review-body item: if the body is vague or only asks questions without requesting changes, the evaluation may conclude that no code change is required.
-4. **Project conventions** — Does it align with the project's documented rules (check `.claude/CLAUDE.md` and `docs/*.md`)?
-5. **Language / library / framework / external-service correctness** — When the item concerns usage
+1. **Project conventions** — Does it align with the project's documented rules (check `.claude/CLAUDE.md` and `docs/*.md`)?
+2. **Language / library / framework / external-service correctness** — When the item concerns usage
    of a language runtime, library, framework, or external service (e.g., REST API, cloud SDK),
    verify the claim against the **official documentation of the exact version the project uses**.
    Prefer official docs (API reference, language spec, release notes, vendor API docs) over blog
    posts or Stack Overflow. If the docs do not cover the point, inspect the source code or make a
    controlled test request directly. Do not rely on memory or general assumptions.
-6. **Regression / security / data-integrity risk** — If the item proposes or implies a code change, consider whether adopting it could break existing behavior (regression), weaken security boundaries, or corrupt data. Focus especially on:
+3. **Regression / security / data-integrity risk** — If the item proposes or implies a code change, consider whether adopting it could break existing behavior (regression), weaken security boundaries, or corrupt data. Focus especially on:
    - **Security**: authorization checks, input validation, secrets handling, injection vectors, and race conditions (e.g., TOCTOU).
    - **Data integrity**: transaction boundaries, unique / foreign-key constraints, merge semantics (`DatabaseMerger`, `MergeSql`, `SyncRepository`), FTS index consistency (`articles_fts` lifetime rules), and logical-deletion timestamps.
    - Verify the proposal does not violate documented critical constraints (e.g., `.claude/CLAUDE.md` "Critical constraints", `docs/sync-architecture.md`).
-7. **Likelihood is not a verdict** — An item reporting a reachable failure path or race is not Invalid, or only Partially Valid, because its window is narrow or it "practically never happens" (`.claude/CLAUDE.md` "Error handling and race conditions"). Judge whether the interleaving or failure is reachable, not how often.
+4. **Likelihood is not a verdict** — An item reporting a reachable failure path or race is not Invalid, or only Partially Valid, because its window is narrow or it "practically never happens" (`.claude/CLAUDE.md` "Error handling and race conditions"). Judge whether the interleaving or failure is reachable, not how often.
 
 A review-body item is evaluated only for what it raises **beyond** the review's line-comment
 items. If everything it says is already covered by them, its verdict is **No action needed —
@@ -393,7 +373,7 @@ Step 8's clean-tree guard intact by requiring every probe to be removed first.
   **No action needed**, its Reasoning records what was tried, and its reviewer reply (8.2) says
   the point could not be confirmed and what evidence would settle it.
 
-### Step 8 — Take action
+### Step 8 — Take action (fork prepares the report and plan; main conversation approves and implements)
 
 Every URL goes through the same steps below, whether it has one item or many.
 
@@ -448,23 +428,7 @@ holds):
   the reply's language: `In reply to <url>:` in English, `<url> への返信です：` in Japanese, and an
   equally natural lead-in for any other language.
 
-For example:
-
-````markdown
-**Reply to**: https://github.com/<owner>/<repo>/pull/<number>#discussion_r<id>
-
-```markdown
-Thanks for the review. After checking, I've concluded no change is needed here because 〈reason〉.
-```
-````
-
-````markdown
-**Reply to**: https://github.com/<owner>/<repo>/pull/<number>#discussion_r<id>
-
-```markdown
-ご指摘ありがとうございます。確認した結果、〈理由〉のため、現状のコードに変更は不要と判断しました。
-```
-````
+For example, for a review-body item:
 
 ````markdown
 **Reply to**: https://github.com/<owner>/<repo>/pull/<number>#pullrequestreview-<id>
@@ -478,12 +442,7 @@ Thanks for the review. 〈Which part is being fixed, and why the rest is left as
 
 #### 8.3 — Nothing to fix
 
-If no item is **Fix & commit**, output the line below and end this URL
-(`No implementation plan needed`):
-
-```text
-No implementation plan is needed.
-```
+If no item is **Fix & commit**, say so and end this URL (`No implementation plan needed`).
 
 #### 8.4 — Guards
 
@@ -494,11 +453,12 @@ Before planning anything:
    must never be able to destroy pre-existing uncommitted work in the same file. A clean result
    here is the baseline for 8.6's re-check.
 
-#### 8.5 — Plan, refine, approve
+#### 8.5 — Plan and hand-off (fork writes the file; main conversation approves and implements)
 
-1. Call `EnterPlanMode`.
-2. Explore the codebase to understand the surrounding architecture of every **Fix & commit** item.
-3. Write the plan to `~/.claude/plans/evaluate-review-{id}.md` (`{id}` = the URL's trailing
+The fork phase performs only the planning write; approval and execution are left to the main
+conversation.
+
+1. Write the plan to `~/.claude/plans/evaluate-review-{id}.md` (`{id}` = the URL's trailing
    numeric ID) with:
    - **Context** — what the review pointed out and why it matters.
    - **One section per Fix & commit item**, in item order, each with:
@@ -509,51 +469,48 @@ Before planning anything:
        is measurable, add "re-measure per 8.6".
    - **Commit Strategy** — one commit per item, in item order, per
      `.claude/etc/per-item-commit.md` §4, made after that item's verification passes.
-4. Invoke the `refine-plan` skill with the plan file path as its argument, and resolve any
-   question it asks before proceeding.
-5. Call `ExitPlanMode` to submit the refined plan for user approval. This approval is the
-   whole URL's one-time run confirmation (`.claude/etc/per-item-commit.md` §1). If the user rejects it, implement nothing, commit nothing, and end this URL
-   (`Plan rejected`); revise the plan instead if the user asks for changes.
+2. Append a **hand-off block** that tells the main conversation exactly what to do:
+   - Call `EnterPlanMode`, invoke the `refine-plan` skill with the plan file path as its
+     argument, resolve any question it asks before proceeding, then call `ExitPlanMode` to submit
+     the refined plan for user approval. This approval is the whole URL's one-time run
+     confirmation (`.claude/etc/per-item-commit.md` §1). If the user rejects it, implement
+     nothing, commit nothing, and end this URL (`Plan rejected`).
+   - Right before the first edit, re-run `git status --porcelain` and confirm it still matches
+     8.4's clean baseline. If it no longer does, commit nothing and end this URL
+     (`Working tree not clean`).
+   - If an earlier URL of this run has already committed fixes, re-check this plan's premises —
+     the files it plans to modify and the anchors its Changes cite — against the current tree.
+     If those commits have changed them, do not approve the stale plan; re-run `/evaluate-review`
+     for this URL alone instead.
+   - Re-fetch the PR head with
+     `gh api repos/{owner}/{repo}/pulls/{pull_number} --jq '.head.sha'` and compare it with the
+     `PR head` SHA Step 3.1 printed. Never re-bind it from the API here: that returns the new
+     head, and the comparison would always pass.
+     - **Same SHA** → still verify the current branch matches the one Step 3.2 printed and that
+       `git merge-base --is-ancestor <sha> HEAD` succeeds. A switch during approval can leave the
+       PR head an ancestor of HEAD while the current branch is wrong, so the status check alone
+       is not enough. If either check fails, commit nothing and end this URL
+       (`Needs checkout alignment`).
+     - **Different SHA, but the fetched SHA is already in HEAD** (`git merge-base --is-ancestor <sha> HEAD`)
+       → still verify the current branch matches the one Step 3.2 printed as above; if it does not,
+       end this URL (`Needs checkout alignment`). If it does, continue.
+     - **Otherwise** → commit nothing and end this URL (`PR head moved`).
+   - For each **Fix & commit** item, in item order (one item's failure never stops the rest):
+     implement that item's section of the approved plan, verify per
+     `.claude/etc/per-item-commit.md` §2 (re-measuring first when the plan says so), and commit
+     per `.claude/etc/per-item-commit.md` §4.
+   - Implementation may be delegated to the `implementer` agent and test writing to the
+     `test-writer` agent; both have their own frontmatter pinning `model: opus`, so precision is
+     preserved.
 
 #### 8.6 — Fix, verify, commit each item
 
-Approval can take an unbounded time, so right before the first edit re-run
-`git status --porcelain` and confirm it still matches 8.4's clean baseline. If it no longer
-does, commit nothing and end this URL (`Working tree not clean`).
-
-The PR can also gain commits during that wait. Re-fetch its head with
-`gh api repos/{owner}/{repo}/pulls/{pull_number} --jq '.head.sha'` and compare it with the
-`PR head` SHA Step 3.1 printed (a hex SHA, so it is written into the command directly). Never
-re-bind it from the API here: that returns the new head, and the comparison would always pass.
-
-- **Same SHA**, or the fetched SHA is already in HEAD (`git merge-base --is-ancestor <sha> HEAD`,
-  e.g. it was pushed from this checkout) → continue. If Step 3.1 printed no head SHA, only the
-  ancestor check applies.
-- **Otherwise** → commit nothing and end this URL (`PR head moved`): the new commits may already
-  change what was evaluated and planned, so tell the user to bring the checkout up to the PR head
-  and re-run.
-- **The request fails** → warn, as Step 3.1 does, and continue.
-
-Then, for each **Fix & commit** item, in item order (one item's failure never stops the rest):
-
-1. Implement that item's section of the approved plan — that item only — following the repo's
-   standing constraints (`.claude/CLAUDE.md`, `docs/testing.md` — including adding/updating
-   tests where constraint #7 applies).
-2. Verify per `.claude/etc/per-item-commit.md` §2. When the plan says to re-measure, do that
-   first: re-insert Step 7's measurement and check the effect, then remove it and confirm a fresh
-   `.claude/etc/temporary-instrumentation.md` §4 snapshot matches the fix-only one taken before
-   re-inserting it. Then run the item's planned Verification — at minimum `./gradlew build` (or
-   the narrowest relevant test target, e.g. `:shared:desktopTest --tests "..."` /
-   `:composeApp:desktopTest --tests "..."`, when that clearly covers the change).
-3. On failure (including a re-measurement that does not confirm the effect), revert the item per
-   `.claude/etc/per-item-commit.md` §3 and record `Verification failed: <reason>`.
-4. On success, commit per `.claude/etc/per-item-commit.md` §4, e.g.
-   `fix(sync): correct rev comparison for Google Drive`.
+**Executed in the main conversation** per the hand-off block from 8.5.
 
 #### 8.7 — Closing summary
 
-Output a short summary listing, for each item (its Comment URL), its verdict and its item
-outcome from the Outcomes table.
+**Executed in the main conversation** after 8.6. Output a short summary listing, for each item
+(its Comment URL), its verdict and its item outcome from the Outcomes table.
 
 #### Multiple top-level URLs
 

@@ -3,6 +3,7 @@ name: review-data-integrity
 description: Reviews Keryx changes for DB correctness — deterministic IDs, storage conventions, per-field edit timestamps, transactional/FK safety, logical-deletion semantics — and for backward compatibility across versions (schema migrations, the parallel schema copies, local_settings.json, cloud file format, token storage format, OPML). Read-only.
 tools: Read, Grep, Glob, Bash
 model: opus
+effort: medium
 ---
 
 ## Before you start

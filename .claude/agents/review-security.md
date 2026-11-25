@@ -3,6 +3,7 @@ name: review-security
 description: Reviews Keryx changes for secret disclosure (logs, VCS, exception messages), OAuth CSRF/PKCE integrity, token-storage hardening, raw-SQL injection, HTTPS-only networking and redirect guards, and filesystem paths derived from remote input. Read-only.
 tools: Read, Grep, Glob, Bash
 model: opus
+effort: medium
 ---
 
 ## Before you start

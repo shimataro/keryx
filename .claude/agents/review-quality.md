@@ -3,6 +3,7 @@ name: review-quality
 description: Reviews Keryx changes for internal code quality — dead code, duplication, oversized files and functions, unclear naming, magic numbers, deep nesting, non-idiomatic Kotlin — and enforces that all source text (comments, KDoc, log and exception messages) is written in English. Read-only.
 tools: Read, Grep, Glob, Bash
 model: sonnet
+effort: medium
 ---
 
 ## Before you start

@@ -15,6 +15,8 @@ verified, reverted and committed.
 - The tree must have no uncommitted changes when the first item starts — `git status --porcelain`
   prints nothing, untracked files included; that clean state is the **baseline** §3 returns to.
   The caller says where it checked.
+- The caller records the branch current when it takes the clean baseline as the **run's branch**;
+  §4 checks it before every commit.
 
 ## 2. Verify
 
@@ -66,14 +68,17 @@ When the item fails verification and the caller's own retry (if any) cannot fix 
 1. Review `git status --porcelain` / `git diff`, then run the marker check from
    `.claude/etc/temporary-instrumentation.md` §3 and confirm it prints nothing **before staging
    anything**.
-2. If this is the run's first commit and the current branch is a version branch (`v*`), run
+2. Confirm the current branch is the run's branch (§1) or the feature branch created in step 4 of
+   this run. If neither, make no commit, stop the commit flow, and report the mismatch for the
+   caller's closing summary — the item's changes stay uncommitted for the caller to decide.
+3. If this is the run's first commit and the current branch is a version branch (`v*`), run
    `/feature-branch` now, with this item's changes still uncommitted. The skill infers the branch
    name from those changes, which do not exist yet at the start of the run; `git switch -c` carries
    them onto the new branch. Do not run it before the first item has been applied and verified.
-3. Stage **only the files, and only the hunks, belonging to this item** (including anything the
+4. Stage **only the files, and only the hunks, belonging to this item** (including anything the
    caller says rides along, such as a doc fix). Verify the staged diff contains nothing beyond
    this item, so an unrelated edit or residue from an earlier item's revert never rides along.
-4. Create **exactly one commit** in the repo's Conventional Commits style. The message is a
+5. Create **exactly one commit** in the repo's Conventional Commits style. The message is a
    single-line subject (`<type>(<scope>): <subject>`) with no body; the only addition allowed is
    the attribution trailer that the harness or the user's instructions require. Never batch several
    items into one commit, never amend a commit made earlier in the same run, and never push.

@@ -8,16 +8,10 @@ SwiftUI app that shares its logic through `:shared` (see `docs/external-spec.md`
 
 ## Working language
 
-**Output language**: Always reply to the user in the language of their **most recent**
-message — switch immediately if they switch languages mid-conversation. If the latest
-message alone doesn't clearly signal a language (e.g. it's just a URL, file path, command,
-or very short), infer it from earlier messages in this conversation, or from what you
-already know about the user's usual language, before defaulting to English. This applies to
-the entire reply (explanations, summaries, headers, and Plan Mode plans), not just an
-opening/closing line. Quoting or discussing English source code, logs, or documentation is
-expected and does not change what language your own prose is written in — do not let it
-leak into your reply's language. Source code, log/exception text, and identifiers
-themselves stay in English regardless (see constraint #9 below).
+Reply in the language of the user's most recent message (when that message is only a URL,
+path or command, use the conversation's language), including plans and headers. Quoted English
+code, logs or docs do not change it. Source code, log/exception text, and identifiers stay in
+English (constraint #9).
 
 ## Documentation
 

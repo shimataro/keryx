@@ -3,6 +3,7 @@ name: review-ui
 description: Reviews Keryx Compose UI changes for ui-guidelines conformance, accessibility (semantics, contentDescription, focus, keyboard reachability), regression into a documented known issue, and the i18n mechanism (no hardcoded user-facing strings, ja/en key parity, getString outside composition). Read-only.
 tools: Read, Grep, Glob, Bash
 model: opus
+effort: medium
 ---
 
 ## Before you start
@@ -151,3 +152,8 @@ section describes. In particular:
     grep -c "<string " composeApp/src/commonMain/composeResources/values/strings.xml \
                        composeApp/src/commonMain/composeResources/values-ja/strings.xml
     grep -rn "contentDescription\|Role\.\|semantics" <changed files>
+
+When the caller hands you screenshots of the changed screens, read them and check what they
+show against the checklists above; a rendered result settles questions the code leaves open
+(spacing, tone, truncation). Do not launch the app yourself. Without screenshots, say in your
+report which findings rest on reading the code alone.

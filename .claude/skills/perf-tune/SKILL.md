@@ -1,15 +1,25 @@
 ---
 name: perf-tune
 description: Measurement-driven performance work on the Keryx source — reduce total work (CPU / SQL / IO / allocation), improve perceived speed (show what's ready, report progress, optimistic display), and fix concurrency/scheduling — while never weakening security, data integrity, or observable behavior. After a one-time gate approval (bulk for Green/Yellow, individual for each Red), each approved item is measured, verified, and committed independently (one commit per item) with no further per-item confirmation. Invoke explicitly with /perf-tune (optionally /perf-tune <path>), or when asked to "make it faster", "optimize performance", "speed up startup", "reduce memory", or "the app feels slow".
+model: opus
+effort: medium
+context: fork
 ---
 
 # Perf Tune
 
 > This skill involves **high-accuracy judgments** — interpreting measurements, and
 > deciding whether a change trades away durability, security, or observable behavior.
-> **Run it in an opus session.** Skills inherit the caller session's model and cannot
-> pin one in frontmatter, so verify the session model is opus before executing;
-> if it is not, tell the user and ask whether to continue.
+> It runs in a forked subagent context so its frontmatter pins `model: opus` at `effort: medium`
+> for the whole workflow.
+>
+> **Two-phase workflow.** `context: fork` removes `AskUserQuestion`, `EnterPlanMode` and
+> `ExitPlanMode` from this subagent, so the fork phase runs **Steps 1–3** only: it establishes a
+> green baseline, measures, inventories candidates, tiers them, runs the mandatory Yellow/Red
+> review gate and returns a tiered candidate list plus an application plan as one report. **The
+> Step 4 approval gate and Steps 5–8 (apply, test, docs, constraint review) run in the main
+> conversation** after it receives the report, following the hand-off instructions at the end of
+> the fork's output.
 
 Make Keryx faster **without ever trading away durability, security, or observable
 behavior**. Every change must be justified by a measurement taken before it, and
@@ -254,7 +264,7 @@ headroom:
 
 ## Steps
 
-### Step 1 — Establish a green baseline
+### Step 1 — Establish a green baseline (fork)
 
 Check `git status --porcelain` before anything else: if it prints anything,
 warn and stop — proceeding would
@@ -278,7 +288,7 @@ Also capture the branch's current commit as `BASE_SHA` (`git rev-parse
 HEAD`) — Step 8 needs it to review the accumulated per-item commits, since
 by then the working tree itself will be clean.
 
-### Step 2 — Measure (never guess)
+### Step 2 — Measure (never guess) (fork)
 
 Each axis has its own method.
 
@@ -295,23 +305,13 @@ Each axis has its own method.
   sampling discipline as the CPU/memory axis below (warm-up, several samples,
   median plus spread) — before proposing an SQL candidate. Where the CLI is
   unavailable, use a throwaway JDBC connection.
-- **Axis 1, CPU / memory** — write disposable seeding code under the scratch
-  directory and run the **same seeded workload** before and after, with warm-up
-  runs to let the JIT settle, several repeated samples, and a reported **median
-  plus spread** — a single before/after timing lets JIT / GC / scheduler noise
-  pass the gate. Wall-clock time measures **elapsed** time, not CPU work — and
-  neither reflects memory or allocation; when the claimed win is allocation or
-  memory rather than speed, measure it **resource-specifically** with an explicit
-  allocation/heap delta in that same disposable code (e.g. `System.gc()` +
-  `Runtime.totalMemory() - Runtime.freeMemory()` sampled before and after — an
-  **approximate retained-heap proxy, not a precise allocation count** — or a real
-  allocation counter such as `com.sun.management.ThreadMXBean.getThreadAllocatedBytes()`,
-  the JDK-specific extension interface rather than the standard
-  `java.lang.management.ThreadMXBean`, and only valid where
-  `isThreadAllocatedMemorySupported()` / `isThreadAllocatedMemoryEnabled()` report
-  it available) — never an unspecified local measurement —
-  this never means adding a profiler dependency or a telemetry service (see the
-  security invariant above). **Call counts are candidate evidence only** (e.g. how
+- **Axis 1, CPU / memory** — run the **same seeded workload** (disposable code
+  under the scratch directory) before and after, with warm-up and enough repeated
+  samples to report a **median plus spread**; a single timing lets JIT / GC /
+  scheduler noise pass the gate. When the claimed win is memory or allocation
+  rather than speed, measure that resource directly and say which measure you used
+  and its limits — elapsed time does not show it. Never add a profiler dependency
+  or a telemetry service (see the security invariant above). **Call counts are candidate evidence only** (e.g. how
   many `Ksoup.parse` calls N articles cost): reading the code establishes how often
   something runs, never whether CPU, memory, or allocation cost improved, so a count
   ranks a candidate in Step 3 but is never the before/after evidence. For work moved
@@ -351,7 +351,7 @@ here in Step 2 is removed like any other probe; Step 5 adds the test back as par
 of the change, without the `TEMP-INSTRUMENTATION` marker, keeps it through Step
 5's measurement cleanup, and commits it with the item.
 
-### Step 3 — Inventory, tier, and gate the candidates
+### Step 3 — Inventory, tier, and gate the candidates (fork)
 
 Label each candidate with its axis and its Green/Yellow/Red tier, then prioritize
 by benefit ÷ risk. Every Red carries its integrity and sync-compatibility impact.
@@ -361,24 +361,55 @@ Every axis-2 candidate states **both sides of the trade**.
 or Red item, launch **`review-architecture`**, **`review-data-integrity`**,
 **`review-sync-merge`**, **`review-concurrency`**, **`review-security`**, and
 **`review-state-consistency`** in one message, in parallel, scoped to the files/areas
-those candidates touch — this must complete before Step 4. It is not optional, unlike
-a Green-only list: Green is integrity-irrelevant by this file's own tier definition
-(see "Risk tiers" above), so a candidate set with no Yellow/Red item skips this gate
-entirely. Do **not** call `review-performance` — you are the performance analysis;
-what you need from review is whether the ground you are about to touch is
-load-bearing. `review-state-consistency` is on the list because narrowing a query,
-memoizing a derived list, or changing a flow's sharing strategy can silently drop
-state the UI is still showing. If any of the six fails to run, do not proceed to
-Step 4: stop, name which perspective is unchecked, and report that the run is blocked
-(never hide a gap — `.claude/etc/review/common.md` §"Never hide a gap").
+those candidates touch — this must complete before the report is returned. It is not
+optional, unlike a Green-only list: Green is integrity-irrelevant by this file's own
+tier definition (see "Risk tiers" above), so a candidate set with no Yellow/Red item
+skips this gate entirely. Do **not** call `review-performance` — you are the
+performance analysis; what you need from review is whether the ground you are about
+to touch is load-bearing. `review-state-consistency` is on the list because
+narrowing a query, memoizing a derived list, or changing a flow's sharing strategy
+can silently drop state the UI is still showing. If any of the six fails to run,
+do not return a candidate list: stop, name which perspective is unchecked, and report
+that the run is blocked (never hide a gap — `.claude/etc/review/common.md` §"Never
+hide a gap").
+
+#### Fork-phase report
+
+Return a single report containing:
+- The Step 1 baseline result (pass/fail, passing count, baseline test set).
+- The `BASE_SHA` captured in Step 1 (`git rev-parse HEAD`), for Step 8's
+  `git diff "$BASE_SHA" HEAD`.
+- The tiered, prioritized candidate list. For each candidate: axis, tier, location,
+  measured baseline, suspected win, integrity/sync-compatibility impact (Red only),
+  both sides of the trade (axis-2 only).
+- The mandatory-review gate result (completed or blocked, and which perspectives
+  ran). Every finding the six mandatory reviews produced — each naming the
+  candidate it affects and its severity — passes through unchanged.
+- A plan file written to `~/.claude/plans/perf-tune-{timestamp}.md` with:
+  - **Context** — what is being optimized and why.
+  - **One section per candidate**, in priority order, each with:
+    - **Files to modify**
+    - **Changes** — concrete actions
+    - **Measurement method** — the exact axis-appropriate measurement to re-run
+    - **Verification** — tests, build targets, manual checks
+    - **Commit message suggestion**
+  - **Commit Strategy** — one commit per approved item, in priority order, per
+    `.claude/etc/per-item-commit.md` §4, made after that item's verification passes.
+- A **hand-off block** that tells the main conversation exactly what to do (see
+  Steps 4–8 below). The hand-off carries the `BASE_SHA` captured in Step 1 and the
+  mandatory-review findings unchanged.
 
 ### Step 4 — Confirm scope (the single gate)
 
-Present the tiered, prioritized list and use **`AskUserQuestion`** once to confirm
-the Green and Yellow batches. Take Red items **one at a time**, each with its
-impact stated. Proceed with only what was approved. If the list contains any
-Yellow/Red item, Step 3's mandatory review must have completed first — this gate
-is downstream of that one, not a substitute for it.
+**Executed in the main conversation** per the hand-off block from Step 3.
+
+Present the tiered, prioritized list together with every mandatory-review finding that
+names each candidate, and use **`AskUserQuestion`** once to confirm the Green and Yellow
+batches. Take Red items **one at a time**, each with its impact and every associated
+finding shown. Proceed with only what was approved. If the list contains any Yellow/Red
+item, Step 3's mandatory review must have completed first — this gate is downstream of
+that one, not a substitute for it. A candidate with an unresolved integrity finding is
+not approved unless that finding was shown.
 
 Each of these approvals is also its item's **one-time run confirmation**
 (`.claude/etc/per-item-commit.md` §1): the bulk Green/Yellow approval covers
@@ -386,6 +417,8 @@ every item in that batch, and each individual Red approval covers that one
 item. Step 1's worktree check is the clean baseline.
 
 ### Step 5 — Apply one at a time, verified
+
+**Executed in the main conversation** per the hand-off block from Step 3.
 
 For each approved item:
 
@@ -421,6 +454,8 @@ failure there means a DB/merge/sync regression slipped in.
 
 ### Step 6 — Tests
 
+**Executed in the main conversation** inline inside Step 5's loop.
+
 Changed logic in `domain/`, `data/`, or a ViewModel needs a test (#7). For
 performance work, the valuable tests are **semantic-equivalence** tests: a batched
 query returns the same rows in the same order as the loop it replaced; a
@@ -436,9 +471,11 @@ verification list instead.
 
 ### Step 7 — Doc consistency
 
-This check is applied **inline inside Step 5's loop**, immediately before the
-commit for the item that triggered it — not as a separate later pass — so the
-doc fix rides along in that same item's single commit.
+**Executed in the main conversation** inline inside Step 5's loop.
+
+This check is applied immediately before the commit for the item that triggered
+it — not as a separate later pass — so the doc fix rides along in that same
+item's single commit.
 
 Update only the docs whose stated performance characteristics actually changed.
 **`docs/` is bilingual — every page has an English `X.md` and a Japanese
@@ -456,12 +493,14 @@ CLAUDE.md "Documentation").
 
 ### Step 8 — Constraint review + closing summary
 
+**Executed in the main conversation** after Step 5–7 finish.
+
 This is a supplementary final sweep, not the primary gate — Step 3 already required
 review of every Yellow/Red candidate before it was applied. What this step catches
 instead is **interaction effects across the accumulated diff**: something that only
 becomes a problem once several independently-fine items are combined. Optionally
 review the accumulated changes (`git diff "$BASE_SHA" HEAD`, using the `BASE_SHA`
-captured in Step 1) for invariants broken by the optimization. Launch
+captured in Step 1 and carried by the hand-off) for invariants broken by the optimization. Launch
 **`review-architecture`**, **`review-data-integrity`**, **`review-sync-merge`**,
 **`review-concurrency`**, **`review-security`**, and **`review-state-consistency`** in
 parallel — `review-concurrency` matters here specifically because performance work
