@@ -116,6 +116,31 @@ class StaleTagFolderIdWriteTest {
         }
     }
 
+    /**
+     * The re-key fixture itself behaves as a merge's move does: the feed's raw assignment stays on the
+     * old id, and only its resolved `feeds.folder_id` follows the folder onto the new one.
+     */
+    @Test
+    fun rekeyingAFolderKeepsItsFeedsRawAssignmentAndResolvesTheirFolderOntoTheNewId() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFolder("d-old", "Work")
+            db.insertFeed("f1", folderId = "d-old")
+
+            driver.rekeyFolderForTest("d-old", "d-new")
+
+            val raw = driver.executeQuery(
+                null, "SELECT folder_id FROM ks_feed_folder_raw WHERE feed_id = 'f1'",
+                { c -> app.cash.sqldelight.db.QueryResult.Value(if (c.next().value) c.getString(0) else null) }, 0,
+            ).value
+            assertEquals("d-old", raw, "the raw assignment is never rewritten by a re-key")
+            assertEquals("d-new", db.feedsQueries.getById("f1").executeAsOne().folder_id)
+            assertNull(db.foldersQueries.getById("d-old").executeAsOneOrNull())
+        } finally {
+            driver.close()
+        }
+    }
+
     @Test
     fun renamingAndDeletingAFolderByItsStaleIdAffectTheRowItBecame() = runTest {
         val (driver, db) = inMemoryDb()

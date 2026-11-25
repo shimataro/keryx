@@ -301,8 +301,8 @@ class SameNameInsertingDriver(
 
 /**
  * Re-keys the tag [oldId] onto [newId] the way a sync merge does when it moves a row onto another id
- * of the same identity: the row is copied under [newId], its `feed_tags` links move with it, the old
- * row is deleted, and the move is recorded in `ks_id_remap` ([IdRemapSql.record], chains folded) —
+ * of the same identity: the row is copied under [newId], its `feed_tags` links move with it, the move
+ * is recorded in `ks_id_remap` ([IdRemapSql.record], chains folded), and the old row is deleted —
  * one transaction, foreign keys satisfied throughout. For tests of what holds a tag id across such a
  * re-key; [newId] must not exist yet.
  */
@@ -315,15 +315,17 @@ fun SqlDriver.rekeyTagForTest(oldId: String, newId: String) = rekeyForTest(
     newId = newId,
 )
 
-/** As [rekeyTagForTest], for the folder [oldId]: its feeds' raw and resolved assignments move with it. */
+/**
+ * As [rekeyTagForTest], for the folder [oldId]. As in a merge, its feeds' raw assignments
+ * (`ks_feed_folder_raw.folder_id`) are left on [oldId]: the remap is recorded before the old row is
+ * deleted, and the remap triggers resolve `feeds.folder_id` onto [newId] — so nothing references the
+ * old row by the time it goes.
+ */
 fun SqlDriver.rekeyFolderForTest(oldId: String, newId: String) = rekeyForTest(
     table = "folders",
     kind = "folder",
     columns = "name, sort_order, deleted_at, updated_at, created_at, name_updated_at, sort_order_updated_at, v2_id",
-    moveChildren = listOf(
-        "UPDATE ks_feed_folder_raw SET folder_id = ? WHERE folder_id = ?",
-        "UPDATE feeds SET folder_id = ? WHERE folder_id = ?",
-    ),
+    moveChildren = emptyList(),
     oldId = oldId,
     newId = newId,
 )
@@ -347,8 +349,10 @@ private fun SqlDriver.rekeyForTest(
                 bindString(1, oldId)
             }
         }
-        execute(null, "DELETE FROM $table WHERE id = ?", 1) { bindString(0, oldId) }
+        // Recorded before the delete, as the merge's `recordMoves` precedes its delete: a folder's
+        // remap triggers move the resolved `feeds.folder_id` off the old row first.
         works.merc.keryx.app.domain.IdRemapSql.record(this@rekeyForTest, kind, oldId, newId)
+        execute(null, "DELETE FROM $table WHERE id = ?", 1) { bindString(0, oldId) }
     }
     // The raw statements bypass SQLDelight's query notifications; re-run the observing queries as a
     // merge's commit would.
