@@ -233,10 +233,11 @@ it, for the item's platform. Record the files and lines you relied on in the ite
 they do not go into the reply. Outcome: `Answered`.
 
 If answering shows that a change is needed after all — the behavior asked about is a bug, or the
-docs say something the code does not do — explain why and mark the item as **awaiting decision**
-with your recommendation and grounds in the Step 8 hand-off. The main conversation will use
-`AskUserQuestion` to decide whether to move the item to Step 7. If moved, the item still gets its
-answer reply, which says the point will be looked into; if not, it stays `Answered`.
+docs say something the code does not do — **continue that item through Step 7 in the fork before
+producing the report**. Run 7.1 (premise), 7.2 (validity) and 7.3 (spec-change check) on the item
+so the user's decision rests on completed analysis. An item that reaches 7.3 awaiting the user's
+decision is listed in the Step 8 hand-off; one that clears 7.3 becomes `Fix & commit`. The answer
+still reaches its author via 8.3's outcome-based reply rules.
 
 ### Step 7 — Items that ask for a change
 
@@ -360,7 +361,7 @@ the same form.
 - Below the block, suggest labels from the repository's set (`question`, `enhancement`, `bug`,
   `documentation`, `duplicate`, `wontfix`, `invalid`) and whether the issue can be closed.
 
-If no item is Fix & commit, output `No implementation plan is needed.` and go to Step 10.
+If no item is Fix & commit **and none is awaiting the 7.3 decision**, output `No implementation plan is needed.` and go to Step 10.
 
 ### Step 9 — Plan and hand-off (fork writes the file; main conversation approves and implements)
 
@@ -369,12 +370,14 @@ conversation.
 
 1. **Write the plan file** — write `~/.claude/plans/evaluate-issue-{number}.md` with:
    - **Context** — what the issue asks for and why it is being done.
-   - **One section per Fix & commit item**, in item order: **Files to modify**, **Changes**
-     (concrete actions) and **Verification** (tests, build targets, manual checks). Tests follow
-     CLAUDE.md constraint #7 and `docs/testing.md`; a doc change updates both the English and
-     the `.ja.md` file, and a string change both `values/` and `values-ja/` `strings.xml`. For
-     an item whose evidence came from temporary instrumentation and whose effect is measurable,
-     add "re-measure per 9.4".
+   - **One section per Fix & commit item and per item awaiting the 7.3 decision**, in item order:
+     **Files to modify**, **Changes** (concrete actions) and **Verification** (tests, build
+     targets, manual checks). Tests follow CLAUDE.md constraint #7 and `docs/testing.md`; a doc
+     change updates both the English and the `.ja.md` file, and a string change both `values/`
+     and `values-ja/` `strings.xml`. For an item whose evidence came from temporary instrumentation
+     and whose effect is measurable, add "re-measure per 9.4". Sections for 7.3-decision items are
+     marked pending that decision: adopted, they proceed like a Fix & commit item; declined, their
+     section is dropped.
    - **Commit Strategy** — one commit per item, in item order, per
      `.claude/etc/per-item-commit.md` §4, after that item's verification passes.
 2. **Hand-off block** — append a block that tells the main conversation exactly what to do:
