@@ -187,6 +187,49 @@ class V2IdentityMergeTest {
 
     // ---- (c) fold equivalence and idempotence ----
 
+    /**
+     * Two aliases of one identity whose newer edits sit in different field groups: A has the newer
+     * name (and the greater `updated_at`, so a whole-row pick would keep only A), B the newer color
+     * and sort order. Received one by one or folded into one base, every group keeps its own newest
+     * value on the one canonical row.
+     */
+    @Test
+    fun aliasesWithIndependentNewerFieldsKeepEachGroupsNewestValueInEveryOrderAndFold() {
+        fun fileA() = transportFile(
+            deltaName(DEV_A, 1),
+            folder("d-a", "Folder a", updatedAt = 300, nameAt = 300, sortOrder = 1, sortAt = 100, v2Id = "p"),
+            tag("t-a", "Tag a", updatedAt = 300, nameAt = 300, color = "red", colorAt = 100, sortOrder = 1, sortAt = 100, v2Id = "p"),
+            feed("f1"),
+            feedTag("f1", "t-a", updatedAt = 300),
+        )
+        fun fileB() = transportFile(
+            deltaName(DEV_B, 1),
+            folder("d-b", "Folder b", updatedAt = 100, nameAt = 100, sortOrder = 2, sortAt = 300, v2Id = "p"),
+            tag("t-b", "Tag b", updatedAt = 100, nameAt = 100, color = "blue", colorAt = 300, sortOrder = 2, sortAt = 300, v2Id = "p"),
+            feed("f1"),
+            feedTag("f1", "t-b", updatedAt = 100),
+        )
+        val nameA = deltaName(DEV_A, 1)
+        val nameB = deltaName(DEV_B, 1)
+
+        val results = listOf(
+            localDb().also { merge(it, fileA()); merge(it, fileB()) },
+            localDb().also { merge(it, fileB()); merge(it, fileA()) },
+            localDb().also { merge(it, fold(fileA() to nameA, fileB() to nameB)) },
+            localDb().also { merge(it, fold(fileB() to nameB, fileA() to nameA)) },
+        )
+        for (db in results) {
+            assertEquals(listOf("t-a"), tagIds(db))
+            assertEquals(listOf("d-a"), folderIds(db))
+            assertEquals(listOf("Tag a|blue|2"), rows(db, "SELECT name, color, sort_order FROM tags"))
+            assertEquals(listOf("Folder a|2"), rows(db, "SELECT name, sort_order FROM folders"))
+            assertEquals(listOf("f1|t-a"), links(db))
+            assertEquals(emptyList(), foreignKeyViolations(db))
+        }
+        val reference = state(results.first())
+        results.drop(1).forEach { assertEquals(reference, state(it)) }
+    }
+
     @Test
     fun foldingBeforeOrAfterMergingGivesTheSameStateForEveryGrouping() {
         val names = listOf(deltaName(DEV_A, 1), deltaName(DEV_B, 1), deltaName(DEV_C, 1))
