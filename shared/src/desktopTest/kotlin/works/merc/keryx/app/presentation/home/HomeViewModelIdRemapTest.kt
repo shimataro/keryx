@@ -308,6 +308,50 @@ class HomeViewModelIdRemapTest {
         assertEquals(0, vm.newArticleCount.value, "the new list's first emission is the new baseline")
     }
 
+    // ---- Actions made after a re-key is published but before Home's collector applies it ----
+    //
+    // The collector runs on the main dispatcher, so it can lag `idRemaps.current`; each test below
+    // forces that interval: re-key, publish, then the action, and only then advanceUntilIdle().
+
+    private suspend fun TestScope.rekeyAndPublishWithoutApplying(tag: Boolean = true, folder: Boolean = true) {
+        if (tag) driver.rekeyTagForTest("t-old", "t-new")
+        if (folder) driver.rekeyFolderForTest("d-old", "d-new")
+        remaps.publishFromDb()
+    }
+
+    @Test
+    fun reSelectingTheSameFilterBeforeTheRemapIsAppliedKeepsTheArticleAndGeneration() = runVmTest {
+        seedArticles()
+        val vm = newViewModel().vm
+        vm.selectFilter(ArticleFilter.Tag("t-old"))
+        testScheduler.advanceUntilIdle()
+        vm.selectArticle(vm.articles.value.first { it.id == "s2" })
+        testScheduler.advanceUntilIdle()
+        val before = vm.filterSelection.value.generation
+
+        rekeyAndPublishWithoutApplying(folder = false)
+        vm.selectFilter(ArticleFilter.Tag("t-old"))
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(FilterSelection(ArticleFilter.Tag("t-new"), before), vm.filterSelection.value)
+        assertEquals("s2", vm.selectedArticle.value?.id)
+    }
+
+    @Test
+    fun selectingAnotherFilterBeforeTheRemapIsAppliedStillSwitches() = runVmTest {
+        val vm = newViewModel().vm
+        vm.selectFilter(ArticleFilter.Tag("t-old"))
+        testScheduler.advanceUntilIdle()
+        val before = vm.filterSelection.value.generation
+
+        rekeyAndPublishWithoutApplying()
+        vm.selectFilter(ArticleFilter.Folder("d-old"))
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(ArticleFilter.Folder("d-new"), vm.filter.value)
+        assertNotEquals(before, vm.filterSelection.value.generation)
+    }
+
     /** Selecting the row the selection already is (by its stale or new id) changes nothing, generation included. */
     @Test
     fun reSelectingTheReKeyedRowKeepsTheGeneration() = runVmTest {

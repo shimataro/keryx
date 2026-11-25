@@ -999,8 +999,9 @@ class HomeViewModel(
         instance: FeedListRowSelection = FeedListRowSelection.canonicalFor(filter),
     ) {
         // A row the feed list rendered before a merge re-keyed its tag or folder still carries the old
-        // id; select the row it became (see [applyIdRemap]).
-        val remap = idRemaps.current.value
+        // id; select the row it became (see [applyIdRemap]). The selection itself is caught up first,
+        // so both sides of the comparison below are in the same id space.
+        val remap = catchUpIdRemap()
         val current = remap.filter(filter)
         val currentInstance = instance.remappedBy(remap)
         if (current == _filter.value) {
@@ -2236,6 +2237,21 @@ class HomeViewModel(
         expansion.remap(remap)
         deletedTagFallback.remapPending(remap::tag)
         deletedFolderFallback.remapPending(remap::folder)
+    }
+
+    /**
+     * Applies the current re-key map ([TagFolderIdRemaps.current]) to this ViewModel's state now, and
+     * returns it. The collector below applies each published map, but on the main dispatcher, so it
+     * can lag the map's current value: an action that reads that value synchronously would otherwise
+     * compare or toggle an id already moved against state still holding the old one. Every action
+     * that reads the map calls this first. Main thread only; idempotent ([applyIdRemap]), so the
+     * collector applying the same map afterwards — or a nested call from a fallback this one runs —
+     * changes nothing.
+     */
+    private fun catchUpIdRemap(): TagFolderIdRemap {
+        val remap = idRemaps.current.value
+        applyIdRemap(remap)
+        return remap
     }
 
     // Last in the class body: every property applyIdRemap touches is initialized by now.
