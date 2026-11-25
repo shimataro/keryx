@@ -535,7 +535,7 @@ Before version 3 a tag's or folder's id was a random UUIDv4; the v2→v3 migrati
 creation-time name derives from and kept the pre-upgrade id in `v2_id`. Two devices that shared that v2 id still
 recognise each other's row even if one renamed it before the rename reached the other, which would otherwise derive
 a different name-derived id on each device: the pair `(v2_id, id)` is an identity edge (`ks_v2_edge`), and every merge
-moves all rows of one identity onto its canonical id, the smallest id it has been seen under (see "Identities of tags
+moves all rows of one identity onto its canonical id, the smallest row id of the identity — never a pre-upgrade id (see "Identities of tags
 and folders" in [sync-architecture.md](sync-architecture.md)). The column travels in transport files, as do the edge
 tables in full sends and bases, and is NULL on a row created after the migration.
 

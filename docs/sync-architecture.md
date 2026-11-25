@@ -29,7 +29,7 @@ pre-delta migration and the legacy watch), `domain/MergeSql.kt`,
   carries the same id and the merge matches tags and folders by id alone. A row re-keyed by that migration also
   keeps its pre-upgrade id in `v2_id`; rows renamed differently on two devices before they upgraded are linked by
   that shared id as one identity, and every merge moves both sides onto the identity's canonical id — the smallest
-  id the identity has ever been seen under — so the id a device keeps never depends on the order files arrived in.
+  row id of the identity, never a pre-upgrade id — so the id a device keeps never depends on the order files arrived in.
   Version 3 is
   unreleased, but a development environment that already ran it with the interim random ids is not re-keyed — the
   callback fires only when crossing version 2 — and needs its cloud sync data reset once.)

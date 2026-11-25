@@ -195,7 +195,7 @@ Indexes: `feed_id`, `is_read`, `is_starred`, and a composite `(published_at DESC
   created afterwards. Two devices that shared a v2 id derive different name-derived ids if they renamed
   the row differently before upgrading; the pair `(v2_id, id)` is an identity edge (`ks_v2_edge`), and
   the sync merge moves every row of one identity — on both sides — onto its canonical id, the smallest
-  id the identity has been seen under (`domain/V2IdentitySql.kt`; "Identities of tags and folders" in
+  row id of the identity — never a pre-upgrade id (`domain/V2IdentitySql.kt`; "Identities of tags and folders" in
   [sync-architecture.md](sync-architecture.md)). The column itself decides nothing: it is a source of
   edges, carried in transport files so deltas and bases deliver them too, and a merge or fold keeps the
   greatest non-NULL value of the rows it combines (the other one's edge stays in `ks_v2_edge`), so every
