@@ -43,7 +43,7 @@ actuals — see "Apple targets in `:shared`" below.
                   CloudFileTransfer, SecretStoreTokenStorage
     data/cloud/nextcloud/  NextcloudStorage (WebDAV), NextcloudLoginFlow (Login Flow v2), NextcloudServerProbe (status.php), normalizeNextcloudUrl, revokeNextcloudAppPassword — see "Nextcloud (Login Flow v2)" in sync-architecture.md
     data/opml/    OpmlCodec
-    domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport (interface + CustomUri), AuthorizationLauncher (interface + schemeOf — how OAuthConnectFlow opens the authorize URL; desktop/Android default to the system browser, the Apple app hands it to Swift instead, see "KeryxSdk" below), LoginPageLauncher (interface + BrowserLoginPageLauncher — how Nextcloud's Login Flow v2 shows its sign-in page and gets back from it), OAuthCallbackParams, OAuthUriParser (parseOAuthUri, shared by every `keryx://` and loopback redirect handler), StartupMaintenanceTasks (runStartupMaintenance/checkForUpdateAndNotify/maybeRebuildFtsIndex), BackgroundRefreshLoop (backgroundUpdateLoop — the desktop app's own polling loop, also used by the Apple app's `KeryxSdk.startMaintenance()`; Android has no equivalent, since it schedules through `WorkManager` instead), RefreshCycleRunner (the refresh → notify → sync cycle every refresh path shares), NetworkUsagePolicy (which automatic network work the current network allows — see "Network Gate" in sync-architecture.md), UpdateChecker/UpdateRepository/UpdateAsset/UpdateInstallPolicy/UpdateInstaller(expect-like interface)/AvailableUpdate/UpdateState (in-app update — see "In-App Update" below)
+    domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, IdRemapSql/TagFolderIdRemaps (tag/folder id re-keys — see "Tag/folder id re-keys" below), CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport (interface + CustomUri), AuthorizationLauncher (interface + schemeOf — how OAuthConnectFlow opens the authorize URL; desktop/Android default to the system browser, the Apple app hands it to Swift instead, see "KeryxSdk" below), LoginPageLauncher (interface + BrowserLoginPageLauncher — how Nextcloud's Login Flow v2 shows its sign-in page and gets back from it), OAuthCallbackParams, OAuthUriParser (parseOAuthUri, shared by every `keryx://` and loopback redirect handler), StartupMaintenanceTasks (runStartupMaintenance/checkForUpdateAndNotify/maybeRebuildFtsIndex), BackgroundRefreshLoop (backgroundUpdateLoop — the desktop app's own polling loop, also used by the Apple app's `KeryxSdk.startMaintenance()`; Android has no equivalent, since it schedules through `WorkManager` instead), RefreshCycleRunner (the refresh → notify → sync cycle every refresh path shares), NetworkUsagePolicy (which automatic network work the current network allows — see "Network Gate" in sync-architecture.md), UpdateChecker/UpdateRepository/UpdateAsset/UpdateInstallPolicy/UpdateInstaller(expect-like interface)/AvailableUpdate/UpdateState (in-app update — see "In-App Update" below)
     di/           SharedModule (sharedModule + updateModule + presentationModule) and HttpClientFactory [:shared]; AppModule (+ expect platformModule) and ImageLoaderSetup [:composeApp]
     presentation/ [:shared] UI-framework-free screen state shared by every UI: home/ (HomeViewModel — the
                   home screen's filter/selection/article list/search/unread-only/new-article state and
@@ -1124,6 +1124,41 @@ once the body lands, by `selectFilter` and by a tombstoned lookup; a newer selec
 showing takes the header over at once rather than returning the reader to the previously loaded article for
 another grace period. Compose's single reader and the macOS SwiftUI reader both render it; the iOS pager does
 not (a page with no body yet shows only the reader's background, as before).
+
+### Tag/folder id re-keys
+
+A tag's or folder's id can move: the v2→v3 migration re-keys every row onto its name-derived id, and a sync merge
+may move a row onto another id of the same identity. Every move is recorded in `ks_id_remap` through
+`domain/IdRemapSql.kt`, which folds chains so an old id maps in one hop to the id its row has now (see
+[db-schema.md](db-schema.md)). What holds such an id outside the database follows it, so a re-key never strands a
+selection or a user's write:
+
+- **Publication.** `domain/TagFolderIdRemaps` (a Koin single) holds the whole folded table as a `StateFlow`
+  (`TagFolderIdRemap`: old → new, per kind). A merge that re-keyed rows calls `publishFromDb()` after its commit.
+  A whole-map `StateFlow` rather than a stream of batches is deliberate: a holder that starts collecting late still
+  gets every re-key so far, a superseded value is contained in the newer one, and applying a value again changes
+  nothing (the map is folded and no live row carries an old id), so nothing is lost and nothing is double-applied.
+- **Local settings.** `SettingsRepository` applies the table to `lastFilter`, `collapsedFolderIds` and
+  `expandedTagIds` at construction (read from the table itself) and again for every published value — one rewrite
+  for both, persisted only when it changes something.
+- **`HomeViewModel`.** On each published value it moves the selected filter and row (`_filter`,
+  `_selectedRowInstance`, including a feed row nested under a re-keyed tag) onto the new ids — directly, not through
+  `selectFilter`, so the selection does not fall back to All Feeds and its article, pins and cursor stay (external-spec
+  §9, "Least surprise") —, remaps `FeedListExpansion`'s collapsed/expanded sets, and moves pending delete fallbacks
+  (`DeletedItemFallback.remapPending`) onto the id the deleted item has now, whose fallback then compares and
+  forgets that id. A row the feed list rendered before the re-key may still be clicked with its old id, so
+  `selectFilter`, the folder/tag toggles and `revealFeedListRow` resolve the ids they are given through the current
+  value as well.
+- **Writes.** Every repository write that takes a tag or folder id resolves it in the write statement itself
+  (`tags.sq` / `folders.sq` / `feeds.sq` / `feed_tags.sq` / `articles.sq`), so a rename field left open, a queued
+  `SerialWriteQueue` item or a drag that predates the re-key applies to the row it became, instead of matching
+  nothing or failing a foreign key (which would be a local-write failure). Being part of the statement, the
+  resolution adds no read ahead of a transaction's first write. `FolderRepository.reorderFolders` also resolves its
+  two ids before computing the new order, outside its transaction as before.
+
+The Apple app holds no tag or folder id of its own beyond what it reads from `HomeViewModel` and transient UI state
+(an inline rename's row key, a pending delete confirmation's row, a drag), whose action goes through the resolving
+writes above.
 
 ## Navigation
 

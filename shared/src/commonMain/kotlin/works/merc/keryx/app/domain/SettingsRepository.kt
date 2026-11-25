@@ -68,6 +68,10 @@ class SettingsRepository(
     // Counts the global-setting writes queued but not yet run, so a foreground-exit sync flush waits
     // for them (see [PendingLocalWrites]). Shared with `SyncRepository` in production.
     private val pendingLocalWrites: PendingLocalWrites = PendingLocalWrites(),
+    // The tag/folder id re-keys, republished after a merge re-keys rows; the local settings' tag and
+    // folder ids are rewritten from it (see [applyIdRemap]). Production passes the app's one (Koin),
+    // which HomeViewModel observes too.
+    internal val idRemaps: TagFolderIdRemaps = TagFolderIdRemaps(db),
 ) {
     private companion object {
         const val TAG = "SettingsRepository"
@@ -88,20 +92,34 @@ class SettingsRepository(
         remapTagAndFolderIdsInLocalSettings()
         writeScope.launch {
             for (signal in saveSignals) {
-                store.save(_localSettings.value)
+                // A failed write (disk full, a read-only file) is logged and the writer carries on:
+                // the in-memory value is intact and the next save writes it again. Letting it escape
+                // would end this loop, so no later save would ever reach the disk.
+                try {
+                    store.save(_localSettings.value)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Throwable) {
+                    Log.error(TAG, "Failed to persist local settings", e)
+                }
             }
         }
+        // Every re-key published after construction (a merge that moved tag/folder rows onto other
+        // ids) is applied as it arrives. The first value collected is the one current now, which the
+        // construction-time pass above has already applied, so it changes nothing.
+        writeScope.launch { idRemaps.current.collect(::applyIdRemap) }
     }
 
     /**
-     * Applies the v2->v3 migration's tag/folder id re-key (`ks_id_remap`, written by
-     * [rekeyTagAndFolderIds]) to the three local-settings fields that hold tag or folder ids, then
-     * persists the result only when the remap actually changes a value. Runs synchronously in
-     * construction, before anything reads [localSettings] — otherwise a restored selection or
-     * collapsed state would reference an id that no longer exists. Idempotent: an id not in the map
-     * (already re-keyed, or not a tag/folder id) passes through, so a second application is a no-op.
-     * The remap table is kept (rather than dropped after this run), so the rewrite stays idempotent
-     * across launches.
+     * Applies every tag/folder id re-key so far (`ks_id_remap` — the v2->v3 migration's, written by
+     * [rekeyTagAndFolderIds], and any a merge made) to the three local-settings fields that hold tag
+     * or folder ids ([remappedBy]), then persists the result only when the remap actually changes a
+     * value. Runs synchronously in construction, before anything reads [localSettings] — otherwise a
+     * restored selection or collapsed state would reference an id that no longer exists. Read from the
+     * table itself rather than from [idRemaps], so a re-key committed since [idRemaps] last read it is
+     * not missed. Idempotent: an id not in the map (already re-keyed, or not a tag/folder id) passes
+     * through, so a second application is a no-op. The remap table is kept (rather than dropped after
+     * this run), so the rewrite stays idempotent across launches.
      *
      * A disk-write failure (e.g. disk full or a read-only file) is logged and swallowed: the
      * in-memory [localSettings] still carries the remap, so the app can start, and the next save
@@ -109,24 +127,10 @@ class SettingsRepository(
      * write.
      */
     private fun remapTagAndFolderIdsInLocalSettings() {
-        val remaps = db.sync_bookkeepingQueries.idRemapAll().executeAsList()
-        if (remaps.isEmpty()) return
-        val tagIds = remaps.filter { it.kind == ID_REMAP_KIND_TAG }.associate { it.old_id to it.new_id }
-        val folderIds = remaps.filter { it.kind == ID_REMAP_KIND_FOLDER }.associate { it.old_id to it.new_id }
+        val remap = loadIdRemap(db)
+        if (remap.isEmpty) return
         val original = _localSettings.value
-        _localSettings.update { settings ->
-            settings.copy(
-                lastFilter = settings.lastFilter?.let { filter ->
-                    when {
-                        filter.startsWith("tag:") -> "tag:" + tagIds.getOrElse(filter.removePrefix("tag:")) { filter.removePrefix("tag:") }
-                        filter.startsWith("folder:") -> "folder:" + folderIds.getOrElse(filter.removePrefix("folder:")) { filter.removePrefix("folder:") }
-                        else -> filter
-                    }
-                },
-                collapsedFolderIds = settings.collapsedFolderIds.map { folderIds[it] ?: it }.toSet(),
-                expandedTagIds = settings.expandedTagIds.map { tagIds[it] ?: it }.toSet(),
-            )
-        }
+        _localSettings.update { it.remappedBy(remap) }
         val rewritten = _localSettings.value
         if (rewritten == original) return
         try {
@@ -137,6 +141,40 @@ class SettingsRepository(
             Log.error(TAG, "Failed to persist remapped local settings", e)
         }
     }
+
+    /**
+     * Applies a re-key published while the app runs ([TagFolderIdRemaps.current]) — the same rewrite
+     * as the construction-time pass ([remappedBy]), persisted through the background writer like any
+     * other local-settings change (whose failure is logged and retried by the next save; the next
+     * launch's pass applies the table again in any case). Atomic against a concurrent
+     * [mutateLocalSettings]: the rewrite is one [update] of the current value. Writes nothing when
+     * the remap changes nothing — the common case, since the value collected first is the one the
+     * construction-time pass has already applied.
+     */
+    private fun applyIdRemap(remap: TagFolderIdRemap) {
+        if (remap.isEmpty) return
+        var changed = false
+        _localSettings.update { settings -> settings.remappedBy(remap).also { changed = it != settings } }
+        if (changed) saveSignals.trySend(Unit)
+    }
+
+    /**
+     * These settings with every tag/folder id brought up to date by [remap]: a `tag:` / `folder:`
+     * [LocalSettings.lastFilter], [LocalSettings.collapsedFolderIds] and [LocalSettings.expandedTagIds].
+     * The single rewrite both the construction-time pass and the runtime one apply.
+     */
+    private fun LocalSettings.remappedBy(remap: TagFolderIdRemap): LocalSettings = copy(
+        lastFilter = lastFilter?.let { filter ->
+            when {
+                filter.startsWith("tag:") -> "tag:" + remap.tag(filter.removePrefix("tag:"))
+                filter.startsWith("folder:") -> "folder:" + remap.folder(filter.removePrefix("folder:"))
+                else -> filter
+            }
+        },
+        collapsedFolderIds = collapsedFolderIds.mapTo(LinkedHashSet()) { remap.folder(it) },
+        expandedTagIds = expandedTagIds.mapTo(LinkedHashSet()) { remap.tag(it) },
+    )
+
     // --- Global (synced) settings ---
 
     fun getReadTimeoutSeconds(): Int =

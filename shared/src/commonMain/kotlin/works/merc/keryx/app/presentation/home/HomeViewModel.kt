@@ -64,6 +64,8 @@ import works.merc.keryx.app.domain.RefreshCycleRunner
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SubscribeOutcome
 import works.merc.keryx.app.domain.SyncRepository
+import works.merc.keryx.app.domain.TagFolderIdRemap
+import works.merc.keryx.app.domain.TagFolderIdRemaps
 import works.merc.keryx.app.domain.TagRepository
 import works.merc.keryx.app.presentation.DerivedStateFlow
 import works.merc.keryx.app.presentation.ManualSync
@@ -108,6 +110,9 @@ class HomeViewModel(
     // Reports a read/star or feed-list write that failed off the UI thread (its optimistic state is
     // then undone here — see [revertFailedArticleWrite]). The app's one instance in production.
     private val localWriteFailureReporter: LocalWriteFailureReporter,
+    // The tag/folder id re-keys a merge publishes (see [applyIdRemap]). The app's one instance in
+    // production; by default the one [settingsRepository] observes, so both always agree.
+    private val idRemaps: TagFolderIdRemaps = settingsRepository.idRemaps,
 ) : ViewModel() {
 
     // Eagerly (not WhileSubscribed) so these start populating as soon as the ViewModel is
@@ -885,6 +890,7 @@ class HomeViewModel(
         selectFilter = { selectFilter(it) },
         launchWrite = { write, afterWrite -> feedListWrites.enqueue(write, afterWrite) },
         fallBackOnceHidden = ::fallBackOnceHidden,
+        currentIdRemap = { idRemaps.current.value },
     )
 
     /** The feed list's collapsed folders — see [FeedListExpansion.collapsedFolderIds]. */
@@ -898,7 +904,7 @@ class HomeViewModel(
      *
      * @param folderId The identifier of the folder to toggle.
      */
-    fun toggleFolderCollapsed(folderId: String) = expansion.toggleFolder(folderId)
+    fun toggleFolderCollapsed(folderId: String) = expansion.toggleFolder(idRemaps.current.value.folder(folderId))
 
     /**
      * Toggles whether a tag's attached-feed list is expanded and persists the updated state.
@@ -913,7 +919,8 @@ class HomeViewModel(
      * inline rename starts on the selection (F2/Return, the Feed menu), whose editor needs a
      * rendered row.
      */
-    fun revealFeedListRow(instance: FeedListRowSelection) = expansion.reveal(instance, feeds.value)
+    fun revealFeedListRow(instance: FeedListRowSelection) =
+        expansion.reveal(instance.remappedBy(idRemaps.current.value), feeds.value)
 
     /** Whether the previous session's selected article was restored at launch — see [initialHomePane]. */
     val articleRestoredOnLaunch: Boolean
@@ -955,6 +962,8 @@ class HomeViewModel(
      * filter (see this class's own "Search" section), so switching feeds/folders/tags while
      * actively searching keeps the query and simply re-scopes the search to the new filter.
      *
+     * A tag or folder id a merge has re-keyed is brought up to date first ([TagFolderIdRemaps]).
+     *
      * @param filter The article filter to select.
      * @param instance Which rendered feed-list row was selected — defaults to [filter]'s canonical
      *   (folder-group) row for callers with no specific row in mind (notification actions).
@@ -966,12 +975,17 @@ class HomeViewModel(
         filter: ArticleFilter,
         instance: FeedListRowSelection = FeedListRowSelection.canonicalFor(filter),
     ) {
-        if (filter == _filter.value) {
-            _selectedRowInstance.value = instance
+        // A row the feed list rendered before a merge re-keyed its tag or folder still carries the old
+        // id; select the row it became (see [applyIdRemap]).
+        val remap = idRemaps.current.value
+        val current = remap.filter(filter)
+        val currentInstance = instance.remappedBy(remap)
+        if (current == _filter.value) {
+            _selectedRowInstance.value = currentInstance
             return
         }
-        _filter.value = filter
-        _selectedRowInstance.value = instance
+        _filter.value = current
+        _selectedRowInstance.value = currentInstance
         _selectedArticle.value = null
         _pendingSelectedRow.value = null
         _headerArticleId.value = null
@@ -984,7 +998,7 @@ class HomeViewModel(
         // non-null id straight back — so the epoch records the switch itself.
         selectionCursorId = null
         browsingEpoch++
-        settingsRepository.mutateLocalSettings { it.copy(lastFilter = filter.encode(), lastArticleId = null) }
+        settingsRepository.mutateLocalSettings { it.copy(lastFilter = current.encode(), lastArticleId = null) }
     }
 
     private val articleContentCache = ArticleContentCache(
@@ -2170,5 +2184,35 @@ class HomeViewModel(
      */
     fun reorderFolders(draggedFolderId: String, targetFolderId: String?) =
         feedListActions.reorderFolders(draggedFolderId, targetFolderId)
-}
 
+    /**
+     * Brings every tag/folder id this ViewModel holds up to date after a merge re-keyed rows onto
+     * other ids ([TagFolderIdRemaps]), so nothing the user had selected or open is lost to a re-key
+     * (external-spec §9, "Least surprise"): the selected filter and row move to the id the tag or
+     * folder has now instead of falling back to All Feeds, the feed list's expansion keeps the same
+     * folders collapsed and tags expanded, and a delete still waiting for its item to leave the feed
+     * list waits for the row it became. The local settings are rewritten by [SettingsRepository]
+     * from the same value.
+     *
+     * Runs on the main thread (collected on [viewModelScope], below), like every other change to this
+     * state, so it needs no lock. Idempotent — the map is folded and no live id is a key — so the
+     * value at hand when collection starts, which usually changes nothing, is applied harmlessly.
+     * The filter is replaced directly rather than through [selectFilter]: the selection stays where it
+     * is, so its article, pins and cursor are kept.
+     */
+    private fun applyIdRemap(remap: TagFolderIdRemap) {
+        if (remap.isEmpty) return
+        val filter = remap.filter(_filter.value)
+        if (filter != _filter.value) _filter.value = filter
+        val instance = _selectedRowInstance.value.remappedBy(remap)
+        if (instance != _selectedRowInstance.value) _selectedRowInstance.value = instance
+        expansion.remap(remap)
+        deletedTagFallback.remapPending(remap::tag)
+        deletedFolderFallback.remapPending(remap::folder)
+    }
+
+    // Last in the class body: every property applyIdRemap touches is initialized by now.
+    init {
+        idRemaps.current.onEach(::applyIdRemap).launchIn(viewModelScope)
+    }
+}

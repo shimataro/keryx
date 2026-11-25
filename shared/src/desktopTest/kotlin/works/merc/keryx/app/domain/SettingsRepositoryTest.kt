@@ -512,8 +512,8 @@ class SettingsRepositoryTest {
             first.saveLocalSettings(preset)
             runBlocking { first.flush() }
 
-            db.sync_bookkeepingQueries.insertIdRemap(ID_REMAP_KIND_TAG, "t-old", "t-new")
-            db.sync_bookkeepingQueries.insertIdRemap(ID_REMAP_KIND_FOLDER, "d-old", "d-new")
+            IdRemapSql.record(driver, ID_REMAP_KIND_TAG, "t-old", "t-new")
+            IdRemapSql.record(driver, ID_REMAP_KIND_FOLDER, "d-old", "d-new")
 
             val repo = newRepo(db, store = store)
 
@@ -553,8 +553,8 @@ class SettingsRepositoryTest {
             first.saveLocalSettings(LocalSettings(lastFilter = "folder:d-old"))
             runBlocking { first.flush() }
 
-            db.sync_bookkeepingQueries.insertIdRemap(ID_REMAP_KIND_TAG, "t-old", "t-new")
-            db.sync_bookkeepingQueries.insertIdRemap(ID_REMAP_KIND_FOLDER, "d-old", "d-new")
+            IdRemapSql.record(driver, ID_REMAP_KIND_TAG, "t-old", "t-new")
+            IdRemapSql.record(driver, ID_REMAP_KIND_FOLDER, "d-old", "d-new")
 
             val repo = newRepo(db, store = store)
 
@@ -586,7 +586,7 @@ class SettingsRepositoryTest {
     fun remapSaveIsSkippedWhenRemapProducesNoChange() {
         val (driver, db) = inMemoryDb()
         try {
-            db.sync_bookkeepingQueries.insertIdRemap(ID_REMAP_KIND_TAG, "t-old", "t-new")
+            IdRemapSql.record(driver, ID_REMAP_KIND_TAG, "t-old", "t-new")
             val store = RecordingLocalSettingsStore(dir, LocalSettings(lastFilter = "tag:t-new"))
 
             val repo = newRepo(db, store = store)
@@ -603,7 +603,7 @@ class SettingsRepositoryTest {
     fun remapSaveFailureDoesNotCrashConstruction() {
         val (driver, db) = inMemoryDb()
         try {
-            db.sync_bookkeepingQueries.insertIdRemap(ID_REMAP_KIND_TAG, "t-old", "t-new")
+            IdRemapSql.record(driver, ID_REMAP_KIND_TAG, "t-old", "t-new")
             val store = RecordingLocalSettingsStore(dir, LocalSettings(lastFilter = "tag:t-old")).apply {
                 error = RuntimeException("disk full")
             }
@@ -622,13 +622,82 @@ class SettingsRepositoryTest {
     fun remapSaveCancellationPropagates() {
         val (driver, db) = inMemoryDb()
         try {
-            db.sync_bookkeepingQueries.insertIdRemap(ID_REMAP_KIND_TAG, "t-old", "t-new")
+            IdRemapSql.record(driver, ID_REMAP_KIND_TAG, "t-old", "t-new")
             val store = RecordingLocalSettingsStore(dir, LocalSettings(lastFilter = "tag:t-old")).apply {
                 error = CancellationException("cancelled")
             }
 
             assertFailsWith<CancellationException> { newRepo(db, store = store) }
             assertEquals(1, store.saveCount)
+        } finally {
+            driver.close()
+        }
+    }
+
+    // --- Re-keys published while the app runs (TagFolderIdRemaps) ---
+
+    /**
+     * A re-key a merge publishes after construction rewrites the same three fields as the startup
+     * pass, in memory and on disk; publishing the same map again changes and writes nothing.
+     */
+    @Test
+    fun aPublishedReKeyRewritesTheLocalSettingsOnceAndIdempotently() = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val store = RecordingLocalSettingsStore(
+                dir,
+                LocalSettings(
+                    lastFilter = "folder:d-old",
+                    collapsedFolderIds = setOf("d-old", "d-kept"),
+                    expandedTagIds = setOf("t-old"),
+                ),
+            )
+            val remaps = TagFolderIdRemaps(db)
+            val repo = SettingsRepository(db, store, SyncScheduler {}, Clock { 0L }, writeDispatcher = Dispatchers.Unconfined, idRemaps = remaps)
+            assertEquals(0, store.saveCount, "nothing to rewrite at construction")
+
+            IdRemapSql.record(driver, ID_REMAP_KIND_TAG, "t-old", "t-new")
+            IdRemapSql.record(driver, ID_REMAP_KIND_FOLDER, "d-old", "d-new")
+            remaps.publishFromDb()
+
+            val settings = repo.getLocalSettings()
+            assertEquals("folder:d-new", settings.lastFilter)
+            assertEquals(setOf("d-new", "d-kept"), settings.collapsedFolderIds)
+            assertEquals(setOf("t-new"), settings.expandedTagIds)
+            assertEquals(1, store.saveCount)
+            assertEquals("folder:d-new", LocalSettingsStore(dirOverride = dir).load().lastFilter)
+
+            // A further publish (another merge, say) that brings nothing new writes nothing.
+            remaps.publishFromDb()
+            assertEquals(settings, repo.getLocalSettings())
+            assertEquals(1, store.saveCount)
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
+     * A failed write of the runtime rewrite is logged, not fatal: the in-memory value keeps the new
+     * ids and the background writer goes on persisting later saves.
+     */
+    @Test
+    fun aFailedWriteOfAPublishedReKeyDoesNotStopLaterSaves() = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val store = RecordingLocalSettingsStore(dir, LocalSettings(lastFilter = "tag:t-old"))
+            val remaps = TagFolderIdRemaps(db)
+            val repo = SettingsRepository(db, store, SyncScheduler {}, Clock { 0L }, writeDispatcher = Dispatchers.Unconfined, idRemaps = remaps)
+            store.error = RuntimeException("disk full")
+
+            IdRemapSql.record(driver, ID_REMAP_KIND_TAG, "t-old", "t-new")
+            remaps.publishFromDb()
+
+            assertEquals("tag:t-new", repo.getLocalSettings().lastFilter)
+            assertEquals(1, store.saveCount)
+            store.error = null
+            repo.mutateLocalSettings { it.copy(lastFocusedPane = "reader") }
+            assertEquals(2, store.saveCount)
+            assertEquals("tag:t-new", LocalSettingsStore(dirOverride = dir).load().lastFilter)
         } finally {
             driver.close()
         }

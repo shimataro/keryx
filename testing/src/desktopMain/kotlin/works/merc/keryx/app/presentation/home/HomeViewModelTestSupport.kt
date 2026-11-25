@@ -42,6 +42,7 @@ import works.merc.keryx.app.domain.RefreshCycleRunner
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.SyncScheduler
+import works.merc.keryx.app.domain.TagFolderIdRemaps
 import works.merc.keryx.app.domain.TagRepository
 import works.merc.keryx.app.ftsManagerIndexed
 import works.merc.keryx.app.platform.AppDirs
@@ -169,6 +170,9 @@ fun newHomeViewModel(
     pendingLocalWrites: PendingLocalWrites = PendingLocalWrites(),
     // Where the ViewModel reports a write that failed — overridable so a test can observe it.
     localWriteFailureReporter: LocalWriteFailureReporter = LocalWriteFailureReporter(NotificationCenter(), clock),
+    // The tag/folder id re-keys the settings and the ViewModel observe — overridable so a test can
+    // publish a re-key ([TagFolderIdRemaps.publishFromDb]) after changing `ks_id_remap` itself.
+    idRemaps: TagFolderIdRemaps = TagFolderIdRemaps(db),
 ): HomeViewModelFixture {
     // A fresh, unique directory per call (not a fixed name shared across every test in this file):
     // LocalSettingsStore persists lastFilter/collapsedFolderIds/etc. to a JSON file there, and a
@@ -191,6 +195,7 @@ fun newHomeViewModel(
         val folderRepository = FolderRepository(db, feedRepository, syncScheduler, clock, Dispatchers.Unconfined)
         val settingsRepository = SettingsRepository(
             db, LocalSettingsStore(dirOverride = dir), syncScheduler, clock, writeDispatcher = Dispatchers.Unconfined,
+            idRemaps = idRemaps,
         )
         cleanupOnFailure += { syncScope.cancel() }
         injectFailureAfterActivityCenter()

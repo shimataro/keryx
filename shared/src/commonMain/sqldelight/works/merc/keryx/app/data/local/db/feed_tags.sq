@@ -24,9 +24,12 @@ SELECT feed_id, tag_id FROM feed_tags WHERE deleted_at IS NULL;
 -- MAX(now, previous + 1). The merge settles an equal stamp by its tie rule (the cloud side wins),
 -- which knows nothing of which write came later, so a write stamped at the value the row already
 -- holds would lose to the older value on the next merge. See docs/db-schema.md.
+-- :tag_id is resolved like every tag id a write takes (see tags.sq), so an attach/detach issued with
+-- the id a merge has since re-keyed lands on the row it became rather than failing tag_id's FOREIGN
+-- KEY.
 upsert:
 INSERT INTO feed_tags (feed_id, tag_id, deleted_at, updated_at)
-VALUES (?, ?, ?, ?)
+VALUES (:feed_id, COALESCE((SELECT id FROM tags WHERE id = :tag_id), (SELECT new_id FROM ks_id_remap WHERE kind = 'tag' AND old_id = :tag_id), :tag_id), :deleted_at, :updated_at)
 ON CONFLICT(feed_id, tag_id) DO UPDATE SET
     deleted_at = excluded.deleted_at,
     updated_at = MAX(excluded.updated_at, updated_at + 1);

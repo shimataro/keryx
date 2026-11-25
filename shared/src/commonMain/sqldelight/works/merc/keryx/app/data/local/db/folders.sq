@@ -23,11 +23,25 @@ CREATE TABLE folders (
 
 CREATE INDEX folders_name ON folders(name);
 
+-- A write that takes a folder id resolves it first (ks_id_remap, see sync_bookkeeping.sq): an id whose
+-- row is gone because a merge re-keyed it names the row it became, so a write the UI issued with
+-- the id it held before the re-key (an open rename field, a queued feed-list write, a drag) lands on
+-- that row instead of matching nothing. The resolution is an expression inside the write statement
+-- itself, so no write is preceded by a read of its own and nothing can re-key the id in between:
+--   COALESCE((SELECT id FROM folders WHERE id = :id),
+--            (SELECT new_id FROM ks_id_remap WHERE kind = 'folder' AND old_id = :id), :id)
+-- An existing row's id resolves to itself. 'folder' is ID_REMAP_KIND_FOLDER (TagFolderIdRekey.kt).
+
 watchAll:
 SELECT * FROM folders WHERE deleted_at IS NULL ORDER BY sort_order ASC, name COLLATE NOCASE ASC;
 
 getById:
 SELECT * FROM folders WHERE id = ?;
+
+-- The id a folder id given to a write resolves to (see the note above): the id itself while a row
+-- has it, else the id ks_id_remap maps it to, else the id unchanged.
+resolveId:
+SELECT COALESCE((SELECT id FROM folders WHERE id = :id), (SELECT new_id FROM ks_id_remap WHERE kind = 'folder' AND old_id = :id), :id);
 
 -- The canonical folder of :name: an alive row over a deleted one, then the earliest created_at, then
 -- the smallest id. Same-named rows may exist, so every by-name lookup (creation, reactivation and
@@ -75,7 +89,9 @@ ON CONFLICT(id) DO UPDATE SET
 -- converge on one row in the sync merge — unless that id is already held (a row renamed off the
 -- name keeps its id), in which case :randomId is used; the choice sits in the statement, not in a
 -- lookup before it, so no concurrent write can slip between the check and the insert. :randomId is
--- only ever reached when :nameDerivedId is held, so exactly one of the two is inserted.
+-- only ever reached when :nameDerivedId is held, so exactly one of the two is inserted. An id
+-- ks_id_remap maps elsewhere counts as held too (see tags.sq's insertIfNameAbsent), so no row ever
+-- carries an id ks_id_remap maps.
 --
 -- Exactly one of the two writes: a row of the name exists -> reactivateByName (whose updated_at
 -- always moves forward, so it always writes) and insertIfNameAbsent no-ops; none exists ->
@@ -102,23 +118,37 @@ WHERE id = (
 insertIfNameAbsent:
 INSERT INTO folders (id, name, sort_order, deleted_at, updated_at, created_at, name_updated_at, sort_order_updated_at)
 SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM folders WHERE id = :nameDerivedId)
+        AND NOT EXISTS (SELECT 1 FROM ks_id_remap WHERE kind = 'folder' AND old_id = :nameDerivedId)
         THEN :nameDerivedId ELSE :randomId END,
     :name, (SELECT COALESCE(MAX(sort_order), -1) + 1 FROM folders WHERE deleted_at IS NULL), NULL, :now, :now, :now, :now
 WHERE NOT EXISTS (SELECT 1 FROM folders WHERE name = :name);
 
--- updated_at moves forward like every local write (see upsert).
+-- A rename of an existing folder (FolderRepository.updateFolder): the one write, so a value another
+-- writer (a sync merge) changed in the meantime — the sort order, the deletion — is never written back
+-- from a stale read. name_updated_at moves (forward, as in upsert) only when the name changes. :id is
+-- resolved (see the note above).
+updateName:
+UPDATE folders SET
+    name_updated_at = CASE WHEN name IS NOT :name
+        THEN MAX(:now, COALESCE(name_updated_at, 0) + 1) ELSE name_updated_at END,
+    name = :name,
+    updated_at = MAX(:now, updated_at + 1)
+WHERE id = COALESCE((SELECT id FROM folders WHERE id = :id), (SELECT new_id FROM ks_id_remap WHERE kind = 'folder' AND old_id = :id), :id);
+
+-- updated_at moves forward like every local write (see upsert). :id is resolved (see the note above).
 softDelete:
-UPDATE folders SET deleted_at = ?, updated_at = MAX(?, updated_at + 1) WHERE id = ?;
+UPDATE folders SET deleted_at = :deleted_at, updated_at = MAX(:updated_at, updated_at + 1)
+WHERE id = COALESCE((SELECT id FROM folders WHERE id = :id), (SELECT new_id FROM ks_id_remap WHERE kind = 'folder' AND old_id = :id), :id);
 
 -- updated_at moves forward like every local write (see upsert), and so does sort_order_updated_at
--- when the order actually changes.
+-- when the order actually changes. :id is resolved (see the note above).
 updateSortOrder:
 UPDATE folders SET
     sort_order_updated_at = CASE WHEN sort_order IS NOT :sort_order
         THEN MAX(:now, COALESCE(sort_order_updated_at, 0) + 1) ELSE sort_order_updated_at END,
     sort_order = :sort_order,
     updated_at = MAX(:now, updated_at + 1)
-WHERE id = :id;
+WHERE id = COALESCE((SELECT id FROM folders WHERE id = :id), (SELECT new_id FROM ks_id_remap WHERE kind = 'folder' AND old_id = :id), :id);
 
 nextSortOrder:
 SELECT COALESCE(MAX(sort_order), -1) + 1 FROM folders WHERE deleted_at IS NULL;

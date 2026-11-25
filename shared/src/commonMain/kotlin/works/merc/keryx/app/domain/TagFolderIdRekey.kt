@@ -36,8 +36,8 @@ val KERYX_SCHEMA_CALLBACKS: Array<AfterVersion> = arrayOf(
  * For every row whose id is not already the derived one: the row is copied under the new id, its
  * children (`feed_tags.tag_id`, or `feeds.folder_id` and the feeds' raw folder assignments in
  * `ks_feed_folder_raw`, which `2.sqm` has just filled) are moved, the old row is deleted, and the
- * move is recorded in `ks_id_remap` so `SettingsRepository` can rewrite the same ids in
- * `local_settings.json` once at startup. The row's `v2_id` (set by `2.sqm` to its pre-upgrade id)
+ * move is recorded in `ks_id_remap` ([IdRemapSql.record]) so `SettingsRepository` can rewrite the
+ * same ids in `local_settings.json` at startup. The row's `v2_id` (set by `2.sqm` to its pre-upgrade id)
  * is copied along, so `MergeSql` can reconcile two devices that renamed the same pre-upgrade row
  * differently before upgrading. Every row that carries a `v2_id` afterwards — re-keyed here or already
  * at its derived id — also gets its identity edge `(kind, v2_id, id)` in `ks_v2_edge`, the grow-only
@@ -152,15 +152,7 @@ private fun rekey(
         driver.execute(null, "DELETE FROM $table WHERE $id = ?", 1) {
             bindString(0, oldId)
         }
-        driver.execute(
-            null,
-            "INSERT OR REPLACE INTO ks_id_remap (kind, old_id, new_id) VALUES (?, ?, ?)",
-            3,
-        ) {
-            bindString(0, kind)
-            bindString(1, oldId)
-            bindString(2, newId)
-        }
+        IdRemapSql.record(driver, kind, oldId, newId)
     }
     // Every row carrying a pre-upgrade id now sits at its derived id: record its identity edge.
     driver.execute(

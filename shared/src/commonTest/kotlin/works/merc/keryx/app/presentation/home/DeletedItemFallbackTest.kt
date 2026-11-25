@@ -139,4 +139,86 @@ class DeletedItemFallbackTest {
         assertEquals(emptyList(), uncaught)
         scope.cancel()
     }
+
+    // --- remapPending: the deleted item was re-keyed onto another id by a merge ---
+
+    /** A pending request moved onto an id the list does not show falls back at once. */
+    @Test
+    fun aRequestRemappedOntoAnIdTheListLacksFallsBack() = runTest {
+        val shown = MutableStateFlow(listOf(Row("t-old", "Kotlin"), Row("t2", "Other")))
+        val (scope, fallback) = fallbackFor(shown) { false }
+        var fellBack = 0
+        fallback.fallBackOnceHidden("t-old") { fellBack++ }
+        assertEquals(0, fellBack)
+
+        // The merge re-keyed t-old onto t-new, whose row (deleted) the list does not show; the re-key
+        // is published before the list's next value arrives.
+        fallback.remapPending { if (it == "t-old") "t-new" else it }
+        assertEquals(1, fellBack)
+        shown.value = listOf(Row("t2", "Other"))
+        assertEquals(1, fellBack, "decided once")
+        scope.cancel()
+    }
+
+    /**
+     * A request moved onto an id the list still shows checks that row's liveness, as a new request
+     * would, and then waits for the new id to leave the list.
+     */
+    @Test
+    fun aRequestRemappedOntoAShownIdFollowsThatRow() = runTest {
+        // The re-key is published while the list value at hand still shows the row under its new id.
+        val shown = MutableStateFlow(listOf(Row("t-old", "Kotlin"), Row("t-new", "Kotlin"), Row("t2", "Other")))
+        val checked = mutableListOf<String>()
+        val (scope, fallback) = fallbackFor(shown) { id -> checked += id; false }
+        var fellBack = 0
+        fallback.fallBackOnceHidden("t-old") { fellBack++ }
+        checked.clear()
+
+        fallback.remapPending { if (it == "t-old") "t-new" else it }
+        assertEquals(listOf("t-new"), checked, "the new id's row is checked at once")
+        assertEquals(0, fellBack)
+
+        shown.value = listOf(Row("t-new", "Kotlin"), Row("t2", "Other"))
+        assertEquals(0, fellBack, "still shown under its new id")
+        shown.value = listOf(Row("t2", "Other"))
+        assertEquals(1, fellBack)
+        scope.cancel()
+    }
+
+    @Test
+    fun aRequestRemappedOntoAStillShownLiveRowIsDropped() = runTest {
+        val shown = MutableStateFlow(listOf(Row("t-old", "Kotlin")))
+        val live = mutableSetOf<String>()
+        val (scope, fallback) = fallbackFor(shown) { id -> id in live }
+        var fellBack = 0
+        fallback.fallBackOnceHidden("t-old") { fellBack++ }
+
+        // The merge re-keyed t-old onto t-new and kept it alive (another device's newer revival).
+        live += "t-new"
+        shown.value = listOf(Row("t-old", "Kotlin"), Row("t-new", "Kotlin"))
+        fallback.remapPending { if (it == "t-old") "t-new" else it }
+        shown.value = listOf(Row("t-new", "Kotlin"))
+        // A later deletion from elsewhere moves nothing: the request was dropped as live.
+        shown.value = emptyList()
+
+        assertEquals(0, fellBack)
+        scope.cancel()
+    }
+
+    @Test
+    fun aRemapThatMovesNoPendingIdChangesNothing() = runTest {
+        val shown = MutableStateFlow(listOf(Row("t1", "Kotlin")))
+        val checked = mutableListOf<String>()
+        val (scope, fallback) = fallbackFor(shown) { id -> checked += id; false }
+        var fellBack = 0
+        fallback.fallBackOnceHidden("t1") { fellBack++ }
+        val checksBefore = checked.size
+
+        fallback.remapPending { if (it == "other") "moved" else it }
+
+        assertEquals(checksBefore, checked.size)
+        shown.value = emptyList()
+        assertEquals(1, fellBack)
+        scope.cancel()
+    }
 }

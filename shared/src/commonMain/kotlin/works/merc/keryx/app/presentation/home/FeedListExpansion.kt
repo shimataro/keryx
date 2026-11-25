@@ -5,6 +5,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.domain.SettingsRepository
+import works.merc.keryx.app.domain.TagFolderIdRemap
 
 /**
  * The feed list's folder/tag expansion state: which folders are collapsed (folders default to
@@ -57,6 +58,18 @@ internal class FeedListExpansion(private val settingsRepository: SettingsReposit
         val reveal = containersToRevealFor(instance, feeds, _collapsedFolderIds.value, _expandedTagIds.value)
         reveal.folderToExpand?.let { setCollapsedFolders(_collapsedFolderIds.value - it) }
         reveal.tagToExpand?.let { setExpandedTags(_expandedTagIds.value + it) }
+    }
+
+    /**
+     * Brings the folder and tag ids up to date after a merge re-keyed rows (see
+     * `HomeViewModel.applyIdRemap`), so a collapsed folder or expanded tag stays so under its new
+     * id. Persisted like any change, and only when something actually changes; idempotent.
+     */
+    fun remap(remap: TagFolderIdRemap) {
+        val folders = _collapsedFolderIds.value.mapTo(LinkedHashSet()) { remap.folder(it) }
+        if (folders != _collapsedFolderIds.value) setCollapsedFolders(folders)
+        val tags = _expandedTagIds.value.mapTo(LinkedHashSet()) { remap.tag(it) }
+        if (tags != _expandedTagIds.value) setExpandedTags(tags)
     }
 
     /** Drops a deleted folder from the collapsed-folder state. */

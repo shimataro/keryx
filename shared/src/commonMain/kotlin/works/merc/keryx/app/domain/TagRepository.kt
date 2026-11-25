@@ -117,17 +117,28 @@ class TagRepository(
         return tags.getByName(name).executeAsOne().id
     }
 
+    /**
+     * Renames / recolors the tag [id]; a tag that no longer exists is left alone. One statement
+     * (`updateNameAndColor`), which resolves [id] itself: an id a merge has re-keyed since the caller
+     * read it (an open rename field, a queued feed-list write) names the row it became, so the
+     * change lands there rather than matching nothing (`ks_id_remap`, see tags.sq). Being the one
+     * write, it also never writes back a sort order or deletion read before a concurrent merge.
+     */
     fun updateTag(id: String, name: String, color: String?) {
-        val existing = tags.getById(id).executeAsOneOrNull() ?: return
-        tags.upsert(id, name, color, existing.sort_order, existing.deleted_at, clock.nowMillis(), existing.created_at)
-        syncScheduler.scheduleSync()
+        val updated = tags.updateNameAndColor(name = name, now = clock.nowMillis(), color = color, id = id).value
+        if (updated > 0L) syncScheduler.scheduleSync()
     }
 
+    /** Soft-deletes the tag [id], resolved like [updateTag]'s. */
     fun deleteTag(id: String) {
         tags.softDelete(clock.nowMillis(), clock.nowMillis(), id)
         syncScheduler.scheduleSync()
     }
 
+    /**
+     * Attaches [tagId] to [feedId], or detaches it. [tagId] is resolved like [updateTag]'s, so a
+     * stale id lands on the tag it became instead of failing `feed_tags.tag_id`'s FOREIGN KEY.
+     */
     fun setFeedTag(feedId: String, tagId: String, attached: Boolean) {
         val now = clock.nowMillis()
         feedTags.upsert(feedId, tagId, if (attached) null else now, now)

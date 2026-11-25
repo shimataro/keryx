@@ -424,6 +424,12 @@ class FeedRepository(
     /**
      * Moves a feed to a folder and positions it before the specified target feed.
      *
+     * [folderId] is resolved by every statement that takes it (`getByFolder`,
+     * `updateFolderAndSortOrder`; see feeds.sq / folders.sq): a folder a merge has re-keyed since the
+     * caller read the id (a queued write, a drag) is the one the feed lands in, ordered among that
+     * folder's feeds. Each statement resolves on its own, so the group is still read outside the
+     * transaction (below) and the transaction still starts with a write.
+     *
      * @param feedId The ID of the feed to move.
      * @param folderId The destination folder ID, or `null` for no folder.
      * @param targetFeedId The ID of the feed to place the moved feed before, or `null` to place it last.

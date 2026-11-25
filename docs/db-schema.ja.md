@@ -57,9 +57,9 @@
   （`domain/TagFolderIdRekey.kt`。各プラットフォームのドライバーと `DatabaseMerger` のクラウドファイル移行に
   `KERYX_SCHEMA_CALLBACKS` として配線済み）で、**すべてのタグとフォルダーの id を名前から導かれた id に振り直す**
   （`IdGenerator.tagId` / `folderId`）: 行を新しい id でコピーし（`v2_id` も引き継ぎ）、`feed_tags.tag_id` / `feeds.folder_id` を
-  付け替え、旧行を削除し、付け替えを `ks_id_remap` に記録する。`SettingsRepository` は起動時にその一度だけ
-  `local_settings.json` の同じ id（`lastFilter`、`collapsedFolderIds`、`expandedTagIds`）を書き換える（表は保持するので
-  この書き換えはべき等）。旧 id は行の `v2_id` にも残り、移行前に別々の名前へリネームした 2 台の端末の行を同期マージが
+  付け替え、旧行を削除し、付け替えを `ks_id_remap` に記録する。`SettingsRepository` は起動時に
+  `local_settings.json` の同じ id（`lastFilter`、`collapsedFolderIds`、`expandedTagIds`）を書き換える（後述の `ks_id_remap`
+  を参照。表は保持するのでこの書き換えはべき等）。旧 id は行の `v2_id` にも残り、移行前に別々の名前へリネームした 2 台の端末の行を同期マージが
   1 つの同一性に再統合するために使う（後述の「tags / feed_tags」を参照）。べき等で、2 度走らせても何も変わらない。
   バージョン 3 は未リリースだが、暫定のランダム id で
   バージョン 3 をすでに走らせたプリリリースの開発環境は振り直されない（コールバックはバージョン 2 をまたぐとき
@@ -182,6 +182,16 @@
   1 行に収束させる。リネームしても id は変わらない——つまり id は「元の名前」から導かれたものであり、その元の名前で
   後から作成すると派生 id が使用中になるため、ランダム UUIDv4 にフォールバックする（`tags.insertIfNameAbsent` が
   1 文の中で両者を選ぶ）。既存のランダム id は v2→v3 移行で派生 id に振り直された（後述）。
+- **タグの id は変わりうる。** v2→v3 移行は行の id を振り直し、同期マージも同じ同一性の別の id へ行を移すことがある。
+  こうした移動はすべて `ks_id_remap`（後述）に記録され、旧行は残らない。移動前から保持していた id でもその行に
+  届くよう、**タグ id を受け取る書き込みはすべて**、書き込み文そのものの中で **id を解決する**——行がその id を
+  持っていればそのまま、なければ `ks_id_remap` が写す先の id（`tags.sq` の `updateNameAndColor`・`softDelete`、
+  `feed_tags.upsert`、`articles.markAllReadByTag`）。そのため、古い id で発行されたリネーム・削除・付け外し・
+  すべて既読（開いていたリネーム欄、キューに積まれたフィードリストの書き込み、ドラッグ）は、何にも当たらずに
+  終わることも外部キー違反になることもなく、移った先の行に適用される。解決は文の一部であって文の前の読み取りでは
+  ないので、どのトランザクションにも最初の書き込みより前の読み取りが増えず、その間に振り直しが割り込むこともない。
+  `insertIfNameAbsent` は `ks_id_remap` が写す id を使用中として扱うので、新しい行がそうした id を取ることはなく、
+  解決が新しく作った行へ逸れることもない。
 - `v2_id` はその振り直しの前に行が持っていた id で、v2→v3 移行が設定し、移行後に作られた行では NULL。値は変わる
   ことがない。v2 の id を共有していた 2 台が、アップグレード前にその行を別々の名前にリネームしていると、それぞれ
   別の名前由来 id を導くため、`MergeSql` はフィールドごとのマージの前にクラウド行を `v2_id` で受信端末の id に
@@ -204,8 +214,11 @@
 `sort_order_updated_at`, `v2_id`（NULL 可）。
 
 - `id` は作成時の名前から **UUIDv5** として決定的に生成される（`IdGenerator.folderId`）。仕組みは `tags.id`
-  と同じ（名前空間は別なので、同名のタグとフォルダーが同じ id を持つことはない）。派生 id が使用中のときの
-  ランダム id へのフォールバックも同様。
+  と同じ（名前空間は別なので、同名のタグとフォルダーが同じ id を持つことはない）。派生 id が使用中（または
+  `ks_id_remap` が写す id）のときのランダム id へのフォールバックも同様で、書き込みに渡されたフォルダー id も
+  同じように解決される（`folders.sq` の `updateName`・`softDelete`・`updateSortOrder`、`feeds.sq` の
+  `updateFolder`・`updateFolderAndSortOrder`・`getByFolder`・`nextSortOrderInGroup`、`articles.markAllReadByFolder`）。
+  そのため、古いフォルダー id での移動・リネーム・並べ替え・削除は、移った先のフォルダーに適用される。
 - `v2_id` は `tags.v2_id` と同じ移行前 id（上記参照）: v2→v3 移行が設定し、移行後に作られた行では NULL。
   `MergeSql` が、アップグレード前にフォルダーを別々の名前にリネームした 2 台の端末の行を再統合するために使う。
 - `name` は **UNIQUE ではない**（スキーマバージョン 3 で制約を廃止）。理由は `tags.name` と同じ: リネームが同名の
@@ -251,7 +264,7 @@
 | `ks_search_pending` | `rowid`(PK) — `search_text` の再計算が必要な記事 |
 | `ks_search_awaiting_body` | `id`(PK) — マージが本文なし（軽量行）で挿入した記事。本文が届くか、日次 rebuild が索引するまで検索索引に入れない |
 | `ks_feed_folder_raw` | `feed_id`(PK), `folder_updated_at`, `folder_id` — フィードごとの生のフォルダー割り当て（勝った版が書いたままのフォルダー id とスタンプ。この端末で生きているかは問わない）: `feeds.folder_id` / `folder_updated_at` の解決元となる正（ビュー `ks_feed_folder_resolved`）であり、マージが生と生で比べる値、送信が運ぶ値でもある。フィードごとに 1 行で、フィードと一緒に（トリガーで）作られ、既存のフィードの分は `2.sqm` が埋める。`folder_id` は NULL か、存在するフォルダー行を指す。参加でも接続解除でも残す |
-| `ks_id_remap` | `kind` + `old_id`（複合 PK）, `new_id` — v2→v3 移行が走らせたタグ/フォルダー id の振り直し（`domain/TagFolderIdRekey.kt`）の記録: 旧ランダム id と、それが変わった名前由来の id。`SettingsRepository` は移行後の最初の起動時に `local_settings.json` の同じ id（`lastFilter`、`collapsedFolderIds`、`expandedTagIds`）を書き換える。その書き換えをべき等に保つため表は無期限に保持する（同期マージは事前アップグレード行の同一性をこの表ではなく行の `v2_id` で再統合する）。この移行だけが書き込む。新規作成 DB では常に空 |
+| `ks_id_remap` | `kind` + `old_id`（複合 PK）, `new_id` — タグ/フォルダーの id の振り直しすべての記録: 行が持っていた id と、移った先の id。v2→v3 移行による名前由来 id への移動（`domain/TagFolderIdRekey.kt`）と、同期マージによる同じ同一性の別の id への移動。記録は必ず `domain/IdRemapSql.kt` を通し、移動を足すたびに連鎖を畳む（`a → b` の後に `b → c` なら `a → c`・`b → c` が残る。元へ戻す移動では、再び生きた id の項目を消す）ので、引くのは 1 回で済み、旧 id を持つ行は存在しない。データベースの外で保持される id を最新に保つために使う: `SettingsRepository` は起動時と、マージが行の id を振り直した後に表が再公開されるたびに（`domain/TagFolderIdRemaps.kt`。畳んだ対応表全体の `StateFlow`）`local_settings.json`（`lastFilter`、`collapsedFolderIds`、`expandedTagIds`）を書き換え、`HomeViewModel` は選択・展開状態・保留中の削除フォールバックを書き換える。また、タグ/フォルダー id を受け取る書き込みはすべて、この表を通して id を解決する（「tags / feed_tags」と「folders」を参照）。無期限に保持するので、再適用しても何も変わらない（同期マージは事前アップグレード行の同一性をこの表ではなく行の `v2_id` で再統合する）。新規作成 DB では、何かが振り直すまで空 |
 | `ks_v2_edge` | `kind` + `v2_id` + `id`（複合 PK）— タグとフォルダーの同一性の辺（`kind` は `tag` / `folder`）: 移行前の id と、それを持つ行が振り直された先の行 id の組で、辺でつながる行は 1 つの識別になる。増えるだけの集合: v2→v3 の振り直しが `v2_id` を持つすべての行について書き、同期マージのたびに（クラウドファイルの辺の表と、クラウドと main の行のうち `v2_id` を持つものの `(v2_id, id)` を）加える。削除はせず、参加時にも接続解除時にも消さない——辺は 2 つの id についての事実であり、接続についてのものではない。全量送信は、これを転送ファイルの `folder_v2_edges` / `tag_v2_edges` として運ぶ（[sync-architecture.ja.md](sync-architecture.ja.md) の「転送用スキーマ」参照） |
 
 `ks_v2_edge` を除くこれらも、`sync_state`、`feed_fetch_state`、`articles_fts` も、端末の外に出ることは決してない:

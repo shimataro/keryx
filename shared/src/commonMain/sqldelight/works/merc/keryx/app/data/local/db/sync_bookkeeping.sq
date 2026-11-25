@@ -39,12 +39,19 @@
 --                    stamp. The ks_feed_folder_resolve_* triggers write it into feeds whenever a raw
 --                    row changes or a folder's liveness changes — in every transaction, the sync
 --                    merge's included — so feeds.folder_id never disagrees with it after a statement.
--- ks_id_remap        the tag/folder id re-key the v2->v3 migration ran (TagFolderIdRekey): kind
---                    ('tag' / 'folder'), the row's old random id and its new name-derived one, so
---                    SettingsRepository can rewrite the same ids in local_settings.json (lastFilter,
---                    collapsedFolderIds, expandedTagIds) once at startup, and MergeSql can reconcile
---                    pre-upgrade rows that were renamed before the migration. Kept indefinitely;
---                    populated only by that migration; empty on every fresh database.
+-- ks_id_remap        every tag/folder re-key: kind ('tag' / 'folder'), the id a row had and the id
+--                    it was moved to — the v2->v3 migration's move onto the name-derived id
+--                    (TagFolderIdRekey), and a merge's move onto another id of the same identity.
+--                    Chains are folded as each move is recorded (IdRemapSql), so an old id maps
+--                    straight to the id its row has now, and no row ever carries an old id (tags.sq
+--                    / folders.sq insertIfNameAbsent treat a mapped id as held). Used to keep ids held
+--                    outside the database current: SettingsRepository rewrites local_settings.json
+--                    (lastFilter, collapsedFolderIds, expandedTagIds) at startup and whenever the map
+--                    is republished (TagFolderIdRemaps), HomeViewModel its in-memory selection and
+--                    expansion; and every write taking a tag/folder id resolves it through this
+--                    table in the same statement (tags.sq / folders.sq), so a write made with a
+--                    stale id lands on the row it became. Kept indefinitely, so applying it again is
+--                    a no-op; empty on every fresh database until something re-keys.
 -- ks_v2_edge         the identity edges of tags and folders: kind ('tag' / 'folder'), a pre-upgrade
 --                    (v2) id and a row id the row carrying it was re-keyed to. Rows connected by these
 --                    edges (through a shared v2_id or a shared row id) are one identity. A grow-only
@@ -347,9 +354,6 @@ SELECT feed_id, folder_updated_at, folder_id FROM ks_feed_folder_raw ORDER BY fe
 
 idRemapAll:
 SELECT kind, old_id, new_id FROM ks_id_remap;
-
-insertIdRemap:
-INSERT OR REPLACE INTO ks_id_remap (kind, old_id, new_id) VALUES (?, ?, ?);
 
 clearIdRemap:
 DELETE FROM ks_id_remap;

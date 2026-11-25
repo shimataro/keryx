@@ -298,3 +298,59 @@ class SameNameInsertingDriver(
         return result
     }
 }
+
+/**
+ * Re-keys the tag [oldId] onto [newId] the way a sync merge does when it moves a row onto another id
+ * of the same identity: the row is copied under [newId], its `feed_tags` links move with it, the old
+ * row is deleted, and the move is recorded in `ks_id_remap` ([IdRemapSql.record], chains folded) —
+ * one transaction, foreign keys satisfied throughout. For tests of what holds a tag id across such a
+ * re-key; [newId] must not exist yet.
+ */
+fun SqlDriver.rekeyTagForTest(oldId: String, newId: String) = rekeyForTest(
+    table = "tags",
+    kind = "tag",
+    columns = "name, color, sort_order, deleted_at, updated_at, created_at, name_updated_at, color_updated_at, sort_order_updated_at, v2_id",
+    moveChildren = listOf("UPDATE feed_tags SET tag_id = ? WHERE tag_id = ?"),
+    oldId = oldId,
+    newId = newId,
+)
+
+/** As [rekeyTagForTest], for the folder [oldId]: its feeds' raw and resolved assignments move with it. */
+fun SqlDriver.rekeyFolderForTest(oldId: String, newId: String) = rekeyForTest(
+    table = "folders",
+    kind = "folder",
+    columns = "name, sort_order, deleted_at, updated_at, created_at, name_updated_at, sort_order_updated_at, v2_id",
+    moveChildren = listOf(
+        "UPDATE ks_feed_folder_raw SET folder_id = ? WHERE folder_id = ?",
+        "UPDATE feeds SET folder_id = ? WHERE folder_id = ?",
+    ),
+    oldId = oldId,
+    newId = newId,
+)
+
+private fun SqlDriver.rekeyForTest(
+    table: String,
+    kind: String,
+    columns: String,
+    moveChildren: List<String>,
+    oldId: String,
+    newId: String,
+) {
+    object : app.cash.sqldelight.TransacterImpl(this) {}.transaction {
+        execute(null, "INSERT INTO $table (id, $columns) SELECT ?, $columns FROM $table WHERE id = ?", 2) {
+            bindString(0, newId)
+            bindString(1, oldId)
+        }
+        for (sql in moveChildren) {
+            execute(null, sql, 2) {
+                bindString(0, newId)
+                bindString(1, oldId)
+            }
+        }
+        execute(null, "DELETE FROM $table WHERE id = ?", 1) { bindString(0, oldId) }
+        works.merc.keryx.app.domain.IdRemapSql.record(this@rekeyForTest, kind, oldId, newId)
+    }
+    // The raw statements bypass SQLDelight's query notifications; re-run the observing queries as a
+    // merge's commit would.
+    notifyListeners(table, "feed_tags", "feeds", "articles")
+}

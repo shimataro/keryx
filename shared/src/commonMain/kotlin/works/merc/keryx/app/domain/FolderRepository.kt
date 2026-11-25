@@ -109,21 +109,36 @@ class FolderRepository(
         return folders.getByName(name).executeAsOne().id
     }
 
+    /**
+     * Renames the folder [id]; a folder that no longer exists is left alone. One statement
+     * (`updateName`), which resolves [id] itself: an id a merge has re-keyed since the caller read it
+     * (an open rename field, a queued feed-list write) names the row it became, so the rename lands
+     * there rather than matching nothing (`ks_id_remap`, see folders.sq). Being the one write, it
+     * also never writes back a sort order or deletion read before a concurrent merge.
+     */
     fun updateFolder(id: String, name: String) {
-        val existing = folders.getById(id).executeAsOneOrNull() ?: return
-        folders.upsert(id, name, existing.sort_order, existing.deleted_at, clock.nowMillis(), existing.created_at)
-        syncScheduler.scheduleSync()
+        val updated = folders.updateName(name = name, now = clock.nowMillis(), id = id).value
+        if (updated > 0L) syncScheduler.scheduleSync()
     }
 
     /**
      * Moves a folder directly before the target folder, or to the end when no target is provided.
      *
+     * Both ids are resolved first (`ks_id_remap`, see folders.sq), so a drag that started before a
+     * merge re-keyed either folder still moves the folder it became, before the one it became. The
+     * resolution and the order are read outside the transaction, as before, so the transaction
+     * starts with a write (the lock upgrade `docs/known-issues.md` describes); a re-key landing
+     * between that read and the transaction is still applied correctly, since each `updateSortOrder`
+     * resolves its id again.
+     *
      * @param draggedFolderId The ID of the folder to move.
      * @param targetFolderId The ID of the folder to place the dragged folder before, or `null` to place it at the end.
      */
     fun reorderFolders(draggedFolderId: String, targetFolderId: String?) {
+        val dragged = folders.resolveId(draggedFolderId).executeAsOne()
+        val target = targetFolderId?.let { folders.resolveId(it).executeAsOne() }
         val current = folders.watchAll().executeAsList()
-        val newOrder = reorderIds(current.map { it.id }, draggedFolderId, targetFolderId)
+        val newOrder = reorderIds(current.map { it.id }, dragged, target)
         val now = clock.nowMillis()
         db.transaction {
             newOrder.forEachIndexed { index, id ->
@@ -135,7 +150,9 @@ class FolderRepository(
     }
 
     /**
-     * Soft-deletes the folder and moves its feeds to the no-folder group.
+     * Soft-deletes the folder and moves its feeds to the no-folder group. [id] is resolved by every
+     * statement that takes it (`getByFolder`, `softDelete`; see folders.sq), so a folder a merge has
+     * re-keyed since the caller read [id] is the one deleted and emptied.
      *
      * @param id The identifier of the folder to delete.
      */

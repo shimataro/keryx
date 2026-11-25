@@ -66,7 +66,7 @@ internal class DeletedItemFallback<T>(
      * latest value that still had the item — so a newer one is told apart by identity.
      * [checkGeneration] numbers the liveness checks, so only the newest one's result is applied.
      */
-    private class Pending(val id: String, var reference: List<*>, val fallback: () -> Unit) {
+    private class Pending(var id: String, var reference: List<*>, val fallback: () -> Unit) {
         var checkGeneration = 0
     }
 
@@ -94,6 +94,30 @@ internal class DeletedItemFallback<T>(
         val request = Pending(id, current, fallback)
         pending += request
         checkLiveness(request)
+    }
+
+    /**
+     * Moves every pending request onto the id [remap] gives it — a merge re-keyed the deleted item
+     * onto another id (see `HomeViewModel.applyIdRemap`), whose row now stands for it. A moved request
+     * is decided against the current value of [shown] at once, as a new request would be: it falls
+     * back if the list lacks the new id, and otherwise checks whether that row is live. Requests
+     * whose id does not move are untouched.
+     */
+    fun remapPending(remap: (String) -> String) {
+        if (pending.isEmpty()) return
+        val current = shown.value
+        for (request in pending.toList()) {
+            val moved = remap(request.id)
+            if (moved == request.id) continue
+            request.id = moved
+            if (current.none { idOf(it) == moved }) {
+                pending.remove(request)
+                request.fallback()
+            } else {
+                request.reference = current
+                checkLiveness(request)
+            }
+        }
     }
 
     private fun onShown(list: List<T>) {
