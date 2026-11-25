@@ -53,7 +53,8 @@ you finished.
    that a fresh checkout lacks (`docs/build.md`).
 6. The marker check in `.claude/etc/temporary-instrumentation.md` §3 prints nothing — no
    temporary instrumentation remains.
-7. When the change alters what a Compose screen looks like and the app can be launched here
-   (the `run` skill, or `./gradlew :composeApp:run`), take a screenshot of the changed screen
-   and check it against `ui-guidelines` — look at the result rather than inferring it from the
-   code. Where it cannot be launched, say in your report that the visual check was not done.
+7. When the change alters what a Compose or SwiftUI screen looks like and the app can be
+   launched here (the `run` skill, `./gradlew :composeApp:run`, or the Apple app via Xcode /
+   `xcodebuild`), take a screenshot of the changed screen and check it against `ui-guidelines`
+   — look at the result rather than inferring it from the code. Where it cannot be launched,
+   say in your report that the visual check was not done.
