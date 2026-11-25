@@ -62,7 +62,7 @@ internal class FeedListExpansion(private val settingsRepository: SettingsReposit
 
     /**
      * Brings the folder and tag ids up to date after a merge re-keyed rows (see
-     * `HomeViewModel.applyIdRemap`), so a collapsed folder or expanded tag stays so under its new
+     * `TagFolderIdRemapping`), so a collapsed folder or expanded tag stays so under its new
      * id. Persisted like any change, and only when something actually changes; idempotent.
      */
     fun remap(remap: TagFolderIdRemap) {

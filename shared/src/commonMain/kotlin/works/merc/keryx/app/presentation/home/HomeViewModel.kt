@@ -110,7 +110,7 @@ class HomeViewModel(
     // Reports a read/star or feed-list write that failed off the UI thread (its optimistic state is
     // then undone here — see [revertFailedArticleWrite]). The app's one instance in production.
     private val localWriteFailureReporter: LocalWriteFailureReporter,
-    // The tag/folder id re-keys a merge publishes (see [applyIdRemap]). The app's one instance in
+    // The tag/folder id re-keys a merge publishes (see [TagFolderIdRemapping]). The app's one instance in
     // production; by default the one [settingsRepository] observes, so both always agree.
     private val idRemaps: TagFolderIdRemaps = settingsRepository.idRemaps,
 ) : ViewModel() {
@@ -954,8 +954,8 @@ class HomeViewModel(
         launchWrite = { write, afterWrite -> feedListWrites.enqueue(write, afterWrite) },
         fallBackOnceHidden = ::fallBackOnceHidden,
         // Caught up, not just read: a fallback compares the selection and expansion with the id the
-        // map gives, so they must already be in the same id space (see [catchUpIdRemap]).
-        currentIdRemap = { catchUpIdRemap() },
+        // map gives, so they must already be in the same id space (see [catchUpAndGetIdRemap]).
+        currentIdRemap = { catchUpAndGetIdRemap() },
     )
 
     /** The feed list's collapsed folders — see [FeedListExpansion.collapsedFolderIds]. */
@@ -971,8 +971,8 @@ class HomeViewModel(
      */
     fun toggleFolderCollapsed(folderId: String) {
         // The expansion state is caught up on the current re-keys first, so a stale id and the state
-        // holding it are toggled in the same id space (see [catchUpIdRemap]).
-        expansion.toggleFolder(catchUpIdRemap().folder(folderId))
+        // holding it are toggled in the same id space (see [catchUpAndGetIdRemap]).
+        expansion.toggleFolder(catchUpAndGetIdRemap().folder(folderId))
     }
 
     /**
@@ -994,7 +994,7 @@ class HomeViewModel(
      * rendered row.
      */
     fun revealFeedListRow(instance: FeedListRowSelection) =
-        expansion.reveal(instance.remappedBy(catchUpIdRemap()), feeds.value)
+        expansion.reveal(instance.remappedBy(catchUpAndGetIdRemap()), feeds.value)
 
     /** Whether the previous session's selected article was restored at launch — see [initialHomePane]. */
     val articleRestoredOnLaunch: Boolean
@@ -1050,9 +1050,9 @@ class HomeViewModel(
         instance: FeedListRowSelection = FeedListRowSelection.canonicalFor(filter),
     ) {
         // A row the feed list rendered before a merge re-keyed its tag or folder still carries the old
-        // id; select the row it became (see [applyIdRemap]). The selection itself is caught up first,
+        // id; select the row it became (see [TagFolderIdRemapping]). The selection itself is caught up first,
         // so both sides of the comparison below are in the same id space.
-        val remap = catchUpIdRemap()
+        val remap = catchUpAndGetIdRemap()
         val current = remap.filter(filter)
         val currentInstance = instance.remappedBy(remap)
         if (current == _filter.value) {
@@ -1570,7 +1570,7 @@ class HomeViewModel(
             // A merge may have re-keyed the requested tag or folder while this waited: compare both
             // scopes in the current id space, so the selection following the re-key is not mistaken
             // for the user switching away (which still cancels the action).
-            val remap = catchUpIdRemap()
+            val remap = catchUpAndGetIdRemap()
             if (currentScope().remappedBy(remap) == requested.remappedBy(remap)) markShownRead()
         }.invokeOnCompletion { pendingLocalWrites.end() }
     }
@@ -2266,54 +2266,22 @@ class HomeViewModel(
     fun reorderFolders(draggedFolderId: String, targetFolderId: String?) =
         feedListActions.reorderFolders(draggedFolderId, targetFolderId)
 
-    /**
-     * Brings every tag/folder id this ViewModel holds up to date after a merge re-keyed rows onto
-     * other ids ([TagFolderIdRemaps]), so nothing the user had selected or open is lost to a re-key
-     * (external-spec §9, "Least surprise"): the selected filter and row move to the id the tag or
-     * folder has now instead of falling back to All Feeds, the feed list's expansion keeps the same
-     * folders collapsed and tags expanded, and a delete still waiting for its item to leave the feed
-     * list waits for the row it became. The local settings are rewritten by [SettingsRepository]
-     * from the same value.
-     *
-     * Runs on the main thread (collected on [viewModelScope], below), like every other change to this
-     * state, so it needs no lock. Idempotent — the map is folded and no live id is a key — so the
-     * value at hand when collection starts, which usually changes nothing, is applied harmlessly.
-     * The filter is replaced directly rather than through [selectFilter]: the selection stays where it
-     * is, so its article, pins and cursor are kept, and its generation ([FilterSelection]) with them,
-     * so the article list neither scrolls back to the top nor loses its new-articles pill, and a pull
-     * in progress on it keeps its indicator ([HomeRefreshController.remapPulls]).
-     */
-    private fun applyIdRemap(remap: TagFolderIdRemap) {
-        if (remap.isEmpty) return
-        // The same selection under the tag's or folder's new id: the generation stays, so neither UI
-        // treats it as a switch (the list keeps its scroll position and its new-articles pill).
-        _filterSelection.update { it.remappedBy(remap) }
-        refreshController.remapPulls(remap)
-        val instance = _selectedRowInstance.value.remappedBy(remap)
-        if (instance != _selectedRowInstance.value) _selectedRowInstance.value = instance
-        expansion.remap(remap)
-        deletedTagFallback.remapPending(remap::tag)
-        deletedFolderFallback.remapPending(remap::folder)
-    }
+    // Applies the tag/folder id re-keys a merge publishes to the state held here (see
+    // [TagFolderIdRemapping]). Declared after every property it touches.
+    private val idRemapping = TagFolderIdRemapping(
+        idRemaps, _filterSelection, _selectedRowInstance, expansion, refreshController,
+        deletedTagFallback, deletedFolderFallback,
+    )
 
-    /**
-     * Applies the current re-key map ([TagFolderIdRemaps.current]) to this ViewModel's state now, and
-     * returns it. The collector below applies each published map, but on the main dispatcher, so it
-     * can lag the map's current value: an action that reads that value synchronously would otherwise
-     * compare or toggle an id already moved against state still holding the old one. Every action
-     * that reads the map calls this first. Main thread only; idempotent ([applyIdRemap]), so the
-     * collector applying the same map afterwards — or a nested call from a fallback this one runs —
-     * changes nothing.
-     */
-    private fun catchUpIdRemap(): TagFolderIdRemap {
-        val remap = idRemaps.current.value
-        applyIdRemap(remap)
-        return remap
-    }
+    /** See [TagFolderIdRemapping.catchUp]: the ViewModel's state is in the current re-key map's id space. */
+    private fun catchUpIdRemap() = idRemapping.catchUp()
 
-    // Last in the class body: every property applyIdRemap touches is initialized by now.
+    /** See [TagFolderIdRemapping.catchUpAndGet]: [catchUpIdRemap], then the map an id is resolved by. */
+    private fun catchUpAndGetIdRemap(): TagFolderIdRemap = idRemapping.catchUpAndGet()
+
+    // Last in the class body: every property the re-key collector touches is initialized by now.
     init {
-        idRemaps.current.onEach(::applyIdRemap).launchIn(viewModelScope)
+        idRemapping.collectIn(viewModelScope)
         if (!launchFilter.validated) validateRestoredFilterOnceRemapLoaded()
     }
 }

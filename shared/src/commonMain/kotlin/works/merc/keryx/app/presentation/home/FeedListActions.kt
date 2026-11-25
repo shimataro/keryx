@@ -55,7 +55,7 @@ internal class FeedListActions(
     private val selectFilter: (ArticleFilter) -> Unit,
     private val launchWrite: (write: suspend () -> Unit, afterWrite: (() -> Unit)?) -> Unit,
     private val fallBackOnceHidden: (target: DeletedTarget, fallback: () -> Unit) -> Unit,
-    private val currentIdRemap: () -> TagFolderIdRemap = { TagFolderIdRemap.EMPTY },
+    private val currentIdRemap: () -> TagFolderIdRemap,
 ) {
     /** See `HomeViewModel.toggleTagExpanded`. */
     fun toggleTagExpanded(tagId: String) {

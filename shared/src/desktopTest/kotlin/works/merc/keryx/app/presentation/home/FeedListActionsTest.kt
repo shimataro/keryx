@@ -22,6 +22,7 @@ import works.merc.keryx.app.domain.FeedRepository
 import works.merc.keryx.app.domain.FolderRepository
 import works.merc.keryx.app.domain.NotificationCenter
 import works.merc.keryx.app.domain.SettingsRepository
+import works.merc.keryx.app.domain.TagFolderIdRemap
 import works.merc.keryx.app.domain.SyncScheduler
 import works.merc.keryx.app.domain.TagRepository
 import works.merc.keryx.app.ftsManagerIndexed
@@ -107,6 +108,8 @@ class FeedListActionsTest {
             },
             // No feed-list flow here to wait on: falls back as soon as the write has landed.
             fallBackOnceHidden = { _, fallback -> fallback() },
+            // Nothing is re-keyed in these tests.
+            currentIdRemap = { TagFolderIdRemap.EMPTY },
         )
     }
 

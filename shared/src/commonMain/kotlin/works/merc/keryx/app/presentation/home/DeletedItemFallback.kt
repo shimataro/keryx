@@ -106,7 +106,7 @@ internal class DeletedItemFallback<T>(
 
     /**
      * Moves every pending request onto the id [remap] gives it — a merge re-keyed the deleted item
-     * onto another id (see `HomeViewModel.applyIdRemap`), whose row now stands for it. A moved request
+     * onto another id (see `TagFolderIdRemapping`), whose row now stands for it. A moved request
      * is decided against the current value of [shown] at once, as a new request would be: it falls
      * back if the list lacks the new id, and otherwise checks whether that row is live. A list that
      * still shows an old id — the request's previous one, or an earlier id of a chain of re-keys that
