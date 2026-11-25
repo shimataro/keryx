@@ -65,7 +65,7 @@ Every place that reports a result uses only these labels — plus the suffix
 | URL | `No actionable feedback` | A review with no body and no line comments (Step 4) |
 | URL | `No implementation plan needed` | No item needs a fix (8.3) |
 | URL | `N committed, M failed` | Summary of a URL whose plan ran (8.6) |
-| URL | `Needs checkout alignment` | Step 3 found a mismatch that requires a main-conversation decision before evaluation can continue |
+| URL | `Needs checkout alignment` | Step 3, or the pre-implementation check in 8.5, found a mismatch that requires a main-conversation decision before evaluation can continue |
 | Run | `Cancelled` | The user cancelled at Step 3 |
 
 **End this URL** (used throughout): print the reason, record the URL's outcome from the table,
@@ -126,8 +126,8 @@ into a shell variable and only ever use the variable, never the retyped name.
    The printed `PR head` SHA is the one 8.6 compares against, so it stays in the transcript.
 
    If this fails (e.g. network error, bad credentials), output a warning and proceed to Step 4.
-2. Get the current local branch with `git branch --show-current`. If the directory is not a git
-   repository, output a warning and proceed to Step 4.
+2. Get the current local branch with `git branch --show-current`, print it, and save it for the
+   8.5 hand-off. If the directory is not a git repository, output a warning and proceed to Step 4.
 3. If the `--continue-unaligned` flag was recorded in Step 1, report which checkout-alignment
    check is being skipped (branch mismatch, or PR head not an ancestor of HEAD), include the usual
    warning, and continue with the evaluation for this run only. The guard is unchanged for runs
@@ -486,8 +486,14 @@ conversation.
      `gh api repos/{owner}/{repo}/pulls/{pull_number} --jq '.head.sha'` and compare it with the
      `PR head` SHA Step 3.1 printed. Never re-bind it from the API here: that returns the new
      head, and the comparison would always pass.
-     - **Same SHA**, or the fetched SHA is already in HEAD (`git merge-base --is-ancestor <sha> HEAD`)
-       → continue.
+     - **Same SHA** → still verify the current branch matches the one Step 3.2 printed and that
+       `git merge-base --is-ancestor <sha> HEAD` succeeds. A switch during approval can leave the
+       PR head an ancestor of HEAD while the current branch is wrong, so the status check alone
+       is not enough. If either check fails, commit nothing and end this URL
+       (`Needs checkout alignment`).
+     - **Different SHA, but the fetched SHA is already in HEAD** (`git merge-base --is-ancestor <sha> HEAD`)
+       → still verify the current branch matches the one Step 3.2 printed as above; if it does not,
+       end this URL (`Needs checkout alignment`). If it does, continue.
      - **Otherwise** → commit nothing and end this URL (`PR head moved`).
    - For each **Fix & commit** item, in item order (one item's failure never stops the rest):
      implement that item's section of the approved plan, verify per
