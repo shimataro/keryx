@@ -12,6 +12,20 @@ context: fork
 > behavior-preserving, and not silently altering the sync / merge / FTS / error-taxonomy
 > invariants. It runs in a forked subagent context so its frontmatter pins `model: opus` at
 > `effort: medium` for the whole workflow.
+>
+> **Two-phase workflow.** `context: fork` removes `AskUserQuestion`, `EnterPlanMode` and
+> `ExitPlanMode` from this subagent, so the fork phase runs **Steps 1–2** only: it establishes a
+> green baseline and inventories refactoring candidates (plus test debt). It returns a prioritized
+> batch list and a plan file as one report. **The Step 3 scope-approval gate and Steps 4–7
+> (apply, test, doc consistency, constraint review) run in the main conversation** after it
+> receives the report, following the hand-off instructions at the end of the fork's output.
+>
+> **Default scope is a starting point.** When `/refactor` is invoked without a path argument, the
+> fork phase inventories the default scope listed below. That inventory is a proposal. If the main
+> conversation has already agreed on a different scope — or if the user specifies one when
+> re-running the skill — that agreed scope is applied at the Step 3 gate in the main conversation
+> (or passed as the skill argument so the fork phase inventories exactly that scope). A
+> domain-limited agreement is never silently widened back to the default.
 
 Improve the internal quality of Keryx's source **without changing observable
 behavior**. The existing test suite is the oracle: it must stay green from the
@@ -155,7 +169,7 @@ divider policy, article card style, flat native-feel components, dialog rules).
 
 ## Steps
 
-### Step 1 — Establish a green baseline
+### Step 1 — Establish a green baseline (fork)
 
 Check `git status --porcelain` before anything else: if it prints anything,
 warn and stop — proceeding would
@@ -176,7 +190,7 @@ module's `build/reports/tests/desktopTest/`). This recorded set is the oracle
 checked in Step 4. If the baseline is **red**, stop and report — never refactor
 on top of failing tests.
 
-### Step 2 — Inventory candidates
+### Step 2 — Inventory candidates (fork)
 
 Survey the in-scope files with read-only tools (Grep / Read, plus compiler
 warnings from a build). Optionally run the **`review-quality` agent** to surface
@@ -199,7 +213,27 @@ wall-clock assertion, or `runTest` mixed with real IO / `HttpTimeout` per
 the pass finds none, note **None** explicitly, so an empty result reads as
 deliberate rather than a forgotten check.
 
+#### Fork-phase report
+
+Return a single report containing:
+- The Step 1 baseline result (pass/fail, passing count, baseline test set).
+- The prioritized batch list. For each batch: category, files, why it is
+  behavior-preserving, and any risk/invariant it touches.
+- A plan file written to `~/.claude/plans/refactor-{timestamp}.md` with:
+  - **Context** — scope and goal.
+  - **One section per batch**, in priority order, each with:
+    - **Files to modify**
+    - **Changes** — concrete actions
+    - **Verification** — tests, build targets, manual checks
+    - **Commit message suggestion**
+  - **Commit Strategy** — one commit per approved batch, in priority order, per
+    `.claude/etc/per-item-commit.md` §4, made after that batch's verification passes.
+- A **hand-off block** that tells the main conversation exactly what to do (see
+  Steps 3–7 below).
+
 ### Step 3 — Confirm scope (the single gate)
+
+**Executed in the main conversation** per the hand-off block from Step 2.
 
 Present the prioritized batch list and use **`AskUserQuestion`** once to
 confirm or narrow what to apply (e.g. all of it, only `domain/`, or exclude
@@ -210,6 +244,8 @@ This approval is also the **one-time run confirmation**
 worktree check is the clean baseline.
 
 ### Step 4 — Apply batches (behavior-preserving, verified)
+
+**Executed in the main conversation** per the hand-off block from Step 2.
 
 For each approved batch:
 
@@ -244,6 +280,8 @@ failure there means a DB/merge/sync regression slipped in.
 
 ### Step 5 — Tests
 
+**Executed in the main conversation** inline inside Step 4's loop.
+
 Existing tests are the oracle: they must stay green, and a refactor must
 **never delete or weaken coverage** (no removed or loosened assertions). Two
 kinds of test change are allowed, each in its **own batch, never mixed with the
@@ -263,6 +301,8 @@ mixed with real IO/`HttpTimeout` per `docs/testing.md`'s known gotchas) — is
 below.
 
 ### Step 6 — Doc consistency check (targeted, auto-fix)
+
+**Executed in the main conversation** inline inside Step 4's loop.
 
 This check is applied **inline inside Step 4's loop**, immediately before the
 commit for the batch that triggered it — not as a separate later pass — so the
@@ -292,6 +332,8 @@ twin: update it in the same step (`.claude/rules/docs-translation.md`). **Do NOT
 of every doc.
 
 ### Step 7 — Constraint review + closing summary
+
+**Executed in the main conversation** after Step 4–6 finish.
 
 Optionally review the accumulated diff (`git diff`) for constraint violations
 before finishing. Launch these five specialist agents **in parallel, in one

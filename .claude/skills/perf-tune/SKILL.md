@@ -12,6 +12,14 @@ context: fork
 > deciding whether a change trades away durability, security, or observable behavior.
 > It runs in a forked subagent context so its frontmatter pins `model: opus` at `effort: medium`
 > for the whole workflow.
+>
+> **Two-phase workflow.** `context: fork` removes `AskUserQuestion`, `EnterPlanMode` and
+> `ExitPlanMode` from this subagent, so the fork phase runs **Steps 1–3** only: it establishes a
+> green baseline, measures, inventories candidates, tiers them, runs the mandatory Yellow/Red
+> review gate and returns a tiered candidate list plus an application plan as one report. **The
+> Step 4 approval gate and Steps 5–8 (apply, test, docs, constraint review) run in the main
+> conversation** after it receives the report, following the hand-off instructions at the end of
+> the fork's output.
 
 Make Keryx faster **without ever trading away durability, security, or observable
 behavior**. Every change must be justified by a measurement taken before it, and
@@ -256,7 +264,7 @@ headroom:
 
 ## Steps
 
-### Step 1 — Establish a green baseline
+### Step 1 — Establish a green baseline (fork)
 
 Check `git status --porcelain` before anything else: if it prints anything,
 warn and stop — proceeding would
@@ -280,7 +288,7 @@ Also capture the branch's current commit as `BASE_SHA` (`git rev-parse
 HEAD`) — Step 8 needs it to review the accumulated per-item commits, since
 by then the working tree itself will be clean.
 
-### Step 2 — Measure (never guess)
+### Step 2 — Measure (never guess) (fork)
 
 Each axis has its own method.
 
@@ -343,7 +351,7 @@ here in Step 2 is removed like any other probe; Step 5 adds the test back as par
 of the change, without the `TEMP-INSTRUMENTATION` marker, keeps it through Step
 5's measurement cleanup, and commits it with the item.
 
-### Step 3 — Inventory, tier, and gate the candidates
+### Step 3 — Inventory, tier, and gate the candidates (fork)
 
 Label each candidate with its axis and its Green/Yellow/Red tier, then prioritize
 by benefit ÷ risk. Every Red carries its integrity and sync-compatibility impact.
@@ -353,18 +361,43 @@ Every axis-2 candidate states **both sides of the trade**.
 or Red item, launch **`review-architecture`**, **`review-data-integrity`**,
 **`review-sync-merge`**, **`review-concurrency`**, **`review-security`**, and
 **`review-state-consistency`** in one message, in parallel, scoped to the files/areas
-those candidates touch — this must complete before Step 4. It is not optional, unlike
-a Green-only list: Green is integrity-irrelevant by this file's own tier definition
-(see "Risk tiers" above), so a candidate set with no Yellow/Red item skips this gate
-entirely. Do **not** call `review-performance` — you are the performance analysis;
-what you need from review is whether the ground you are about to touch is
-load-bearing. `review-state-consistency` is on the list because narrowing a query,
-memoizing a derived list, or changing a flow's sharing strategy can silently drop
-state the UI is still showing. If any of the six fails to run, do not proceed to
-Step 4: stop, name which perspective is unchecked, and report that the run is blocked
-(never hide a gap — `.claude/etc/review/common.md` §"Never hide a gap").
+those candidates touch — this must complete before the report is returned. It is not
+optional, unlike a Green-only list: Green is integrity-irrelevant by this file's own
+tier definition (see "Risk tiers" above), so a candidate set with no Yellow/Red item
+skips this gate entirely. Do **not** call `review-performance` — you are the
+performance analysis; what you need from review is whether the ground you are about
+to touch is load-bearing. `review-state-consistency` is on the list because
+narrowing a query, memoizing a derived list, or changing a flow's sharing strategy
+can silently drop state the UI is still showing. If any of the six fails to run,
+do not return a candidate list: stop, name which perspective is unchecked, and report
+that the run is blocked (never hide a gap — `.claude/etc/review/common.md` §"Never
+hide a gap").
+
+#### Fork-phase report
+
+Return a single report containing:
+- The Step 1 baseline result (pass/fail, passing count, baseline test set).
+- The tiered, prioritized candidate list. For each candidate: axis, tier, location,
+  measured baseline, suspected win, integrity/sync-compatibility impact (Red only),
+  both sides of the trade (axis-2 only).
+- The mandatory-review gate result (completed or blocked, and which perspectives
+  ran).
+- A plan file written to `~/.claude/plans/perf-tune-{timestamp}.md` with:
+  - **Context** — what is being optimized and why.
+  - **One section per candidate**, in priority order, each with:
+    - **Files to modify**
+    - **Changes** — concrete actions
+    - **Measurement method** — the exact axis-appropriate measurement to re-run
+    - **Verification** — tests, build targets, manual checks
+    - **Commit message suggestion**
+  - **Commit Strategy** — one commit per approved item, in priority order, per
+    `.claude/etc/per-item-commit.md` §4, made after that item's verification passes.
+- A **hand-off block** that tells the main conversation exactly what to do (see
+  Steps 4–8 below).
 
 ### Step 4 — Confirm scope (the single gate)
+
+**Executed in the main conversation** per the hand-off block from Step 3.
 
 Present the tiered, prioritized list and use **`AskUserQuestion`** once to confirm
 the Green and Yellow batches. Take Red items **one at a time**, each with its
@@ -378,6 +411,8 @@ every item in that batch, and each individual Red approval covers that one
 item. Step 1's worktree check is the clean baseline.
 
 ### Step 5 — Apply one at a time, verified
+
+**Executed in the main conversation** per the hand-off block from Step 3.
 
 For each approved item:
 
@@ -413,6 +448,8 @@ failure there means a DB/merge/sync regression slipped in.
 
 ### Step 6 — Tests
 
+**Executed in the main conversation** inline inside Step 5's loop.
+
 Changed logic in `domain/`, `data/`, or a ViewModel needs a test (#7). For
 performance work, the valuable tests are **semantic-equivalence** tests: a batched
 query returns the same rows in the same order as the loop it replaced; a
@@ -428,9 +465,11 @@ verification list instead.
 
 ### Step 7 — Doc consistency
 
-This check is applied **inline inside Step 5's loop**, immediately before the
-commit for the item that triggered it — not as a separate later pass — so the
-doc fix rides along in that same item's single commit.
+**Executed in the main conversation** inline inside Step 5's loop.
+
+This check is applied immediately before the commit for the item that triggered
+it — not as a separate later pass — so the doc fix rides along in that same
+item's single commit.
 
 Update only the docs whose stated performance characteristics actually changed.
 **`docs/` is bilingual — every page has an English `X.md` and a Japanese
@@ -447,6 +486,8 @@ Update only the docs whose stated performance characteristics actually changed.
 CLAUDE.md "Documentation").
 
 ### Step 8 — Constraint review + closing summary
+
+**Executed in the main conversation** after Step 5–7 finish.
 
 This is a supplementary final sweep, not the primary gate — Step 3 already required
 review of every Yellow/Red candidate before it was applied. What this step catches
