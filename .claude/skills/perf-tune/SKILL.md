@@ -377,6 +377,8 @@ hide a gap").
 
 Return a single report containing:
 - The Step 1 baseline result (pass/fail, passing count, baseline test set).
+- The `BASE_SHA` captured in Step 1 (`git rev-parse HEAD`), for Step 8's
+  `git diff "$BASE_SHA" HEAD`.
 - The tiered, prioritized candidate list. For each candidate: axis, tier, location,
   measured baseline, suspected win, integrity/sync-compatibility impact (Red only),
   both sides of the trade (axis-2 only).
@@ -393,7 +395,8 @@ Return a single report containing:
   - **Commit Strategy** — one commit per approved item, in priority order, per
     `.claude/etc/per-item-commit.md` §4, made after that item's verification passes.
 - A **hand-off block** that tells the main conversation exactly what to do (see
-  Steps 4–8 below).
+  Steps 4–8 below). The hand-off carries the `BASE_SHA` captured in Step 1 and the
+  mandatory-review findings unchanged.
 
 ### Step 4 — Confirm scope (the single gate)
 
@@ -494,7 +497,7 @@ review of every Yellow/Red candidate before it was applied. What this step catch
 instead is **interaction effects across the accumulated diff**: something that only
 becomes a problem once several independently-fine items are combined. Optionally
 review the accumulated changes (`git diff "$BASE_SHA" HEAD`, using the `BASE_SHA`
-captured in Step 1) for invariants broken by the optimization. Launch
+captured in Step 1 and carried by the hand-off) for invariants broken by the optimization. Launch
 **`review-architecture`**, **`review-data-integrity`**, **`review-sync-merge`**,
 **`review-concurrency`**, **`review-security`**, and **`review-state-consistency`** in
 parallel — `review-concurrency` matters here specifically because performance work
