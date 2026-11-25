@@ -326,6 +326,14 @@ class SyncRepositoryTest {
         assertEquals(newGeneration, a.state(SYNC_STATE_KS_GENERATION))
         assertEquals(listOf("fa|1|dz", "fx||"), a.rawFolders())
         assertNull(a.db.feedsQueries.getById("fa").executeAsOne().folder_id, "the folder is still deleted here")
+        // The full send this device uploaded into the new generation carries the raw assignment, not
+        // the resolved "no folder".
+        val fullSend = cloud.names().mapNotNull(TransportFileName::parse)
+            .single { it.generation == newGeneration && it.device == a.deviceId() }
+        assertEquals(
+            listOf(listOf("dz", "1")),
+            SyncFiles.query(cloud.bytesOf(fullSend.fileName)!!, "SELECT folder_id, folder_updated_at FROM feeds WHERE id = 'fa'"),
+        )
     }
 
     // ---- Pointer and pre-delta data ----
