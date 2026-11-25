@@ -55,3 +55,15 @@ Place a new test under the same relative path as the code it targets.
 3. Run `./gradlew :shared:desktopTest :composeApp:desktopTest` (or just the module the tests live in) and confirm the new tests pass and
    existing ones still pass. For tests in `:shared` `commonTest`/`appleTest`/`macosTest`, also run
    `./gradlew :shared:macosArm64Test` on a Mac; for `appleApp/KeryxTests`, the `xcodebuild` command above.
+
+## When to stop and report
+
+Return to your caller instead of pressing on when:
+
+- **A test exposes what looks like a bug in the code under test.** Do not bend the assertion to
+  the current behavior, and do not fix production code. Return the failing test, the expected and
+  actual behavior, and the doc or contract that says which is right.
+- **A race cannot be forced deterministically** with the seams the code offers. Do not fall back to
+  a loop, `sleep`, or a raised timeout. Report what seam would make it testable.
+- **The intended behavior is unclear** from the code and `docs/`. Return the question rather than
+  encoding a guess as the expected value.

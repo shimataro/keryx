@@ -30,7 +30,9 @@ AppKit/UIKit differences) — CLAUDE.md constraint #4.
 ## Constraints that must be strictly followed
 
 - Follow the design docs (`docs/*.md`). Do not change the design on your own
-  judgment. If unclear, check the docs; if still unclear, ask the user first.
+  judgment. If unclear, check the docs. If still unclear, stop before implementing that part —
+  you cannot ask the user directly — and return to your caller the question, the options you
+  see, and the one you recommend, along with whatever you finished.
 - After changing a `.sq` file, regenerate: `./gradlew :shared:generateCommonMainKeryxDatabaseInterface`.
   Then build. SQLDelight generates data classes with snake_case property names
   (e.g. `feed.site_url`) and query accessors like `db.feed_tagsQueries`.
