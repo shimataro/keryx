@@ -927,14 +927,23 @@ class HomeViewModel(
      *
      * @param folderId The identifier of the folder to toggle.
      */
-    fun toggleFolderCollapsed(folderId: String) = expansion.toggleFolder(idRemaps.current.value.folder(folderId))
+    fun toggleFolderCollapsed(folderId: String) {
+        // The expansion state is caught up on the current re-keys first, so a stale id and the state
+        // holding it are toggled in the same id space (see [catchUpIdRemap]).
+        expansion.toggleFolder(catchUpIdRemap().folder(folderId))
+    }
 
     /**
      * Toggles whether a tag's attached-feed list is expanded and persists the updated state.
      *
      * @param tagId The identifier of the tag to toggle.
      */
-    fun toggleTagExpanded(tagId: String) = feedListActions.toggleTagExpanded(tagId)
+    fun toggleTagExpanded(tagId: String) {
+        // Caught up first, as for toggleFolderCollapsed: FeedListActions resolves [tagId] against the
+        // same map the expansion state now holds.
+        catchUpIdRemap()
+        feedListActions.toggleTagExpanded(tagId)
+    }
 
     /**
      * Expands whatever collapsed folder or tag hides the exact row [instance] (see
@@ -943,7 +952,7 @@ class HomeViewModel(
      * rendered row.
      */
     fun revealFeedListRow(instance: FeedListRowSelection) =
-        expansion.reveal(instance.remappedBy(idRemaps.current.value), feeds.value)
+        expansion.reveal(instance.remappedBy(catchUpIdRemap()), feeds.value)
 
     /** Whether the previous session's selected article was restored at launch — see [initialHomePane]. */
     val articleRestoredOnLaunch: Boolean

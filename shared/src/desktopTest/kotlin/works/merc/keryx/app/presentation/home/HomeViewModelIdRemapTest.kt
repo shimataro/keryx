@@ -352,6 +352,39 @@ class HomeViewModelIdRemapTest {
         assertNotEquals(before, vm.filterSelection.value.generation)
     }
 
+    /** A stale row's toggle before the remap is applied flips the state the row it became has. */
+    @Test
+    fun aStaleRowToggledBeforeTheRemapIsAppliedFlipsTheRowItBecame() = runVmTest {
+        val vm = newViewModel().vm
+        vm.toggleFolderCollapsed("d-old") // collapsed
+        vm.toggleTagExpanded("t-old") // expanded
+        testScheduler.advanceUntilIdle()
+
+        rekeyAndPublishWithoutApplying()
+        vm.toggleFolderCollapsed("d-old") // expands it again
+        vm.toggleTagExpanded("t-old") // collapses it again
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(emptySet(), vm.collapsedFolderIds.value)
+        assertEquals(emptySet(), vm.expandedTagIds.value)
+    }
+
+    /** Revealing a row by its stale id before the remap is applied expands what hides the row it became. */
+    @Test
+    fun revealingAStaleRowBeforeTheRemapIsAppliedExpandsTheRowItBecame() = runVmTest {
+        val vm = newViewModel().vm
+        vm.toggleFolderCollapsed("d-old")
+        testScheduler.advanceUntilIdle()
+
+        rekeyAndPublishWithoutApplying()
+        vm.revealFeedListRow(FeedListRowSelection.FeedInFolderGroup("f1"))
+        vm.revealFeedListRow(FeedListRowSelection.FeedInTag("f1", "t-old"))
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(emptySet(), vm.collapsedFolderIds.value)
+        assertEquals(setOf("t-new"), vm.expandedTagIds.value)
+    }
+
     /** Selecting the row the selection already is (by its stale or new id) changes nothing, generation included. */
     @Test
     fun reSelectingTheReKeyedRowKeepsTheGeneration() = runVmTest {
