@@ -385,6 +385,43 @@ class HomeViewModelIdRemapTest {
         assertEquals(setOf("t-new"), vm.expandedTagIds.value)
     }
 
+    /**
+     * A delete lands, then a merge re-keys the deleted tag and publishes the move before Home applies
+     * it: the delete's fallback still takes the selection to All (not onto the deleted row's new id)
+     * and forgets the tag's expansion.
+     */
+    @Test
+    fun aDeletedTagsFallbackAfterAPublishedRemapStillFallsBack() = runVmTest {
+        val vm = newViewModel().vm
+        vm.selectFilter(ArticleFilter.Tag("t-old"))
+        vm.toggleTagExpanded("t-old")
+        testScheduler.advanceUntilIdle()
+
+        vm.deleteTag("t-old")
+        rekeyAndPublishWithoutApplying(folder = false)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(ArticleFilter.All, vm.filter.value)
+        assertEquals(FeedListRowSelection.canonicalFor(ArticleFilter.All), vm.selectedRowInstance.value)
+        assertEquals(emptySet(), vm.expandedTagIds.value)
+    }
+
+    /** As [aDeletedTagsFallbackAfterAPublishedRemapStillFallsBack], for a folder. */
+    @Test
+    fun aDeletedFoldersFallbackAfterAPublishedRemapStillFallsBack() = runVmTest {
+        val vm = newViewModel().vm
+        vm.selectFilter(ArticleFilter.Folder("d-old"))
+        vm.toggleFolderCollapsed("d-old")
+        testScheduler.advanceUntilIdle()
+
+        vm.deleteFolder("d-old")
+        rekeyAndPublishWithoutApplying(tag = false)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(ArticleFilter.All, vm.filter.value)
+        assertEquals(emptySet(), vm.collapsedFolderIds.value)
+    }
+
     /** Selecting the row the selection already is (by its stale or new id) changes nothing, generation included. */
     @Test
     fun reSelectingTheReKeyedRowKeepsTheGeneration() = runVmTest {

@@ -913,7 +913,9 @@ class HomeViewModel(
         selectFilter = { selectFilter(it) },
         launchWrite = { write, afterWrite -> feedListWrites.enqueue(write, afterWrite) },
         fallBackOnceHidden = ::fallBackOnceHidden,
-        currentIdRemap = { idRemaps.current.value },
+        // Caught up, not just read: a fallback compares the selection and expansion with the id the
+        // map gives, so they must already be in the same id space (see [catchUpIdRemap]).
+        currentIdRemap = { catchUpIdRemap() },
     )
 
     /** The feed list's collapsed folders — see [FeedListExpansion.collapsedFolderIds]. */

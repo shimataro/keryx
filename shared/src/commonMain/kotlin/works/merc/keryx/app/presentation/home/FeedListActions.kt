@@ -32,10 +32,12 @@ import works.merc.keryx.app.domain.TagRepository
  *   expansion exactly as they were. Creating an item and placing a feed in it is one write
  *   ([TagRepository.createTagAndAttach], [FolderRepository.createFolderAndMoveFeed]), so a failure
  *   leaves neither half behind; no action shows anything ahead of its write.
- * @param currentIdRemap The current tag/folder id re-keys (`TagFolderIdRemaps.current`). A delete's
- *   fallback runs later, possibly after a merge has re-keyed the deleted item, so it compares and
- *   forgets the id the item has *then*; a toggle resolves the id the UI passed, which may predate
- *   a re-key.
+ * @param currentIdRemap The current tag/folder id re-keys (`TagFolderIdRemaps.current`), with the
+ *   ViewModel's own state — [currentFilter], [selectedRowInstance], [expansion] — already brought up
+ *   to date on them when it returns, so an id it maps is compared with state in the same id space.
+ *   A delete's fallback runs later, possibly after a merge has re-keyed the deleted item, so it
+ *   compares and forgets the id the item has *then*; a toggle resolves the id the UI passed, which
+ *   may predate a re-key.
  * @param fallBackOnceHidden Runs the fallback it is given once the feed list stops showing the
  *   deleted target — in production the ViewModel's [DeletedItemFallback]s. A delete's write lands
  *   before the list flow delivers it, so the feed list still shows the deleted item, and the user can
