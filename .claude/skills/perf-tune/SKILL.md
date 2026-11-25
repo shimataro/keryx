@@ -295,23 +295,13 @@ Each axis has its own method.
   sampling discipline as the CPU/memory axis below (warm-up, several samples,
   median plus spread) — before proposing an SQL candidate. Where the CLI is
   unavailable, use a throwaway JDBC connection.
-- **Axis 1, CPU / memory** — write disposable seeding code under the scratch
-  directory and run the **same seeded workload** before and after, with warm-up
-  runs to let the JIT settle, several repeated samples, and a reported **median
-  plus spread** — a single before/after timing lets JIT / GC / scheduler noise
-  pass the gate. Wall-clock time measures **elapsed** time, not CPU work — and
-  neither reflects memory or allocation; when the claimed win is allocation or
-  memory rather than speed, measure it **resource-specifically** with an explicit
-  allocation/heap delta in that same disposable code (e.g. `System.gc()` +
-  `Runtime.totalMemory() - Runtime.freeMemory()` sampled before and after — an
-  **approximate retained-heap proxy, not a precise allocation count** — or a real
-  allocation counter such as `com.sun.management.ThreadMXBean.getThreadAllocatedBytes()`,
-  the JDK-specific extension interface rather than the standard
-  `java.lang.management.ThreadMXBean`, and only valid where
-  `isThreadAllocatedMemorySupported()` / `isThreadAllocatedMemoryEnabled()` report
-  it available) — never an unspecified local measurement —
-  this never means adding a profiler dependency or a telemetry service (see the
-  security invariant above). **Call counts are candidate evidence only** (e.g. how
+- **Axis 1, CPU / memory** — run the **same seeded workload** (disposable code
+  under the scratch directory) before and after, with warm-up and enough repeated
+  samples to report a **median plus spread**; a single timing lets JIT / GC /
+  scheduler noise pass the gate. When the claimed win is memory or allocation
+  rather than speed, measure that resource directly and say which measure you used
+  and its limits — elapsed time does not show it. Never add a profiler dependency
+  or a telemetry service (see the security invariant above). **Call counts are candidate evidence only** (e.g. how
   many `Ksoup.parse` calls N articles cost): reading the code establishes how often
   something runs, never whether CPU, memory, or allocation cost improved, so a count
   ranks a candidate in Step 3 but is never the before/after evidence. For work moved
