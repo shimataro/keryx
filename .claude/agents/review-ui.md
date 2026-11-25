@@ -152,3 +152,8 @@ section describes. In particular:
     grep -c "<string " composeApp/src/commonMain/composeResources/values/strings.xml \
                        composeApp/src/commonMain/composeResources/values-ja/strings.xml
     grep -rn "contentDescription\|Role\.\|semantics" <changed files>
+
+When the caller hands you screenshots of the changed screens, read them and check what they
+show against the checklists above; a rendered result settles questions the code leaves open
+(spacing, tone, truncation). Do not launch the app yourself. Without screenshots, say in your
+report which findings rest on reading the code alone.
