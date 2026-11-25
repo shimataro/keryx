@@ -589,17 +589,20 @@ SQLDelight コードの `getLong` がそれを読むときに例外を投げ、�
   1. グループはその `v2_id` を共有するクラウド行で、正規のクラウド行は `updated_at` が最大、次に id が最大の行。
   2. 対象 id は、main に同じ `v2_id` を持つ行があればその id（その同一性はこの端末ですでに確立している）、
      無ければ正規のクラウド行の id。
-  3. どの行も変更する前に、移動が許可される mapping を解決する: 対象が reconciliation 対象外のクラウド行
-     （`v2_id` が NULL の別 identity）に占有されている moving mapping はブロックされ、対象がそれ自身ブロックされた
-     source 行に占有されている mapping は再帰的にブロックされる。ブロックされていない moving mapping の target だけが
-     空きと見なされる。
+  3. どの行も変更する前に、移動が許可される mapping を解決する。対象が reconciliation 対象外のクラウド行
+     （`v2_id` が NULL の別 identity）に占有されている moving mapping は **anchor-blocked**（source 行は移動せず、
+     元の id のまま残る）。対象がそれ自身ブロックされた source 行に占有されている mapping は **chain-blocked**
+     として再帰的にブロックされる。ブロックされていない moving mapping の target だけが空きと見なされる。
   4. `cloud` に対象行が無く、かつ mapping が許可されていればコピーして入れ、フィールドごとの文が同一性ごとに 1 行を
      id で照合できるようにする。
   5. 子の参照（`cloud.feeds.folder_id`、および `cloud.feed_tags.tag_id`——リンクは先に `(feed_id, tag_id)` ごとに
      通常の後勝ちで 1 本に畳む）を対象 id へ移し、移し替えた行を削除する。対象の占有者すべても移動する完全な swap や
      cycle は一時テーブルで段階的に行う: source 行を削除してから target 行を挿入するため PK 衝突は起きず、folder 参照は
-     一時的にクリアされてから対象 id に復元される。ブロックされた mapping は元の id のまま残り、両方の identity とその
-     子参照がフィールドごとのマージに持ち込まれる。
+     一時的にクリアされてから対象 id に復元される。**anchor-blocked** な mapping で、元の id が別の v2 identity の main 行と
+     衝突しない場合は元の id のまま残り、両方の identity とその子参照がフィールドごとのマージに持ち込まれる。
+     **chain-blocked** な mapping、または元の id が別の `v2_id` を持つ main 行と衝突する anchor-blocked な mapping は、
+     元の id に留まれない。代わりに、そのフィールドは対象とする main identity と同じ `v2_id` で照合してマージされ、
+     子参照は誤った identity へのアタッチを防ぐためクリアされる。
   順序は FK 安全（差分同期以前のクラウドファイルは完全スキーマへ移行され FK が有効）、正規行とリンクの選択は畳み込み
   順序に依存せず、2 回目の実行は何も変えない。Transport ファイルも `v2_id` を運ぶため差分・ベースの両方で機能し、
   差分同期以前のファイルも同じ移行で `v2_id` を得る。マージは `ks_id_remap` を参照しない。
