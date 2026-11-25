@@ -12,11 +12,19 @@ context: fork
 > actually true of this codebase, whether a request is worth doing, and committing fixes for the
 > ones that are. It runs in a forked subagent context so its frontmatter pins `model: opus` at
 > `effort: medium` for the whole workflow.
+>
+> **Two-phase workflow.** `context: fork` removes `AskUserQuestion`, `EnterPlanMode` and
+> `ExitPlanMode` from this subagent, so the fork phase is **read-only / non-interactive**: it
+> validates URLs, fetches the issue, splits it into items, evaluates premises and validity,
+> produces the summary table, detail blocks, drafted replies and a plan file, then returns all of
+> that as one report. **User decisions, plan approval and implementation happen in the main
+> conversation** after it receives the report, following the hand-off instructions at the end of
+> the fork's output.
 
 Evaluate a GitHub issue, then act on it: each URL is broken into **items** (Step 5). An item whose
 author asks for no change is answered (Step 6); an item that asks for a change is checked for a
 correct premise and for validity (Step 7). The items to implement are planned, approved once, then
-fixed, verified and committed one commit per item (Step 9). This skill never posts anything to
+fixed, verified and committed one commit per item. This skill never posts anything to
 GitHub — every reply is a draft for the user to copy.
 
 This is the issue-side counterpart of `evaluate-review`; where a step says "as in
@@ -58,6 +66,7 @@ Every place that reports a result uses only these labels — plus the suffix
 | URL | `Not in this issue` | The linked comment belongs to another issue (Step 4) |
 | URL | `Fetch failed: <reason>` | A Step 4 request failed |
 | URL | `Cancelled` | The user cancelled at Step 3 |
+| URL | `Needs checkout alignment` | Step 3 found a mismatch that requires a main-conversation decision before evaluation can continue |
 
 **End this URL** (used throughout): print the reason, record the URL's outcome from the table,
 and continue with the next URL at Step 2. After the last URL, print the cross-URL summary
@@ -96,7 +105,7 @@ The URL must match `https://github.com/<owner>/<repo>/issues/<number>`, optional
 - If the URL does not match (a `/pull/` URL included), say it is not an issue link and end this
   URL (`Invalid URL`).
 
-### Step 3 — Verify repository and checkout
+### Step 3 — Verify repository and checkout (read-only in fork; decisions in main conversation)
 
 1. Find the git remote of this checkout that points at `{owner}/{repo}` — the **issue remote**
    used by every later step. Check the checkout's own remotes, not `gh repo view`: that answers
@@ -131,25 +140,15 @@ The URL must match `https://github.com/<owner>/<repo>/issues/<number>`, optional
    `git fetch <remote> <default>` succeeds without updating `<remote>/<default>`, and every
    check below (and in 3.3 and 7.1) would compare against a stale or missing ref.
 
-   Check its exit status: if it fails, the existing `<remote>/<default>` may be stale and would
-   pass the check below regardless, so output the error and ask via `AskUserQuestion` whether
-   to **continue with a warning** that the comparison may use stale code, or **cancel**
-   (`Cancelled`). If the user continues and `<remote>/<default>` does not exist at all, skip
-   this check and 3.3 with a warning, and treat 7.1's released/unreleased question as
-   undeterminable.
-
-   Then check `git merge-base --is-ancestor <remote>/<default> HEAD`.
-   If HEAD does not contain `<remote>/<default>`, output the state and ask via `AskUserQuestion`:
-   - **Fast-forward** (Recommended) — offered only when the current branch is the default
-     branch: `git merge --ff-only <remote>/<default>`. If git refuses, report it and ask again
-     without this option.
-   - **Continue on the current HEAD** — with a warning that the evaluation uses older code.
-   - **Cancel evaluation** — stop the whole run (`Cancelled`).
-3. **Unrelated work** — if the current branch is not a version branch (`v*`) and has commits
-   that `<remote>/<default>` lacks (`git log --oneline <remote>/<default>..HEAD` is not empty), Step 9
-   would commit on top of that unrelated work. Show those commits and ask via
-   `AskUserQuestion` whether to **continue on this branch** or **cancel** (`Cancelled`) so the
-   user can switch first.
+   Check its exit status. If it fails, or if `git merge-base --is-ancestor <remote>/<default> HEAD`
+   shows HEAD does not contain `<remote>/<default>`, or if the current branch is not a version
+   branch (`v*`) and has commits that `<remote>/<default>` lacks
+   (`git log --oneline <remote>/<default>..HEAD` is not empty), the fork **does not continue**.
+   Instead, report the observed state precisely and append a **hand-off block** that tells the
+   main conversation what decision is needed and how to proceed (for example: fast-forward the
+   default branch, switch first, continue with a warning, or cancel). End this URL with the
+   outcome `Needs checkout alignment` so the main conversation can realign the checkout and
+   re-run if desired.
 
 ### Step 4 — Fetch the issue
 
@@ -217,9 +216,10 @@ it, for the item's platform. Record the files and lines you relied on in the ite
 they do not go into the reply. Outcome: `Answered`.
 
 If answering shows that a change is needed after all — the behavior asked about is a bug, or the
-docs say something the code does not do — explain why and ask via `AskUserQuestion` whether to
-**move the item to Step 7**. If moved, the item still gets its answer reply, which says the
-point will be looked into; if not, it stays `Answered`.
+docs say something the code does not do — explain why and mark the item as **awaiting decision**
+with your recommendation and grounds in the Step 8 hand-off. The main conversation will use
+`AskUserQuestion` to decide whether to move the item to Step 7. If moved, the item still gets its
+answer reply, which says the point will be looked into; if not, it stays `Answered`.
 
 ### Step 7 — Items that ask for a change
 
@@ -281,10 +281,10 @@ its reply says which part and why.
 A valid item that would change the documented behavior, the feature scope, the sync algorithm or
 merge semantics, or the error taxonomy is a product decision, not this skill's
 (CLAUDE.md constraint #5). Mark it **awaiting the user's decision** with your recommendation and
-its grounds; 8.2 asks. An item that only brings the code in line with the documented spec, or
-changes nothing documented, needs no decision.
+its grounds; the main conversation handles it via `AskUserQuestion`. An item that only brings the
+code in line with the documented spec, or changes nothing documented, needs no decision.
 
-### Step 8 — Report and decide
+### Step 8 — Report (fork phase)
 
 #### 8.1 — Summary table and details
 
@@ -316,11 +316,11 @@ Then print each item's detail block:
 [Analysis, citing files, lines and docs; the perspectives applied (7.2); any evidence gathered.]
 ```
 
-#### 8.2 — Decisions
+#### 8.2 — Decisions delegated to the main conversation
 
-If any item is awaiting a decision, ask about all of them in one `AskUserQuestion`, each with
-your recommendation first and its grounds. **Adopt** → Fix & commit; **Decline** →
-`Declined by user`.
+If any item is awaiting a decision, list all of them in a **hand-off block** at the end of the
+report. For each, give your recommendation first and its grounds. The main conversation must use
+`AskUserQuestion` to ask the user: **Adopt** → Fix & commit; **Decline** → `Declined by user`.
 
 #### 8.3 — Reply drafts
 
@@ -328,8 +328,8 @@ Output a suggested reply for every item that is not Fix & commit — including `
 is missing). Several items of one issue may share one reply, covering each of them.
 
 A Fix & commit item gets no reply here: until its plan is approved and its fix verified, a reply
-promising the change could turn out false. Its reply is drafted once its outcome is known
-(Step 9), in the same form.
+promising the change could turn out false. Its reply is drafted once its outcome is known, in
+the same form.
 
 - Write it in the language of the author's own text; if that cannot be confidently identified,
   use English.
@@ -345,13 +345,12 @@ promising the change could turn out false. Its reply is drafted once its outcome
 
 If no item is Fix & commit, output `No implementation plan is needed.` and go to Step 10.
 
-### Step 9 — Plan, approve, implement
+### Step 9 — Plan and hand-off (fork writes the file; main conversation approves and implements)
 
-1. **Guard** — check `git status --porcelain`. If it prints anything, warn and end this URL
-   (`Working tree not clean`) — a failed-verification revert must never destroy pre-existing
-   work. The clean result is the baseline for 9.4.
-2. **Plan** — call `EnterPlanMode`, explore the code around every Fix & commit item, and write
-   the plan to `~/.claude/plans/evaluate-issue-{number}.md` with:
+The fork phase performs only the planning write; approval and execution are left to the main
+conversation.
+
+1. **Write the plan file** — write `~/.claude/plans/evaluate-issue-{number}.md` with:
    - **Context** — what the issue asks for and why it is being done.
    - **One section per Fix & commit item**, in item order: **Files to modify**, **Changes**
      (concrete actions) and **Verification** (tests, build targets, manual checks). Tests follow
@@ -361,31 +360,36 @@ If no item is Fix & commit, output `No implementation plan is needed.` and go to
      add "re-measure per 9.4".
    - **Commit Strategy** — one commit per item, in item order, per
      `.claude/etc/per-item-commit.md` §4, after that item's verification passes.
-3. **Refine and approve** — invoke the `refine-plan` skill with the plan file path, resolve any
-   question it asks, then call `ExitPlanMode`. This approval is the URL's one-time run
-   confirmation (`.claude/etc/per-item-commit.md` §1). If the user rejects it, implement and
-   commit nothing (`Plan rejected`) and draft a reply (8.3's form) for each Fix & commit item
-   saying it is not being addressed this time; revise the plan instead if they ask for changes.
-4. **Fix, verify, commit each item** — right before the first edit, re-run
-   `git status --porcelain` and confirm it still matches 9.1's baseline; if not, commit nothing
-   and end this URL (`Working tree not clean`) — with no reply drafts, since nothing has been
-   decided; tell the user to clean the tree and re-run. Then, for each Fix & commit item in order (one
-   item's failure never stops the rest):
-   1. Implement that item's section of the plan only, following `.claude/CLAUDE.md`.
-   2. Verify per `.claude/etc/per-item-commit.md` §2 — re-measuring first when the plan says so
-      (`.claude/etc/temporary-instrumentation.md` §4) — then the item's planned Verification, at
-      minimum `./gradlew build` or the narrowest test target that clearly covers the change.
-   3. On failure, revert per `.claude/etc/per-item-commit.md` §3, record
-      `Verification failed: <reason>`, and draft a reply (8.3's form) saying the change was
-      attempted but is not included yet and remains under consideration.
-   4. On success, commit per `.claude/etc/per-item-commit.md` §4 (on a `v*` branch it runs
-      `/feature-branch` before the first commit).
-5. **Hand-off** — if at least one item was committed in 9.4, output the line to put in the pull
-   request's body (`Closes #{number}`, or `Refs #{number}` when only part of the issue was done)
-   and a reply draft (8.3's form) for each committed item reporting what was done. If nothing
-   was committed (every item failed verification), output no reference line and say there is
-   nothing to put in a pull request; the failed items' replies come from 9.4.3. Never push and
-   never post.
+2. **Hand-off block** — append a block that tells the main conversation exactly what to do:
+   - Check `git status --porcelain`. If it prints anything, warn and stop this URL
+     (`Working tree not clean`) before any edit — the clean result is the baseline for the
+     re-check right before the first edit.
+   - Call `EnterPlanMode`, invoke the `refine-plan` skill on the plan file path, resolve any
+     question it asks, then call `ExitPlanMode` to submit the refined plan for user approval.
+     This approval is the URL's one-time run confirmation
+     (`.claude/etc/per-item-commit.md` §1). If the user rejects it, implement and commit nothing
+     (`Plan rejected`) and draft a reply (8.3's form) for each Fix & commit item saying it is not
+     being addressed this time; revise the plan instead if they ask for changes.
+   - After approval, right before the first edit re-run `git status --porcelain` and confirm it
+     still matches the baseline; if not, commit nothing and end this URL
+     (`Working tree not clean`).
+   - For each Fix & commit item in order (one item's failure never stops the rest), implement
+     that item's section of the plan only, following `.claude/CLAUDE.md`, then verify per
+     `.claude/etc/per-item-commit.md` §2 — re-measuring first when the plan says so
+     (`.claude/etc/temporary-instrumentation.md` §4) — then the item's planned Verification, at
+     minimum `./gradlew build` or the narrowest test target that clearly covers the change. On
+     failure, revert per `.claude/etc/per-item-commit.md` §3, record
+     `Verification failed: <reason>`, and draft a reply (8.3's form) saying the change was
+     attempted but is not included yet and remains under consideration. On success, commit per
+     `.claude/etc/per-item-commit.md` §4 (on a `v*` branch run `/feature-branch` before the first
+     commit).
+   - Implementation may be delegated to the `implementer` agent and test writing to the
+     `test-writer` agent; both have their own frontmatter pinning `model: opus`, so precision is
+     preserved.
+   - If at least one item was committed, output the line to put in the pull request's body
+     (`Closes #{number}`, or `Refs #{number}` when only part of the issue was done) and a reply
+     draft (8.3's form) for each committed item reporting what was done. Never push and never
+     post.
 
 ### Step 10 — Closing summary
 
