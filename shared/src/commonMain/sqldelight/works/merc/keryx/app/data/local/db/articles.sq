@@ -80,15 +80,19 @@ ORDER BY published_at DESC, created_at DESC, id DESC;
 
 -- watchByTag / watchByFolder resolve the id through ks_id_remap like the writes do (tags.sq /
 -- folders.sq), as part of the statement: a sync merge that moves the selected tag or folder onto
--- another id re-runs these queries when it commits, before the selection has followed the move
--- (TagFolderIdRemaps is published after the commit), and the re-run must still show the same list —
--- an empty one in between would drop the new-articles pill's count and the list's scroll position.
+-- another id re-runs these queries when it commits, before the selection has followed the move,
+-- and the re-run must still show the same list — an empty one in between would drop the
+-- new-articles pill's count and the list's scroll position. Only ks_id_remap is consulted, not the
+-- tags / folders table: no live row has an id that is an old_id in ks_id_remap (IdRemapSql drops the
+-- entry of an id that names a row again), so "the id unchanged while a row has it" needs no lookup
+-- of its own — and a lookup in tags / folders would re-run this query (and so re-emit the list) on
+-- every rename or reorder of a tag or folder, which cannot change the articles listed.
 watchByTag:
 SELECT a.id, a.feed_id, a.title, a.url, a.published_at, a.created_at, a.is_read, a.is_starred
 FROM articles a
 INNER JOIN feeds f ON f.id = a.feed_id
 INNER JOIN feed_tags ft ON ft.feed_id = f.id
-WHERE ft.tag_id = COALESCE((SELECT id FROM tags WHERE id = :tagId), (SELECT new_id FROM ks_id_remap WHERE kind = 'tag' AND old_id = :tagId), :tagId)
+WHERE ft.tag_id = COALESCE((SELECT new_id FROM ks_id_remap WHERE kind = 'tag' AND old_id = :tagId), :tagId)
     AND ft.deleted_at IS NULL AND f.deleted_at IS NULL AND a.deleted_at IS NULL
 ORDER BY a.published_at DESC, a.created_at DESC, a.id DESC;
 
@@ -96,7 +100,7 @@ watchByFolder:
 SELECT a.id, a.feed_id, a.title, a.url, a.published_at, a.created_at, a.is_read, a.is_starred
 FROM articles a
 INNER JOIN feeds f ON f.id = a.feed_id
-WHERE f.folder_id = COALESCE((SELECT id FROM folders WHERE id = :folderId), (SELECT new_id FROM ks_id_remap WHERE kind = 'folder' AND old_id = :folderId), :folderId)
+WHERE f.folder_id = COALESCE((SELECT new_id FROM ks_id_remap WHERE kind = 'folder' AND old_id = :folderId), :folderId)
     AND f.deleted_at IS NULL AND a.deleted_at IS NULL
 ORDER BY a.published_at DESC, a.created_at DESC, a.id DESC;
 
