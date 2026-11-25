@@ -468,18 +468,55 @@ class DeltaExporterTest {
         assertNull(feedFolderIn(full)[0])
     }
 
-    /**
-     * A full send carries every identity edge of `ks_v2_edge`, split by kind — an edge of an id it holds
-     * no row of included, and with an except file that carries none of them — while a delta carries none.
-     */
+    /** An edge added while capture is on and no merge is running is recorded and rides in the next delta. */
     @Test
-    fun aFullSendCarriesEveryIdentityEdgeAndADeltaNone() {
+    fun aDeltaCarriesTheIdentityEdgesRecordedInTheOutbox() {
         val local = capturingDb(*seedRows)
         exec(
             local,
             "INSERT INTO ks_v2_edge (kind, v2_id, id) VALUES ('folder', 'p', 'd1')",
+            "INSERT INTO ks_v2_edge (kind, v2_id, id) VALUES ('tag', 'q', 't1')",
+            "INSERT OR IGNORE INTO ks_v2_edge (kind, v2_id, id) VALUES ('tag', 'q', 't1')", // already there: records nothing
+        )
+        assertEquals(
+            listOf(listOf("folder_v2_edges", "p", "d1"), listOf("tag_v2_edges", "q", "t1")),
+            query(local, "SELECT tbl, pk, pk2 FROM sync_outbox WHERE tbl LIKE '%_v2_edges' ORDER BY seq"),
+        )
+        val delta = newPath()
+        assertNotNull(DeltaExporter.exportDelta(local.absolutePath, delta, meta()))
+        assertEquals(listOf(listOf("p", "d1")), query(File(delta), "SELECT v2_id, id FROM folder_v2_edges"))
+        assertEquals(listOf(listOf("q", "t1")), query(File(delta), "SELECT v2_id, id FROM tag_v2_edges"))
+    }
+
+    /** A transport merge (the `sync_merging` marker) records no edge: the other devices receive its file too. */
+    @Test
+    fun anEdgeAddedInsideATransportMergeIsNotRecorded() {
+        val local = capturingDb(*seedRows)
+        exec(
+            local,
+            "INSERT INTO sync_merging (flag) VALUES (1)",
+            "INSERT INTO ks_v2_edge (kind, v2_id, id) VALUES ('folder', 'p', 'd1')",
+            "DELETE FROM sync_merging",
+        )
+        assertEquals(emptyList(), query(local, "SELECT tbl FROM sync_outbox WHERE tbl LIKE '%_v2_edges'"))
+    }
+
+    /**
+     * A full send carries every identity edge of `ks_v2_edge`, split by kind — an edge of an id it holds
+     * no row of included, and with an except file that carries none of them — while a delta carries
+     * only the edges recorded in the outbox (none here: they were added while capture was off, as the
+     * v2→v3 re-key adds them).
+     */
+    @Test
+    fun aFullSendCarriesEveryIdentityEdgeAndADeltaNoneThatWasNotCaptured() {
+        val local = capturingDb(*seedRows)
+        exec(
+            local,
+            "UPDATE sync_capture SET enabled = 0",
+            "INSERT INTO ks_v2_edge (kind, v2_id, id) VALUES ('folder', 'p', 'd1')",
             "INSERT INTO ks_v2_edge (kind, v2_id, id) VALUES ('folder', 'p', 'd-elsewhere')",
             "INSERT INTO ks_v2_edge (kind, v2_id, id) VALUES ('tag', 'q', 't1')",
+            "UPDATE sync_capture SET enabled = 1",
         )
         val delta = newPath()
         assertNotNull(DeltaExporter.exportDelta(local.absolutePath, delta, meta()))

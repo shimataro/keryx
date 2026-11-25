@@ -106,8 +106,9 @@ Each file carries `PRAGMA user_version` and:
 - `folder_v2_edges(v2_id, id)` / `tag_v2_edges(v2_id, id)` (version 2) — identity edges: a pre-upgrade id and a row
   id the row carrying it was re-keyed to, the sender's `ks_v2_edge` (see "Local Bookkeeping") split by kind. Rows
   connected by edges are one identity. Filled in full by a full send (and so by a base uploaded from one) — less the
-  edges its except file already carries; an ordinary delta carries only the folder edges a feed's folder reference
-  needs (an alias with no row in the file, see "Sending"); a fold unions them, adding the
+  edges its except file already carries; an ordinary delta carries the edges recorded in the outbox up to its
+  high-water mark (an edge a pre-delta merge added, see "Local Bookkeeping") and the folder edges a feed's folder
+  reference needs (an alias with no row in the file, see "Sending"); a fold unions them, adding the
   `(v2_id, id)` of every input tag or folder row that carries a `v2_id` (a row keeps only one `v2_id` per id, so a
   link would otherwise be lost when two files carry the same id with different `v2_id`s). No reference check
   applies to the edges themselves: an edge means something without its rows. The 1→2 transport migration creates them empty;
@@ -138,7 +139,7 @@ extend).
 
 | Object | Purpose |
 | --- | --- |
-| `sync_outbox(seq INTEGER PRIMARY KEY AUTOINCREMENT, tbl, pk, pk2, heavy)` | Every local change to a synced row, in order |
+| `sync_outbox(seq INTEGER PRIMARY KEY AUTOINCREMENT, tbl, pk, pk2, heavy)` | Every local change to a synced row, in order, and every identity edge a merge run with capture on adds to `ks_v2_edge` (`tbl` `folder_v2_edges` / `tag_v2_edges`, `pk` the pre-upgrade id, `pk2` the row id) |
 | `sync_capture(id = 1, enabled, full_pending)` | Whether changes are recorded (only while connected), and whether a full send is due |
 | `sync_merging(flag)` | Present only inside a merge transaction (inserted first, deleted just before `COMMIT`), so no other connection ever sees it |
 | `sync_applied(name)` | Cloud files already merged (including this device's own) |
@@ -148,7 +149,7 @@ extend).
 | `ks_feed_folder_raw(feed_id, folder_updated_at, folder_id)` | Per feed, its raw folder assignment — the folder id and stamp as the winning version wrote them, whether or not that folder is alive here. The source of truth for a feed's folder: every local move writes it, the merge records the winner into it, and a send carries it; `feeds.folder_id` / `folder_updated_at` are a cache resolved from it (see "Merge"). Every feed has exactly one row, created with the feed. Its `folder_id` is kept exactly as written — never mapped or replaced afterwards — so it can name an alias of a folder identity this device holds no row for (resolved through `ks_id_remap`); only a pre-delta file's orphan reference is recorded as NULL. This device's data, kept across joining and disconnect |
 | `ks_feed_folder_resolved` (view) | The one definition of a feed's resolved folder: the raw `folder_id` mapped one hop through `ks_id_remap`, while that folder exists and is alive, else NULL, with the raw stamp. Triggers write it into `feeds` whenever a raw row changes, a folder is inserted, deleted or revived, or a folder entry of `ks_id_remap` is added, changed or removed — in every transaction, the merge's included |
 | `ks_id_remap(kind, old_id, new_id)` | Every tag/folder re-key — the v2→v3 migration's (`domain/TagFolderIdRekey.kt`) and any a merge makes, which records every alias of an identity it maps onto the canonical id, including aliases only another device's file used (a feed's raw folder assignment can name one, and `ks_feed_folder_resolved` resolves it through this table) — recorded through `domain/IdRemapSql.kt`, which folds chains so an old id maps in one hop to the id its row has now. Ids held outside the database follow it: `SettingsRepository` rewrites the same ids in `local_settings.json` at startup and, while the app runs, whenever `domain/TagFolderIdRemaps.kt` republishes the table after a merge's commit (`HomeViewModel` rewrites its selection and expansion from the same value); every write taking a tag or folder id resolves it through the table in the same statement. Kept indefinitely, so re-applying it is a no-op. The merge's identity step reads its moves as identity edges too, which normally duplicate edges already in `ks_v2_edge` (see "Identities of tags and folders" under "Merge") |
-| `ks_v2_edge(kind, v2_id, id)` | The identity edges of tags and folders (`kind` `tag` / `folder`): a pre-upgrade id and a row id the row carrying it was re-keyed to; rows connected by edges are one identity. A grow-only set: the v2→v3 re-key records the edge of every row carrying a `v2_id`, and every merge adds the cloud file's edge tables (transport files only) and the `(v2_id, id)` of its and main's rows that carry a `v2_id`; never deleted. Full sends carry it (see "Transport schema"). Unlike `sync_applied` it is not cleared on joining or disconnecting: an edge is a fact about two ids, not about the connection |
+| `ks_v2_edge(kind, v2_id, id)` | The identity edges of tags and folders (`kind` `tag` / `folder`): a pre-upgrade id and a row id the row carrying it was re-keyed to; rows connected by edges are one identity. A grow-only set: the v2→v3 re-key records the edge of every row carrying a `v2_id`, and every merge adds the cloud file's edge tables (transport files only) and the `(v2_id, id)` of its and main's rows that carry a `v2_id`; never deleted. Full sends carry it, and an edge added while capture is on and no `sync_merging` row exists — only the pre-delta merge's — is also recorded in `sync_outbox` by a trigger and rides in the next ordinary delta (see "Transport schema"); the re-key (capture off) and a transport merge (`sync_merging`) record nothing. Unlike `sync_applied` it is not cleared on joining or disconnecting: an edge is a fact about two ids, not about the connection |
 | `feed_fetch_state(feed_id, etag, last_modified, error_count, last_error)` | A feed's fetch state on this device — never synced |
 
 **Triggers** on the six synced tables append to `sync_outbox` (`AFTER INSERT` / `AFTER UPDATE`), guarded by
@@ -182,7 +183,7 @@ time — so it can tell what a base covers without downloading it), `ks_legacy_s
 from a merge's commit until the search index has caught up with it — see "Receiving"; without the `ks_` prefix, since
 that work belongs to the local search index and survives a disconnect). `sync_state` and the tables
 above are device-local and never leave the device — except that a full send copies `ks_v2_edge`'s edges into its
-edge tables, and an ordinary delta whose raw folder assignment names an alias copies the folder edges of that alias's
+edge tables, an ordinary delta carries the edges recorded in the outbox, and an ordinary delta whose raw folder assignment names an alias copies the folder edges of that alias's
 connected component (see "Sending").
 
 ## Sync Flow (`SyncRepository.sync()`)
@@ -291,7 +292,9 @@ only the retries of a revision-checked write (the pointer, the stub); delta and 
      this device holds no row for — an alias of a folder identity that a merge moved onto its canonical id, or one
      only another device's file used (see "Merge") — and then the file also carries that id's identity: every folder
      edge of its connected component in `ks_v2_edge`, and the folder rows this device holds in that component, so
-     the receiver can resolve it (check 9 accepts that). These edges are the only ones an ordinary delta carries.
+     the receiver can resolve it (check 9 accepts that). Besides these, an ordinary delta carries the identity edges recorded in the outbox up to `S` (`INSERT OR IGNORE`
+     into `folder_v2_edges` / `tag_v2_edges`), so an edge only a pre-delta merge brought reaches the devices that
+     receive just deltas; an outbox holding only edges still yields a delta.
      Because `S` and the rows come from one snapshot, any write
      after it carries a `seq > S` and goes into the next delta.
    - **Full send** (when joining) — from a `VACUUM INTO` copy, as the pre-delta upload did, so the live database's
@@ -626,7 +629,7 @@ Merge SQL (`MergeSql`) key points:
      and the ids of the rows on either side; a pre-upgrade id is never one. It depends only on the set of edges
      this device has seen — not on the order files arrived in, how they were folded, or what one file happens to
      contain. Edges are never deleted, so the canonical id only ever moves to a smaller id, and every device ends
-     on the same one once it has seen the same edges; full sends and bases carry every edge, so every device
+     on the same one once it has seen the same edges; full sends and bases carry every edge and a delta carries the ones recorded since, so every device
      eventually does.
   3. **The cloud side** is read, not rewritten: its rows are mapped onto their canonical ids and folded into one row
      per id by the ordinary per-group last-write-wins (`created_at` the earliest, `v2_id` the greatest), into a temp

@@ -70,6 +70,12 @@ object DeltaExportSql {
     /** A feed's folder columns, which a file carries from the feed's raw assignment. */
     private val FEED_FOLDER_COLUMNS = setOf("folder_id", "folder_updated_at")
 
+    /** `(ks_v2_edge.kind, transport edge table)` of the two kinds of identity edge. */
+    private val EDGE_KIND_TABLES = listOf(
+        ID_REMAP_KIND_FOLDER to "folder_v2_edges",
+        ID_REMAP_KIND_TAG to "tag_v2_edges",
+    )
+
     /**
      * Where [name]'s rows are read from in the source, as a `FROM` item named [name]. For `feeds`, the
      * folder assignment comes from the raw row (`ks_feed_folder_raw`) exactly as stored — the source of
@@ -125,7 +131,18 @@ object DeltaExportSql {
                     "SELECT ${columns(settings)} FROM $SOURCE.global_settings WHERE key IN (${outboxKeys("global_settings", s)})",
             )
             addAll(closureStatements)
+            addAll(capturedEdgeStatements(s))
         }
+    }
+
+    /**
+     * The identity edges recorded in the outbox up to [s] (`tbl` `folder_v2_edges` / `tag_v2_edges`, `pk` the
+     * pre-upgrade id and `pk2` the row id — see `ks_capture_v2_edge_insert`), written into the edge tables of an
+     * ordinary delta. `OR IGNORE`: [closureStatements] may already have written the same edge.
+     */
+    private fun capturedEdgeStatements(s: Long): List<String> = EDGE_KIND_TABLES.map { (_, edgeTable) ->
+        "INSERT OR IGNORE INTO main.$edgeTable (v2_id, id) " +
+            "SELECT pk, pk2 FROM $SOURCE.sync_outbox WHERE tbl = '$edgeTable' AND seq <= $s"
     }
 
     private fun deltaArticles(s: Long): String {
@@ -162,16 +179,14 @@ object DeltaExportSql {
     /**
      * Every identity edge of the source's `ks_v2_edge`, split by kind into `folder_v2_edges` /
      * `tag_v2_edges` — less, with [withExcept], those the [EXCEPT] file carries. Written in full by full
-     * sends (and so by the bases uploaded from one) only: an edge is created only by the v2→v3 re-key,
-     * while capture is still off, and by a merge, which brings it from a file the other devices
-     * receive too; and every device makes a full send when it joins, so each edge the re-key created
-     * reaches the cloud that way. An ordinary delta carries only the edges its folder references need
-     * ([closureStatements]).
+     * sends (and so by the bases uploaded from one). The v2→v3 re-key creates its edges while capture is
+     * still off, and every device makes a full send when it joins, so those reach the cloud that way. An
+     * edge a pre-delta merge adds to a device that has already joined is recorded in the outbox
+     * (`ks_capture_v2_edge_insert`) and rides in the next ordinary delta ([capturedEdgeStatements]); a
+     * transport merge's edges come from a file the other devices receive too. An ordinary delta otherwise
+     * carries only the edges its folder references need ([closureStatements]).
      */
-    fun edgeStatements(withExcept: Boolean): List<String> = listOf(
-        ID_REMAP_KIND_FOLDER to "folder_v2_edges",
-        ID_REMAP_KIND_TAG to "tag_v2_edges",
-    ).map { (kind, edgeTable) ->
+    fun edgeStatements(withExcept: Boolean): List<String> = EDGE_KIND_TABLES.map { (kind, edgeTable) ->
         val except = if (withExcept) " EXCEPT SELECT v2_id, id FROM $EXCEPT.$edgeTable" else ""
         // OR IGNORE: the closure may already have written some of them (a folder reference's identity).
         "INSERT OR IGNORE INTO main.$edgeTable (v2_id, id) SELECT v2_id, id FROM $SOURCE.ks_v2_edge WHERE kind = '$kind'$except"

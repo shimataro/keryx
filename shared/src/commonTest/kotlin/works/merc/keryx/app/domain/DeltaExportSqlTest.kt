@@ -25,7 +25,7 @@ class DeltaExportSqlTest {
     @Test
     fun aDeltaReadsOnlyOutboxEntriesUpToTheHighWaterMark() {
         val outboxReads = delta.filter { "sync_outbox" in it }
-        assertEquals(6, outboxReads.size, "one per synced table")
+        assertEquals(8, outboxReads.size, "one per synced table, and one per identity edge table")
         for (statement in outboxReads) {
             assertTrue("seq <= 42" in statement, statement)
             assertFalse(Regex("seq\\s*(>|<(?!=))").containsMatchIn(statement), statement)
@@ -45,7 +45,9 @@ class DeltaExportSqlTest {
     @Test
     fun bothKindsEndWithTheClosureFeedsAndTagsBeforeFolders() {
         val closure = DeltaExportSql.closureStatements
-        assertEquals(closure, delta.takeLast(closure.size))
+        assertEquals(closure, delta.dropLast(2).takeLast(closure.size))
+        // then the identity edges recorded in the outbox
+        assertTrue(delta.takeLast(2).all { "sync_outbox" in it && "_v2_edges" in it })
         // A full send then writes the identity edges, which reference nothing.
         for (withExcept in listOf(false, true)) {
             assertEquals(
@@ -66,12 +68,18 @@ class DeltaExportSqlTest {
 
     @Test
     fun onlyAFullSendCarriesEveryIdentityEdge() {
-        // A delta reads identity edges only in its closure (the folder edges its references need, and
-        // the rows of those identities), never the whole table or a tag edge.
-        val edgeStatements = delta.filter { "ks_v2_edge" in it || "_v2_edges" in it }
+        // A delta reads ks_v2_edge only in its closure (the folder edges its references need, and the
+        // rows of those identities), never the whole table; besides that it carries the edges recorded
+        // in the outbox up to its high-water mark.
+        val edgeStatements = delta.filter { "ks_v2_edge" in it }
         assertEquals(DeltaExportSql.closureStatements.filter { "ks_v2_edge" in it }, edgeStatements)
-        assertEquals(1, edgeStatements.count { "INTO main.folder_v2_edges" in it })
-        assertTrue(delta.none { "tag_v2_edges" in it })
+        assertEquals(
+            listOf(
+                "INSERT OR IGNORE INTO main.folder_v2_edges (v2_id, id) SELECT pk, pk2 FROM src.sync_outbox WHERE tbl = 'folder_v2_edges' AND seq <= 42",
+                "INSERT OR IGNORE INTO main.tag_v2_edges (v2_id, id) SELECT pk, pk2 FROM src.sync_outbox WHERE tbl = 'tag_v2_edges' AND seq <= 42",
+            ),
+            delta.takeLast(2),
+        )
         assertEquals(
             listOf(
                 "INSERT OR IGNORE INTO main.folder_v2_edges (v2_id, id) SELECT v2_id, id FROM src.ks_v2_edge WHERE kind = 'folder'",

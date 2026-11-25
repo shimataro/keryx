@@ -322,6 +322,16 @@ BEGIN
     INSERT INTO sync_outbox (tbl, pk) VALUES ('global_settings', new.key);
 END;
 
+-- An identity edge a merge adds (the pre-delta merge runs with capture on) is recorded like a row: tbl
+-- names the transport edge table, pk is the pre-upgrade id and pk2 the row id. A transport merge and the
+-- v2->v3 re-key add edges too, but the first runs with sync_merging and the second while capture is off.
+CREATE TRIGGER ks_capture_v2_edge_insert AFTER INSERT ON ks_v2_edge
+WHEN (SELECT enabled FROM sync_capture WHERE id = 1) = 1 AND NOT EXISTS (SELECT 1 FROM sync_merging)
+BEGIN
+    INSERT INTO sync_outbox (tbl, pk, pk2)
+    VALUES (CASE new.kind WHEN 'folder' THEN 'folder_v2_edges' ELSE 'tag_v2_edges' END, new.v2_id, new.id);
+END;
+
 -- 6. A feed's raw folder assignment (sync_bookkeeping.sq): the triggers that create it with every new
 --    feed and resolve feeds.folder_id / folder_updated_at from it, then one raw row per existing feed
 --    from its current folder_id / folder_updated_at. A folder_id naming no folder row (written before

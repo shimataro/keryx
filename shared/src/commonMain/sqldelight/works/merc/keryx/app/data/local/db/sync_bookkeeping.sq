@@ -1,11 +1,13 @@
 -- Delta-sync bookkeeping (device-local — NEVER synced, never part of a delta, base or uploaded
--- snapshot, except that a full send copies ks_v2_edge's rows into its edge tables; see
+-- snapshot, except that a full send copies ks_v2_edge's rows into its edge tables (and a delta the
+-- edges recorded in sync_outbox); see
 -- docs/sync-architecture.md "Local Bookkeeping (schema version 3)").
 --
 -- sync_outbox        every local change to a synced row, in order, appended by the capture
 --                    triggers below. pk is the row's primary key (feeds/articles/tags/folders: id,
 --                    global_settings: key, feed_tags: feed_id); pk2 is feed_tags' tag_id (NULL for
---                    every other table). heavy = 1 when the delta must carry an article's body.
+--                    every other table). An identity edge added to ks_v2_edge is recorded too (tbl
+--                    folder_v2_edges / tag_v2_edges, pk = v2_id, pk2 = id) — see ks_capture_v2_edge_insert. heavy = 1 when the delta must carry an article's body.
 -- sync_capture       a single row (id = 1): whether changes are recorded at all (only while a
 --                    cloud provider is connected), and whether a full send is due.
 -- sync_merging       holds a row only inside a merge transaction (inserted first, deleted just
@@ -65,7 +67,8 @@
 --                    edges (through a shared v2_id or a shared row id) are one identity. A grow-only
 --                    set: written by the v2->v3 re-key (TagFolderIdRekey) and by every merge (MergeSql:
 --                    the cloud file's edge tables and the v2_id of its and main's rows), carried by
---                    full sends and bases (folder_v2_edges / tag_v2_edges), never deleted. Unlike
+--                    full sends and bases (folder_v2_edges / tag_v2_edges) and, when added while capture
+--                    is on, by the next ordinary delta (ks_capture_v2_edge_insert), never deleted. Unlike
 --                    sync_applied it is NOT cleared on joining or on disconnect: an edge is a fact about
 --                    two ids, not about the connection or the files merged in a generation. No
 --                    constraint beyond the primary key: a merge must only be able to violate a FOREIGN
@@ -298,6 +301,16 @@ WHEN (SELECT enabled FROM sync_capture WHERE id = 1) = 1 AND NOT EXISTS (SELECT 
         OR old.updated_at IS NOT new.updated_at)
 BEGIN
     INSERT INTO sync_outbox (tbl, pk) VALUES ('global_settings', new.key);
+END;
+
+-- An identity edge a merge adds (the pre-delta merge runs with capture on) is recorded like a row: tbl
+-- names the transport edge table, pk is the pre-upgrade id and pk2 the row id. A transport merge and the
+-- v2->v3 re-key add edges too, but the first runs with sync_merging and the second while capture is off.
+CREATE TRIGGER ks_capture_v2_edge_insert AFTER INSERT ON ks_v2_edge
+WHEN (SELECT enabled FROM sync_capture WHERE id = 1) = 1 AND NOT EXISTS (SELECT 1 FROM sync_merging)
+BEGIN
+    INSERT INTO sync_outbox (tbl, pk, pk2)
+    VALUES (CASE new.kind WHEN 'folder' THEN 'folder_v2_edges' ELSE 'tag_v2_edges' END, new.v2_id, new.id);
 END;
 
 -- A feed's raw folder row is created with the feed (a feed inserted with no folder starts with NULL /

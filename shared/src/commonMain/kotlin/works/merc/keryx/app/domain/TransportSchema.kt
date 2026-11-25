@@ -19,7 +19,8 @@ import works.merc.keryx.app.domain.ColumnKind.TEXT
  * v2→v3 migration re-keyed it, which gives every receiver the identity edge linking rows renamed
  * differently on two devices before they upgraded (`V2IdentitySql`). Version 2 also adds the identity edge tables
  * `folder_v2_edges` / `tag_v2_edges` ([EDGE_TABLES]): the sender's `ks_v2_edge`, carried by full
- * sends and bases only and folded by union. `KeryxDatabase.Schema.migrate` is never run on a
+ * sends and bases (and, for an edge a pre-delta merge added while capture was on, by an ordinary
+ * delta) and folded by union. `KeryxDatabase.Schema.migrate` is never run on a
  * transport file.
  *
  * Pure data; the DDL is generated from the same [TableSpec]s the validation reads, so the two
@@ -108,9 +109,9 @@ object TransportSchema {
 
     /**
      * `folder_v2_edges(v2_id, id)` (version 2): identity edges of folders — a pre-upgrade id and a row
-     * id it was re-keyed to — the sender's `ks_v2_edge` rows of kind `folder`. Filled in full sends
-     * and bases only (a delta carries none), folded by union ([ReduceSql]), and merged into the
-     * receiver's `ks_v2_edge`. No reference check: an edge means something without its rows.
+     * id it was re-keyed to — the sender's `ks_v2_edge` rows of kind `folder`. Filled in full by full sends
+     * and bases, in a delta only with the edges recorded in the outbox (`ks_capture_v2_edge_insert`),
+     * folded by union ([ReduceSql]), and merged into the receiver's `ks_v2_edge`. No reference check: an edge means something without its rows.
      * `v2_id` has the kind of the rows' own `v2_id` (any text), since a fold derives edges from them.
      */
     private val FOLDER_V2_EDGES = TableSpec(
