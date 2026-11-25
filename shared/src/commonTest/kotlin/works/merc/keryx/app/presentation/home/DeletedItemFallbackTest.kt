@@ -235,6 +235,50 @@ class DeletedItemFallbackTest {
         scope.cancel()
     }
 
+    /**
+     * Two re-keys published before the list's next value (Z -> M, then M -> A, the map folded as
+     * `Z -> A`, `M -> A`): the list still shows Z, which neither M nor A is, yet it predates both
+     * re-keys. The request stays pending, and a refreshed list without any of the three ids decides it.
+     */
+    @Test
+    fun aRequestRemappedTwiceWhileTheListStillShowsTheFirstIdStaysPending() = runTest {
+        val shown = MutableStateFlow(listOf(Row("t-z", "Kotlin"), Row("t2", "Other")))
+        val checked = mutableListOf<String>()
+        val (scope, fallback) = fallbackFor(shown) { id -> checked += id; false }
+        var fellBack = 0
+        fallback.fallBackOnceHidden("t-z") { fellBack++ }
+        checked.clear()
+
+        fallback.remapPending { if (it == "t-z") "t-m" else it }
+        fallback.remapPending { if (it == "t-z" || it == "t-m") "t-a" else it }
+        assertEquals(0, fellBack, "a list at the first id predates both re-keys")
+        assertEquals(listOf("t-m", "t-a"), checked, "each new id's liveness is checked")
+
+        shown.value = listOf(Row("t2", "Other"))
+        assertEquals(1, fellBack, "a refreshed list without the item decides it")
+        shown.value = emptyList()
+        assertEquals(1, fellBack, "decided once")
+        scope.cancel()
+    }
+
+    /** The same two re-keys, the item living on as A: the request is dropped, not fallen back. */
+    @Test
+    fun aRequestRemappedTwiceOntoALiveRowIsDroppedWhenTheListCatchesUp() = runTest {
+        val shown = MutableStateFlow(listOf(Row("t-z", "Kotlin")))
+        val (scope, fallback) = fallbackFor(shown) { id -> id == "t-a" }
+        var fellBack = 0
+        fallback.fallBackOnceHidden("t-z") { fellBack++ }
+
+        fallback.remapPending { if (it == "t-z") "t-m" else it }
+        fallback.remapPending { if (it == "t-z" || it == "t-m") "t-a" else it }
+        assertEquals(0, fellBack)
+
+        shown.value = listOf(Row("t-a", "Kotlin"))
+        shown.value = emptyList()
+        assertEquals(0, fellBack, "dropped as live: a later deletion from elsewhere moves nothing")
+        scope.cancel()
+    }
+
     @Test
     fun aRemapThatMovesNoPendingIdChangesNothing() = runTest {
         val shown = MutableStateFlow(listOf(Row("t1", "Kotlin")))

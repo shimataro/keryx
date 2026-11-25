@@ -101,9 +101,10 @@ internal class DeletedItemFallback<T>(
      * onto another id (see `HomeViewModel.applyIdRemap`), whose row now stands for it. A moved request
      * is decided against the current value of [shown] at once, as a new request would be: it falls
      * back if the list lacks the new id, and otherwise checks whether that row is live. A list that
-     * still shows the old id was read before the re-key, so it cannot tell whether the new id is
-     * shown: the request then stays pending, with that row's liveness checked, as for a list that
-     * shows the new id. Requests whose id does not move are untouched.
+     * still shows an old id — the request's previous one, or an earlier id of a chain of re-keys that
+     * [remap], which is folded, sends to the same new id — was read before the re-key, so it cannot
+     * tell whether the new id is shown: the request then stays pending, with that row's liveness
+     * checked, as for a list that shows the new id. Requests whose id does not move are untouched.
      */
     fun remapPending(remap: (String) -> String) {
         if (pending.isEmpty()) return
@@ -113,9 +114,11 @@ internal class DeletedItemFallback<T>(
             val moved = remap(previous)
             if (moved == previous) continue
             request.id = moved
-            // A list that still shows the old id predates the re-key, so its lacking the new one
-            // proves nothing: the request stays pending, decided by the liveness check or a newer value.
-            val predatesTheRemap = current.any { idOf(it) == previous }
+            // A list that still shows an id [remap] sends to the new one (the previous id, or one from
+            // an earlier re-key of the same chain, Z -> M -> A with the list still at Z) predates the
+            // re-key, so its lacking the new id proves nothing: the request stays pending, decided by
+            // the liveness check or a newer value.
+            val predatesTheRemap = current.any { idOf(it).let { shown -> shown != moved && remap(shown) == moved } }
             if (!predatesTheRemap && current.none { idOf(it) == moved }) {
                 pending.remove(request)
                 request.fallback()
