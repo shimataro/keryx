@@ -56,5 +56,6 @@ you finished.
 7. When the change alters what a Compose or SwiftUI screen looks like and the app can be
    launched here (the `run` skill, `./gradlew :composeApp:run`, or the Apple app via Xcode /
    `xcodebuild`), take a screenshot of the changed screen and check it against `ui-guidelines`
-   — look at the result rather than inferring it from the code. Where it cannot be launched,
-   say in your report that the visual check was not done.
+   — look at the result rather than inferring it from the code. Where the visual check cannot be
+   completed — because the app cannot be launched, the changed screen cannot be reached, or any
+   other reason — say in your report that the visual check was not done.
