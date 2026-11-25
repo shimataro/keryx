@@ -483,18 +483,18 @@ class V2IdentityMergeTest {
 
     /**
      * Two files assign one feed to different folders at the same stamp, and a third file's edges link
-     * one of those folders to a smaller canonical id — so mapping would change the order of the two
+     * one of those folders to a smaller canonical id — so mapping would reverse the order of the two
      * values. The tie is settled on the values as the files wrote them, so every merge order and every
-     * fold grouping stores the same raw value (one of the two files' values, never a mapped id), the
-     * same stamp and the same resolved folder.
+     * fold grouping stores the greater raw value `d-b` (never the mapped `d-a`, and never `d-ab`, which
+     * mapping would make the greater), the same stamp, and resolves it to the canonical folder `d-a`.
      */
     @Test
     fun aSameStampFolderTieIsSettledOnRawValuesWhateverTheEdgesSayAndInEveryOrderAndFold() {
         val names = listOf(deltaName(DEV_A, 1), deltaName(DEV_B, 1), deltaName(DEV_C, 1))
-        // d-a < d-c < d-b: mapped, d-b becomes d-a and would sort below d-c; raw, it sorts above.
+        // d-a < d-ab < d-b: mapped, d-b becomes d-a and would sort below d-ab; raw, it sorts above.
         fun file(i: Int) = when (i) {
             0 -> transportFile(names[0], folder("d-b", "Folder b"), feed("f1", folderId = "d-b", folderAt = 500))
-            1 -> transportFile(names[1], folder("d-c", "Folder c"), feed("f1", folderId = "d-c", folderAt = 500))
+            1 -> transportFile(names[1], folder("d-ab", "Folder ab"), feed("f1", folderId = "d-ab", folderAt = 500))
             else -> transportFile(
                 names[2],
                 folder("d-a", "Folder a", v2Id = "p"),
@@ -519,13 +519,14 @@ class V2IdentityMergeTest {
         val (referenceLabel, reference) = results.first()
         val referenceState = state(reference)
         val referenceFolders = feedFolders(reference).single().split("|")
-        // The raw value is one of the file values, with the files' stamp — never a mapped id.
-        assertTrue(referenceFolders[2] in setOf("d-b", "d-c"), "raw=${referenceFolders[2]}")
+        // The raw value is the greater file value as written, with the files' stamp — never a mapped id.
+        assertEquals("d-b", referenceFolders[2], "raw")
         assertEquals("500", rows(reference, "SELECT folder_updated_at FROM ks_feed_folder_raw").single())
-        // d-b was re-keyed onto d-a, so it resolves there; d-c is its own.
-        assertEquals(if (referenceFolders[2] == "d-b") "d-a" else "d-c", referenceFolders[1])
-        assertEquals(listOf("d-a", "d-c"), folderIds(reference))
+        // d-b was re-keyed onto d-a, so it resolves there.
+        assertEquals("d-a", referenceFolders[1])
+        assertEquals(listOf("d-a", "d-ab"), folderIds(reference))
         for ((label, db) in results) {
+            assertEquals(listOf("f1|d-a|d-b"), feedFolders(db), label)
             assertEquals(referenceState, state(db), "$label differs from $referenceLabel")
             assertEquals(feedFolders(reference), feedFolders(db), label)
             assertEquals(emptyList(), foreignKeyViolations(db), label)
