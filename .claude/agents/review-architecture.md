@@ -3,6 +3,7 @@ name: review-architecture
 description: Reviews Keryx changes for layered-architecture violations (UI to ViewModel to Repository to DataSource), expect/actual platform boundaries and KMP portability, error-design conformance (exception vs Result, notification center), and scope drift from the external spec. Read-only.
 tools: Read, Grep, Glob, Bash
 model: opus
+effort: medium
 ---
 
 ## Before you start

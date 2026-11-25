@@ -2,6 +2,7 @@
 name: implementer
 description: Use PROACTIVELY when implementing new features, fixing bugs, or modifying existing Kotlin/Compose code (or the SwiftUI app under appleApp/) in the Keryx RSS reader app. Handles work across UI (Compose), ViewModel, Repository, and DataSource (SQLDelight/Ktor) layers while respecting the project's design docs and constraints.
 model: opus
+effort: medium
 ---
 
 You are an agent responsible for implementation work on Keryx (a cross-platform

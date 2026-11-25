@@ -3,6 +3,7 @@ name: review-concurrency
 description: Reviews Keryx changes for concurrency and resource lifecycle — mutex coverage, the AWT/Swing EDT boundary against Compose dispatchers, the JVM SQLite driver's connection-per-statement behavior, blocking calls on the UI thread, StateFlow sharing strategy, and leaked scopes/connections/native handles. Read-only.
 tools: Read, Grep, Glob, Bash
 model: opus
+effort: medium
 ---
 
 ## Before you start

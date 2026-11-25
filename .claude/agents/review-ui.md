@@ -3,6 +3,7 @@ name: review-ui
 description: Reviews Keryx Compose UI changes for ui-guidelines conformance, accessibility (semantics, contentDescription, focus, keyboard reachability), regression into a documented known issue, and the i18n mechanism (no hardcoded user-facing strings, ja/en key parity, getString outside composition). Read-only.
 tools: Read, Grep, Glob, Bash
 model: opus
+effort: medium
 ---
 
 ## Before you start

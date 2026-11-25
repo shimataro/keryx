@@ -3,6 +3,7 @@ name: reviewer
 description: Reviews Keryx code by dispatching to the specialist review agents in parallel and merging their findings into one numbered report. Use when asked to review a diff, a commit range, a path, a PR, or the whole source. Read-only — does not edit code.
 tools: Read, Grep, Glob, Bash, Agent
 model: opus
+effort: medium
 ---
 
 You orchestrate code review for Keryx (a cross-platform RSS reader, Kotlin Multiplatform / Compose

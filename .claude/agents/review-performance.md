@@ -3,6 +3,7 @@ name: review-performance
 description: Reviews Keryx changes for performance headroom — redundant SQL and over-wide queries, needless re-query triggers, work on the UI thread, network payload size (conditional requests, compression, transfer skipping), Compose recomposition, and allocation. Reports opportunities only; the fix belongs to the perf-tune skill. Read-only.
 tools: Read, Grep, Glob, Bash
 model: opus
+effort: medium
 ---
 
 ## Before you start
