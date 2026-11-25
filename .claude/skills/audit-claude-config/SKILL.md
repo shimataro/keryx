@@ -3,6 +3,7 @@ name: audit-claude-config
 description: Audit configuration under `.claude/`. Inspect CLAUDE.md, rules, skills (SKILL.md), subagents (agents/*.md), etc/ shared fragments, and settings(.local).json for outdated / incorrect / ambiguous / redundant / missing descriptions, files to add or remove, content that should be split from CLAUDE.md into rules/, role changes (rules↔skills↔agents), and model and effort assignments, then output recommended fixes with rationale. Invoke explicitly with /audit-claude-config. Also triggered by phrases like "review .claude", "audit settings/rules/skills/subagents".
 model: opus
 effort: medium
+context: fork
 ---
 
 # .claude Configuration Audit
@@ -12,7 +13,8 @@ Inspect everything under `.claude/` (`CLAUDE.md`, `rules/`, `skills/*/SKILL.md`,
 best practices and
 cross-checking against the current source code**, then output recommended fixes with rationale.
 
-> This skill involves **high-accuracy judgments**. Its frontmatter therefore pins `model: opus` at `effort: medium`.
+> This skill involves **high-accuracy judgments**. It runs in a forked subagent context so its
+> frontmatter pins `model: opus` at `effort: medium` for the whole workflow.
 
 ## Process
 

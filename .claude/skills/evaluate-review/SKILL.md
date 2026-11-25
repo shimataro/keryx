@@ -3,13 +3,15 @@ name: evaluate-review
 description: Evaluate a GitHub PR review comment or review summary for technical validity. Each finding (a discussion comment, or a review's line comments and body) is evaluated on its own; the ones needing a change go into one implementation plan for user approval, and once approved each is fixed, verified and committed independently. Accepts multiple URLs, processed one at a time in the order given. Invoke with /evaluate-review <url> [<url> ...].
 model: opus
 effort: medium
+context: fork
 ---
 
 # Evaluate Review
 
 > This skill involves **high-accuracy judgments** — deciding whether a reviewer's claim is
 > actually correct against this codebase, and committing fixes for the ones that are.
-> Its frontmatter therefore pins `model: opus` at `effort: medium`.
+> It runs in a forked subagent context so its frontmatter pins `model: opus` at `effort: medium`
+> for the whole workflow.
 
 Evaluate a GitHub pull-request review comment or review summary for technical validity, then act
 on it: each URL is broken into **items** (Step 4), every item is evaluated on its own, and the
