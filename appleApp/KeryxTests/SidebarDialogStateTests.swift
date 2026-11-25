@@ -95,4 +95,33 @@ struct SidebarDialogStateTests {
         state.renamingRowKey = nil
         #expect(!state.isEditingInline)
     }
+
+    @Test
+    func theDraftBelongsToTheEditAndIsDroppedWhenAnEditStartsOrEnds() {
+        let state = SidebarDialogState()
+        state.startRename(FeedListRowSelectionTag(tagId: "t1"))
+        state.renamingDraft = "Half typed"
+        // Another edit never begins from the previous one's text.
+        state.startRename(FeedListRowSelectionFolder(folderId: "d1"))
+        #expect(state.renamingDraft == nil)
+
+        state.renamingDraft = "Typed"
+        state.endRename()
+        #expect(state.renamingRowKey == nil)
+        #expect(state.renamingDraft == nil)
+        #expect(!state.isEditingInline)
+    }
+
+    /// A merge moving the tag onto another id gives its row another key: the edit is still on that row.
+    @Test
+    func theEditedRowIsRecognisedThroughAReKey() {
+        let state = SidebarDialogState()
+        state.startRename(FeedListRowSelectionTag(tagId: "t-old"))
+        let remap = SidebarIdRemap(tags: ["t-old": "t-new"], folders: [:])
+
+        #expect(state.isRenaming("tag:t-new", remap: remap))
+        #expect(state.isRenaming("tag:t-old", remap: remap))
+        #expect(!state.isRenaming("tag:other", remap: remap))
+        #expect(!state.isRenaming("tag:t-new", remap: .empty))
+    }
 }
