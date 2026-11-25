@@ -113,7 +113,7 @@ the sync bookkeeping tables / `articles_fts` (virtual).
   by recreating it by name). Deleting a folder, on whichever device, also moves its feeds to "no folder" (a raw
   change that syncs like any move; see `FolderRepository.deleteFolder` under "folders"), so a revival brings back only
   the feeds whose raw assignment still names the folder — for example one another device moved into it concurrently
-  with the delete. The capture trigger therefore ignores these two columns; a raw change is captured
+  with the delete. Since the triggers keep these two columns derived, the capture trigger ignores them; a raw change is captured
   instead. `updateFolder` writes the feeds row first with the requested folder, so its FOREIGN KEY still rejects a
   folder that does not exist.
 - `folder_updated_at` / `sort_order_updated_at` / `custom_title_updated_at` / `deleted_updated_at` are
