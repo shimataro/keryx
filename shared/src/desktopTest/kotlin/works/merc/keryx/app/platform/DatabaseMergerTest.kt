@@ -60,7 +60,7 @@ class DatabaseMergerTest {
         )
         val before = schemaEntries(transport)
         try {
-            DatabaseMerger.mergeTransport(local.absolutePath, transport.absolutePath, MergeSql.all)
+            DatabaseMerger.mergeTransport(local.absolutePath, transport.absolutePath, MergeSql.transport)
             assertEquals(before, schemaEntries(transport), "no device-local table or trigger is added to a transport file")
             assertTrue(DriverManager.getConnection("jdbc:sqlite:${local.absolutePath}").use { c ->
                 c.createStatement().use { st -> st.executeQuery("SELECT COUNT(*) FROM feeds WHERE id = 'ft'").use { rs -> rs.next(); rs.getInt(1) == 1 } }
@@ -77,7 +77,7 @@ class DatabaseMergerTest {
         driver.close()
         val transport = transportFile("PRAGMA user_version = ${TransportSchema.VERSION + 1}")
         try {
-            val e = assertFailsWith<SchemaVersionException> { DatabaseMerger.mergeTransport(local.absolutePath, transport.absolutePath, MergeSql.all) }
+            val e = assertFailsWith<SchemaVersionException> { DatabaseMerger.mergeTransport(local.absolutePath, transport.absolutePath, MergeSql.transport) }
             assertEquals(TransportSchema.VERSION, e.localVersion)
         } finally {
             local.delete()
@@ -92,10 +92,10 @@ class DatabaseMergerTest {
         val broken = transportFile("DROP TABLE tags")
         val intact = transportFile()
         try {
-            assertFailsWith<CloudDataIncompatibleException> { DatabaseMerger.mergeTransport(local.absolutePath, broken.absolutePath, MergeSql.all) }
+            assertFailsWith<CloudDataIncompatibleException> { DatabaseMerger.mergeTransport(local.absolutePath, broken.absolutePath, MergeSql.transport) }
             DriverManager.getConnection("jdbc:sqlite:${local.absolutePath}").use { c -> c.createStatement().use { it.execute("DROP TABLE global_settings") } }
             // A broken local schema with an intact transport file is rethrown unclassified.
-            assertFailsWith<SQLException> { DatabaseMerger.mergeTransport(local.absolutePath, intact.absolutePath, MergeSql.all) }
+            assertFailsWith<SQLException> { DatabaseMerger.mergeTransport(local.absolutePath, intact.absolutePath, MergeSql.transport) }
         } finally {
             local.delete()
             broken.delete()

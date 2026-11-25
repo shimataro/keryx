@@ -1016,6 +1016,8 @@ class SyncMergerTest {
                         "updated_at INTEGER NOT NULL, PRIMARY KEY (feed_id, tag_id))",
                 )
                 st.execute("CREATE TABLE global_settings (key TEXT NOT NULL PRIMARY KEY, value TEXT NOT NULL, updated_at INTEGER NOT NULL)")
+                // A pre-delta file at the current schema holds its feeds' raw folder assignments.
+                st.execute("CREATE TABLE ks_feed_folder_raw (feed_id TEXT NOT NULL PRIMARY KEY, folder_updated_at INTEGER, folder_id TEXT)")
                 st.execute("INSERT INTO feeds (id, url, title, updated_at, created_at) VALUES ('f-dup-1', 'https://dup.example/feed', 'Dup 1', 0, 0)")
                 st.execute("INSERT INTO feeds (id, url, title, updated_at, created_at) VALUES ('f-dup-2', 'https://dup.example/feed', 'Dup 2', 0, 0)")
             }
@@ -1296,7 +1298,7 @@ class SyncMergerTest {
             exceptPath = null,
         )
 
-        DatabaseMerger.mergeTransport(bFile.absolutePath, base.absolutePath, MergeSql.all)
+        DatabaseMerger.mergeTransport(bFile.absolutePath, base.absolutePath, MergeSql.transport)
 
         // The canonical id is the smaller of the two derived ids, whichever device held it.
         val bTagId = minOf(IdGenerator.tagId("Job"), IdGenerator.tagId("Work"))
