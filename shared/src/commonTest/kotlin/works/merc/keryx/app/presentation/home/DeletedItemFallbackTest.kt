@@ -142,21 +142,51 @@ class DeletedItemFallbackTest {
 
     // --- remapPending: the deleted item was re-keyed onto another id by a merge ---
 
-    /** A pending request moved onto an id the list does not show falls back at once. */
+    /**
+     * A pending request moved onto an id the list does not show, while the list still shows the old
+     * id, stays pending: that list predates the re-key. The next list value lacking the new id
+     * decides it.
+     */
     @Test
-    fun aRequestRemappedOntoAnIdTheListLacksFallsBack() = runTest {
+    fun aRequestRemappedWhileTheListStillShowsTheOldIdWaitsForANewerList() = runTest {
         val shown = MutableStateFlow(listOf(Row("t-old", "Kotlin"), Row("t2", "Other")))
-        val (scope, fallback) = fallbackFor(shown) { false }
+        val checked = mutableListOf<String>()
+        val (scope, fallback) = fallbackFor(shown) { id -> checked += id; false }
         var fellBack = 0
         fallback.fallBackOnceHidden("t-old") { fellBack++ }
+        checked.clear()
+
+        // The merge re-keyed t-old onto t-new (deleted); the re-key is published before the list's
+        // next value arrives.
+        fallback.remapPending { if (it == "t-old") "t-new" else it }
+        assertEquals(0, fellBack, "a list still showing the old id proves nothing about the new one")
+        assertEquals(listOf("t-new"), checked, "the new id's liveness is checked")
+
+        shown.value = listOf(Row("t2", "Other"))
+        assertEquals(1, fellBack)
+        shown.value = emptyList()
+        assertEquals(1, fellBack, "decided once")
+        scope.cancel()
+    }
+
+    /**
+     * The list is held at the old id while the re-key onto a live row is published: no fallback runs,
+     * since the new row is live — the selection is not reset onto All while the item lives on.
+     */
+    @Test
+    fun aRequestRemappedOntoALiveRowWhileTheListIsHeldAtTheOldIdDoesNotFallBack() = runTest {
+        val shown = MutableStateFlow(listOf(Row("t-old", "Kotlin")))
+        val (scope, fallback) = fallbackFor(shown) { id -> id == "t-new" }
+        var fellBack = 0
+        fallback.fallBackOnceHidden("t-old") { fellBack++ }
+
+        fallback.remapPending { if (it == "t-old") "t-new" else it }
         assertEquals(0, fellBack)
 
-        // The merge re-keyed t-old onto t-new, whose row (deleted) the list does not show; the re-key
-        // is published before the list's next value arrives.
-        fallback.remapPending { if (it == "t-old") "t-new" else it }
-        assertEquals(1, fellBack)
-        shown.value = listOf(Row("t2", "Other"))
-        assertEquals(1, fellBack, "decided once")
+        shown.value = listOf(Row("t-new", "Kotlin"))
+        // Dropped as live: a later deletion from elsewhere moves nothing.
+        shown.value = emptyList()
+        assertEquals(0, fellBack)
         scope.cancel()
     }
 

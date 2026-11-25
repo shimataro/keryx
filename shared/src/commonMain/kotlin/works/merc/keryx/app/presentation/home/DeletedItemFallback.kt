@@ -100,17 +100,23 @@ internal class DeletedItemFallback<T>(
      * Moves every pending request onto the id [remap] gives it — a merge re-keyed the deleted item
      * onto another id (see `HomeViewModel.applyIdRemap`), whose row now stands for it. A moved request
      * is decided against the current value of [shown] at once, as a new request would be: it falls
-     * back if the list lacks the new id, and otherwise checks whether that row is live. Requests
-     * whose id does not move are untouched.
+     * back if the list lacks the new id, and otherwise checks whether that row is live. A list that
+     * still shows the old id was read before the re-key, so it cannot tell whether the new id is
+     * shown: the request then stays pending, with that row's liveness checked, as for a list that
+     * shows the new id. Requests whose id does not move are untouched.
      */
     fun remapPending(remap: (String) -> String) {
         if (pending.isEmpty()) return
         val current = shown.value
         for (request in pending.toList()) {
-            val moved = remap(request.id)
-            if (moved == request.id) continue
+            val previous = request.id
+            val moved = remap(previous)
+            if (moved == previous) continue
             request.id = moved
-            if (current.none { idOf(it) == moved }) {
+            // A list that still shows the old id predates the re-key, so its lacking the new one
+            // proves nothing: the request stays pending, decided by the liveness check or a newer value.
+            val predatesTheRemap = current.any { idOf(it) == previous }
+            if (!predatesTheRemap && current.none { idOf(it) == moved }) {
                 pending.remove(request)
                 request.fallback()
             } else {
