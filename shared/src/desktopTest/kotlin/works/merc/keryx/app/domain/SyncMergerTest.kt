@@ -1281,7 +1281,17 @@ class SyncMergerTest {
      * as a second row.
      */
     @Test
-    fun preUpgradeRowsRenamedDifferentlyBeforeMigrationAreReconciledByV2Id() {
+    fun preUpgradeRowsRenamedDifferentlyBeforeMigrationAreReconciledByV2Id() = reconcileRenamedPreUpgradeRows(stripFolderV2Ids = false)
+
+    /**
+     * As [preUpgradeRowsRenamedDifferentlyBeforeMigrationAreReconciledByV2Id], with the base's folder
+     * rows carrying no `v2_id`: the folder identity is reachable only through the base's exported
+     * `folder_v2_edges`, which [MergeSql.transport] reads (and [MergeSql.all] does not).
+     */
+    @Test
+    fun preUpgradeFoldersAreReconciledThroughTheBasesEdgeTableAlone() = reconcileRenamedPreUpgradeRows(stripFolderV2Ids = true)
+
+    private fun reconcileRenamedPreUpgradeRows(stripFolderV2Ids: Boolean) {
         val oldTagId = "old-tag-id"
         val oldFolderId = "old-folder-id"
         val aFile = migratedRenamedDevice("device-a-", oldTagId, oldFolderId, "Job", "JobDir", stamp = 300, assignChildren = true)
@@ -1297,6 +1307,17 @@ class SyncMergerTest {
             TransportMeta(TransportFixtures.GEN, TransportFileKind.BASE, TransportFixtures.DEV_A, 1, 1_000),
             exceptPath = null,
         )
+        if (stripFolderV2Ids) {
+            java.sql.DriverManager.getConnection("jdbc:sqlite:${base.absolutePath}").use { conn ->
+                conn.createStatement().use { st ->
+                    st.execute("UPDATE folders SET v2_id = NULL")
+                    st.executeQuery("SELECT COUNT(*) FROM folder_v2_edges WHERE v2_id = '$oldFolderId'").use { rs ->
+                        rs.next()
+                        assertTrue(rs.getInt(1) > 0, "precondition: the base carries A's folder edge")
+                    }
+                }
+            }
+        }
 
         DatabaseMerger.mergeTransport(bFile.absolutePath, base.absolutePath, MergeSql.transport)
 
