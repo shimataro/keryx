@@ -81,12 +81,8 @@ Pick the items that genuinely apply; don't churn code that is already clean.
   to report`), not applied.
 - **Magic numbers / literals** → named constants in `core/Constants.kt` where a
   name adds clarity. Don't over-abstract one-off literals.
-- **Deep nesting / complex conditionals** → guard clauses, early return, `when`,
-  extract-method.
-- **Non-idiomatic Kotlin** → scope functions (`let`/`also`/`apply`/`run`),
-  null-safety operators (`?.`/`?:`/`requireNotNull`), exhaustive `when` over
-  sealed types, immutability (`val`, immutable collections). Leave
-  already-idiomatic code alone.
+- **Deep nesting / complex conditionals, non-idiomatic Kotlin** → flatten and use
+  the idiomatic construct. Leave already-idiomatic code alone.
 - **Comment / KDoc hygiene** → drop stale/redundant comments; ensure English
   (constraint #9 — except a comment in a localized message file such as
   `values-ja/strings.xml`, which follows that file's own language; never translate it).
@@ -141,28 +137,16 @@ skill hands its performance findings off to.
 
 ## Do NOT touch (invariants)
 
-These are hard stops — see `.claude/CLAUDE.md` "Critical constraints" #1–#10 and
-`docs/*.md`. A refactor that crosses one of these is a redesign; stop and ask.
+`.claude/CLAUDE.md` "Critical constraints" #1–#10 and `docs/*.md` are hard stops; a
+refactor that crosses one is a redesign — stop and ask. Two need a refactoring-specific
+reading:
 
 1. **No behavior / API / feature change** (#5). Don't alter the sync algorithm,
    `MergeSql` statement semantics or application order, the error taxonomy, or
    feature scope (`docs/sync-architecture.md`, `docs/error-design.md`).
-2. **FTS rules** (#1): never add `articles_fts` to a `.sq` file, never DROP the
-   live index, never swap `FtsManager.indexMissing()` for a full `'rebuild'` on a
-   hot path.
-3. **Merge stays on `DatabaseMerger`'s dedicated JDBC connection** (#2) — not the
-   SQLDelight driver.
-4. **No hardcoded user-facing strings** (#3) — keep Compose Resources
-   (`values/strings.xml`, `getString`, `NotificationMessages`).
-5. **Platform code stays behind `expect`/`actual`** (#4); desktop `actual`s in
-   `desktopMain`.
-6. **No new architecture / patterns** (#6, `docs/app-architecture.md`): keep the
-   layered UI → ViewModel → Repository → DataSource shape, use SQLDelight
-   generated classes as-is (no separate domain model classes), no Riverpod.
-7. **English source** (#9) for comments, KDoc, and non-UI string literals (comments in a localized
-   message file follow that file's own language).
-8. **License attribution** (#8): only relevant if a shipped runtime dependency is
-   removed as dead — then update `THIRD-PARTY-LICENSES.md`.
+2. **No new architecture / patterns** (#6, `docs/app-architecture.md`): keep the
+   layered UI → ViewModel → Repository → DataSource shape, and use SQLDelight
+   generated classes as-is (no separate domain model classes).
 
 When a batch touches `ui/`, read the **`ui-guidelines` skill** first (pane tones,
 divider policy, article card style, flat native-feel components, dialog rules).
