@@ -1,6 +1,8 @@
 ---
 name: audit-claude-config
-description: Audit configuration under `.claude/`. Inspect CLAUDE.md, rules, skills (SKILL.md), subagents (agents/*.md), etc/ shared fragments, and settings(.local).json for outdated / incorrect / ambiguous / redundant / missing descriptions, files to add or remove, content that should be split from CLAUDE.md into rules/, role changes (rules↔skills↔agents), and model assignments, then output recommended fixes with rationale. Invoke explicitly with /audit-claude-config. Also triggered by phrases like "review .claude", "audit settings/rules/skills/subagents".
+description: Audit configuration under `.claude/`. Inspect CLAUDE.md, rules, skills (SKILL.md), subagents (agents/*.md), etc/ shared fragments, and settings(.local).json for outdated / incorrect / ambiguous / redundant / missing descriptions, files to add or remove, content that should be split from CLAUDE.md into rules/, role changes (rules↔skills↔agents), and model and effort assignments, then output recommended fixes with rationale. Invoke explicitly with /audit-claude-config. Also triggered by phrases like "review .claude", "audit settings/rules/skills/subagents".
+model: opus
+effort: medium
 ---
 
 # .claude Configuration Audit
@@ -10,10 +12,7 @@ Inspect everything under `.claude/` (`CLAUDE.md`, `rules/`, `skills/*/SKILL.md`,
 best practices and
 cross-checking against the current source code**, then output recommended fixes with rationale.
 
-> This skill involves **high-accuracy judgments**. **Run it in an opus session.**
-> Skills inherit the caller session's model and cannot fix a model in frontmatter,
-> so verify the session model is opus before executing;
-> if it is not, tell the user and ask whether to continue.
+> This skill involves **high-accuracy judgments**. Its frontmatter therefore pins `model: opus` at `effort: medium`.
 
 ## Process
 
@@ -32,7 +31,7 @@ cross-checking against the current source code**, then output recommended fixes 
 3. **Files to remove** — files that no longer serve a purpose or are duplicated.
 4. **Should `CLAUDE.md` be split into `rules/`?** — If bloated, split via `@` imports; otherwise keep as-is.
 5. **Files that should change roles** — e.g. ever-loaded doc → on-demand skill, rule → agent, etc.
-6. **Model assignments** — whether subagent/skill models match their roles (see policy below).
+6. **Model and effort assignments** — whether subagent/skill models and effort levels match their roles (see the model and effort policies below).
 
 ## Verification points (concrete back-up methods)
 
@@ -56,8 +55,17 @@ cross-checking against the current source code**, then output recommended fixes 
   - Keep `CLAUDE.md` concise. Consider **converting large domain-specific guides (hundreds of lines) into on-demand skills** rather than importing them constantly (saves context when only loaded for related work).
   - Check whether the split between `settings.json` (shared, committed) and `settings.local.json` (personal, gitignored) is appropriate (safe shared permissions in the former, machine-specific / personal permissions in the latter).
   - Skill `SKILL.md` frontmatter should have a `name` and a sufficiently specific `description` for launch detection.
-  - Subagent frontmatter should have `name`/`description`/plus `tools`/`model` when needed.
-- **Model policy**: Subagents requiring high accuracy (detecting design violations, implementing under many constraints, audits involving difficult judgment) should use `model: opus`. Mechanical work centered on following existing patterns can use `sonnet`. Skills cannot set `model:` in frontmatter and inherit the caller's model, so skills requiring high accuracy should state in the body that they should be run in an opus session.
+  - Subagent frontmatter should have `name`/`description`/plus `tools`/`model`/`effort` when needed.
+- **Model policy**: Both subagents (`agents/*.md`) and skills (`SKILL.md`) set `model:` and `effort:`
+  in frontmatter; a skill that omits them inherits the caller session's. Work requiring high accuracy
+  (detecting design violations, checking long documents against code, implementing or testing under
+  many constraints, audits involving difficult judgment) should use `model: opus`. Well-scoped work
+  centered on following existing patterns can use `sonnet`. Lightweight or reference-only skills may
+  leave both unset.
+- **Effort policy**: `effort: medium` is the baseline. Raise one to `high` only after a concrete miss
+  at medium has been observed, and record why next to the setting. If a `sonnet` agent falls short,
+  switch it to `opus` rather than raising its effort. Flag any `high`/`xhigh`/`max` without a stated
+  reason, and any body text that asks the user to switch models instead of pinning one.
 
 ## Output format
 

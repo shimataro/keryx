@@ -1,15 +1,15 @@
 ---
 name: evaluate-issue
 description: Evaluate a GitHub issue of this repository. Each point in it is first routed by whether the author asks for a change; a point that does not (a question) gets a drafted answer checked against the source, and one that does (a feature request, bug report, doc fix) is checked for a correct premise and then for validity, with spec-changing points left to the user. Valid points go into one implementation plan for user approval, and once approved each is fixed, verified and committed independently. Replies are drafted, never posted. Accepts multiple URLs, processed one at a time in the order given. Invoke with /evaluate-issue <url> [<url> ...].
+model: opus
+effort: medium
 ---
 
 # Evaluate Issue
 
 > This skill involves **high-accuracy judgments** — deciding whether an issue's premise is
 > actually true of this codebase, whether a request is worth doing, and committing fixes for the
-> ones that are. **Run it in an opus session.** Skills inherit the caller session's model and
-> cannot pin one in frontmatter, so verify the session model is opus before executing;
-> if it is not, tell the user and ask whether to continue.
+> ones that are. Its frontmatter therefore pins `model: opus` at `effort: medium`.
 
 Evaluate a GitHub issue, then act on it: each URL is broken into **items** (Step 5). An item whose
 author asks for no change is answered (Step 6); an item that asks for a change is checked for a
