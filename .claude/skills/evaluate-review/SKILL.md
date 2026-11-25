@@ -71,9 +71,11 @@ the end of Step 8) if more than one URL was given.
 
 ### Step 1 — Arguments
 
-With no URL, ask the user for one. With several, run each through Steps 2–8 as its own
-independent pass, **one at a time, in the order given**, finishing one URL's Step 8 before
-starting the next — their plans, fixes and commits must not interleave.
+With no URL, ask the user for one. With several, the fork runs each URL through Steps 2–8.5 as
+its own independent pass, **one at a time, in the order given**. The main conversation then
+executes each URL's hand-off in that same order, finishing one URL's implementation before the
+next URL's plan approval; because a later plan is written before earlier fixes are committed, the
+8.5 hand-off re-checks each later plan against the current tree.
 
 ### Step 2 — Validate URL format
 
@@ -461,6 +463,10 @@ conversation.
    - Right before the first edit, re-run `git status --porcelain` and confirm it still matches
      8.4's clean baseline. If it no longer does, commit nothing and end this URL
      (`Working tree not clean`).
+   - If an earlier URL of this run has already committed fixes, re-check this plan's premises —
+     the files it plans to modify and the anchors its Changes cite — against the current tree.
+     If those commits have changed them, do not approve the stale plan; re-run `/evaluate-review`
+     for this URL alone instead.
    - Re-fetch the PR head with
      `gh api repos/{owner}/{repo}/pulls/{pull_number} --jq '.head.sha'` and compare it with the
      `PR head` SHA Step 3.1 printed. Never re-bind it from the API here: that returns the new
