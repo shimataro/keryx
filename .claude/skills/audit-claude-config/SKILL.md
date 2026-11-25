@@ -42,6 +42,11 @@ cross-checking against the current source code**, then output recommended fixes 
   You can verify whether it actually reaches by checking if the file body is injected into the session
   context at the top of the conversation (this skill has previously detected a broken import because
   `ui-guidelines.md` was missing even though `docs/*.md` were expanded).
+  Because this skill runs in a forked subagent context, this check observes the **fork's own fresh
+  session context** against the current files. That is still valid evidence for the current config — a
+  broken import is missing in the fork's context too — but it does not observe the user's live parent
+  session. Report any finding that depends on the live parent session's state with that limitation
+  noted.
 - **`@` imports do not work in `agents/*.md`.** They are expanded in `CLAUDE.md`, but an agent
   definition's own `@path` is not — an agent that needs a document must be told to `Read` it by path.
   Flag any `@` import found in `.claude/agents/`: it is silently doing nothing. (Found once in
