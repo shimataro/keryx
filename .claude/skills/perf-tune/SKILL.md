@@ -383,7 +383,8 @@ Return a single report containing:
   measured baseline, suspected win, integrity/sync-compatibility impact (Red only),
   both sides of the trade (axis-2 only).
 - The mandatory-review gate result (completed or blocked, and which perspectives
-  ran).
+  ran). Every finding the six mandatory reviews produced — each naming the
+  candidate it affects and its severity — passes through unchanged.
 - A plan file written to `~/.claude/plans/perf-tune-{timestamp}.md` with:
   - **Context** — what is being optimized and why.
   - **One section per candidate**, in priority order, each with:
@@ -402,11 +403,13 @@ Return a single report containing:
 
 **Executed in the main conversation** per the hand-off block from Step 3.
 
-Present the tiered, prioritized list and use **`AskUserQuestion`** once to confirm
-the Green and Yellow batches. Take Red items **one at a time**, each with its
-impact stated. Proceed with only what was approved. If the list contains any
-Yellow/Red item, Step 3's mandatory review must have completed first — this gate
-is downstream of that one, not a substitute for it.
+Present the tiered, prioritized list together with every mandatory-review finding that
+names each candidate, and use **`AskUserQuestion`** once to confirm the Green and Yellow
+batches. Take Red items **one at a time**, each with its impact and every associated
+finding shown. Proceed with only what was approved. If the list contains any Yellow/Red
+item, Step 3's mandatory review must have completed first — this gate is downstream of
+that one, not a substitute for it. A candidate with an unresolved integrity finding is
+not approved unless that finding was shown.
 
 Each of these approvals is also its item's **one-time run confirmation**
 (`.claude/etc/per-item-commit.md` §1): the bulk Green/Yellow approval covers
