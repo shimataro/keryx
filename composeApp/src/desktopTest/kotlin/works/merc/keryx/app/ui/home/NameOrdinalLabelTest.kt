@@ -14,6 +14,7 @@ import androidx.compose.ui.test.v2.runDesktopComposeUiTest
 import works.merc.keryx.app.data.local.db.Folders
 import works.merc.keryx.app.data.local.db.Tags
 import works.merc.keryx.app.presentation.home.DropBoundary
+import works.merc.keryx.app.presentation.home.OrdinalName
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
@@ -59,7 +60,7 @@ class NameOrdinalLabelTest {
             MaterialTheme {
                 TagRow(
                     tag = tag("t2", "Work"),
-                    ordinal = 2,
+                    label = OrdinalName("Work", 2),
                     count = 0,
                     expanded = false,
                     selected = false,
@@ -82,7 +83,7 @@ class NameOrdinalLabelTest {
             MaterialTheme {
                 TagRow(
                     tag = tag("t1", "Job"),
-                    ordinal = null,
+                    label = OrdinalName("Job", null),
                     count = 0,
                     expanded = false,
                     selected = false,
@@ -105,7 +106,7 @@ class NameOrdinalLabelTest {
             MaterialTheme {
                 FolderGroupHeader(
                     folder = folder("d2", "Work"),
-                    ordinal = 2,
+                    label = OrdinalName("Work", 2),
                     count = 0,
                     collapsed = false,
                     selected = false,
@@ -132,7 +133,7 @@ class NameOrdinalLabelTest {
             MaterialTheme {
                 TagRow(
                     tag = tag("t2", "Work"),
-                    ordinal = 2,
+                    label = OrdinalName("Work", 2),
                     count = 0,
                     expanded = false,
                     selected = false,

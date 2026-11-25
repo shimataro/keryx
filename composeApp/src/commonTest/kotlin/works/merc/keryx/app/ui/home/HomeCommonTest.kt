@@ -14,7 +14,6 @@ import kotlin.test.assertTrue
 import works.merc.keryx.app.presentation.home.FeedListRowSelection
 import works.merc.keryx.app.presentation.home.FeedListSelectionTarget
 import works.merc.keryx.app.presentation.home.ReorderTarget
-import works.merc.keryx.app.presentation.home.articleListTitle
 import works.merc.keryx.app.presentation.home.buildOrderedFeedListRows
 import works.merc.keryx.app.presentation.home.feedsForTag
 import works.merc.keryx.app.presentation.home.groupFeedsByFolder

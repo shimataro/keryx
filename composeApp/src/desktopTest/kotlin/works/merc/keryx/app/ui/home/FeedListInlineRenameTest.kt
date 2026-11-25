@@ -14,6 +14,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -24,16 +25,21 @@ import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.requestFocus
 import androidx.compose.ui.test.v2.runDesktopComposeUiTest
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
 import org.koin.compose.KoinApplication
 import org.koin.dsl.koinConfiguration
 import org.koin.dsl.module
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.data.local.db.KeryxDatabase
+import works.merc.keryx.app.domain.TagFolderIdRemaps
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
 import works.merc.keryx.app.insertFeedTag
 import works.merc.keryx.app.insertFolder
 import works.merc.keryx.app.insertTag
+import works.merc.keryx.app.rekeyFolderForTest
+import works.merc.keryx.app.rekeyTagForTest
 import works.merc.keryx.app.presentation.home.FeedListRowSelection
 import works.merc.keryx.app.presentation.home.HomeViewModel
 import works.merc.keryx.app.ui.menu.MenuCommand
@@ -543,6 +549,49 @@ class FeedListInlineRenameTest {
             // blur-commit as the scene disposes, writing to the DB after driver.close() below.
             editor().performKeyInput { pressKey(Key.Escape) }
             waitForIdle()
+        }
+    }
+    @Test
+    fun aReKeyOfTheTagBeingRenamedKeepsTheEditorOpenWithTheTypedText() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        db.insertTag("t-old", "Tag One", sortOrder = 0L)
+        val remaps = TagFolderIdRemaps(db, Dispatchers.Unconfined)
+        useHomeViewModel(driver, db, idRemaps = remaps) { fixture ->
+            val vm = fixture.vm
+            setInlineRenameContent(vm)
+            startInlineRename(vm, ArticleFilter.Tag("t-old"))
+            typeName("Half typed")
+
+            // A sync merge re-keys the tag onto another id while the editor is open.
+            // As a merge does: the re-key is published before the lists that changed are notified.
+            driver.rekeyTagForTest("t-old", "t-new") { runBlocking { remaps.publishFromDb() } }
+            waitForIdle()
+
+            editor().assertIsDisplayed()
+            editor().assertTextContains("Half typed")
+            pressEnter()
+            assertEquals("Half typed", db.tagOf("t-new").name, "the commit lands on the row the tag became")
+        }
+    }
+
+    @Test
+    fun aReKeyOfTheFolderBeingRenamedKeepsTheEditorOpenWithTheTypedText() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        db.insertFolder("d-old", "Folder One", sortOrder = 0L)
+        val remaps = TagFolderIdRemaps(db, Dispatchers.Unconfined)
+        useHomeViewModel(driver, db, idRemaps = remaps) { fixture ->
+            val vm = fixture.vm
+            setInlineRenameContent(vm)
+            startInlineRename(vm, ArticleFilter.Folder("d-old"))
+            typeName("Half typed")
+
+            driver.rekeyFolderForTest("d-old", "d-new") { runBlocking { remaps.publishFromDb() } }
+            waitForIdle()
+
+            editor().assertIsDisplayed()
+            editor().assertTextContains("Half typed")
+            pressEnter()
+            assertEquals("Half typed", db.folderNameOf("d-new"))
         }
     }
 }

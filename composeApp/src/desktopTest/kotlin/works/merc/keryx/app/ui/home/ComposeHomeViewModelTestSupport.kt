@@ -40,12 +40,14 @@ internal suspend fun <T> ComposeUiTest.useHomeViewModel(
     // See newHomeViewModel's own parameter: lets a test hold a selection's body lookup.
     dispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
     // See newHomeViewModel's own parameter: lets a test publish a tag/folder id re-key.
-    idRemaps: TagFolderIdRemaps = TagFolderIdRemaps(db),
+    idRemaps: TagFolderIdRemaps = TagFolderIdRemaps(db, Dispatchers.Unconfined),
+    // See newHomeViewModel's own parameter: models a process restart over the same saved settings.
+    settingsDir: String? = null,
     block: suspend (HomeViewModelFixture) -> T,
 ): T {
     val fixture = newHomeViewModel(
         driver, db, syncScheduler, clock, activityCenter, tokenStorage, appKey, manualSync = manualSync, dispatcher = dispatcher,
-        idRemaps = idRemaps,
+        idRemaps = idRemaps, settingsDir = settingsDir,
     )
     return try {
         // waitForIdle only on the success path: it rethrows Compose's own uncaught exceptions, and

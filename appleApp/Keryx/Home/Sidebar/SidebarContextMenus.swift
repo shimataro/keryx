@@ -65,7 +65,7 @@ enum SidebarContextMenus {
                 home.viewModel.moveFeed(feedId: feed.id, folderId: nil, targetFeedId: nil)
             },
         ] + home.sidebar.sortedFolders.map { folder in
-            UIAction(title: nameWithOrdinal(folder.name, home.folderOrdinals[folder.id]), state: feed.folder_id == folder.id ? .on : .off) { _ in
+            UIAction(title: home.labels.name(of: folder), state: feed.folder_id == folder.id ? .on : .off) { _ in
                 home.viewModel.moveFeed(feedId: feed.id, folderId: folder.id, targetFeedId: nil)
             }
         } + [
@@ -74,7 +74,7 @@ enum SidebarContextMenus {
         let attachedTagIds = home.feedTagMap[feed.id] ?? []
         let assignTags = UIMenu(title: L("home_assign_tags"), image: UIImage(systemName: "tag"), children: home.sidebar.sortedTags.map { tag in
             let attached = attachedTagIds.contains(tag.id)
-            return UIAction(title: nameWithOrdinal(tag.name, home.tagOrdinals[tag.id]), state: attached ? .on : .off) { _ in
+            return UIAction(title: home.labels.name(of: tag), state: attached ? .on : .off) { _ in
                 home.viewModel.setFeedTag(feedId: feed.id, tagId: tag.id, attached: !attached)
             }
         } + [

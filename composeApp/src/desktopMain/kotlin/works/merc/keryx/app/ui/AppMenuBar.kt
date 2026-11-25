@@ -144,8 +144,7 @@ internal fun FrameWindowScope.AppMenuBar(
     val tags by homeVm.tags.collectAsState()
     val folders by homeVm.folders.collectAsState()
     val feedTagMap by homeVm.feedTagMap.collectAsState()
-    val tagOrdinals by homeVm.tagOrdinals.collectAsState()
-    val folderOrdinals by homeVm.folderOrdinals.collectAsState()
+    val tagFolderLabels by homeVm.tagFolderLabels.collectAsState()
     // Collected here (rather than by main.kt's `application {}`, which deliberately passes the raw
     // flow down to the tray) so a download-progress tick only rebuilds this menu tree. The label is
     // already rounded to 5% steps by `updateMenuEntry` → `roundedTrayProgressPercent`, so the D-Bus
@@ -286,8 +285,8 @@ internal fun FrameWindowScope.AppMenuBar(
         currentFolderId = selectedFeed?.folder_id,
         // The submenus' labels with each tag/folder's ordinal applied — resolved here, in
         // composition, because buildAppMenuTree runs outside it (see SelectedFeedMenuData).
-        tagDisplayNames = tags.associate { it.id to nameWithOrdinal(it.name, tagOrdinals[it.id]) },
-        folderDisplayNames = folders.associate { it.id to nameWithOrdinal(it.name, folderOrdinals[it.id]) },
+        tagDisplayNames = tags.associate { it.id to nameWithOrdinal(tagFolderLabels.tag(it.id, it.name)) },
+        folderDisplayNames = folders.associate { it.id to nameWithOrdinal(tagFolderLabels.folder(it.id, it.name)) },
     )
     val tree = buildAppMenuTree(ui, labels, actions, menuBarToggle, selectedFeedMenu, updateEntry)
 

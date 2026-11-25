@@ -174,7 +174,7 @@ struct HomeCommands: Commands {
                 Menu(L("home_assign_tags")) {
                     ForEach(sortedTags(home), id: \.id) { tag in
                         if let feed = selectedFeed(home) {
-                            Toggle(nameWithOrdinal(tag.name, home.tagOrdinals[tag.id]), isOn: Binding(
+                            Toggle(home.labels.name(of: tag), isOn: Binding(
                                 get: { home.feedTagMap[feed.id]?.contains(tag.id) ?? false },
                                 set: { attached in home.viewModel.setFeedTag(feedId: feed.id, tagId: tag.id, attached: attached) }
                             ))
@@ -195,7 +195,7 @@ struct HomeCommands: Commands {
                             set: { _ in home.viewModel.moveFeed(feedId: feed.id, folderId: nil, targetFeedId: nil) }
                         ))
                         ForEach(sortedFolders(home), id: \.id) { folder in
-                            Toggle(nameWithOrdinal(folder.name, home.folderOrdinals[folder.id]), isOn: Binding(
+                            Toggle(home.labels.name(of: folder), isOn: Binding(
                                 get: { feed.folder_id == folder.id },
                                 set: { _ in home.viewModel.moveFeed(feedId: feed.id, folderId: folder.id, targetFeedId: nil) }
                             ))

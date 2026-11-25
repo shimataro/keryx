@@ -34,11 +34,12 @@ struct SidebarModelTests {
         tags: [Tags] = [],
         feedTagMap: [String: Set<String>] = [:],
         collapsedFolderIds: Set<String> = [],
-        expandedTagIds: Set<String> = []
+        expandedTagIds: Set<String> = [],
+        labels: TagFolderLabelSet = .empty
     ) -> SidebarModel {
         SidebarModel(
             feeds: feeds, folders: folders, tags: tags, feedTagMap: feedTagMap,
-            collapsedFolderIds: collapsedFolderIds, expandedTagIds: expandedTagIds
+            collapsedFolderIds: collapsedFolderIds, expandedTagIds: expandedTagIds, labels: labels
         )
     }
 

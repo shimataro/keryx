@@ -47,12 +47,16 @@ final class HomeObservable: ObservableAssignment {
     private(set) var subscribedFeedUrls: Set<String> = []
     private(set) var tags: [Tags] = []
     private(set) var folders: [Folders] = []
-    /// Each live tag's ordinal among the tags sharing its name, by tag id (`HomeViewModel.tagOrdinals`
-    /// — `NameOrdinals.kt` in `:shared` decides it) — what `nameWithOrdinal` renders as "X (2)".
-    /// Drives `sidebar` (the rows' titles), the context menus and the menu bar.
-    private(set) var tagOrdinals: [String: Int32] = [:]
-    /// The folder counterpart of `tagOrdinals`, by folder id.
-    private(set) var folderOrdinals: [String: Int32] = [:]
+    /// Every tag's and folder's display name with its ordinal among the rows sharing its name
+    /// (`HomeViewModel.tagFolderLabels` — `NameOrdinals.kt` in `:shared` decides it), what
+    /// `NameLabel.text` renders as "X (2)". One snapshot, so a name and its ordinal always agree. Drives
+    /// `sidebar` (the rows' titles), the context menus, the delete alerts and the menu bar.
+    private(set) var labels: TagFolderLabelSet = .empty
+    /// The same snapshot as the Kotlin value the shared functions take (`articleListOrdinalName`).
+    @ObservationIgnored private var kotlinLabels: TagFolderLabels = TagFolderLabels.companion.EMPTY
+    /// The tag/folder id re-keys a sync merge has published (`HomeViewModel.tagFolderIdRemap`): what an
+    /// id or row key held from before a re-key — an inline rename's — is compared through.
+    private(set) var idRemap: SidebarIdRemap = .empty
     private(set) var feedTagMap: [String: Set<String>] = [:]
     /// `HomeViewModel.feedFetchProblems` — why a feed row is flagged, by feed id; part of `sidebar`.
     @ObservationIgnored private var feedFetchProblems: [String: FeedFetchProblem] = [:]
@@ -66,7 +70,12 @@ final class HomeObservable: ObservableAssignment {
     /// The generation of the user's selection that put `filter` there (`FilterSelection`): it moves on
     /// a switch to another filter, and not when a merge re-keys the selected tag or folder (which
     /// changes `filter` alone). What the article list keys its scroll-to-top on.
-    private(set) var filterGeneration: Int64 = 0
+    var filterGeneration: Int64 { filterTracker.generation }
+    @ObservationIgnored private var filterTracker = FilterSelectionTracker()
+    /// How many times the user has selected a row (`HomeViewModel.selectedRowGeneration`). The sidebar
+    /// scrolls to the selected row when it moves — not when `selectedRowInstance` changes, which a merge
+    /// re-keying the selected tag or folder does too.
+    private(set) var selectedRowGeneration: Int64 = 0
     /// The article list's pull in flight — see `pullToRefresh()`.
     @ObservationIgnored private let articleListPull = AbandonableRefresh()
     private(set) var selectedRowInstance: FeedListRowSelection = FeedListRowSelectionAll()
@@ -247,6 +256,7 @@ final class HomeObservable: ObservableAssignment {
         // The sidebar's selected row is restored with it; mirroring only the filter would leave the
         // two disagreeing (the highlight follows both) until the first delivery.
         assignSelectedRowInstance(viewModel.selectedRowInstance.value)
+        assignSelectedRowGeneration(viewModel.selectedRowGeneration.value.int64Value)
         // The first delivery then finds the filter unchanged and would not set the header from it.
         updateFeedListSelectionTarget()
     }
@@ -258,6 +268,7 @@ final class HomeObservable: ObservableAssignment {
         viewModel.selectFilter(filter: filter, instance: instance)
         assignFilterSelection(viewModel.filterSelection.value)
         assignSelectedRowInstance(viewModel.selectedRowInstance.value)
+        assignSelectedRowGeneration(viewModel.selectedRowGeneration.value.int64Value)
         updateFeedListSelectionTarget()
     }
 
@@ -336,7 +347,9 @@ final class HomeObservable: ObservableAssignment {
     /// folder is no such switch: the pull is tracked under the new id from then on
     /// (`HomeRefreshController.remapPulls`), so the wait follows `filter` as it is at each delivery.
     func pullToRefresh() async {
-        await articleListPull.run { await self.awaitPull(of: { self.filter }) { self.viewModel.pullToRefresh() } }
+        await articleListPull.run {
+            await self.awaitPull(of: { self.viewModel.filterSelection.value.filter }) { self.viewModel.pullToRefresh() }
+        }
     }
 
     /// The iOS sidebar's pull: every feed, whatever the article list shows. Held up like
@@ -345,12 +358,15 @@ final class HomeObservable: ObservableAssignment {
         await awaitPull(of: { ArticleFilterAll() }) { viewModel.pullToRefreshAll() }
     }
 
+    /// `filter` is read at each delivery from the ViewModel's own current value, not from the mirrored
+    /// `self.filter`: that one is written by another task (`observeFilter`), and nothing orders its
+    /// delivery against this loop's — a pull moved onto a re-keyed filter could be seen here before the
+    /// mirror caught up, and the wait would end early.
     private func awaitPull(of filter: () -> ArticleFilter, start: () -> Void) async {
         await PullRefreshHold.run {
             start()
             for await pending in viewModel.pullRefreshingFilters {
-                let current = filter() as AnyObject
-                if !pending.contains(where: { kotlinValuesEqual($0 as AnyObject, current) }) { return }
+                if !PullMembership.isPending(filter() as AnyObject, in: pending) { return }
             }
         }
     }
@@ -369,8 +385,8 @@ final class HomeObservable: ObservableAssignment {
         async let t1b: () = observeStructuralFeeds()
         async let t2: () = observeTags()
         async let t3: () = observeFolders()
-        async let t3b: () = observeTagOrdinals()
-        async let t3c: () = observeFolderOrdinals()
+        async let t3b: () = observeTagFolderLabels()
+        async let t3c: () = observeIdRemap()
         async let t4: () = observeFeedTagMap()
         async let t4b: () = observeFeedFetchProblems()
         async let t5: () = observeUnreadByFeed()
@@ -380,6 +396,7 @@ final class HomeObservable: ObservableAssignment {
         async let t9: () = observeStarredUnreadCount()
         async let t10: () = observeFilter()
         async let t11: () = observeSelectedRowInstance()
+        async let t11b: () = observeSelectedRowGeneration()
         async let t12: () = observeCollapsedFolderIds()
         async let t13: () = observeExpandedTagIds()
         async let t14: () = observeSearchQuery()
@@ -460,16 +477,18 @@ final class HomeObservable: ObservableAssignment {
         }
     }
 
-    private func observeTagOrdinals() async {
-        for await v in viewModel.tagOrdinals {
-            if assignIfChanged(\.tagOrdinals, v.mapValues { $0.int32Value }) { sidebarRebuild?.markDirty() }
+    private func observeTagFolderLabels() async {
+        for await v in viewModel.tagFolderLabels {
+            kotlinLabels = v
+            if assignIfChanged(\.labels, TagFolderLabelSet(v)) {
+                sidebarRebuild?.markDirty()
+                updateFeedListSelectionTarget()
+            }
         }
     }
 
-    private func observeFolderOrdinals() async {
-        for await v in viewModel.folderOrdinals {
-            if assignIfChanged(\.folderOrdinals, v.mapValues { $0.int32Value }) { sidebarRebuild?.markDirty() }
-        }
+    private func observeIdRemap() async {
+        for await v in viewModel.tagFolderIdRemap { assignIfChanged(\.idRemap, SidebarIdRemap(v)) }
     }
 
     private func observeFeedTagMap() async {
@@ -517,12 +536,11 @@ final class HomeObservable: ObservableAssignment {
     /// filter — ends the article list's pull; a re-keyed filter under the same generation keeps it.
     @discardableResult
     private func assignFilterSelection(_ v: FilterSelection) -> Bool {
-        let switched = v.generation != filterGeneration
-        if switched { filterGeneration = v.generation }
-        guard !articleFiltersEqual(filter, v.filter) else { return false }
+        let change = filterTracker.apply(generation: v.generation, filterChanged: !articleFiltersEqual(filter, v.filter))
+        guard change != .unchanged else { return false }
         filter = v.filter
         updateRowsMatchFilter()
-        if switched { articleListPull.abandon() }
+        if change.abandonsPull { articleListPull.abandon() }
         return true
     }
 
@@ -532,6 +550,14 @@ final class HomeObservable: ObservableAssignment {
 
     private func observeSelectedRowInstance() async {
         for await v in viewModel.selectedRowInstance { assignSelectedRowInstance(v) }
+    }
+
+    private func assignSelectedRowGeneration(_ v: Int64) {
+        assignIfChanged(\.selectedRowGeneration, v)
+    }
+
+    private func observeSelectedRowGeneration() async {
+        for await v in viewModel.selectedRowGeneration { assignSelectedRowGeneration(v.int64Value) }
     }
 
     private func observeCollapsedFolderIds() async {
@@ -638,21 +664,13 @@ final class HomeObservable: ObservableAssignment {
     private func updateFeedListSelectionTarget() {
         let target = FeedListModelKt.resolveFeedListSelectionTarget(filter: filter, feeds: structuralFeeds, folders: folders, tags: tags)
         if !kotlinValuesEqual(feedListSelectionTarget as AnyObject?, target as AnyObject?) { feedListSelectionTarget = target }
-        // `articleListTitle` resolves the selected filter's display name together with its ordinal
-        // (`NameOrdinals.kt` decides it); the ordinal maps travel back as Kotlin values for the
-        // call, since the observable copies are native (see `observeTagOrdinals`).
-        let resolved = FeedListModelKt.articleListTitle(
-            filter: filter, feeds: structuralFeeds, folders: folders, tags: tags,
-            allLabel: L("home_all_feeds"), starredLabel: L("home_starred"),
-            folderOrdinals: kotlinOrdinals(folderOrdinals), tagOrdinals: kotlinOrdinals(tagOrdinals)
+        // `articleListOrdinalName` resolves the selected filter's display name together with its ordinal
+        // (`NameOrdinals.kt` decides it) from the same labels snapshot every other name is shown from.
+        let resolved = FeedListModelKt.articleListOrdinalName(
+            filter: filter, feeds: structuralFeeds, labels: kotlinLabels,
+            allLabel: L("home_all_feeds"), starredLabel: L("home_starred")
         )
-        assignIfChanged(\.articleListTitle, nameWithOrdinal(resolved.name, resolved.ordinal?.int32Value))
-    }
-
-    /// The native ordinal copies as the Kotlin `Map<String, Int>` the shared functions take — see
-    /// `updateFeedListSelectionTarget`.
-    private func kotlinOrdinals(_ ordinals: [String: Int32]) -> [String: KotlinInt] {
-        ordinals.mapValues { KotlinInt(int: $0) }
+        assignIfChanged(\.articleListTitle, NameLabel(resolved).text)
     }
 
     /// Runs through `sidebarRebuild` only, once per MainActor turn in which any of its inputs changed.
@@ -665,8 +683,7 @@ final class HomeObservable: ObservableAssignment {
             collapsedFolderIds: collapsedFolderIds,
             expandedTagIds: expandedTagIds,
             fetchProblems: feedFetchProblems,
-            folderOrdinals: folderOrdinals,
-            tagOrdinals: tagOrdinals
+            labels: labels
         )
         sidebar = model
         assignIfChanged(\.sortedFolders, model.sortedFolders)

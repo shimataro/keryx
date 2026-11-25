@@ -261,6 +261,8 @@ targets:
       - path: Keryx/Bridge/HeldRefreshStatus.swift
       - path: Keryx/Bridge/ReaderPagerIndex.swift
       - path: Keryx/Bridge/SidebarModel.swift
+      - path: Keryx/Bridge/NameLabels.swift
+      - path: Keryx/Bridge/FilterSelectionTracking.swift
       - path: Keryx/Bridge/ObservableAssignment.swift
       - path: Keryx/Home/SidebarRowHighlight.swift
       - path: Keryx/Home/Sidebar/SidebarItemID.swift
@@ -269,6 +271,7 @@ targets:
       - path: Keryx/Home/Sidebar/SidebarUnreadCounts.swift
       - path: Keryx/Home/Sidebar/TagColorNames.swift
       - path: Keryx/Home/Sidebar/SidebarRenameTarget.swift
+      - path: Keryx/Home/Sidebar/SidebarIdRemap.swift
       - path: Keryx/Home/Sidebar/SidebarSwipeActions.swift
       - path: Keryx/Home/Sidebar/SidebarReorder.swift
       - path: Keryx/Home/Sidebar/SidebarDropResolver.swift

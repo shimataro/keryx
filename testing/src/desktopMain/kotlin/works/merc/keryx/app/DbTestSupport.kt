@@ -304,15 +304,17 @@ class SameNameInsertingDriver(
  * of the same identity: the row is copied under [newId], its `feed_tags` links move with it, the move
  * is recorded in `ks_id_remap` ([IdRemapSql.record], chains folded), and the old row is deleted —
  * one transaction, foreign keys satisfied throughout. For tests of what holds a tag id across such a
- * re-key; [newId] must not exist yet.
+ * re-key; [newId] must not exist yet. [beforeNotify] runs after the commit and before the observing
+ * queries are re-run — where a merge publishes the re-key.
  */
-fun SqlDriver.rekeyTagForTest(oldId: String, newId: String) = rekeyForTest(
+fun SqlDriver.rekeyTagForTest(oldId: String, newId: String, beforeNotify: () -> Unit = {}) = rekeyForTest(
     table = "tags",
     kind = "tag",
     columns = "name, color, sort_order, deleted_at, updated_at, created_at, name_updated_at, color_updated_at, sort_order_updated_at, v2_id",
     moveChildren = listOf("UPDATE feed_tags SET tag_id = ? WHERE tag_id = ?"),
     oldId = oldId,
     newId = newId,
+    beforeNotify = beforeNotify,
 )
 
 /**
@@ -321,13 +323,14 @@ fun SqlDriver.rekeyTagForTest(oldId: String, newId: String) = rekeyForTest(
  * deleted, and the remap triggers resolve `feeds.folder_id` onto [newId] — so nothing references the
  * old row by the time it goes.
  */
-fun SqlDriver.rekeyFolderForTest(oldId: String, newId: String) = rekeyForTest(
+fun SqlDriver.rekeyFolderForTest(oldId: String, newId: String, beforeNotify: () -> Unit = {}) = rekeyForTest(
     table = "folders",
     kind = "folder",
     columns = "name, sort_order, deleted_at, updated_at, created_at, name_updated_at, sort_order_updated_at, v2_id",
     moveChildren = emptyList(),
     oldId = oldId,
     newId = newId,
+    beforeNotify = beforeNotify,
 )
 
 private fun SqlDriver.rekeyForTest(
@@ -337,6 +340,7 @@ private fun SqlDriver.rekeyForTest(
     moveChildren: List<String>,
     oldId: String,
     newId: String,
+    beforeNotify: () -> Unit,
 ) {
     object : app.cash.sqldelight.TransacterImpl(this) {}.transaction {
         execute(null, "INSERT INTO $table (id, $columns) SELECT ?, $columns FROM $table WHERE id = ?", 2) {
@@ -355,6 +359,8 @@ private fun SqlDriver.rekeyForTest(
         execute(null, "DELETE FROM $table WHERE id = ?", 1) { bindString(0, oldId) }
     }
     // The raw statements bypass SQLDelight's query notifications; re-run the observing queries as a
-    // merge's commit would.
+    // merge's commit would — after [beforeNotify], as a merge publishes the re-keys (`DeltaSync`)
+    // before it notifies, so a test can play that order.
+    beforeNotify()
     notifyListeners(table, "feed_tags", "feeds", "articles")
 }

@@ -175,8 +175,7 @@ internal fun FeedListPane(
     val tags by vm.tags.collectAsState()
     val feedTagMap by vm.feedTagMap.collectAsState()
     val folders by vm.folders.collectAsState()
-    val tagOrdinals by vm.tagOrdinals.collectAsState()
-    val folderOrdinals by vm.folderOrdinals.collectAsState()
+    val labels by vm.tagFolderLabels.collectAsState()
     val unreadByFeed by vm.unreadByFeed.collectAsState()
     val unreadByTag by vm.unreadByTag.collectAsState()
     val unreadByFolder by vm.unreadByFolder.collectAsState()
@@ -189,6 +188,7 @@ internal fun FeedListPane(
     val starredUnread by vm.starredUnreadCount.collectAsState()
     val filter by vm.filter.collectAsState()
     val selectedRowInstance by vm.selectedRowInstance.collectAsState()
+    val selectedRowGeneration by vm.selectedRowGeneration.collectAsState()
     val searchQuery by vm.searchQuery.collectAsState()
     val cloudConnected by vm.cloudConnected.collectAsState()
     val searchFocusRequester = remember { FocusRequester() }
@@ -224,7 +224,18 @@ internal fun FeedListPane(
     var creatingTagForFeedId by remember { mutableStateOf<String?>(null) }
     // The single row (if any) whose name is currently being edited in place. Renaming a feed,
     // folder, or tag happens in the row itself rather than in a dialog — see InlineRename.kt.
-    var inlineEdit by remember { mutableStateOf<InlineEditTarget?>(null) }
+    // Held in an [InlineEditState], which also keeps what has been typed: a merge re-keying the
+    // tag or folder onto another id composes its row afresh (the list key is its id), and the field
+    // carries on from the draft instead of from the row's own name.
+    val inlineEditState = remember { InlineEditState() }
+    var inlineEdit by inlineEditState::target
+    // The edit keeps naming the row by the id it was started under, and every comparison with a row
+    // goes through this map — never an eager rewrite of the edit. The map and the lists a merge
+    // changes reach composition on separate flows, in either order: a rewrite could name an id the
+    // lists do not have yet, and one that waited could name an id they no longer have; but two ids
+    // the map joins are the same row, whichever of them the lists currently use.
+    val idRemap by vm.tagFolderIdRemap.collectAsState()
+    fun isEditing(row: InlineEditTarget): Boolean = inlineEdit?.remappedBy(idRemap) == row.remappedBy(idRemap)
     var searchFieldFocused by remember { mutableStateOf(false) }
     val folderNameDuplicateError = stringResource(Res.string.home_folder_name_duplicate)
     val tagNameDuplicateError = stringResource(Res.string.home_tag_name_duplicate)
@@ -354,7 +365,7 @@ internal fun FeedListPane(
     // because the controller's titleOf runs at drag time, outside it, where the @Composable
     // formatter cannot be called (same reason FeedRow pre-resolves its submenu labels). Feed
     // titles carry no ordinal.
-    val folderDisplayNames = folders.associate { it.id to nameWithOrdinal(it.name, folderOrdinals[it.id]) }
+    val folderDisplayNames = folders.associate { it.id to nameWithOrdinal(labels.folder(it.id, it.name)) }
     val dragController = rememberFeedListDragController(
         vm = vm,
         listState = listState,
@@ -383,8 +394,12 @@ internal fun FeedListPane(
 
     // Scrolls to exactly the row instance that was selected — the tag-nested copy when that's the
     // one clicked/navigated to, not whichever copy of the same feed happens to already be visible.
-    LaunchedEffect(selectedRowInstance, feeds.isNotEmpty(), tags.isNotEmpty(), folders.isNotEmpty()) {
-        val index = feedListRowIndex(selectedRowInstance, feeds, folders, tags, collapsedFolderIds, feedTagMap, expandedTagIds)
+    //
+    // Keyed on the selection's generation, not on the instance: a merge re-keying the selected tag
+    // or folder replaces the instance's id without the user selecting anything, and must not scroll
+    // a list the user had moved away from the row (external-spec §9, "Least surprise").
+    LaunchedEffect(selectedRowGeneration, feeds.isNotEmpty(), tags.isNotEmpty(), folders.isNotEmpty()) {
+        val index = feedListRowIndex(vm.selectedRowInstance.value, feeds, folders, tags, collapsedFolderIds, feedTagMap, expandedTagIds)
         if (index != null) listState.scrollToIndexIfNeeded(index)
     }
 
@@ -400,9 +415,13 @@ internal fun FeedListPane(
     // The rendered index of the row the in-progress edit lives on, or null while that row isn't in
     // the list — derived from the same collected state the rows render from, and recomputed only when
     // that state changes rather than on every keystroke's recomposition while the edit is open.
-    val editRowIndex = remember(inlineEdit?.rowInstance, feeds, folders, tags, collapsedFolderIds, feedTagMap, expandedTagIds) {
+    // The edit's row is looked up under the id it was started with and under the id a re-key gave
+    // it: the lists use one or the other, depending on which of the two reached composition first.
+    val editRowIndex = remember(inlineEdit, idRemap, feeds, folders, tags, collapsedFolderIds, feedTagMap, expandedTagIds) {
         inlineEdit?.let { target ->
-            feedListRowIndex(target.rowInstance, feeds, folders, tags, collapsedFolderIds, feedTagMap, expandedTagIds)
+            listOf(target, target.remappedBy(idRemap)).firstNotNullOfOrNull {
+                feedListRowIndex(it.rowInstance, feeds, folders, tags, collapsedFolderIds, feedTagMap, expandedTagIds)
+            }
         }
     }
 
@@ -436,15 +455,17 @@ internal fun FeedListPane(
             editRowSeen = true
             return@LaunchedEffect
         }
-        val renderableNow = feedListRowIndex(
-            target.rowInstance,
-            feeds,
-            folders,
-            tags,
-            vm.collapsedFolderIds.value,
-            feedTagMap,
-            vm.expandedTagIds.value,
-        ) != null
+        val renderableNow = listOf(target, target.remappedBy(vm.tagFolderIdRemap.value)).any {
+            feedListRowIndex(
+                it.rowInstance,
+                feeds,
+                folders,
+                tags,
+                vm.collapsedFolderIds.value,
+                feedTagMap,
+                vm.expandedTagIds.value,
+            ) != null
+        }
         if (editRowSeen || !renderableNow) inlineEdit = null
     }
 
@@ -456,7 +477,10 @@ internal fun FeedListPane(
     // the right signal (null only at PaneLayout.Triple, where this pane is the permanent sidebar
     // rather than drawer content). FeedListDialogs below is deliberately outside this provider — it
     // renders no list rows of its own.
-    CompositionLocalProvider(LocalFeedListInDrawer provides (onSelectionAdvance != null)) {
+    CompositionLocalProvider(
+        LocalFeedListInDrawer provides (onSelectionAdvance != null),
+        LocalInlineEditState provides inlineEditState,
+    ) {
     Column(
         modifier
             .background(MaterialTheme.colorScheme.surfaceContainerLow)
@@ -587,7 +611,7 @@ internal fun FeedListPane(
                             activeBoundaryState = activeBoundaryState,
                             onClick = { selectFilterFromRow(ArticleFilter.Feed(feed.id), instance) },
                             onRename = { inlineEdit = editTarget },
-                            editingName = inlineEdit == editTarget,
+                            editingName = isEditing(editTarget),
                             onRenameCommit = { vm.renameFeed(feed.id, it); inlineEdit = null },
                             onRenameCancel = { inlineEdit = null },
                             onRefresh = { vm.refreshFeed(feed.id) },
@@ -595,8 +619,7 @@ internal fun FeedListPane(
                             attachedTagIds = feedTagMap[feed.id] ?: emptySet(),
                             onToggleFeedTag = { tagId, attached -> vm.setFeedTag(feed.id, tagId, attached) },
                             folders = folders,
-                            tagOrdinals = tagOrdinals,
-                            folderOrdinals = folderOrdinals,
+                            labels = labels,
                             onMoveFeedToFolder = { moveFolderId -> vm.moveFeed(feed.id, moveFolderId) },
                             onUnsubscribe = { confirmingUnsubscribeFeed = feed },
                             onCopyFeedUrl = { copyUrl(feed.url) },
@@ -694,7 +717,7 @@ internal fun FeedListPane(
                             item(key = folderRowKey(folder.id), contentType = "folder-header") {
                                 FolderGroupHeader(
                                     folder = folder,
-                                    ordinal = folderOrdinals[folder.id],
+                                    label = labels.folder(folder.id, folder.name),
                                     count = unreadByFolder[folder.id] ?: 0L,
                                     refreshing = folder.id in refreshingFolderIds,
                                     collapsed = collapsed,
@@ -709,7 +732,7 @@ internal fun FeedListPane(
                                     onClick = { selectFilterFromRow(ArticleFilter.Folder(folder.id)) },
                                     onEdit = { inlineEdit = InlineEditTarget.Folder(folder.id) },
                                     onDelete = { confirmingDeleteFolder = folder },
-                                    editingName = inlineEdit == InlineEditTarget.Folder(folder.id),
+                                    editingName = isEditing(InlineEditTarget.Folder(folder.id)),
                                     onRenameCommit = { vm.updateFolder(folder.id, it); inlineEdit = null },
                                     onRenameCancel = { inlineEdit = null },
                                     nameError = { name ->
@@ -752,7 +775,7 @@ internal fun FeedListPane(
                         item(key = tagRowKey(tag.id), contentType = "tag") {
                             TagRow(
                                 tag = tag,
-                                ordinal = tagOrdinals[tag.id],
+                                label = labels.tag(tag.id, tag.name),
                                 count = unreadByTag[tag.id] ?: 0L,
                                 expanded = tag.id in expandedTagIds,
                                 selected = filter == ArticleFilter.Tag(tag.id),
@@ -762,7 +785,7 @@ internal fun FeedListPane(
                                 onClick = { selectFilterFromRow(ArticleFilter.Tag(tag.id)) },
                                 onEdit = { inlineEdit = InlineEditTarget.Tag(tag.id) },
                                 onDelete = { confirmingDeleteTag = tag },
-                                editingName = inlineEdit == InlineEditTarget.Tag(tag.id),
+                                editingName = isEditing(InlineEditTarget.Tag(tag.id)),
                                 onRenameCommit = { vm.updateTag(tag.id, it, tag.color); inlineEdit = null },
                                 onRenameCancel = { inlineEdit = null },
                                 nameError = { name ->
@@ -816,8 +839,7 @@ internal fun FeedListPane(
         vm = vm,
         tags = tags,
         folders = folders,
-        tagOrdinals = tagOrdinals,
-        folderOrdinals = folderOrdinals,
+        labels = labels,
         showAddTag = showAddTag,
         onShowAddTagChange = { showAddTag = it },
         confirmingDeleteTag = confirmingDeleteTag,

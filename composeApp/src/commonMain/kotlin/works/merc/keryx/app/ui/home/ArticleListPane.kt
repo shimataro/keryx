@@ -79,7 +79,7 @@ import works.merc.keryx.app.presentation.home.ArticleSwipeAction
 import works.merc.keryx.app.presentation.home.listModeChecked
 import works.merc.keryx.app.presentation.home.HomeViewModel
 import works.merc.keryx.app.presentation.home.articleListCatchingUp
-import works.merc.keryx.app.presentation.home.articleListTitle
+import works.merc.keryx.app.presentation.home.articleListOrdinalName
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.common_back
 import works.merc.keryx.app.resources.home_all_feeds
@@ -195,22 +195,16 @@ fun ArticleListPane(
 ) {
     val filter by vm.filter.collectAsState()
     val feeds by vm.structuralFeeds.collectAsState()
-    val folders by vm.folders.collectAsState()
-    val tags by vm.tags.collectAsState()
-    val tagOrdinals by vm.tagOrdinals.collectAsState()
-    val folderOrdinals by vm.folderOrdinals.collectAsState()
+    val labels by vm.tagFolderLabels.collectAsState()
     val title = onOpenDrawer?.let {
-        val resolved = articleListTitle(
+        val resolved = articleListOrdinalName(
             filter = filter,
             feeds = feeds,
-            folders = folders,
-            tags = tags,
+            labels = labels,
             allLabel = stringResource(Res.string.home_all_feeds),
             starredLabel = stringResource(Res.string.home_starred),
-            folderOrdinals = folderOrdinals,
-            tagOrdinals = tagOrdinals,
         )
-        nameWithOrdinal(resolved.name, resolved.ordinal)
+        nameWithOrdinal(resolved)
     }
     val feedTitles = remember(feeds) { feeds.associate { it.id to it.displayTitle() } }
     val feedFavicons = remember(feeds) { feeds.associate { it.id to it.favicon_url } }
@@ -238,13 +232,15 @@ fun ArticleListPane(
     // (HomeViewModel.filterSelection) to a different filter: a merge re-keying the selected tag or
     // folder changes the filter but keeps the generation, so the list stays where it is; and the
     // saved generation of a previous process (rememberSaveable outlives the ViewModel, whose
-    // generation restarts at 0) differs while the restored filter does not, so that is no switch
-    // either.
+    // generation restarts at 0) is compared only under the same ViewModel's token: with another
+    // token (a restored process) the generations are not comparable, so the saved filter alone
+    // decides — the same list is no switch, a different one is, even when both generations are 0.
     val baseListState = rememberLazyListState()
     val searchListState = rememberLazyListState()
     val filterSelection by vm.filterSelection.collectAsState()
     var lastFilter by rememberSaveable { mutableStateOf(filterSelection.filter.encode()) }
     var lastGeneration by rememberSaveable { mutableStateOf(filterSelection.generation) }
+    var lastToken by rememberSaveable { mutableStateOf(vm.instanceToken) }
     // A switch whose scroll to the top has not completed yet, per list. scrollToItem suspends until its
     // list is measured — the search list's, while no search is showing, until one is — so a run of the
     // effect below can be cancelled by the next selection value (a re-key arriving after the user's
@@ -253,7 +249,10 @@ fun ArticleListPane(
     var searchTopResetPending by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(filterSelection) {
         val encoded = filterSelection.filter.encode()
-        if (filterSelection.generation != lastGeneration && encoded != lastFilter) {
+        // A generation saved under another ViewModel's token is not comparable: only the filter says
+        // whether the list changed.
+        val generationMoved = lastToken != vm.instanceToken || filterSelection.generation != lastGeneration
+        if (generationMoved && encoded != lastFilter) {
             baseTopResetPending = true
             searchTopResetPending = true
         }
@@ -262,6 +261,7 @@ fun ArticleListPane(
         // for a switch.
         lastFilter = encoded
         lastGeneration = filterSelection.generation
+        lastToken = vm.instanceToken
         if (baseTopResetPending) {
             launch {
                 baseListState.scrollToItem(0)

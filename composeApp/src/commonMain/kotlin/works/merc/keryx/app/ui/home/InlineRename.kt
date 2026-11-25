@@ -8,12 +8,18 @@ import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Text
+import androidx.compose.material3.TooltipAnchorPosition
+import androidx.compose.material3.TooltipBox
+import androidx.compose.material3.TooltipDefaults
+import androidx.compose.material3.rememberTooltipState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -27,9 +33,12 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.error
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
 import works.merc.keryx.app.platform.isTouchPrimary
 import works.merc.keryx.app.presentation.home.inlineRenameValidation
@@ -37,6 +46,7 @@ import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.common_cancel
 import works.merc.keryx.app.ui.common.KeryxIcon
 import works.merc.keryx.app.ui.common.KeryxIcons
+import works.merc.keryx.app.ui.common.FlatTooltipContent
 import works.merc.keryx.app.ui.common.KeryxTextField
 
 /** Test tag on the inline row editor's text field (feed / folder / tag rows). */
@@ -79,6 +89,7 @@ private val InlineRenameCancelIconSize = 16.dp
  * @param allowBlank Whether a blank value is a meaningful, committable value.
  * @param blockingError Produces a validation message for the trimmed value, or `null` when valid.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun InlineRenameField(
     value: String,
@@ -89,16 +100,25 @@ internal fun InlineRenameField(
     allowBlank: Boolean = false,
     blockingError: (String) -> String? = { null },
 ) {
-    var text by remember { mutableStateOf(value) }
+    // The draft lives in the feed list's edit state (when there is one), so a row that is composed
+    // afresh under a re-keyed id carries on from what was typed instead of from [value].
+    val editState = LocalInlineEditState.current
+    var text by remember { mutableStateOf(editState?.draft ?: value) }
     // The editor is removed from the composition by its own commit/cancel, which loses focus in
     // turn — without these two guards that focus loss would run the blur path a second time.
     var everFocused by remember { mutableStateOf(false) }
     var finished by remember { mutableStateOf(false) }
+    var hasFocus by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
     val focusRequester = remember { FocusRequester() }
     val cancelLabel = stringResource(Res.string.common_cancel)
 
     val trimmed = text.trim()
-    val (error, canCommit) = inlineRenameValidation(text, allowBlank, blockingError)
+    val (validationError, canCommit) = inlineRenameValidation(text, allowBlank, blockingError)
+    // A value the user has not changed is not an error they made: a row whose own name is already
+    // shared (two same-named rows, shown with an ordinal) opens its editor on that name, and a red
+    // frame there would blame them for what they have not touched. Committing it stays blocked.
+    val shownError = validationError?.takeIf { text != value }
 
     fun finish(commit: Boolean) {
         if (finished) return
@@ -106,11 +126,23 @@ internal fun InlineRenameField(
         if (commit) onCommit(trimmed) else onCancel()
     }
 
+    // The reason for a red frame, which has no supporting text of its own (it would grow the row):
+    // read out by screen readers through the field's error semantics, and shown on hover (long
+    // press on touch) in a tooltip. Always composed — only its input is switched — so the field is
+    // never re-created, and unfocusable, so the popup never takes focus (that would blur the field).
+    TooltipBox(
+        positionProvider = TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Below),
+        tooltip = { shownError?.let { FlatTooltipContent(it) } },
+        state = rememberTooltipState(),
+        focusable = false,
+        enableUserInput = shownError != null,
+        modifier = modifier,
+    ) {
     KeryxTextField(
         value = text,
-        onValueChange = { text = it },
+        onValueChange = { text = it; editState?.draft = it },
         placeholder = placeholder,
-        isError = error != null,
+        isError = shownError != null,
         minHeight = 0.dp,
         horizontalPadding = InlineRenameHorizontalPadding,
         initiallySelectAll = true,
@@ -148,11 +180,23 @@ internal fun InlineRenameField(
         },
         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
         keyboardActions = KeyboardActions(onDone = { if (canCommit) finish(commit = true) }),
-        modifier = modifier
+        modifier = Modifier.fillMaxWidth()
+            .semantics { shownError?.let { error(it) } }
             .testTag(INLINE_RENAME_FIELD_TEST_TAG)
             .focusRequester(focusRequester)
             .onFocusChanged { state ->
-                if (state.isFocused) everFocused = true else if (everFocused) finish(commit = canCommit)
+                hasFocus = state.isFocused
+                if (state.isFocused) {
+                    everFocused = true
+                } else if (everFocused) {
+                    // Deferred to a coroutine of this field's own scope. Taking the field out of the
+                    // composition (its row collapsing, or composed afresh under a re-keyed id) clears
+                    // its focus too, from inside the removal, and that is no blur by the user: the
+                    // scope is cancelled with the field, so the removal finishes nothing — a commit
+                    // there would write the half-typed text and end an edit that moves on. A real blur
+                    // runs the coroutine on the next dispatch, unless focus came back by then.
+                    scope.launch { if (!hasFocus) finish(commit = canCommit) }
+                }
             }
             // Preview, so Enter/Escape are handled here rather than by the text field itself — and
             // so an invalid Enter is swallowed instead of falling through to anything else.
@@ -165,6 +209,7 @@ internal fun InlineRenameField(
                 }
             },
     )
+    }
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
 }
 

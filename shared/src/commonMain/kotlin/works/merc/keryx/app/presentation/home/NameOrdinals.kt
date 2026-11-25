@@ -11,7 +11,38 @@ import works.merc.keryx.app.data.local.db.Tags
  * SwiftUI's `nameWithOrdinal`), per the one-implementation-per-action constraint. [ordinal] is
  * `null` for a uniquely named row — the name alone.
  */
-data class OrdinalName(val name: String, val ordinal: Int? = null)
+data class OrdinalName(val name: String, val ordinal: Int?)
+
+/**
+ * Every live tag's and folder's display name together with its ordinal, from one snapshot of the
+ * tag and folder lists — what both UIs render the rows' labels from. A name and its ordinal are
+ * published as one value so a rename that makes two rows share a name can never be shown with the
+ * new name and the old ordinal (or the reverse), as two separately collected flows could.
+ */
+data class TagFolderLabels(
+    val tags: Map<String, OrdinalName>,
+    val folders: Map<String, OrdinalName>,
+) {
+    /** The tag's label, or its own [fallbackName] bare when this snapshot has no entry for it yet. */
+    fun tag(id: String, fallbackName: String): OrdinalName = tags[id] ?: OrdinalName(fallbackName, null)
+
+    /** The folder's label, or its own [fallbackName] bare when this snapshot has no entry for it yet. */
+    fun folder(id: String, fallbackName: String): OrdinalName = folders[id] ?: OrdinalName(fallbackName, null)
+
+    companion object {
+        val EMPTY = TagFolderLabels(emptyMap(), emptyMap())
+    }
+}
+
+/** The labels of every row in [tags] and [folders] — see [TagFolderLabels]. */
+fun tagFolderLabels(tags: List<Tags>, folders: List<Folders>): TagFolderLabels {
+    val tagOrdinals = tagOrdinals(tags)
+    val folderOrdinals = folderOrdinals(folders)
+    return TagFolderLabels(
+        tags = tags.associate { it.id to OrdinalName(it.name, tagOrdinals[it.id]) },
+        folders = folders.associate { it.id to OrdinalName(it.name, folderOrdinals[it.id]) },
+    )
+}
 
 /**
  * The ordinals that tell same-named live tags apart on screen, keyed by tag id: only the second

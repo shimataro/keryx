@@ -183,13 +183,16 @@ fun newHomeViewModel(
     // The tag/folder id re-keys the settings and the ViewModel observe — overridable so a test can
     // publish a re-key ([TagFolderIdRemaps.publishFromDb]) after changing `ks_id_remap` itself.
     idRemaps: TagFolderIdRemaps = TagFolderIdRemaps(db, Dispatchers.Unconfined),
+    // The directory holding `local_settings.json`. Null (the default) uses a fresh, unique one; a test
+    // that models a process restart passes the previous fixture's, so the saved state is restored.
+    settingsDir: String? = null,
 ): HomeViewModelFixture {
     // A fresh, unique directory per call (not a fixed name shared across every test in this file):
     // LocalSettingsStore persists lastFilter/collapsedFolderIds/etc. to a JSON file there, and a
     // shared path would leak state between tests within the same run (e.g. a filter selected by
     // one test becoming the *restored* initial filter of the next), exactly like
     // `HomeViewModelTest`'s per-instance `Random.nextInt()`-suffixed directory.
-    val dir = FileIO.join(AppDirs.tempDir(), "home-vm-test-${Random.nextInt()}")
+    val dir = settingsDir ?: FileIO.join(AppDirs.tempDir(), "home-vm-test-${Random.nextInt()}")
     val cleanupOnFailure = mutableListOf<() -> Unit>()
     try {
         val fetcherClient = notFoundHttpClient().also { client -> cleanupOnFailure += { client.close() } }

@@ -55,12 +55,13 @@ enum SidebarFixtures {
         feedTagMap: [String: Set<String>] = feedTagMap,
         collapsedFolderIds: Set<String> = collapsedFolderIds,
         expandedTagIds: Set<String> = expandedTagIds,
-        fetchProblems: [String: FeedFetchProblem] = [:]
+        fetchProblems: [String: FeedFetchProblem] = [:],
+        labels: TagFolderLabelSet = .empty
     ) -> SidebarModel {
         SidebarModel(
             feeds: feeds, folders: folders, tags: tags, feedTagMap: feedTagMap,
             collapsedFolderIds: collapsedFolderIds, expandedTagIds: expandedTagIds,
-            fetchProblems: fetchProblems
+            fetchProblems: fetchProblems, labels: labels
         )
     }
 

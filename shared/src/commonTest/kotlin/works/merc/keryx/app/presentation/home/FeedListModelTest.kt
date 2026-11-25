@@ -245,91 +245,47 @@ class FeedListModelTest {
         assertNull(reorderTargetWithinScope(emptyList(), index = 0, delta = 1))
     }
 
-    // --- articleListTitle ---
+    // --- articleListOrdinalName ---
+
+    private fun ordinalName(filter: ArticleFilter, feeds: List<Feeds>, folders: List<Folders>, tags: List<Tags>) =
+        articleListOrdinalName(filter, feeds, tagFolderLabels(tags, folders), "All", "Starred")
 
     @Test
-    fun articleListTitleResolvesEachFilterVariantToItsDisplayName() {
+    fun articleListOrdinalNameResolvesEachFilterVariantToItsDisplayName() {
         val feeds = listOf(feed("f1"))
         val folders = listOf(folder("d1"))
         val tags = listOf(tag("t1"))
 
-        assertEquals(
-            OrdinalName("All"),
-            articleListTitle(ArticleFilter.All, feeds, folders, tags, "All", "Starred"),
-        )
-        assertEquals(
-            OrdinalName("Starred"),
-            articleListTitle(ArticleFilter.Starred, feeds, folders, tags, "All", "Starred"),
-        )
-        assertEquals(
-            OrdinalName("Feed f1"),
-            articleListTitle(ArticleFilter.Feed("f1"), feeds, folders, tags, "All", "Starred"),
-        )
-        assertEquals(
-            OrdinalName("Folder d1"),
-            articleListTitle(ArticleFilter.Folder("d1"), feeds, folders, tags, "All", "Starred"),
-        )
-        assertEquals(
-            OrdinalName("Tag t1"),
-            articleListTitle(ArticleFilter.Tag("t1"), feeds, folders, tags, "All", "Starred"),
-        )
+        assertEquals(OrdinalName("All", null), ordinalName(ArticleFilter.All, feeds, folders, tags))
+        assertEquals(OrdinalName("Starred", null), ordinalName(ArticleFilter.Starred, feeds, folders, tags))
+        assertEquals(OrdinalName("Feed f1", null), ordinalName(ArticleFilter.Feed("f1"), feeds, folders, tags))
+        assertEquals(OrdinalName("Folder d1", null), ordinalName(ArticleFilter.Folder("d1"), feeds, folders, tags))
+        assertEquals(OrdinalName("Tag t1", null), ordinalName(ArticleFilter.Tag("t1"), feeds, folders, tags))
     }
 
     @Test
-    fun articleListTitleFallsBackToAllLabelForAMissingFeedTagOrFolder() {
-        assertEquals(
-            OrdinalName("All"),
-            articleListTitle(ArticleFilter.Feed("gone"), emptyList(), emptyList(), emptyList(), "All", "Starred"),
-        )
-        assertEquals(
-            OrdinalName("All"),
-            articleListTitle(ArticleFilter.Folder("gone"), emptyList(), emptyList(), emptyList(), "All", "Starred"),
-        )
-        assertEquals(
-            OrdinalName("All"),
-            articleListTitle(ArticleFilter.Tag("gone"), emptyList(), emptyList(), emptyList(), "All", "Starred"),
-        )
+    fun articleListOrdinalNameFallsBackToAllLabelForAMissingFeedTagOrFolder() {
+        val none = emptyList<Feeds>()
+        assertEquals(OrdinalName("All", null), ordinalName(ArticleFilter.Feed("gone"), none, emptyList(), emptyList()))
+        assertEquals(OrdinalName("All", null), ordinalName(ArticleFilter.Folder("gone"), none, emptyList(), emptyList()))
+        assertEquals(OrdinalName("All", null), ordinalName(ArticleFilter.Tag("gone"), none, emptyList(), emptyList()))
     }
 
     @Test
-    fun articleListTitleResolvesTheSelectedTagOrFolderTogetherWithItsOrdinal() {
-        // Two tags and two folders named "Work", created 5 then 9 — the ordinals tagOrdinals/
-        // folderOrdinals would hand the UI, keyed by row id. Note the DB rejects a second
+    fun articleListOrdinalNameResolvesTheSelectedTagOrFolderTogetherWithItsOrdinal() {
+        // Two tags and two folders named "Work", created 5 then 9 — the labels carry the ordinals
+        // tagOrdinals/folderOrdinals decide, keyed by row id. Note the DB rejects a second
         // same-named row today; this is the contract the display relies on once it no longer does
         // (external-spec §7).
         val tags = listOf(ordinalTag("t1", "Work", 5), ordinalTag("t2", "Work", 9))
         val folders = listOf(ordinalFolder("d1", "Work", 5), ordinalFolder("d2", "Work", 9))
         val feeds = emptyList<Feeds>()
 
-        assertEquals(
-            OrdinalName("Work"),
-            articleListTitle(
-                ArticleFilter.Tag("t1"), feeds, folders, tags, "All", "Starred",
-                folderOrdinals = folderOrdinals(folders), tagOrdinals = tagOrdinals(tags),
-            ),
-        )
-        assertEquals(
-            OrdinalName("Work", ordinal = 2),
-            articleListTitle(
-                ArticleFilter.Tag("t2"), feeds, folders, tags, "All", "Starred",
-                folderOrdinals = folderOrdinals(folders), tagOrdinals = tagOrdinals(tags),
-            ),
-        )
-        assertEquals(
-            OrdinalName("Work", ordinal = 2),
-            articleListTitle(
-                ArticleFilter.Folder("d2"), feeds, folders, tags, "All", "Starred",
-                folderOrdinals = folderOrdinals(folders), tagOrdinals = tagOrdinals(tags),
-            ),
-        )
+        assertEquals(OrdinalName("Work", null), ordinalName(ArticleFilter.Tag("t1"), feeds, folders, tags))
+        assertEquals(OrdinalName("Work", 2), ordinalName(ArticleFilter.Tag("t2"), feeds, folders, tags))
+        assertEquals(OrdinalName("Work", 2), ordinalName(ArticleFilter.Folder("d2"), feeds, folders, tags))
         // A missing row still falls back to the All label, with no ordinal to format.
-        assertEquals(
-            OrdinalName("All"),
-            articleListTitle(
-                ArticleFilter.Tag("gone"), feeds, folders, tags, "All", "Starred",
-                folderOrdinals = folderOrdinals(folders), tagOrdinals = tagOrdinals(tags),
-            ),
-        )
+        assertEquals(OrdinalName("All", null), ordinalName(ArticleFilter.Tag("gone"), feeds, folders, tags))
     }
 
     @Test

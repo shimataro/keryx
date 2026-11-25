@@ -179,7 +179,7 @@ extension FeedListView {
             SidebarSourceListRow(
                 home: home,
                 content: sidebar.folderContents[folder.id]
-                    ?? SidebarRowStaticContent(title: nameWithOrdinal(folder.name, home.folderOrdinals[folder.id]), icon: .symbol("folder")),
+                    ?? SidebarRowStaticContent(title: home.labels.name(of: folder), icon: .symbol("folder")),
                 unread: .folder(folder.id),
                 highlight: highlight(for: instance),
                 editor: folderRenameEditor(folder)
@@ -199,7 +199,7 @@ extension FeedListView {
                 .feedListDraggable(
                     FeedListDragPayload(kind: .folder, id: folder.id),
                     draggingItem: $draggingItem,
-                    enabled: dialogs.renamingRowKey != selection.key
+                    enabled: !dialogs.isRenaming(selection.key, remap: home.idRemap)
                 )
                 .tag(selection.key)
                 .trackAppearance(selection.key, in: $appearedRowKeys)
@@ -234,7 +234,7 @@ extension FeedListView {
                 dialogs: dialogs,
                 tag: tag,
                 content: sidebar.tagContents[tag.id]
-                    ?? SidebarRowStaticContent(title: nameWithOrdinal(tag.name, home.tagOrdinals[tag.id]), icon: .tagColor(hex: tag.color)),
+                    ?? SidebarRowStaticContent(title: home.labels.name(of: tag), icon: .tagColor(hex: tag.color)),
                 selection: selection,
                 editor: tagRenameEditor(tag),
                 appearedRowKeys: $appearedRowKeys,
@@ -265,7 +265,7 @@ extension FeedListView {
         .feedListDraggable(
             FeedListDragPayload(kind: .feed, id: feed.id),
             draggingItem: $draggingItem,
-            enabled: dialogs.renamingRowKey != selection.key
+            enabled: !dialogs.isRenaming(selection.key, remap: home.idRemap)
         )
         .selectsOnContextMenu(id: selection.key) { selectForContextMenu(instance) }
         .contextMenu {
@@ -279,7 +279,7 @@ extension FeedListView {
             Button(L("home_refresh")) { home.refreshFeed(feed) }
             Menu(L("home_assign_tags")) {
                 ForEach(sortedTags, id: \.id) { tag in
-                    Toggle(nameWithOrdinal(tag.name, home.tagOrdinals[tag.id]), isOn: Binding(
+                    Toggle(home.labels.name(of: tag), isOn: Binding(
                         get: { home.feedTagMap[feed.id]?.contains(tag.id) ?? false },
                         set: { attached in home.viewModel.setFeedTag(feedId: feed.id, tagId: tag.id, attached: attached) }
                     ))
@@ -292,7 +292,7 @@ extension FeedListView {
                     set: { _ in home.viewModel.moveFeed(feedId: feed.id, folderId: nil, targetFeedId: nil) }
                 ))
                 ForEach(sortedFolders, id: \.id) { folder in
-                    Toggle(nameWithOrdinal(folder.name, home.folderOrdinals[folder.id]), isOn: Binding(
+                    Toggle(home.labels.name(of: folder), isOn: Binding(
                         get: { feed.folder_id == folder.id },
                         set: { _ in home.viewModel.moveFeed(feedId: feed.id, folderId: folder.id, targetFeedId: nil) }
                     ))

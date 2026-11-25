@@ -64,6 +64,8 @@ import works.merc.keryx.app.ui.common.FlatTooltipContent
 import works.merc.keryx.app.ui.common.KeryxIcon
 import works.merc.keryx.app.ui.common.KeryxIcons
 import works.merc.keryx.app.presentation.home.DropBoundary
+import works.merc.keryx.app.presentation.home.OrdinalName
+import works.merc.keryx.app.presentation.home.TagFolderLabels
 
 /** How long a dragged feed must be held over a collapsed folder header before the folder opens by
  * itself, so the feeds inside it become reachable drop targets without letting go of the drag
@@ -89,10 +91,10 @@ internal const val NO_FOLDER_HEADER_TEST_TAG = "no-folder-row"
  * insertion indicators, and automatic expansion while a dragged feed hovers over a collapsed folder.
  *
  * @param folder The folder represented by the header.
- * @param ordinal The folder's ordinal among the folders sharing its name
- *   ([works.merc.keryx.app.presentation.home.folderOrdinals]) — `null` (the bare name) for a
- *   uniquely named folder. Applied to the displayed label only; the rename field's initial value
- *   stays the row's own name.
+ * @param label The folder's display name with its ordinal among the folders sharing its name
+ *   ([works.merc.keryx.app.presentation.home.TagFolderLabels]) — a `null` ordinal (the bare name)
+ *   for a uniquely named folder. Applied to the displayed label only; the rename field's initial
+ *   value stays the row's own name.
  * @param count The number of feeds in the folder.
  * @param collapsed Whether the folder's feed list is collapsed.
  * @param selected Whether the folder is selected.
@@ -127,7 +129,7 @@ internal const val NO_FOLDER_HEADER_TEST_TAG = "no-folder-row"
 @Composable
 internal fun FolderGroupHeader(
     folder: Folders,
-    ordinal: Int? = null,
+    label: OrdinalName,
     count: Long,
     collapsed: Boolean,
     selected: Boolean,
@@ -251,7 +253,7 @@ internal fun FolderGroupHeader(
                 // count badge on the right never move when editing starts or ends.
                 EditableRowName(
                     editing = editingName,
-                    label = nameWithOrdinal(folder.name, ordinal),
+                    label = nameWithOrdinal(label),
                     editValue = folder.name,
                     onCommit = onRenameCommit,
                     onCancel = onRenameCancel,
@@ -349,11 +351,9 @@ internal fun NoFolderHeader(
  * @param isTouchPrimary Whether this platform's reorder gesture starts from the row's own
  *   [DragHandle] — which is then also given its assistive-technology counterpart, see
  *   [reorderAccessibilityActions]. Overridable for tests only, like `FeedListPane`'s own parameter.
- * @param tagOrdinals Each tag's ordinal among the tags sharing its name, by tag id
- *   ([works.merc.keryx.app.presentation.home.tagOrdinals]) — labels the "Assign tags" submenu's
- *   items, so a second same-named tag is offered as "X (2)".
- * @param folderOrdinals Each folder's ordinal among the folders sharing its name, by folder id —
- *   labels the "Move to folder" submenu's items the same way.
+ * @param labels Every tag's and folder's display name with its ordinal
+ *   ([works.merc.keryx.app.presentation.home.TagFolderLabels]) — labels the "Assign tags" and
+ *   "Move to folder" submenus' items, so a second same-named tag is offered as "X (2)".
  * @param onMoveUp Moves this feed one position up among the feeds of its own group, or `null` when
  *   it is already the first one there (see [reorderTargetWithinScope]).
  * @param onMoveDown Moves this feed one position down in the same group, or `null` when it is
@@ -387,8 +387,7 @@ internal fun FeedRow(
     onCopyFeedUrl: () -> Unit,
     onCopySiteUrl: () -> Unit,
     onOpenSite: () -> Unit,
-    tagOrdinals: Map<String, Int> = emptyMap(),
-    folderOrdinals: Map<String, Int> = emptyMap(),
+    labels: TagFolderLabels,
     isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
     onMoveUp: (() -> Unit)? = null,
     onMoveDown: (() -> Unit)? = null,
@@ -417,8 +416,8 @@ internal fun FeedRow(
     // The submenu items' labels, resolved in composition because the context menu's items lambda
     // runs later, outside it (see nativeContextMenu), where the @Composable formatter cannot be
     // called. Built from the same lists the submenu iterates, so lookups cannot miss.
-    val tagLabels = tags.associate { it.id to nameWithOrdinal(it.name, tagOrdinals[it.id]) }
-    val folderLabels = folders.associate { it.id to nameWithOrdinal(it.name, folderOrdinals[it.id]) }
+    val tagLabels = tags.associate { it.id to nameWithOrdinal(labels.tag(it.id, it.name)) }
+    val folderLabels = folders.associate { it.id to nameWithOrdinal(labels.folder(it.id, it.name)) }
     val belowBoundary = nextFeedId?.let(DropBoundary::BeforeFeed) ?: DropBoundary.AppendFeeds(folderId)
     val reorderMoves = reorderMoves(isTouchPrimary, onMoveUp, onMoveDown)
     val rowInteraction = remember { MutableInteractionSource() }

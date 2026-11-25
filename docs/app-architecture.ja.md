@@ -1150,6 +1150,14 @@ JVM ドライバがステートメントごとに開く接続で読むため、�
   `ArticleListTopReset` と macOS の表のリセットは `HomeObservable.filterGeneration` で判断し、iOS のプルの待ちを
   終えるのも新しい世代だけ。そのため、選択中のタグやフォルダーが振り直されても、スクロール位置、ピル、プルの
   表示は保たれる。
+- **フィードリストもそのまま。** `HomeViewModel.selectedRowGeneration` はユーザーが行を選んだ回数を数える。フィード
+  リストのスクロール追従（Compose の `FeedListPane`、macOS の `FeedListView`）は、振り直しで id が置き換わる
+  `selectedRowInstance` ではなく、これで判断する。インラインリネームは、始めたときの id で行を指し続け、行との
+  比較は `HomeViewModel.tagFolderIdRemap` を通して行う（一覧と表は別の flow で UI に届き、順序は不定）。そこまでに
+  入力した文字はペイン側（`InlineEditState`、`SidebarDialogState.renamingDraft`）が持つので、新しい id で作り直された行は
+  その続きから始まる。振り直しで composition から外れたエディタはフォーカスを失ったことにならず、何も確定しない。
+  タグとフォルダーの名前は `HomeViewModel.tagFolderLabels`——各行の名前とその序数を 1 つにした flow——からだけ描画する
+  ので、名前と序数が別々のスナップショットから来ることはない。
 
 Apple アプリは、`HomeViewModel` から読むものと一時的な UI 状態（インラインリネームの行キー、削除確認中の行、
 ドラッグ）以外に、タグやフォルダーの id を独自に保持しない。一時的な状態からの操作は、上の解決付きの書き込みを通る。

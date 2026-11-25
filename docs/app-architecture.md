@@ -1175,6 +1175,15 @@ selection or a user's write:
   list's `ArticleListTopReset` and macOS table reset key on `HomeObservable.filterGeneration`, and only a new
   generation ends the iOS pull's wait. So a re-key of the selected tag or folder keeps the scroll position, the pill
   and a pull's indicator.
+- **The feed list stays put too.** `HomeViewModel.selectedRowGeneration` counts the user's selections of a row, and the
+  feed list's scroll-into-view (Compose's `FeedListPane`, macOS's `FeedListView`) keys on it rather than on
+  `selectedRowInstance`, whose id a re-key replaces. An inline rename keeps naming its row by the id it started under and
+  is compared with rows through `HomeViewModel.tagFolderIdRemap` (the lists and the map reach the UI on separate flows,
+  in either order), and the text typed so far is held by the pane (`InlineEditState`, `SidebarDialogState.renamingDraft`)
+  so the row composed afresh under the new id carries on from it; an editor taken out of the composition by a re-key
+  does not count as losing focus, so it commits nothing. Tag and folder names are rendered only from
+  `HomeViewModel.tagFolderLabels` — one flow of each row's name together with its ordinal — so a name and its ordinal never
+  come from two snapshots.
 
 The Apple app holds no tag or folder id of its own beyond what it reads from `HomeViewModel` and transient UI state
 (an inline rename's row key, a pending delete confirmation's row, a drag), whose action goes through the resolving

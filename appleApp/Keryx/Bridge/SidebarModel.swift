@@ -36,10 +36,9 @@ struct SidebarModel {
 
     /// - Parameter fetchProblems: `HomeViewModel.feedFetchProblems` — why a feed row is flagged,
     ///   by feed id (none for a feed without an entry).
-    /// - Parameter folderOrdinals: `HomeViewModel.folderOrdinals` — each folder's ordinal among the
-    ///   folders sharing its name (`NameOrdinals.kt` in `:shared`), applied to the rows' titles so
-    ///   a second same-named row reads "X (2)".
-    /// - Parameter tagOrdinals: The tag counterpart of `folderOrdinals`.
+    /// - Parameter labels: `HomeViewModel.tagFolderLabels` — each tag's and folder's name with its
+    ///   ordinal among the rows sharing its name (`NameOrdinals.kt` in `:shared`), applied to the rows'
+    ///   titles so a second same-named row reads "X (2)".
     init(
         feeds: [Feeds],
         folders: [Folders],
@@ -48,8 +47,7 @@ struct SidebarModel {
         collapsedFolderIds: Set<String>,
         expandedTagIds: Set<String>,
         fetchProblems: [String: FeedFetchProblem] = [:],
-        folderOrdinals: [String: Int32] = [:],
-        tagOrdinals: [String: Int32] = [:]
+        labels: TagFolderLabelSet
     ) {
         sortedFolders = folders.sorted { $0.sort_order < $1.sort_order }
         sortedFeeds = feeds.sorted { $0.sort_order < $1.sort_order }
@@ -93,11 +91,11 @@ struct SidebarModel {
         }
         self.feedContents = feedContents
         folderContents = Dictionary(
-            sortedFolders.map { ($0.id, SidebarRowStaticContent(title: nameWithOrdinal($0.name, folderOrdinals[$0.id]), icon: .symbol("folder"))) },
+            sortedFolders.map { ($0.id, SidebarRowStaticContent(title: labels.name(of: $0), icon: .symbol("folder"))) },
             uniquingKeysWith: { first, _ in first }
         )
         tagContents = Dictionary(
-            sortedTags.map { ($0.id, SidebarRowStaticContent(title: nameWithOrdinal($0.name, tagOrdinals[$0.id]), icon: .tagColor(hex: $0.color))) },
+            sortedTags.map { ($0.id, SidebarRowStaticContent(title: labels.name(of: $0), icon: .tagColor(hex: $0.color))) },
             uniquingKeysWith: { first, _ in first }
         )
 
@@ -119,7 +117,7 @@ struct SidebarModel {
     }
 
     static var empty: SidebarModel {
-        SidebarModel(feeds: [], folders: [], tags: [], feedTagMap: [:], collapsedFolderIds: [], expandedTagIds: [])
+        SidebarModel(feeds: [], folders: [], tags: [], feedTagMap: [:], collapsedFolderIds: [], expandedTagIds: [], labels: .empty)
     }
 
     func feeds(inFolder folderId: String) -> [Feeds] { feedsByFolderId[folderId] ?? [] }

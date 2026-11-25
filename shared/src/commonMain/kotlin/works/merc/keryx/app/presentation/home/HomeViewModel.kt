@@ -191,19 +191,14 @@ class HomeViewModel(
         articleRepository.watchUnreadCountsByFolder().stateIn(viewModelScope, started, emptyMap())
 
     /**
-     * Each live tag's ordinal among the tags sharing its name — [tagOrdinals] over [tags], keyed
-     * by tag id — so both UIs render two same-named tags as "X" and "X (2)". Only the second and
-     * later of a name have an entry; a tag absent from the map displays its bare name.
+     * Every tag's and folder's display name with its ordinal among the rows sharing its name
+     * ([tagFolderLabels] over [tags] and [folders]) — so both UIs render two same-named tags as
+     * "X" and "X (2)". One flow, one value: a name and its ordinal always come from the same
+     * snapshot of both lists, and the UIs subscribe to nothing else for labels.
      */
-    val tagOrdinals: StateFlow<Map<String, Int>> =
-        tags.map { tagOrdinals(it) }.stateIn(viewModelScope, started, emptyMap())
-
-    /**
-     * Each live folder's ordinal among the folders sharing its name — the folder counterpart of
-     * [tagOrdinals], keyed by folder id.
-     */
-    val folderOrdinals: StateFlow<Map<String, Int>> =
-        folders.map { folderOrdinals(it) }.stateIn(viewModelScope, started, emptyMap())
+    val tagFolderLabels: StateFlow<TagFolderLabels> =
+        combine(tags, folders) { t, f -> tagFolderLabels(t, f) }
+            .stateIn(viewModelScope, started, TagFolderLabels.EMPTY)
 
     val totalUnread: StateFlow<Long> =
         articleRepository.watchUnreadCount().stateIn(viewModelScope, started, 0L)
@@ -292,6 +287,14 @@ class HomeViewModel(
     /** Whether the previous session's filter was restored at launch — see [initialHomePane]. */
     val filterRestoredOnLaunch: Boolean = launchFilter.reproduced
 
+    /**
+     * Identifies this ViewModel instance: unique per instance, and never the same in two processes.
+     * [FilterSelection.generation] restarts at 0 in every ViewModel, so a generation a UI saved
+     * across process death is comparable only with this token — saved alongside it, a generation
+     * whose token differs belongs to another ViewModel and says nothing about this one.
+     */
+    val instanceToken: String = works.merc.keryx.app.domain.IdGenerator.newId()
+
     private val _filterSelection = MutableStateFlow(FilterSelection(launchFilter.filter, generation = 0L))
 
     /**
@@ -311,6 +314,23 @@ class HomeViewModel(
     // starts at that filter's canonical (folder-group) row, matching pre-instance behavior.
     private val _selectedRowInstance = MutableStateFlow(FeedListRowSelection.canonicalFor(_filter.value))
     val selectedRowInstance: StateFlow<FeedListRowSelection> = _selectedRowInstance
+
+    // Counts the user's selections of a row — a click, a key, a notification's "show feed" — and
+    // nothing else. [selectedRowInstance] also changes when a merge re-keys the selected tag or
+    // folder onto another id, which is the same row under a new id and not a selection: a UI that
+    // scrolls the feed list to the selected row keys on this counter, so a re-key never moves a list
+    // the user had scrolled away (external-spec §9, "Least surprise"). Each increment follows the
+    // write of [selectedRowInstance], so reading the instance once this has changed gives the new row.
+    private val _selectedRowGeneration = MutableStateFlow(0L)
+    val selectedRowGeneration: StateFlow<Long> = _selectedRowGeneration.asStateFlow()
+
+    /**
+     * The tag/folder id re-keys a sync merge has published ([TagFolderIdRemaps.current]), for a UI
+     * that holds a tag or folder id of its own — an inline rename's target — to bring up to date.
+     * Published before the lists a merge changes are, so a UI that sees a list under a new id reads
+     * a map that already holds the move.
+     */
+    val tagFolderIdRemap: StateFlow<TagFolderIdRemap> get() = idRemaps.current
 
     // --- Search ---
     //
@@ -1056,11 +1076,15 @@ class HomeViewModel(
         val current = remap.filter(filter)
         val currentInstance = instance.remappedBy(remap)
         if (current == _filter.value) {
-            _selectedRowInstance.value = currentInstance
+            if (_selectedRowInstance.value != currentInstance) {
+                _selectedRowInstance.value = currentInstance
+                _selectedRowGeneration.update { it + 1 }
+            }
             return
         }
         _filterSelection.update { FilterSelection(current, it.generation + 1) }
         _selectedRowInstance.value = currentInstance
+        _selectedRowGeneration.update { it + 1 }
         _selectedArticle.value = null
         _pendingSelectedRow.value = null
         _headerArticleId.value = null

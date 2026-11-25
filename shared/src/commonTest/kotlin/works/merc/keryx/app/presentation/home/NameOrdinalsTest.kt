@@ -64,6 +64,24 @@ class NameOrdinalsTest {
         val rows = listOf(folder("d1", "Work", 9), folder("d2", "Work", 5))
         assertEquals(mapOf("d1" to 2), folderOrdinals(rows))
     }
+
+    @Test
+    fun labelsCarryEachRowsNameTogetherWithItsOrdinal() {
+        val labels = tagFolderLabels(
+            tags = listOf(tag("t1", "Work", 9), tag("t2", "Work", 5), tag("t3", "Home", 1)),
+            folders = listOf(folder("d1", "Work", 1)),
+        )
+        assertEquals(OrdinalName("Work", 2), labels.tag("t1", "stale"))
+        assertEquals(OrdinalName("Work", null), labels.tag("t2", "stale"))
+        assertEquals(OrdinalName("Home", null), labels.tag("t3", "stale"))
+        assertEquals(OrdinalName("Work", null), labels.folder("d1", "stale"))
+    }
+
+    @Test
+    fun aRowTheSnapshotHasNoEntryForShowsItsOwnNameBare() {
+        assertEquals(OrdinalName("Fresh", null), TagFolderLabels.EMPTY.tag("t9", "Fresh"))
+        assertEquals(OrdinalName("Fresh", null), TagFolderLabels.EMPTY.folder("d9", "Fresh"))
+    }
 }
 
 private fun tag(id: String, name: String, createdAt: Long, deletedAt: Long? = null): Tags = Tags(
