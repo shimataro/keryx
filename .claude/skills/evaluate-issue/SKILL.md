@@ -388,6 +388,10 @@ conversation.
    - Check `git status --porcelain`. If it prints anything, warn and stop this URL
      (`Working tree not clean`) before any edit — the clean result is the baseline for the
      re-check right before the first edit.
+   - If an earlier URL of this run has already committed fixes, re-check this plan's premises —
+     the files it plans to modify and the anchors its Changes cite — against the current tree.
+     If those commits have changed them, do not approve the stale plan; re-run `/evaluate-issue`
+     for this URL alone instead.
    - Call `EnterPlanMode`, invoke the `refine-plan` skill on the plan file path, resolve any
      question it asks, then call `ExitPlanMode` to submit the refined plan for user approval.
      This approval is the URL's one-time run confirmation
