@@ -39,7 +39,8 @@ package works.merc.keryx.app.domain
  *    canonical row (created from it when main lacks one) by the same per-group rules; its tag links
  *    follow (`feed_tags`: a link colliding with one the canonical tag already has folds into it by
  *    [SyncLww.FEED_TAG]), and so do the not-yet-sent `sync_outbox` entries naming the id. Every id of
- *    the kind whose canonical id is another one — main's and the aliases only the cloud file used — is
+ *    the kind whose canonical id is another one — main's, the aliases only the cloud file used, and
+ *    the pre-upgrade ids only an edge names — is
  *    then recorded in `ks_id_remap` ([IdRemapSql]); for folders, the table's triggers re-resolve every
  *    feed whose raw assignment names a moving id onto the canonical folder (the raw assignment itself
  *    stays as it was). Then the old rows are deleted. Ids held outside the database follow once the
@@ -163,11 +164,14 @@ internal object V2IdentitySql {
         "INSERT OR IGNORE INTO $CANDIDATE (id) SELECT id FROM cloud.${kind.table} WHERE id IN (SELECT a FROM $ADJACENCY)",
         "CREATE TEMP TABLE IF NOT EXISTS ${kind.canon} (id TEXT NOT NULL PRIMARY KEY, canonical_id TEXT NOT NULL) WITHOUT ROWID",
         "DELETE FROM ${kind.canon}",
-        // Every candidate reaches its whole identity (UNION ends the recursion once nothing new is
-        // reached); its canonical id is the smallest candidate reached. Only movers are kept.
+        // Every node of the graph reaches its whole identity (UNION ends the recursion once nothing
+        // new is reached); its canonical id is the smallest candidate reached. Every node is a start,
+        // not just the candidates, so an id that appears only as an edge's pre-upgrade side (one a
+        // feed's raw folder assignment can still name) is mapped onto its identity's canonical id
+        // too — it is never canonical itself, since only candidates are. Only movers are kept.
         """
         WITH RECURSIVE ks_reach(start, node) AS (
-            SELECT id, id FROM $CANDIDATE
+            SELECT DISTINCT a, a FROM $ADJACENCY
             UNION
             SELECT r.start, j.b FROM ks_reach r JOIN $ADJACENCY j ON j.a = r.node
         )
@@ -227,8 +231,9 @@ internal object V2IdentitySql {
 
     /**
      * Records in `ks_id_remap` every id of [kind] whose canonical id is another one — the ids main's
-     * rows had, and the aliases only the cloud file used (a feed's raw folder assignment can name one,
-     * and is stored as the file wrote it: `ks_feed_folder_resolved` resolves it through this table).
+     * rows had, and the aliases only the cloud file used or only an edge's pre-upgrade side names (a
+     * feed's raw folder assignment can name one, and is stored as the file wrote it:
+     * `ks_feed_folder_resolved` resolves it through this table).
      * Only entries that are new or changed are written, so an unchanged map writes nothing. Each maps an
      * id straight to its final canonical id (a canonical id never moves in the same run), as
      * [IdRemapSql.foldStatements] requires. Recorded before the old rows are deleted: for folders, the

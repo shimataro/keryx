@@ -374,6 +374,31 @@ class DeltaExporterTest {
     }
 
     /**
+     * A received file whose feed's raw folder is an id that appears only on the pre-upgrade side of an
+     * identity edge (`folder_v2_edges.v2_id`), never as a row or an edge's row id: the merge records a
+     * move from it onto the identity's canonical folder — it never becomes canonical itself — so the
+     * receiver keeps the raw value and shows the feed in the live canonical folder, as the sender does.
+     */
+    @Test
+    fun aReceivedRawFolderThatIsOnlyAnEdgesPreUpgradeIdResolvesToTheCanonicalFolder() {
+        val cloud = TransportFixtures.transportFile(
+            deltaName(DEV_A, 1),
+            folder("d-a", "A"),
+            feed("f1", folderId = "x", folderAt = 500),
+            "INSERT INTO folder_v2_edges (v2_id, id) VALUES ('x', 'd-a')",
+        )
+        assertEquals(TransportValidation.Valid, TransportFiles.validate(cloud.absolutePath, ValidationTarget.Transport(deltaName(DEV_A, 1))))
+
+        val other = TransportFixtures.localDb()
+        TransportFixtures.merge(other, cloud)
+
+        assertEquals(listOf("x", "500"), query(other, "SELECT folder_id, folder_updated_at FROM ks_feed_folder_raw").single())
+        assertEquals(listOf("d-a", "500"), query(other, "SELECT folder_id, folder_updated_at FROM feeds WHERE id = 'f1'").single())
+        assertEquals(listOf("d-a"), query(other, "SELECT id FROM folders").map { it[0] })
+        assertEquals(listOf(listOf("x", "d-a")), query(other, "SELECT old_id, new_id FROM ks_id_remap WHERE kind = 'folder'"))
+    }
+
+    /**
      * What a device stored as a feed's raw folder after a merge re-keyed its rows is exactly what it
      * sends — never the canonical id the feed resolves to.
      */

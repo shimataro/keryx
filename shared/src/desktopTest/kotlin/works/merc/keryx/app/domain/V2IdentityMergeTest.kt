@@ -115,8 +115,8 @@ class V2IdentityMergeTest {
         val reference = state(results.first())
         results.drop(1).forEach { assertEquals(reference, state(it)) }
         // Every non-canonical id seen is recorded, whether this device held its rows (B first) or only
-        // a file used it (A first): the map is the same in every order.
-        results.forEach { assertEquals(listOf("folder|d-b|d-a", "tag|t-b|t-a"), remap(it)) }
+        // a file used it (A first), the pre-upgrade id included: the map is the same in every order.
+        results.forEach { assertEquals(listOf("folder|d-b|d-a", "folder|p|d-a", "tag|p|t-a", "tag|t-b|t-a"), remap(it)) }
         // B's stamps are newer, so its values win on the one row.
         assertEquals(listOf("Tag b"), rows(results.first(), "SELECT name FROM tags"))
         assertEquals(listOf("Folder b"), rows(results.first(), "SELECT name FROM folders"))
@@ -267,8 +267,9 @@ class V2IdentityMergeTest {
         val remapAfterFirst = remap(db)
         merge(db, fileB())
         assertEquals(afterFirst, state(db))
-        // The alias b (only a file used it) is recorded once; a second merge records nothing more.
-        assertEquals(listOf("folder|d-b|d-a", "tag|t-b|t-a"), remapAfterFirst)
+        // The alias b (only a file used it) and the pre-upgrade id p are recorded once; a second merge
+        // records nothing more.
+        assertEquals(listOf("folder|d-b|d-a", "folder|p|d-a", "tag|p|t-a", "tag|t-b|t-a"), remapAfterFirst)
         assertEquals(remapAfterFirst, remap(db))
         // A base of the same rows is just as quiet.
         merge(db, fold(fileB() to deltaName(DEV_B, 1)))
@@ -336,9 +337,10 @@ class V2IdentityMergeTest {
         assertEquals(listOf(if (mainHoldsCanonical) "red" else "blue"), rows(local, "SELECT color FROM tags"))
         assertEquals(listOf(if (mainHoldsCanonical) "1" else "2"), rows(local, "SELECT sort_order FROM folders"))
         assertEquals(listOf(if (mainHoldsCanonical) "10" else "100"), rows(local, "SELECT created_at FROM tags"))
-        // Moves recorded, the earlier chains folded onto the final id.
+        // Moves recorded, the earlier chains folded onto the final id; the pre-upgrade ids p and q,
+        // which only the edges name, are mapped onto the canonical ids too.
         assertEquals(
-            listOf("folder|d-b|d-a", "folder|xd|d-a", "tag|t-b|t-a", "tag|x|t-a"),
+            listOf("folder|d-b|d-a", "folder|q|d-a", "folder|xd|d-a", "tag|p|t-a", "tag|t-b|t-a", "tag|x|t-a"),
             rows(local, "SELECT kind, old_id, new_id FROM ks_id_remap ORDER BY 1, 2"),
         )
         // The unsent entries were rewritten onto the new ids; the merge added none.
