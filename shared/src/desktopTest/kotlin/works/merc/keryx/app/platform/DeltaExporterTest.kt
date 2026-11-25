@@ -86,12 +86,21 @@ class DeltaExporterTest {
         assertEquals(listOf("a1", "a2"), ids(dest, "articles"))
         assertEquals(listOf("<p>one</p>", "<p>two</p>"), query(File(dest), "SELECT content FROM articles ORDER BY id").map { it[0] })
         assertEquals(
-            mapOf("folders" to 2L, "feeds" to 2L, "tags" to 1L, "articles" to 2L, "feed_tags" to 1L, "global_settings" to 1L),
+            mapOf(
+                "folders" to 2L, "feeds" to 2L, "tags" to 1L, "articles" to 2L, "feed_tags" to 1L, "global_settings" to 1L,
+                "folder_v2_edges" to 0L, "tag_v2_edges" to 0L,
+            ),
             export.rowCounts,
         )
         // Nothing device-local, and no platform table, reaches the file.
         val tables = query(File(dest), "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").map { it[0] }
-        assertEquals(listOf("articles", "feed_tags", "feeds", "folders", "global_settings", "ks_covered", "ks_meta", "ks_vector", "tags"), tables)
+        assertEquals(
+            listOf(
+                "articles", "feed_tags", "feeds", "folder_v2_edges", "folders", "global_settings", "ks_covered", "ks_meta",
+                "ks_vector", "tag_v2_edges", "tags",
+            ),
+            tables,
+        )
     }
 
     @Test
@@ -314,6 +323,75 @@ class DeltaExporterTest {
         DeltaExporter.exportFull(copy, full, meta(2), exceptPath = null)
         assertEquals(TransportValidation.Valid, TransportFiles.validate(full, ValidationTarget.Transport(deltaName(DEV_A, 2))))
         assertEquals(listOf("d1", "100"), feedFolderIn(full))
+    }
+
+    /**
+     * A full send carries every identity edge of `ks_v2_edge`, split by kind — an edge of an id it holds
+     * no row of included, and with an except file that carries none of them — while a delta carries none.
+     */
+    @Test
+    fun aFullSendCarriesEveryIdentityEdgeAndADeltaNone() {
+        val local = capturingDb(*seedRows)
+        exec(
+            local,
+            "INSERT INTO ks_v2_edge (kind, v2_id, id) VALUES ('folder', 'p', 'd1')",
+            "INSERT INTO ks_v2_edge (kind, v2_id, id) VALUES ('folder', 'p', 'd-elsewhere')",
+            "INSERT INTO ks_v2_edge (kind, v2_id, id) VALUES ('tag', 'q', 't1')",
+        )
+        val delta = newPath()
+        assertNotNull(DeltaExporter.exportDelta(local.absolutePath, delta, meta()))
+        assertEquals(emptyList(), query(File(delta), "SELECT v2_id, id FROM folder_v2_edges"))
+        assertEquals(emptyList(), query(File(delta), "SELECT v2_id, id FROM tag_v2_edges"))
+
+        val copy = newPath("ks-copy-")
+        DeltaExporter.copyForFullSend(local.absolutePath, copy)
+        for (except in listOf(null, delta)) {
+            val dest = newPath()
+            DeltaExporter.exportFull(copy, dest, meta(2), exceptPath = except)
+            assertEquals(TransportValidation.Valid, TransportFiles.validate(dest, ValidationTarget.Transport(deltaName(DEV_A, 2))))
+            assertEquals(
+                listOf(listOf("p", "d-elsewhere"), listOf("p", "d1")),
+                query(File(dest), "SELECT v2_id, id FROM folder_v2_edges ORDER BY v2_id, id"),
+            )
+            assertEquals(listOf(listOf("q", "t1")), query(File(dest), "SELECT v2_id, id FROM tag_v2_edges"))
+        }
+    }
+
+    /** A full send leaves out the edges its except file (the base just merged) already carries. */
+    @Test
+    fun aFullSendLeavesOutEdgesTheExceptFileCarries() {
+        val local = capturingDb(*seedRows)
+        val base = newPath("ks-base-")
+        exec(File(base).also { TransportFiles.createEmpty(it.absolutePath, meta()) }, "INSERT INTO tag_v2_edges (v2_id, id) VALUES ('q', 't1')")
+        exec(
+            local,
+            "INSERT INTO ks_v2_edge (kind, v2_id, id) VALUES ('tag', 'q', 't1')",
+            "INSERT INTO ks_v2_edge (kind, v2_id, id) VALUES ('tag', 'q', 't2')",
+        )
+        val copy = newPath("ks-copy-")
+        DeltaExporter.copyForFullSend(local.absolutePath, copy)
+        val dest = newPath()
+        DeltaExporter.exportFull(copy, dest, meta(2), exceptPath = base)
+        assertEquals(listOf(listOf("q", "t2")), query(File(dest), "SELECT v2_id, id FROM tag_v2_edges"))
+    }
+
+    /**
+     * A full send whose synced rows are all identical to the except file's still counts its edges, so it
+     * is not taken for an empty file and left unsent.
+     */
+    @Test
+    fun aFullSendOfOnlyEdgesIsNotEmpty() {
+        val local = capturingDb(*seedRows)
+        val base = newPath("ks-base-")
+        assertNotNull(DeltaExporter.exportDelta(local.absolutePath, base, meta()))
+        exec(local, "INSERT INTO ks_v2_edge (kind, v2_id, id) VALUES ('tag', 'q', 't1')")
+        val copy = newPath("ks-copy-")
+        DeltaExporter.copyForFullSend(local.absolutePath, copy)
+        val export = DeltaExporter.exportFull(copy, newPath(), meta(2), exceptPath = base)
+        assertEquals(0L, export.rowCounts["articles"])
+        assertEquals(0L, export.rowCounts["folder_v2_edges"])
+        assertEquals(1L, export.rowCounts["tag_v2_edges"])
+        assertFalse(export.rowCounts.values.all { it == 0L })
     }
 
     @Test

@@ -160,6 +160,13 @@ CREATE TABLE ks_id_remap (
     PRIMARY KEY (kind, old_id)
 );
 
+CREATE TABLE ks_v2_edge (
+    kind  TEXT NOT NULL,
+    v2_id TEXT NOT NULL,
+    id    TEXT NOT NULL,
+    PRIMARY KEY (kind, v2_id, id)
+);
+
 -- 4. Articles whose search_text still equals their raw content / summary (written before HTML
 --    stripping) get it recomputed.
 INSERT INTO ks_search_pending (rowid)

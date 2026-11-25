@@ -48,7 +48,7 @@ internal object TransportFixtures {
     fun connect(file: File): Connection = DriverManager.getConnection("jdbc:sqlite:${file.absolutePath}")
 
     /**
-     * Merges the transport file [cloud] into the local database [local] with [MergeSql.all] on one
+     * Merges the transport file [cloud] into the local database [local] with [MergeSql.transport] on one
      * connection, in one transaction, foreign keys on — the statements as `DatabaseMerger.merge`
      * runs them, without its pre-delta migration step (which does not apply to a transport file).
      */
@@ -59,7 +59,7 @@ internal object TransportFixtures {
                 st.execute("ATTACH DATABASE '${cloud.absolutePath.replace("'", "''")}' AS cloud")
             }
             conn.autoCommit = false
-            conn.createStatement().use { st -> MergeSql.all.forEach(st::execute) }
+            conn.createStatement().use { st -> MergeSql.transport.forEach(st::execute) }
             conn.commit()
             conn.autoCommit = true
             conn.createStatement().use { it.execute("DETACH DATABASE cloud") }

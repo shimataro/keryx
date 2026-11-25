@@ -48,14 +48,21 @@ object DeltaExportSql {
      */
     const val HIGH_WATER_MARK_QUERY: String = "SELECT MAX(seq) FROM $SOURCE.sync_outbox"
 
+    /**
+     * The tables whose rows count towards a file's row counts: the synced tables, then the identity
+     * edge tables — so a full send that carries only edges is not taken for an empty one (and left
+     * unsent) while its synced rows are all identical to the except file's.
+     */
+    private val countedTables: List<String> = (TransportSchema.SYNCED_TABLES + TransportSchema.EDGE_TABLES).map { it.name }
+
     /** The row count of [table] in the transport file. */
     fun countQuery(table: String): String {
-        require(table in tables) { "Not a synced table: $table" }
+        require(table in countedTables) { "Not a synced or edge table: $table" }
         return "SELECT COUNT(*) FROM main.$table"
     }
 
-    /** The synced tables, in the order [countQuery] is reported. */
-    val tableNames: List<String> = TransportSchema.SYNCED_TABLES.map { it.name }
+    /** The synced tables, then the identity edge tables, in the order [countQuery] is reported. */
+    val tableNames: List<String> = countedTables
 
     private fun columns(table: TableSpec, alias: String? = null): String =
         table.columnNames.joinToString(", ") { if (alias == null) it else "$alias.$it" }
@@ -137,9 +144,10 @@ object DeltaExportSql {
     }
 
     /**
-     * A full send: every synced row of the source, with bodies, then [closureStatements]. With
-     * [withExcept], a row identical on every transport column to the [EXCEPT] file's is left out
-     * (`EXCEPT` compares NULLs as equal) — the receivers already get it from that file.
+     * A full send: every synced row of the source, with bodies, then [closureStatements], then the
+     * identity edges ([edgeStatements]). With [withExcept], a synced row identical on every transport
+     * column to the [EXCEPT] file's, and an edge that file already carries, is left out (`EXCEPT`
+     * compares NULLs as equal) — the receivers already get it from that file.
      */
     fun fullStatements(withExcept: Boolean): List<String> = buildList {
         for (spec in TransportSchema.SYNCED_TABLES) {
@@ -147,6 +155,23 @@ object DeltaExportSql {
             add("INSERT INTO main.${spec.name} (${columns(spec)}) SELECT ${columns(spec)} FROM ${source(spec.name)}$except")
         }
         addAll(closureStatements)
+        addAll(edgeStatements(withExcept))
+    }
+
+    /**
+     * Every identity edge of the source's `ks_v2_edge`, split by kind into `folder_v2_edges` /
+     * `tag_v2_edges` — less, with [withExcept], those the [EXCEPT] file carries. Written by full sends
+     * (and so by the bases uploaded from one) only. An ordinary delta carries none: an edge is created
+     * only by the v2→v3 re-key, while capture is still off, and by a merge, which brings it from a
+     * file the other devices receive too; and every device makes a full send when it joins, so each
+     * edge the re-key created reaches the cloud that way.
+     */
+    fun edgeStatements(withExcept: Boolean): List<String> = listOf(
+        ID_REMAP_KIND_FOLDER to "folder_v2_edges",
+        ID_REMAP_KIND_TAG to "tag_v2_edges",
+    ).map { (kind, edgeTable) ->
+        val except = if (withExcept) " EXCEPT SELECT v2_id, id FROM $EXCEPT.$edgeTable" else ""
+        "INSERT INTO main.$edgeTable (v2_id, id) SELECT v2_id, id FROM $SOURCE.ks_v2_edge WHERE kind = '$kind'$except"
     }
 
     /**

@@ -252,10 +252,12 @@
 | `ks_search_awaiting_body` | `id`(PK) — マージが本文なし（軽量行）で挿入した記事。本文が届くか、日次 rebuild が索引するまで検索索引に入れない |
 | `ks_feed_folder_raw` | `feed_id`(PK), `folder_updated_at`, `folder_id` — フィードごとの生のフォルダー割り当て（勝った版が書いたままのフォルダー id とスタンプ。この端末で生きているかは問わない）: `feeds.folder_id` / `folder_updated_at` の解決元となる正（ビュー `ks_feed_folder_resolved`）であり、マージが生と生で比べる値、送信が運ぶ値でもある。フィードごとに 1 行で、フィードと一緒に（トリガーで）作られ、既存のフィードの分は `2.sqm` が埋める。`folder_id` は NULL か、存在するフォルダー行を指す。参加でも接続解除でも残す |
 | `ks_id_remap` | `kind` + `old_id`（複合 PK）, `new_id` — v2→v3 移行が走らせたタグ/フォルダー id の振り直し（`domain/TagFolderIdRekey.kt`）の記録: 旧ランダム id と、それが変わった名前由来の id。`SettingsRepository` は移行後の最初の起動時に `local_settings.json` の同じ id（`lastFilter`、`collapsedFolderIds`、`expandedTagIds`）を書き換える。その書き換えをべき等に保つため表は無期限に保持する（同期マージは事前アップグレード行の同一性をこの表ではなく行の `v2_id` で再統合する）。この移行だけが書き込む。新規作成 DB では常に空 |
+| `ks_v2_edge` | `kind` + `v2_id` + `id`（複合 PK）— タグとフォルダーの同一性の辺（`kind` は `tag` / `folder`）: 移行前の id と、それを持つ行が振り直された先の行 id の組で、辺でつながる行は 1 つの識別になる。増えるだけの集合: v2→v3 の振り直しが `v2_id` を持つすべての行について書き、同期マージのたびに（クラウドファイルの辺の表と、クラウドと main の行のうち `v2_id` を持つものの `(v2_id, id)` を）加える。削除はせず、参加時にも接続解除時にも消さない——辺は 2 つの id についての事実であり、接続についてのものではない。全量送信は、これを転送ファイルの `folder_v2_edges` / `tag_v2_edges` として運ぶ（[sync-architecture.ja.md](sync-architecture.ja.md) の「転送用スキーマ」参照） |
 
-これらも、`sync_state`、`feed_fetch_state`、`articles_fts` も、端末の外に出ることは決してない: 差分ファイルと
-ベースは同期対象のテーブルだけから作る（[sync-architecture.ja.md](sync-architecture.ja.md) 参照）。ただしフィードの
-`folder_id` / `folder_updated_at` は、その `ks_feed_folder_raw` の行——この表が持つための値——から書く。
+`ks_v2_edge` を除くこれらも、`sync_state`、`feed_fetch_state`、`articles_fts` も、端末の外に出ることは決してない:
+差分ファイルとベースは同期対象のテーブルだけから作る（[sync-architecture.ja.md](sync-architecture.ja.md) 参照）。
+ただしフィードの `folder_id` / `folder_updated_at` は、その `ks_feed_folder_raw` の行——この表が持つための値——から
+書き、全量送信とベースにはそれに加えて `ks_v2_edge` の同一性の辺を入れる。
 
 ### articles_fts（FTS5 仮想テーブル、SQLDelight 管理外）
 

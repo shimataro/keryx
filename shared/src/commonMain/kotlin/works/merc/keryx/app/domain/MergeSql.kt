@@ -712,21 +712,66 @@ object MergeSql {
         WHERE ${SyncLww.wins("excluded", "", SyncLww.GLOBAL_SETTING)};
     """.trimIndent()
 
+    // ---- identity edges: the grow-only record of which tag / folder ids are one identity ----
+
+    /** `(table, ks_v2_edge kind, transport edge table)` of the two tables that carry `v2_id`. */
+    private val EDGE_SOURCES = listOf(
+        Triple("folders", ID_REMAP_KIND_FOLDER, "folder_v2_edges"),
+        Triple("tags", ID_REMAP_KIND_TAG, "tag_v2_edges"),
+    )
+
     /**
-     * The merge statements for every kind of cloud file — a delta, a base, or a pre-delta database
-     * migrated to the current local schema. Transport files contain only the six synced tables plus
-     * metadata, so this list does not reference device-local tables. A pre-delta file's tags and
-     * folders carry `v2_id` from the migration as well, so the same reconciliation applies wherever
-     * a pre-upgrade id matches.
-     *
-     * Applied in FK-safe order (parents before children): the v2→v3 identity reconciliation,
-     * folders, feeds, the folder merge and the other three `mergeFeed*`, tags,
-     * articles (with the `ks_search_pending` / `ks_search_awaiting_body` registrations around it),
-     * feed_tags, global_settings.
+     * Adds to `main.ks_v2_edge` the `(v2_id, id)` of every `cloud` tag or folder row that carries a
+     * `v2_id` — the edges a pre-delta file (which has no edge tables, but whose rows carry `v2_id`
+     * after the migration's re-key) and every transport file's rows imply. Run first, before the
+     * reconciliation moves any `cloud` row to another id, so the edges are the file's own.
      */
-    val all: List<String> = reconcileFolders + reconcileTags + folders + listOf(
+    private val recordCloudRowEdges: List<String> = EDGE_SOURCES.map { (table, kind, _) ->
+        "INSERT OR IGNORE INTO main.ks_v2_edge (kind, v2_id, id) SELECT '$kind', v2_id, id FROM cloud.$table WHERE v2_id IS NOT NULL"
+    }
+
+    /**
+     * Adds to `main.ks_v2_edge` every edge of a transport file's edge tables (`folder_v2_edges`,
+     * `tag_v2_edges`, filled in full sends and bases). A pre-delta file has no such tables, so these
+     * are only in [transport].
+     */
+    private val recordCloudTransportEdges: List<String> = EDGE_SOURCES.map { (_, kind, edgeTable) ->
+        "INSERT OR IGNORE INTO main.ks_v2_edge (kind, v2_id, id) SELECT '$kind', v2_id, id FROM cloud.$edgeTable"
+    }
+
+    /**
+     * Adds to `main.ks_v2_edge` the `(v2_id, id)` of every `main` tag or folder row that carries a
+     * `v2_id` (idempotent: the re-key and earlier merges recorded them already). Run last, so a
+     * `v2_id` this merge copied into main is covered too.
+     */
+    private val recordMainRowEdges: List<String> = EDGE_SOURCES.map { (table, kind, _) ->
+        "INSERT OR IGNORE INTO main.ks_v2_edge (kind, v2_id, id) SELECT '$kind', v2_id, id FROM main.$table WHERE v2_id IS NOT NULL"
+    }
+
+    /**
+     * The merge statements for a pre-delta database migrated to the current local schema
+     * (`DatabaseMerger.merge`). They reference only `cloud` tables and columns present both in such a
+     * database and in a transport file, so they also merge a delta or a base — [transport] is this
+     * list plus the transport files' identity edge tables. This list does not reference device-local
+     * tables of `cloud`. A pre-delta file's tags and folders carry `v2_id` from the migration as well,
+     * so the same reconciliation applies wherever a pre-upgrade id matches.
+     *
+     * Applied in FK-safe order (parents before children): the cloud rows' identity edges, the v2→v3
+     * identity reconciliation, folders, feeds, the folder merge and the other three `mergeFeed*`,
+     * tags, articles (with the `ks_search_pending` / `ks_search_awaiting_body`
+     * registrations around it), feed_tags, global_settings, and finally main's own rows' identity
+     * edges.
+     */
+    val all: List<String> = recordCloudRowEdges + reconcileFolders + reconcileTags + folders + listOf(
         feeds, mergeFeedFolder, mergeFeedSortOrder, mergeFeedCustomTitle, mergeFeedDeletedAt,
     ) + tags + listOf(
         registerChangedBodies, registerAwaitingBodies, articles, registerNewBodies, feedTags, globalSettings,
-    )
+    ) + recordMainRowEdges
+
+    /**
+     * The merge statements for a transport file — a delta, a base, or the fold of several
+     * (`DatabaseMerger.mergeTransport`): the identity edges of its edge tables
+     * (`folder_v2_edges`, `tag_v2_edges`), then [all].
+     */
+    val transport: List<String> = recordCloudTransportEdges + all
 }

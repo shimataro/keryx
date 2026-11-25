@@ -44,8 +44,13 @@ class DeltaExportSqlTest {
 
     @Test
     fun bothKindsEndWithTheClosureFeedsAndTagsBeforeFolders() {
-        for (statements in listOf(delta, DeltaExportSql.fullStatements(false), DeltaExportSql.fullStatements(true))) {
-            assertEquals(DeltaExportSql.closureStatements, statements.takeLast(3))
+        assertEquals(DeltaExportSql.closureStatements, delta.takeLast(3))
+        // A full send then writes the identity edges, which reference nothing.
+        for (withExcept in listOf(false, true)) {
+            assertEquals(
+                DeltaExportSql.closureStatements + DeltaExportSql.edgeStatements(withExcept),
+                DeltaExportSql.fullStatements(withExcept).takeLast(5),
+            )
         }
         val closure = DeltaExportSql.closureStatements
         assertTrue(closure[0].startsWith("INSERT INTO main.feeds"))
@@ -55,11 +60,33 @@ class DeltaExportSqlTest {
     }
 
     @Test
+    fun onlyAFullSendCarriesTheIdentityEdges() {
+        assertTrue(delta.none { "ks_v2_edge" in it || "_v2_edges" in it }, "a delta carries no identity edge")
+        assertEquals(
+            listOf(
+                "INSERT INTO main.folder_v2_edges (v2_id, id) SELECT v2_id, id FROM src.ks_v2_edge WHERE kind = 'folder'",
+                "INSERT INTO main.tag_v2_edges (v2_id, id) SELECT v2_id, id FROM src.ks_v2_edge WHERE kind = 'tag'",
+            ),
+            DeltaExportSql.edgeStatements(withExcept = false),
+        )
+        // With an except file, the edges it carries are left out, as its identical rows are.
+        assertEquals(
+            listOf(
+                "INSERT INTO main.folder_v2_edges (v2_id, id) SELECT v2_id, id FROM src.ks_v2_edge WHERE kind = 'folder' " +
+                    "EXCEPT SELECT v2_id, id FROM ex.folder_v2_edges",
+                "INSERT INTO main.tag_v2_edges (v2_id, id) SELECT v2_id, id FROM src.ks_v2_edge WHERE kind = 'tag' " +
+                    "EXCEPT SELECT v2_id, id FROM ex.tag_v2_edges",
+            ),
+            DeltaExportSql.edgeStatements(withExcept = true),
+        )
+    }
+
+    @Test
     fun aFullSendExceptsOnlyWhenAskedTo() {
         val plain = DeltaExportSql.fullStatements(withExcept = false)
         val except = DeltaExportSql.fullStatements(withExcept = true)
         assertTrue(plain.none { " EXCEPT " in it })
-        assertEquals(6, except.count { " EXCEPT SELECT " in it && "FROM ex." in it })
+        assertEquals(8, except.count { " EXCEPT SELECT " in it && "FROM ex." in it })
         assertTrue(plain.none { "sync_outbox" in it })
     }
 

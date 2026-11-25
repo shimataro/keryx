@@ -100,6 +100,14 @@ A tag's or folder's `v2_id` — the id it carried before the v2→v3 re-key, NUL
 with it, so a receiver can reconcile a row renamed differently on two devices before they upgraded (see "Merge").
 Each file carries `PRAGMA user_version` and:
 
+- `folder_v2_edges(v2_id, id)` / `tag_v2_edges(v2_id, id)` (version 2) — identity edges: a pre-upgrade id and a row
+  id the row carrying it was re-keyed to, the sender's `ks_v2_edge` (see "Local Bookkeeping") split by kind. Rows
+  connected by edges are one identity. Filled only by a full send (and so by a base uploaded from one) — less the
+  edges its except file already carries — and empty in an ordinary delta; a fold unions them, adding the
+  `(v2_id, id)` of every input tag or folder row that carries a `v2_id` (a row keeps only one `v2_id` per id, so a
+  link would otherwise be lost when two files carry the same id with different `v2_id`s). No reference check
+  applies: an edge means something without its rows. The 1→2 transport migration creates them empty;
+
 - `ks_meta(key, value)` — `format`, `generation`, `device` (the writing device), `created_at`, `kind` (`delta`/`base`)
   and `number` (the delta's `seq` or the base's `n`); generation, device, kind, number and creation time must match
   the file name;
@@ -136,6 +144,7 @@ extend).
 | `ks_feed_folder_raw(feed_id, folder_updated_at, folder_id)` | Per feed, its raw folder assignment — the folder id and stamp as the winning version wrote them, whether or not that folder is alive here. The source of truth for a feed's folder: every local move writes it, the merge records the winner into it, and a send carries it; `feeds.folder_id` / `folder_updated_at` are a cache resolved from it (see "Merge"). Every feed has exactly one row, created with the feed; its `folder_id` is NULL or names an existing folder row. This device's data, kept across joining and disconnect |
 | `ks_feed_folder_resolved` (view) | The one definition of a feed's resolved folder: the raw `folder_id` while that folder exists and is alive, else NULL, with the raw stamp. Triggers write it into `feeds` whenever a raw row changes or a folder is deleted or revived — in every transaction, the merge's included |
 | `ks_id_remap(kind, old_id, new_id)` | The tag/folder id re-key the v2→v3 migration ran (`domain/TagFolderIdRekey.kt`), so `SettingsRepository` rewrites the same ids in `local_settings.json` once at startup. The table is kept indefinitely so that rewrite stays idempotent; the sync merge reconciles pre-upgrade identities by the row's `v2_id`, not by this table (see `db-schema.md`) |
+| `ks_v2_edge(kind, v2_id, id)` | The identity edges of tags and folders (`kind` `tag` / `folder`): a pre-upgrade id and a row id the row carrying it was re-keyed to; rows connected by edges are one identity. A grow-only set: the v2→v3 re-key records the edge of every row carrying a `v2_id`, and every merge adds the cloud file's edge tables (transport files only) and the `(v2_id, id)` of its and main's rows that carry a `v2_id`; never deleted. Full sends carry it (see "Transport schema"). Unlike `sync_applied` it is not cleared on joining or disconnecting: an edge is a fact about two ids, not about the connection |
 | `feed_fetch_state(feed_id, etag, last_modified, error_count, last_error)` | A feed's fetch state on this device — never synced |
 
 **Triggers** on the six synced tables append to `sync_outbox` (`AFTER INSERT` / `AFTER UPDATE`), guarded by
@@ -168,7 +177,8 @@ clock), `ks_bases` (what this device knows of its generation's bases — each on
 time — so it can tell what a base covers without downloading it), `ks_legacy_stub_rev`, `sync_index_pending` (present
 from a merge's commit until the search index has caught up with it — see "Receiving"; without the `ks_` prefix, since
 that work belongs to the local search index and survives a disconnect). `sync_state` and the tables
-above are device-local and never leave the device.
+above are device-local and never leave the device — except that a full send copies `ks_v2_edge`'s edges into its
+edge tables.
 
 ## Sync Flow (`SyncRepository.sync()`)
 
@@ -246,7 +256,7 @@ only the retries of a revision-checked write (the pointer, the stub); delta and 
    last-write-wins — the same rules as the merge, without its local guards), so the merge runs once however many
    files arrived.
 4. **Merge** with `DatabaseMerger.mergeTransport` in a single transaction (see "Merge"): `INSERT INTO sync_merging` first,
-   then `MergeSql.all`, then the `sync_applied`/`sync_cursor` updates for every file merged and the
+   then `MergeSql.transport`, then the `sync_applied`/`sync_cursor` updates for every file merged and the
    `ks_search_pending` registrations and `sync_index_pending`, then `DELETE FROM sync_merging`. The names `sync_applied` records include every
    name a merged base lists explicitly, whether listed or not (garbage-collected meanwhile). Merging and recording what was merged
    therefore commit together or not at all — a crash in between re-merges the same files next time, which the
@@ -279,7 +289,8 @@ only the retries of a revision-checked write (the pointer, the stub); delta and 
      (`EXCEPT`) are left out — a fresh device with an empty database sends almost nothing — and, after the
      filtering, the rows the kept rows reference are added back (the feed of every kept article, the folder of
      every kept feed, the tag and feed of every kept `feed_tags` row), so the file passes validation check 9 even
-     when a kept article's feed is identical to the merged base.
+     when a kept article's feed is identical to the merged base. Every edge of `ks_v2_edge` the merged base does not
+     carry is written to the edge tables, and counts as a row: a full send left with only edges is still uploaded.
 2. **Record before uploading**: the file is named by the hash of the exporter's own output (never opened for writing
    again — on Android that would add `android_metadata` and change its bytes), written compressed to the app's data
    directory as `pending-<n>.db.gz`, and `ks_attempt = (n = ks_last_seq + 1, name, S, full)` is recorded. A file with no
@@ -520,7 +531,14 @@ and the ambiguous `SQLITE_ERROR` case of the classification below is checked aga
 Merge SQL (`MergeSql`) key points:
 
 - **Explicitly specify columns**, and only columns present both in the transport schema and in a pre-delta database
-  migrated to the current schema, so one statement set serves deltas, bases and the migration.
+  migrated to the current schema, so one statement set (`MergeSql.all`) serves deltas, bases and the migration. A
+  transport file's merge (`MergeSql.transport`) runs two more statements first, which add its edge tables
+  (`folder_v2_edges`, `tag_v2_edges`) to `main.ks_v2_edge`; a pre-delta database has no edge tables, and its rows'
+  `v2_id` — set by the migration's re-key — carry the same edges.
+- **Identity edges are recorded in every merge**: before anything else, the `(v2_id, id)` of every cloud tag or folder
+  row that carries a `v2_id`, as the file holds it (before the reconciliation below moves any row), and last, the same
+  of main's own rows — all `INSERT OR IGNORE` into `ks_v2_edge`. They only record identities; the reconciliation below
+  does not read them yet.
 - **A tie is decided by value, in every statement.** When both sides carry the same stamp, the group whose
   normalized values compare greater wins. Precisely (`SyncLww`), each version of a field group gets the rank row
   value `(stamp IS NOT NULL, COALESCE(stamp, 0), c1 IS NOT NULL, COALESCE(c1, 0), c2 IS NOT NULL, COALESCE(c2, 0),
@@ -642,9 +660,10 @@ Merge SQL (`MergeSql`) key points:
   a different id, a referenced row main lacks) so UNIQUE / FK violations do not fail the whole transaction. Tag and
   folder rows carry no extra guard: a name main holds under another id is allowed through, and same-named rows
   coexist.
-- `MergeSql.all` order: folders (per-field statements by id, then the insert), feeds, the folder merge and the
-  other three `mergeFeed*`,
-  tags (per field, insert), articles, feed_tags, global_settings. Folders precede feeds (for
+- `MergeSql.all` order: the cloud rows' identity edges, the v2 reconciliation, folders (per-field statements by id,
+  then the insert), feeds, the folder merge and the other three `mergeFeed*`,
+  tags (per field, insert), articles, feed_tags, global_settings, and main's own rows' identity edges
+  (`MergeSql.transport` puts the edge tables' two statements in front). Folders precede feeds (for
   `feeds.folder_id`), and the `mergeFeed*` statements follow both.
 - The bookkeeping tables (`sync_outbox`, `ks_search_pending`, `ks_feed_folder_raw`, `sync_merging`, …) carry no
   constraints beyond their primary keys, and the triggers on them and on `feeds` / `folders` only append to the
@@ -652,7 +671,9 @@ Merge SQL (`MergeSql`) key points:
   that main can only already violate FOREIGN KEY constraints.
 
 `ReduceSql` folds transport files into one with the same per-field rules and tie-break, keyed by primary key only —
-no local guards, which belong to each device's own merge.
+no local guards, which belong to each device's own merge. The edge tables fold by union (`INSERT OR IGNORE`), plus
+the `(v2_id, id)` of each input's tag and folder rows that carry a `v2_id`, so a base built by folding keeps every
+input's edges.
 
 ### Merge Failure Classification
 

@@ -515,7 +515,7 @@ class AppleDatabaseTest {
          */
         val VERSION_3_TABLES = listOf(
             "feed_fetch_state", "sync_outbox", "sync_capture", "sync_merging", "sync_applied", "sync_cursor", "ks_search_pending",
-            "ks_search_awaiting_body", "ks_feed_folder_raw", "ks_id_remap",
+            "ks_search_awaiting_body", "ks_feed_folder_raw", "ks_id_remap", "ks_v2_edge",
         )
 
         /** The triggers `2.sqm` creates, dropped before the tables they read and write. */

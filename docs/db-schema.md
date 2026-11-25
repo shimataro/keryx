@@ -243,10 +243,12 @@ with it, so a failed indexing is retried by the next sync). Device-local; cleare
 | `ks_search_awaiting_body` | `id`(PK) — articles a merge inserted without a body (a light row), kept out of the search index until one arrives or the daily rebuild indexes them |
 | `ks_feed_folder_raw` | `feed_id`(PK), `folder_updated_at`, `folder_id` — per feed, its raw folder assignment (the folder id and stamp as the winning version wrote them, alive here or not): the source of truth `feeds.folder_id` / `folder_updated_at` are resolved from (view `ks_feed_folder_resolved`), what the merge ranks raw against raw and what a send carries. One row per feed, created with it (trigger) and filled for existing feeds by `2.sqm`; `folder_id` is NULL or names an existing folder row. Kept across joining and disconnect |
 | `ks_id_remap` | `kind` + `old_id`(composite PK), `new_id` — the tag/folder id re-key the v2→v3 migration ran (`domain/TagFolderIdRekey.kt`): the old random id and the name-derived one it became, so `SettingsRepository` rewrites the same ids in `local_settings.json` (`lastFilter`, `collapsedFolderIds`, `expandedTagIds`) once at startup. Kept indefinitely so that rewrite stays idempotent. (The sync merge reconciles pre-upgrade identities by the row's `v2_id`, not by this table.) Populated only by that migration; empty on every fresh database |
+| `ks_v2_edge` | `kind` + `v2_id` + `id`(composite PK) — the identity edges of tags and folders (`kind` `tag` / `folder`): a pre-upgrade id and a row id the row carrying it was re-keyed to; rows connected by edges are one identity. A grow-only set: written by the v2→v3 re-key for every row carrying a `v2_id` and by every sync merge (the cloud file's edge tables and the `(v2_id, id)` of its and main's rows carrying a `v2_id`); never deleted, and not cleared on joining or disconnecting — an edge is a fact about two ids, not about the connection. Full sends carry it as the transport file's `folder_v2_edges` / `tag_v2_edges` (see "Transport schema" in [sync-architecture.md](sync-architecture.md)) |
 
-None of these, nor `sync_state`, `feed_fetch_state` or `articles_fts`, ever leaves the device: delta and base files
-are built from the synced tables only (see [sync-architecture.md](sync-architecture.md)) — except that a feed's
-`folder_id` / `folder_updated_at` are written from its `ks_feed_folder_raw` row, the value the table exists to hold.
+None of these but `ks_v2_edge`, nor `sync_state`, `feed_fetch_state` or `articles_fts`, ever leaves the device: delta
+and base files are built from the synced tables only (see [sync-architecture.md](sync-architecture.md)) — except
+that a feed's `folder_id` / `folder_updated_at` are written from its `ks_feed_folder_raw` row, the value the table
+exists to hold, and that full sends and bases also carry the identity edges of `ks_v2_edge`.
 
 ### articles_fts (FTS5 virtual table, outside SQLDelight management)
 

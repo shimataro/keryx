@@ -124,6 +124,59 @@ class TransportFilesTest {
         assertEquals(TransportValidation.Valid, validate(file, base))
     }
 
+    /** A file of version 1, as an earlier build wrote it: no `v2_id` columns and no identity edge tables. */
+    private fun versionOneFile(name: TransportFileName = delta): File = validFile(name).also { file ->
+        exec(
+            file,
+            "DROP TABLE folder_v2_edges",
+            "DROP TABLE tag_v2_edges",
+            "ALTER TABLE folders DROP COLUMN v2_id",
+            "ALTER TABLE tags DROP COLUMN v2_id",
+            "PRAGMA user_version = 1",
+        )
+    }
+
+    @Test
+    fun aVersionOneFileIsValidAndMigratedToTheCurrentSchema() {
+        val file = versionOneFile()
+        assertEquals(TransportValidation.Valid, validate(file))
+        // Validation migrated it in place: every table of the current version, the edge tables included.
+        for (table in TransportSchema.EXPECTED_TABLES.getValue(TransportSchema.VERSION)) {
+            assertEquals(expectedInfo(table), tableInfo(file, table.name), table.name)
+        }
+        assertEquals(true, TransportFiles.schemaMatches(file.absolutePath))
+    }
+
+    @Test
+    fun prepareForMergeCreatesTheIdentityEdgeTablesOfAVersionOneFile() {
+        val file = versionOneFile()
+        TransportFiles.prepareForMerge(file.absolutePath)
+        for (table in TransportSchema.EDGE_TABLES) {
+            assertEquals(expectedInfo(table), tableInfo(file, table.name), table.name)
+        }
+        assertEquals(true, TransportFiles.schemaMatches(file.absolutePath))
+    }
+
+    @Test
+    fun aFileWithIdentityEdgesIsValidAndOneWithoutTheTablesIsCorrupt() {
+        val file = validFile()
+        exec(
+            file,
+            "INSERT INTO folder_v2_edges (v2_id, id) VALUES ('p', 'd1')",
+            // An edge needs no row of its id: it is not a reference.
+            "INSERT INTO tag_v2_edges (v2_id, id) VALUES ('q', 't-elsewhere')",
+        )
+        assertEquals(TransportValidation.Valid, validate(file))
+
+        val missing = validFile()
+        exec(missing, "DROP TABLE tag_v2_edges")
+        assertCorrupt(validate(missing), "tag_v2_edges")
+
+        val emptyId = validFile()
+        exec(emptyId, "INSERT INTO folder_v2_edges (v2_id, id) VALUES ('p', '')")
+        assertCorrupt(validate(emptyId), "folder_v2_edges.id")
+    }
+
     @Test
     fun aValidPreDeltaDatabasePasses() {
         val (file, driver, db) = fileDb()

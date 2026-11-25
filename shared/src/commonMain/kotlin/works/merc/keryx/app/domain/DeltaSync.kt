@@ -719,7 +719,7 @@ internal class DeltaSync(
     private suspend fun mergeFolded(accumulator: String, merged: List<String>, cursorUpdates: Map<String, Long>): Result<Unit> {
         val statements = buildList {
             add("INSERT INTO main.sync_merging (flag) VALUES (1)")
-            addAll(MergeSql.all)
+            addAll(MergeSql.transport)
             for (name in merged.distinct()) {
                 // Only names that parsed (lowercase hex, digits, '-' and '.') reach SQL.
                 checkNotNull(TransportFileName.parse(name)) { "Malformed name" }

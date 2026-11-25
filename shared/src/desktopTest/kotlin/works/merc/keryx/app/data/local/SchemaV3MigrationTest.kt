@@ -290,6 +290,16 @@ class SchemaV3MigrationTest {
                 ),
                 conn.rows("SELECT kind, old_id, new_id FROM ks_id_remap").toSet(),
             )
+            // Each re-keyed row's identity edge (its pre-upgrade id, its new id) is recorded too.
+            assertEquals(
+                setOf(
+                    listOf<Any?>("folder", "d1", dId),
+                    listOf<Any?>("folder", "d2", dGoneId),
+                    listOf<Any?>("tag", "t1", tId),
+                    listOf<Any?>("tag", "t2", tGoneId),
+                ),
+                conn.rows("SELECT kind, v2_id, id FROM ks_v2_edge").toSet(),
+            )
             // UNIQUE(name) is gone: a second row of a name inserts fine, on both tables.
             conn.createStatement().use { st ->
                 st.execute("INSERT INTO tags (id, name, updated_at, created_at) VALUES ('t3', 'T', 30, 3)")
@@ -346,6 +356,36 @@ class SchemaV3MigrationTest {
                 ),
                 conn.rows("SELECT kind, old_id, new_id FROM ks_id_remap").toSet(),
             )
+            assertEquals(
+                listOf(
+                    listOf<Any?>("folder", "d1", IdGenerator.folderId("D")),
+                    listOf<Any?>("tag", "t1", IdGenerator.tagId("T")),
+                ),
+                conn.rows("SELECT kind, v2_id, id FROM ks_v2_edge ORDER BY kind"),
+            )
+        }
+    }
+
+    /**
+     * A row already at its derived id that carries a `v2_id` (a re-key interrupted after the copy, say)
+     * gets its identity edge recorded as well, without being moved.
+     */
+    @Test
+    fun theRekeyRecordsTheEdgeOfARowAlreadyAtItsDerivedId() {
+        val file = tempFile()
+        val driver = JdbcSqliteDriver("jdbc:sqlite:${file.absolutePath}")
+        try {
+            driver.createSchemaV2()
+            KeryxDatabase.Schema.migrate(driver, 2, 3, *KERYX_SCHEMA_CALLBACKS)
+            val tId = IdGenerator.tagId("T")
+            driver.execute(null, "INSERT INTO tags (id, name, updated_at, created_at, v2_id) VALUES ('$tId', 'T', 10, 1, 'old-t')", 0)
+            rekeyTagAndFolderIds(driver)
+        } finally {
+            driver.close()
+        }
+        withConnection(file) { conn ->
+            assertEquals(listOf(listOf<Any?>("tag", "old-t", IdGenerator.tagId("T"))), conn.rows("SELECT kind, v2_id, id FROM ks_v2_edge"))
+            assertEquals(emptyList(), conn.rows("SELECT kind, old_id, new_id FROM ks_id_remap"))
         }
     }
 

@@ -4,10 +4,10 @@ import app.cash.sqldelight.db.AfterVersion
 import app.cash.sqldelight.db.QueryResult
 import app.cash.sqldelight.db.SqlDriver
 
-/** The `ks_id_remap.kind` of a tag row's re-key record. */
+/** The `ks_id_remap.kind` / `ks_v2_edge.kind` of a tag row's record. */
 internal const val ID_REMAP_KIND_TAG = "tag"
 
-/** The `ks_id_remap.kind` of a folder row's re-key record. */
+/** The `ks_id_remap.kind` / `ks_v2_edge.kind` of a folder row's record. */
 internal const val ID_REMAP_KIND_FOLDER = "folder"
 
 /**
@@ -39,7 +39,9 @@ val KERYX_SCHEMA_CALLBACKS: Array<AfterVersion> = arrayOf(
  * move is recorded in `ks_id_remap` so `SettingsRepository` can rewrite the same ids in
  * `local_settings.json` once at startup. The row's `v2_id` (set by `2.sqm` to its pre-upgrade id)
  * is copied along, so `MergeSql` can reconcile two devices that renamed the same pre-upgrade row
- * differently before upgrading. The insert-children-delete order
+ * differently before upgrading. Every row that carries a `v2_id` afterwards — re-keyed here or already
+ * at its derived id — also gets its identity edge `(kind, v2_id, id)` in `ks_v2_edge`, the grow-only
+ * record of which ids are one identity that full sends and bases carry. The insert-children-delete order
  * keeps every foreign key satisfied with foreign keys enforced, as they are on every platform's
  * migration connection. Capture is not recording yet (`2.sqm` seeds `sync_capture` disabled), so
  * none of this enters `sync_outbox`; and `sync_outbox` is empty on any database this runs on (it is
@@ -52,7 +54,7 @@ val KERYX_SCHEMA_CALLBACKS: Array<AfterVersion> = arrayOf(
  * Running again changes nothing: every row's id is already the derived one.
  */
 fun rekeyTagAndFolderIds(driver: SqlDriver) {
-    // `2.sqm` creates the table; the IF NOT EXISTS keeps this self-contained if it is ever reached
+    // `2.sqm` creates both tables; the IF NOT EXISTS keeps this self-contained if it is ever reached
     // without the full migration behind it.
     driver.execute(
         null,
@@ -62,6 +64,18 @@ fun rekeyTagAndFolderIds(driver: SqlDriver) {
             old_id TEXT NOT NULL,
             new_id TEXT NOT NULL,
             PRIMARY KEY (kind, old_id)
+        )
+        """.trimIndent(),
+        0,
+    )
+    driver.execute(
+        null,
+        """
+        CREATE TABLE IF NOT EXISTS ks_v2_edge (
+            kind  TEXT NOT NULL,
+            v2_id TEXT NOT NULL,
+            id    TEXT NOT NULL,
+            PRIMARY KEY (kind, v2_id, id)
         )
         """.trimIndent(),
         0,
@@ -147,5 +161,13 @@ private fun rekey(
             bindString(1, oldId)
             bindString(2, newId)
         }
+    }
+    // Every row carrying a pre-upgrade id now sits at its derived id: record its identity edge.
+    driver.execute(
+        null,
+        "INSERT OR IGNORE INTO ks_v2_edge (kind, v2_id, id) SELECT ?, v2_id, $id FROM $table WHERE v2_id IS NOT NULL",
+        1,
+    ) {
+        bindString(0, kind)
     }
 }

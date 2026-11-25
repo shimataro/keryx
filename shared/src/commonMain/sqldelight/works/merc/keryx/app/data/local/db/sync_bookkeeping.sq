@@ -1,5 +1,6 @@
 -- Delta-sync bookkeeping (device-local — NEVER synced, never part of a delta, base or uploaded
--- snapshot; see docs/sync-architecture.md "Local Bookkeeping (schema version 3)").
+-- snapshot, except that a full send copies ks_v2_edge's rows into its edge tables; see
+-- docs/sync-architecture.md "Local Bookkeeping (schema version 3)").
 --
 -- sync_outbox        every local change to a synced row, in order, appended by the capture
 --                    triggers below. pk is the row's primary key (feeds/articles/tags/folders: id,
@@ -44,6 +45,16 @@
 --                    collapsedFolderIds, expandedTagIds) once at startup, and MergeSql can reconcile
 --                    pre-upgrade rows that were renamed before the migration. Kept indefinitely;
 --                    populated only by that migration; empty on every fresh database.
+-- ks_v2_edge         the identity edges of tags and folders: kind ('tag' / 'folder'), a pre-upgrade
+--                    (v2) id and a row id the row carrying it was re-keyed to. Rows connected by these
+--                    edges (through a shared v2_id or a shared row id) are one identity. A grow-only
+--                    set: written by the v2->v3 re-key (TagFolderIdRekey) and by every merge (MergeSql:
+--                    the cloud file's edge tables and the v2_id of its and main's rows), carried by
+--                    full sends and bases (folder_v2_edges / tag_v2_edges), never deleted. Unlike
+--                    sync_applied it is NOT cleared on joining or on disconnect: an edge is a fact about
+--                    two ids, not about the connection or the files merged in a generation. No
+--                    constraint beyond the primary key: a merge must only be able to violate a FOREIGN
+--                    KEY through main's own rows (MergeFailureClassifier).
 --
 -- The capture triggers fire AFTER INSERT / AFTER UPDATE on the six synced tables, guarded by
 -- sync_capture.enabled and the absence of a sync_merging row. An UPDATE is recorded only when a
@@ -118,6 +129,13 @@ CREATE TABLE ks_id_remap (
     old_id TEXT NOT NULL,
     new_id TEXT NOT NULL,
     PRIMARY KEY (kind, old_id)
+);
+
+CREATE TABLE ks_v2_edge (
+    kind  TEXT NOT NULL,
+    v2_id TEXT NOT NULL,
+    id    TEXT NOT NULL,
+    PRIMARY KEY (kind, v2_id, id)
 );
 
 CREATE TRIGGER ks_capture_feeds_insert AFTER INSERT ON feeds
