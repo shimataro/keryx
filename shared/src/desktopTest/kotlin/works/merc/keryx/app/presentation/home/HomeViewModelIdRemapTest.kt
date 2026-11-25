@@ -250,10 +250,11 @@ class HomeViewModelIdRemapTest {
     }
 
     /**
-     * KNOWN PRODUCTION GAP (reported, not fixed here): the merge's commit re-runs the old id's list
-     * query, which is empty once the row has moved, BEFORE [TagFolderIdRemaps] publishes the move and
-     * the selection follows. That emission drops every unseen id ([withList] narrows them to the
-     * emitted ids), so the pill's count is already 0 when the filter switches to the new id.
+     * The merge's commit re-runs the old id's list query BEFORE [TagFolderIdRemaps] publishes the move
+     * and the selection follows — the interval this test forces. That query resolves the old id through
+     * `ks_id_remap` (`articles.sq`'s `watchByTag` / `watchByFolder`), so it still returns the same rows
+     * rather than an empty list that would drop every unseen id ([withList] narrows them to the
+     * emitted ids): the pill keeps its count across the re-key.
      */
     @Test
     fun aReKeyOfTheSelectedTagKeepsThePillsUnseenCount() = runVmTest {
@@ -262,6 +263,8 @@ class HomeViewModelIdRemapTest {
         selectWithOneUnseenArticle(vm, ArticleFilter.Tag("t-old"))
 
         driver.rekeyTagForTest("t-old", "t-new")
+        // The interval between the merge's commit and the publish: the old id's list query re-runs.
+        testScheduler.advanceUntilIdle()
         remaps.publishFromDb()
         testScheduler.advanceUntilIdle()
 
@@ -282,6 +285,7 @@ class HomeViewModelIdRemapTest {
         assertEquals(FilterSelection(ArticleFilter.Folder("d-new"), before.generation), vm.filterSelection.value)
     }
 
+    /** As [aReKeyOfTheSelectedTagKeepsThePillsUnseenCount], for a folder. */
     @Test
     fun aReKeyOfTheSelectedFolderKeepsThePillsUnseenCount() = runVmTest {
         seedArticles()
@@ -289,6 +293,8 @@ class HomeViewModelIdRemapTest {
         selectWithOneUnseenArticle(vm, ArticleFilter.Folder("d-old"))
 
         driver.rekeyFolderForTest("d-old", "d-new")
+        // The interval between the merge's commit and the publish: the old id's list query re-runs.
+        testScheduler.advanceUntilIdle()
         remaps.publishFromDb()
         testScheduler.advanceUntilIdle()
 
