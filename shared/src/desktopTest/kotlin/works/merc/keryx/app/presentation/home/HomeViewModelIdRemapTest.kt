@@ -57,7 +57,7 @@ class HomeViewModelIdRemapTest {
         db.insertTag("t-old", "News")
         db.insertFeed("f1", folderId = "d-old")
         db.insertFeedTag("f1", "t-old")
-        remaps = TagFolderIdRemaps(db)
+        remaps = TagFolderIdRemaps(db, Dispatchers.Unconfined)
     }
 
     @AfterTest

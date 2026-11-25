@@ -2,6 +2,8 @@ package works.merc.keryx.app.domain
 
 import app.cash.sqldelight.db.QueryResult
 import app.cash.sqldelight.db.SqlDriver
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.runTest
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.inMemoryDb
@@ -133,10 +135,10 @@ class IdRemapSqlTest {
     // --- TagFolderIdRemaps ---
 
     @Test
-    fun remapsReadTheTableAtConstructionAndOnEachPublish() = runTest {
+    fun remapsLoadTheTableInTheBackgroundAndReadItAgainOnEachPublish() = runTest {
         val (driver, db) = inMemoryDb()
         try {
-            val remaps = TagFolderIdRemaps(db)
+            val remaps = TagFolderIdRemaps(db, Dispatchers.Unconfined)
             assertSame(TagFolderIdRemap.EMPTY, remaps.current.value)
             assertTrue(remaps.current.value.isEmpty)
 
@@ -150,10 +152,72 @@ class IdRemapSqlTest {
             val remap = remaps.current.value
             assertEquals(mapOf("t-old" to "t-new"), remap.tagIds)
             assertEquals(mapOf("d-old" to "d-new"), remap.folderIds)
-            assertEquals(1, TagFolderIdRemaps(db).current.value.tagIds.size, "a new instance reads the same table")
+            assertEquals(1, TagFolderIdRemaps(db, Dispatchers.Unconfined).current.value.tagIds.size, "a new instance reads the same table")
         } finally {
             driver.close()
         }
+    }
+
+    /**
+     * Construction reads nothing: the initial load runs on the given dispatcher, so a UI thread
+     * resolving the instance never opens the database. Until it has run, [TagFolderIdRemaps.loaded]
+     * is false and the map is empty; [TagFolderIdRemaps.awaitLoaded] returns once it has.
+     */
+    @Test
+    fun theInitialLoadRunsOnTheDispatcherNotInTheConstructor() = runTest {
+        var reads = 0
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val remap = TagFolderIdRemap(tagIds = mapOf("a" to "b"), folderIds = emptyMap())
+        val remaps = TagFolderIdRemaps({ reads++; remap }, dispatcher)
+
+        assertEquals(0, reads, "construction does not read")
+        assertEquals(false, remaps.loaded.value)
+        assertTrue(remaps.current.value.isEmpty)
+
+        remaps.awaitLoaded()
+
+        assertEquals(1, reads)
+        assertEquals(true, remaps.loaded.value)
+        assertSame(remap, remaps.current.value)
+    }
+
+    /** A publish that lands before the initial load is not overtaken by it: the last read wins. */
+    @Test
+    fun aPublishBeforeTheInitialLoadIsNotOvertakenByIt() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val reads = ArrayDeque(
+            listOf(
+                TagFolderIdRemap(mapOf("a" to "b"), emptyMap()),
+                TagFolderIdRemap(mapOf("a" to "c"), emptyMap()),
+            ),
+        )
+        val remaps = TagFolderIdRemaps({ reads.removeFirst() }, dispatcher)
+
+        // The publish takes the lock and reads first; the queued initial load then reads after it.
+        remaps.publishFromDb()
+        assertEquals("b", remaps.current.value.tag("a"))
+        remaps.awaitLoaded()
+
+        assertEquals("c", remaps.current.value.tag("a"), "the later read is the one current")
+    }
+
+    /** A failing initial load is logged, not thrown: the map stays empty, the gate still opens. */
+    @Test
+    fun aFailingInitialLoadStillOpensTheGate() = runTest {
+        val remaps = TagFolderIdRemaps({ error("db is locked") }, StandardTestDispatcher(testScheduler))
+
+        remaps.awaitLoaded()
+
+        assertEquals(true, remaps.loaded.value)
+        assertTrue(remaps.current.value.isEmpty)
+    }
+
+    @Test
+    fun theIdSetMappersKeepOrderAndKinds() {
+        val remap = TagFolderIdRemap(tagIds = mapOf("a" to "b"), folderIds = mapOf("a" to "z"))
+
+        assertEquals(listOf("b", "x"), remap.tags(linkedSetOf("a", "x")).toList())
+        assertEquals(listOf("x", "z"), remap.folders(linkedSetOf("x", "a")).toList())
     }
 
     @Test

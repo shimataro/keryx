@@ -212,16 +212,53 @@ class HomeViewModel(
         articleRepository.watchStarredUnreadCount().stateIn(viewModelScope, started, 0L)
 
     /**
+     * What [restoreFilter] decided: the [filter] to start on, whether the saved one was actually
+     * [reproduced], and whether its target was [validated] (read from the database) yet.
+     */
+    private data class RestoredFilter(val filter: ArticleFilter, val reproduced: Boolean, val validated: Boolean = true)
+
+    /**
      * Restores the last-selected filter from local settings, falling back to
      * [ArticleFilter.All] if it's missing, undecodable, or points at a feed/tag/folder that
-     * was deleted while the app was closed. The second value says whether the saved filter was
-     * actually reproduced (false for any of those fallbacks).
+     * was deleted while the app was closed. A tag or folder id a merge or the v2->v3 migration has
+     * re-keyed is brought up to date first ([TagFolderIdRemaps]); [RestoredFilter.reproduced] says
+     * whether the saved filter was actually reproduced (false for any of those fallbacks).
+     *
+     * The re-key map loads in the background ([TagFolderIdRemaps.loaded]), and this runs on the UI
+     * thread, which must not wait for it. A tag or folder filter restored before the map has loaded
+     * is therefore taken as is, unvalidated ([RestoredFilter.validated] false): validating it now
+     * would read a re-keyed id as a deleted row and fall back to All. [validateRestoredFilterOnceRemapLoaded]
+     * finishes the job once the map is in.
      */
-    private fun restoreFilter(): Pair<ArticleFilter, Boolean> {
-        val encoded = settingsRepository.getLocalSettings().lastFilter ?: return ArticleFilter.All to false
-        val decoded = decodeArticleFilter(encoded) ?: return ArticleFilter.All to false
-        val validated = validateFilterTarget(decoded)
-        return validated to (validated == decoded)
+    private fun restoreFilter(): RestoredFilter {
+        val encoded = settingsRepository.getLocalSettings().lastFilter ?: return RestoredFilter(ArticleFilter.All, reproduced = false)
+        val decoded = decodeArticleFilter(encoded) ?: return RestoredFilter(ArticleFilter.All, reproduced = false)
+        // `loaded` first: it is set after the map, so a true here means the map read next is the loaded one.
+        val remapLoaded = idRemaps.loaded.value
+        val remapped = idRemaps.current.value.filter(decoded)
+        if (!remapLoaded && (remapped is ArticleFilter.Tag || remapped is ArticleFilter.Folder)) {
+            return RestoredFilter(remapped, reproduced = true, validated = false)
+        }
+        val validated = validateFilterTarget(remapped)
+        return RestoredFilter(validated, reproduced = validated == remapped)
+    }
+
+    /**
+     * Finishes [restoreFilter] for a tag or folder filter restored before the re-key map had loaded:
+     * waits for it (off the UI thread), brings the selection up to date, then validates its target as
+     * [restoreFilter] would have, falling back to All Feeds when it is gone. Does nothing once the
+     * user has selected anything else in the meantime — their choice stands.
+     */
+    private fun validateRestoredFilterOnceRemapLoaded() {
+        val restored = _filterSelection.value
+        viewModelScope.launch {
+            idRemaps.awaitLoaded()
+            catchUpIdRemap()
+            val current = _filterSelection.value
+            if (current.generation != restored.generation) return@launch
+            val validated = withContext(dispatcher) { validateFilterTarget(current.filter) }
+            if (validated != current.filter && _filterSelection.value == current) selectFilter(validated)
+        }
     }
 
     /**
@@ -253,9 +290,9 @@ class HomeViewModel(
     private val launchFilter = restoreFilter()
 
     /** Whether the previous session's filter was restored at launch — see [initialHomePane]. */
-    val filterRestoredOnLaunch: Boolean = launchFilter.second
+    val filterRestoredOnLaunch: Boolean = launchFilter.reproduced
 
-    private val _filterSelection = MutableStateFlow(FilterSelection(launchFilter.first, generation = 0L))
+    private val _filterSelection = MutableStateFlow(FilterSelection(launchFilter.filter, generation = 0L))
 
     /**
      * The selected filter together with its selection's generation — see [FilterSelection]. One flow,
@@ -2277,5 +2314,6 @@ class HomeViewModel(
     // Last in the class body: every property applyIdRemap touches is initialized by now.
     init {
         idRemaps.current.onEach(::applyIdRemap).launchIn(viewModelScope)
+        if (!launchFilter.validated) validateRestoredFilterOnceRemapLoaded()
     }
 }

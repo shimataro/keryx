@@ -182,7 +182,7 @@ fun newHomeViewModel(
     localWriteFailureReporter: LocalWriteFailureReporter = LocalWriteFailureReporter(NotificationCenter(), clock),
     // The tag/folder id re-keys the settings and the ViewModel observe — overridable so a test can
     // publish a re-key ([TagFolderIdRemaps.publishFromDb]) after changing `ks_id_remap` itself.
-    idRemaps: TagFolderIdRemaps = TagFolderIdRemaps(db),
+    idRemaps: TagFolderIdRemaps = TagFolderIdRemaps(db, Dispatchers.Unconfined),
 ): HomeViewModelFixture {
     // A fresh, unique directory per call (not a fixed name shared across every test in this file):
     // LocalSettingsStore persists lastFilter/collapsedFolderIds/etc. to a JSON file there, and a

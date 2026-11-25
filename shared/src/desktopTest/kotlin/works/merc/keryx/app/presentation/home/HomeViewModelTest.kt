@@ -316,7 +316,7 @@ class HomeViewModelTest {
         // Where a failed write is reported; a test can pass one over its own NotificationCenter.
         localWriteFailureReporter: LocalWriteFailureReporter = LocalWriteFailureReporter(NotificationCenter(), clock),
         // The tag/folder re-keys the ViewModel observes — a test publishes one through it.
-        idRemaps: works.merc.keryx.app.domain.TagFolderIdRemaps = works.merc.keryx.app.domain.TagFolderIdRemaps(db),
+        idRemaps: works.merc.keryx.app.domain.TagFolderIdRemaps = works.merc.keryx.app.domain.TagFolderIdRemaps(db, Dispatchers.Unconfined),
     ): HomeViewModel {
         val articleRepository = ArticleRepository(db, FtsSearch(ftsDriver), syncScheduler, clock, Dispatchers.Unconfined)
         // Mirror startup: ensureIndexed() creates articles_fts so the subscribe/refresh path's indexMissing() works.
@@ -1365,7 +1365,7 @@ class HomeViewModelTest {
         db.insertFeedTag("f1", "t-old")
         val gate = CompletableDeferred<Unit>()
         val fetches = java.util.concurrent.atomic.AtomicInteger(0)
-        val remaps = works.merc.keryx.app.domain.TagFolderIdRemaps(db)
+        val remaps = works.merc.keryx.app.domain.TagFolderIdRemaps(db, Dispatchers.Unconfined)
         val vm = newViewModel(feedFetcher = gatedCountingFetcher(gate, fetches), idRemaps = remaps)
         subscribeAll(vm)
         vm.selectFilter(ArticleFilter.Tag("t-old"))
@@ -6469,6 +6469,72 @@ class HomeViewModelTest {
 
         val vm2 = newViewModel()
         subscribeAll(vm2)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(ArticleFilter.All, vm2.filter.value)
+    }
+
+    /**
+     * A tag filter saved under an id a re-key has since moved is restored on the id the tag has now,
+     * not dropped to All Feeds as a deleted tag would be.
+     */
+    @Test
+    fun restartRestoresATagFilterUnderItsReKeyedId() = runTest {
+        db.insertTag("t-old", "News")
+        val vm1 = newViewModel()
+        subscribeAll(vm1)
+        vm1.selectFilter(ArticleFilter.Tag("t-old"))
+        testScheduler.advanceUntilIdle()
+        driver.rekeyTagForTest("t-old", "t-new")
+
+        val vm2 = newViewModel()
+        subscribeAll(vm2)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(ArticleFilter.Tag("t-new"), vm2.filter.value)
+        assertTrue(vm2.filterRestoredOnLaunch)
+    }
+
+    /**
+     * The same restore with the re-key map still loading in the background when the ViewModel is
+     * built: the saved filter is taken as is for now (the UI thread does not wait), then follows the
+     * re-key once the map lands — it never falls back to All Feeds because of the stale id.
+     */
+    @Test
+    fun aTagFilterRestoredBeforeTheReKeyMapHasLoadedFollowsItsReKey() = runTest {
+        db.insertTag("t-old", "News")
+        val vm1 = newViewModel()
+        subscribeAll(vm1)
+        vm1.selectFilter(ArticleFilter.Tag("t-old"))
+        testScheduler.advanceUntilIdle()
+        driver.rekeyTagForTest("t-old", "t-new")
+
+        val loader = StandardTestDispatcher(mainScheduler)
+        val vm2 = newViewModel(idRemaps = works.merc.keryx.app.domain.TagFolderIdRemaps(db, loader))
+        subscribeAll(vm2)
+        assertEquals(ArticleFilter.Tag("t-old"), vm2.filter.value, "held as saved while the map loads")
+        assertTrue(vm2.filterRestoredOnLaunch)
+
+        mainScheduler.advanceUntilIdle()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(ArticleFilter.Tag("t-new"), vm2.filter.value)
+    }
+
+    /** A filter restored before the map has loaded, whose target is gone for good, still falls back to All. */
+    @Test
+    fun aDeletedTagFilterRestoredBeforeTheReKeyMapHasLoadedFallsBackToAll() = runTest {
+        db.insertTag("t1", "News")
+        val vm1 = newViewModel()
+        subscribeAll(vm1)
+        vm1.selectFilter(ArticleFilter.Tag("t1"))
+        testScheduler.advanceUntilIdle()
+        db.tagsQueries.softDelete(1L, 1L, "t1")
+
+        val loader = StandardTestDispatcher(mainScheduler)
+        val vm2 = newViewModel(idRemaps = works.merc.keryx.app.domain.TagFolderIdRemaps(db, loader))
+        subscribeAll(vm2)
+        mainScheduler.advanceUntilIdle()
         testScheduler.advanceUntilIdle()
 
         assertEquals(ArticleFilter.All, vm2.filter.value)

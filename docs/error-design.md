@@ -63,6 +63,20 @@ and lose more than the access itself is worth. The accesses that are, today:
   folder id resolves a stale one itself in the same statement, and the next merge's publish or the next launch's
   read catches the holders up. Propagating it would turn a merge that committed into a failed sync (and a
   reset offer for a local fault).
+  The same read also runs once at startup, in the background (`TagFolderIdRemaps`'s initial load, which takes
+  the same lock as a publish): it must not run in the constructor, which the UI thread reaches. A failure there is
+  logged, and the map stays empty with its `loaded` gate opened anyway, so nothing waits on it for good — a
+  restored tag or folder selection saved under a since-moved id then falls back to All Feeds, the same as one
+  whose item is gone, and the next publish or launch catches the holders up. Propagating it would end the app
+  on Android and Apple for a read the holders can live without.
+- Saving `local_settings.json` (`SettingsRepository.saveLoggingFailure`, the background writer behind
+  `saveLocalSettings` / `mutateLocalSettings`, and the write of a re-key's rewrite). It is a file, not the
+  database, and nothing waits on it: the in-memory value that the UI and `getLocalSettings` read is already
+  updated, so the app behaves correctly with it, and the next save writes the latest value again. A failure is
+  logged and the writer carries on — letting it escape would end the writer's loop, after which no save would
+  ever reach the disk. What a failure costs is a change the next save does not overwrite, lost only if the
+  process ends before any save succeeds. `SettingsRepository.flush`, which setup completion and the shutdown hook
+  call because durability matters there, is not best-effort: its failure reaches its caller.
 
 Any other DB access propagates as before; a new best-effort one is added to this list, with its reason. (An
 operation the user started — an OPML import or export — that fails is not an exception to this: it is reported

@@ -66,9 +66,9 @@ internal class FeedListExpansion(private val settingsRepository: SettingsReposit
      * id. Persisted like any change, and only when something actually changes; idempotent.
      */
     fun remap(remap: TagFolderIdRemap) {
-        val folders = _collapsedFolderIds.value.mapTo(LinkedHashSet()) { remap.folder(it) }
+        val folders = remap.folders(_collapsedFolderIds.value)
         if (folders != _collapsedFolderIds.value) setCollapsedFolders(folders)
-        val tags = _expandedTagIds.value.mapTo(LinkedHashSet()) { remap.tag(it) }
+        val tags = remap.tags(_expandedTagIds.value)
         if (tags != _expandedTagIds.value) setExpandedTags(tags)
     }
 

@@ -524,6 +524,39 @@ which differs between the files and main — so the survivor depends on the orde
 Even then, a loser whose URL changes again after the re-key comes back as a separate feed, and a pre-delta cloud
 file cannot be rewritten, so devices can still diverge in those cases.
 
+## Home reads the database on the main thread while it is constructed
+
+**Status**: not fixed — moving the first database open and the first reads off the main thread needs the
+whole startup flow redesigned, which is outside the scope of the change that found it (see "What a real fix
+would need"). The tag/folder re-key map's own load (`TagFolderIdRemaps`) was moved to the background; the
+reads below remain.
+
+### Symptom
+
+`HomeViewModel`'s construction runs on the main thread (`koinViewModel` during the first composition) and
+reads the database synchronously: the restored selected article (`restoredArticle`, the
+`ArticleRepository.getArticleById` of `lastArticleId`) and, for a feed filter or a tag/folder filter whose
+re-key map has already loaded, the filter's target (`validateFilterTarget`). On Android the driver opens the
+file, and runs its schema migration, lazily on the first query, so a first launch after an update can do that
+work on the main thread, where a long migration shows as a frozen start or an ANR.
+
+### Diagnosis
+
+Found while tracing the re-key map's load (`App.kt` → `koinInject<SettingsRepository>()` →
+`TagFolderIdRemaps`), which read `ks_id_remap` in its constructor on the same thread. The reads in
+`HomeViewModel` are older than the re-key work. Nothing on the path switches dispatchers before the first
+query. The ViewModel needs the restored filter and article at construction because `filterRestoredOnLaunch`,
+`articleRestoredOnLaunch` and `initialHomePane` are fixed from them, and the article list's first emission
+pins the restored article (see `restoredArticle`).
+
+### What a real fix would need
+
+The first database open, and with it the schema migration, run before the UI is shown (on a background
+dispatcher, behind a splash or the existing startup-failure view), so every later read — these included —
+finds an open, migrated database and is fast. Restoring the filter and the article would then either wait on
+that step or become asynchronous, with `initialHomePane` decided once they have landed; the second is a change
+to what Home shows on its first frame, so it needs the layout's own handling of a not-yet-restored selection.
+
 ## `tags.v2_id` / `folders.v2_id` are temporary and must be removed eventually
 
 **Status**: not fixed — a deliberate transitional column. It is needed only while devices that ran schema

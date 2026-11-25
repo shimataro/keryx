@@ -1,30 +1,32 @@
 package works.merc.keryx.app.domain
 
-import works.merc.keryx.app.core.CACHE_RETENTION_DAYS_DEFAULT
-import works.merc.keryx.app.core.Clock
-import works.merc.keryx.app.core.LOCAL_WRITE_REREAD_RETRY_INITIAL_MS
-import works.merc.keryx.app.core.LOCAL_WRITE_REREAD_RETRY_MAX_MS
-import works.merc.keryx.app.core.READ_TIMEOUT_SECONDS_DEFAULT
-import works.merc.keryx.app.core.SETTING_ARTICLE_LIST_DEFAULT_UNREAD_ONLY
-import works.merc.keryx.app.core.SETTING_CACHE_RETENTION_DAYS
-import works.merc.keryx.app.core.SETTING_READ_TIMEOUT_SECONDS
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelAndJoin
-import kotlinx.coroutines.CancellationException
-import works.merc.keryx.app.core.Log
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.job
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import works.merc.keryx.app.core.CACHE_RETENTION_DAYS_DEFAULT
+import works.merc.keryx.app.core.Clock
+import works.merc.keryx.app.core.LOCAL_WRITE_REREAD_RETRY_INITIAL_MS
+import works.merc.keryx.app.core.LOCAL_WRITE_REREAD_RETRY_MAX_MS
+import works.merc.keryx.app.core.Log
+import works.merc.keryx.app.core.READ_TIMEOUT_SECONDS_DEFAULT
+import works.merc.keryx.app.core.SETTING_ARTICLE_LIST_DEFAULT_UNREAD_ONLY
+import works.merc.keryx.app.core.SETTING_CACHE_RETENTION_DAYS
+import works.merc.keryx.app.core.SETTING_READ_TIMEOUT_SECONDS
+import works.merc.keryx.app.core.decodeArticleFilter
+import works.merc.keryx.app.core.encode
 import works.merc.keryx.app.data.local.LocalSettings
 import works.merc.keryx.app.data.local.LocalSettingsStore
 import works.merc.keryx.app.data.local.db.KeryxDatabase
@@ -70,8 +72,9 @@ class SettingsRepository(
     private val pendingLocalWrites: PendingLocalWrites = PendingLocalWrites(),
     // The tag/folder id re-keys, republished after a merge re-keys rows; the local settings' tag and
     // folder ids are rewritten from it (see [applyIdRemap]). Production passes the app's one (Koin),
-    // which HomeViewModel observes too.
-    internal val idRemaps: TagFolderIdRemaps = TagFolderIdRemaps(db),
+    // which HomeViewModel observes too. Loaded in the background (see [TagFolderIdRemaps]), so the
+    // default shares [writeDispatcher]: a test running writes inline then loads inline as well.
+    internal val idRemaps: TagFolderIdRemaps = TagFolderIdRemaps(db, writeDispatcher),
 ) {
     private companion object {
         const val TAG = "SettingsRepository"
@@ -89,67 +92,47 @@ class SettingsRepository(
     private val saveSignals = Channel<Unit>(capacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
 
     init {
-        remapTagAndFolderIdsInLocalSettings()
         writeScope.launch {
-            for (signal in saveSignals) {
-                // A failed write (disk full, a read-only file) is logged and the writer carries on:
-                // the in-memory value is intact and the next save writes it again. Letting it escape
-                // would end this loop, so no later save would ever reach the disk.
-                try {
-                    store.save(_localSettings.value)
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Throwable) {
-                    Log.error(TAG, "Failed to persist local settings", e)
-                }
-            }
+            for (signal in saveSignals) saveLoggingFailure()
         }
-        // Every re-key published after construction (a merge that moved tag/folder rows onto other
-        // ids) is applied as it arrives. The first value collected is the one current now, which the
-        // construction-time pass above has already applied, so it changes nothing.
+        // Every re-key — the one loaded from `ks_id_remap` in the background after startup (the
+        // v2->v3 migration's, and any an earlier session's merge made) and each one published later (a
+        // merge that moved tag/folder rows onto other ids) — is applied as it arrives. Nothing here
+        // reads the database during construction: see [TagFolderIdRemaps].
         writeScope.launch { idRemaps.current.collect(::applyIdRemap) }
     }
 
     /**
-     * Applies every tag/folder id re-key so far (`ks_id_remap` — the v2->v3 migration's, written by
-     * [rekeyTagAndFolderIds], and any a merge made) to the three local-settings fields that hold tag
-     * or folder ids ([remappedBy]), then persists the result only when the remap actually changes a
-     * value. Runs synchronously in construction, before anything reads [localSettings] — otherwise a
-     * restored selection or collapsed state would reference an id that no longer exists. Read from the
-     * table itself rather than from [idRemaps], so a re-key committed since [idRemaps] last read it is
-     * not missed. Idempotent: an id not in the map (already re-keyed, or not a tag/folder id) passes
-     * through, so a second application is a no-op. The remap table is kept (rather than dropped after
-     * this run), so the rewrite stays idempotent across launches.
-     *
-     * A disk-write failure (e.g. disk full or a read-only file) is logged and swallowed: the
-     * in-memory [localSettings] still carries the remap, so the app can start, and the next save
-     * (or launch) will retry. Cancellation is rethrown so a closing scope does not wait on a hung
-     * write.
+     * Persists the latest [_localSettings] value. **Best effort** (`docs/error-design.md`): a failed
+     * write (disk full, a read-only file) is logged and swallowed — the in-memory value is intact, so
+     * the app carries on with it, and the next save (or the next launch's re-key pass) writes it again.
+     * Letting it escape would end the writer loop, so no later save would ever reach the disk.
+     * Cancellation is rethrown so a closing scope does not wait on a hung write.
      */
-    private fun remapTagAndFolderIdsInLocalSettings() {
-        val remap = loadIdRemap(db)
-        if (remap.isEmpty) return
-        val original = _localSettings.value
-        _localSettings.update { it.remappedBy(remap) }
-        val rewritten = _localSettings.value
-        if (rewritten == original) return
+    private fun saveLoggingFailure() {
         try {
-            store.save(rewritten)
+            store.save(_localSettings.value)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Throwable) {
-            Log.error(TAG, "Failed to persist remapped local settings", e)
+            Log.error(TAG, "Failed to persist local settings", e)
         }
     }
 
     /**
-     * Applies a re-key published while the app runs ([TagFolderIdRemaps.current]) — the same rewrite
-     * as the construction-time pass ([remappedBy]), persisted through the background writer like any
-     * other local-settings change (whose failure is logged and retried by the next save; the next
-     * launch's pass applies the table again in any case). Atomic against a concurrent
-     * [mutateLocalSettings]: the rewrite is one [update] of the current value. Writes nothing when
-     * the remap changes nothing — the common case, since the value collected first is the one the
-     * construction-time pass has already applied.
+     * Applies the tag/folder id re-keys ([TagFolderIdRemaps.current]) to the three local-settings
+     * fields that hold such ids ([remappedBy]) — the loaded `ks_id_remap` (the v2->v3 migration's, and
+     * any a merge made) and each re-key published while the app runs — persisted through the
+     * background writer like any other local-settings change ([saveLoggingFailure]; the next launch
+     * applies the table again in any case). Idempotent: an id not in the map (already re-keyed, or not
+     * a tag/folder id) passes through. The remap table is kept, so the rewrite stays idempotent across
+     * launches. Atomic against a concurrent [mutateLocalSettings]: the rewrite is one [update] of the
+     * current value. Writes nothing when the remap changes nothing — the common case (the value
+     * collected first is [TagFolderIdRemap.EMPTY], before the load).
+     *
+     * Until the load has landed, [localSettings] may still hold a pre-re-key id; a reader that acts
+     * on one at startup (`HomeViewModel`'s restored selection) waits on [TagFolderIdRemaps.awaitLoaded]
+     * and applies the map itself.
      */
     private fun applyIdRemap(remap: TagFolderIdRemap) {
         if (remap.isEmpty) return
@@ -164,16 +147,21 @@ class SettingsRepository(
      * The single rewrite both the construction-time pass and the runtime one apply.
      */
     private fun LocalSettings.remappedBy(remap: TagFolderIdRemap): LocalSettings = copy(
-        lastFilter = lastFilter?.let { filter ->
-            when {
-                filter.startsWith("tag:") -> "tag:" + remap.tag(filter.removePrefix("tag:"))
-                filter.startsWith("folder:") -> "folder:" + remap.folder(filter.removePrefix("folder:"))
-                else -> filter
-            }
-        },
-        collapsedFolderIds = collapsedFolderIds.mapTo(LinkedHashSet()) { remap.folder(it) },
-        expandedTagIds = expandedTagIds.mapTo(LinkedHashSet()) { remap.tag(it) },
+        lastFilter = lastFilter?.let { remap.encodedFilter(it) },
+        collapsedFolderIds = remap.folders(collapsedFolderIds),
+        expandedTagIds = remap.tags(expandedTagIds),
     )
+
+    /**
+     * The persisted filter [encoded] with its tag or folder id brought up to date. A string that does
+     * not decode, and a filter the map does not change, are returned as they are — not re-encoded, so
+     * the legacy `unread` value (read by `HomeViewModel.legacyUnreadFilter`) is not rewritten to `all`.
+     */
+    private fun TagFolderIdRemap.encodedFilter(encoded: String): String {
+        val decoded = decodeArticleFilter(encoded) ?: return encoded
+        val remapped = filter(decoded)
+        return if (remapped == decoded) encoded else remapped.encode()
+    }
 
     // --- Global (synced) settings ---
 

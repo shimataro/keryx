@@ -4,9 +4,11 @@ import app.cash.sqldelight.db.QueryResult
 import app.cash.sqldelight.db.SqlDriver
 import app.cash.sqldelight.db.SqlPreparedStatement
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -491,7 +493,7 @@ class SettingsRepositoryTest {
     /**
      * The remap rows the migration left in `ks_id_remap` rewrite the three local-settings fields
      * holding tag or folder ids — [LocalSettings.lastFilter], [LocalSettings.collapsedFolderIds] and
-     * [LocalSettings.expandedTagIds] — synchronously at construction, before anything reads them.
+     * [LocalSettings.expandedTagIds] — as soon as the background load has run.
      * The remap rows are kept so [MergeSql] can reconcile pre-upgrade rows that were renamed before
      * the migration; a second application is a no-op because the old ids are no longer present in the
      * local settings.
@@ -581,7 +583,7 @@ class SettingsRepositoryTest {
         }
     }
 
-    /** When the remap produces no change, the synchronous disk write is skipped entirely. */
+    /** When the remap produces no change, the disk write is skipped entirely. */
     @Test
     fun remapSaveIsSkippedWhenRemapProducesNoChange() {
         val (driver, db) = inMemoryDb()
@@ -598,9 +600,9 @@ class SettingsRepositoryTest {
         }
     }
 
-    /** A save failure during construction is logged and swallowed; the in-memory value still applies. */
+    /** A save failure of the rewrite is logged and swallowed; the in-memory value still applies. */
     @Test
-    fun remapSaveFailureDoesNotCrashConstruction() {
+    fun aFailedSaveOfTheRemappedSettingsIsLoggedNotFatal() {
         val (driver, db) = inMemoryDb()
         try {
             IdRemapSql.record(driver, ID_REMAP_KIND_TAG, "t-old", "t-new")
@@ -617,21 +619,71 @@ class SettingsRepositoryTest {
         }
     }
 
-    /** Cancellation during the remap save is rethrown rather than swallowed. */
+    /**
+     * Construction does not read `ks_id_remap`: the load is the [TagFolderIdRemaps]'s, run on its own
+     * dispatcher. Held behind a gate, the settings keep their pre-re-key ids and nothing was read or
+     * written; once the load lands, they are rewritten and persisted.
+     */
     @Test
-    fun remapSaveCancellationPropagates() {
+    fun constructionDoesNotTouchTheDatabaseAndTheRewriteFollowsTheLoad() = runBlocking {
         val (driver, db) = inMemoryDb()
         try {
-            IdRemapSql.record(driver, ID_REMAP_KIND_TAG, "t-old", "t-new")
-            val store = RecordingLocalSettingsStore(dir, LocalSettings(lastFilter = "tag:t-old")).apply {
-                error = CancellationException("cancelled")
-            }
+            val gate = CompletableDeferred<Unit>()
+            var reads = 0
+            val remaps = TagFolderIdRemaps(
+                {
+                    reads++
+                    runBlocking { gate.await() }
+                    TagFolderIdRemap(tagIds = mapOf("t-old" to "t-new"), folderIds = emptyMap())
+                },
+                Dispatchers.IO,
+            )
+            val store = RecordingLocalSettingsStore(dir, LocalSettings(lastFilter = "tag:t-old"))
+            val repo = SettingsRepository(db, store, SyncScheduler {}, Clock { 0L }, writeDispatcher = Dispatchers.Unconfined, idRemaps = remaps)
 
-            assertFailsWith<CancellationException> { newRepo(db, store = store) }
+            assertEquals("tag:t-old", repo.getLocalSettings().lastFilter, "nothing is applied before the load")
+            assertEquals(0, store.saveCount)
+
+            gate.complete(Unit)
+            withTimeout(5_000) { remaps.awaitLoaded() }
+            // The collector applies the loaded value on the (inline) writer, right after it is published.
+            withTimeout(5_000) { while (repo.getLocalSettings().lastFilter != "tag:t-new") delay(5) }
+
+            assertEquals(1, reads)
             assertEquals(1, store.saveCount)
         } finally {
             driver.close()
         }
+    }
+
+    // --- lastFilter, through the article filter's own codec ---
+
+    private fun lastFilterAfterRemap(lastFilter: String): String? {
+        val (driver, db) = inMemoryDb()
+        try {
+            IdRemapSql.record(driver, ID_REMAP_KIND_TAG, "x-old", "t-new")
+            IdRemapSql.record(driver, ID_REMAP_KIND_FOLDER, "x-old", "d-new")
+            val store = RecordingLocalSettingsStore(dir, LocalSettings(lastFilter = lastFilter))
+            return newRepo(db, store = store).getLocalSettings().lastFilter
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun aTagFilterIsRemappedThroughTheTagMap() = assertEquals("tag:t-new", lastFilterAfterRemap("tag:x-old"))
+
+    @Test
+    fun aFolderFilterIsRemappedThroughTheFolderMap() = assertEquals("folder:d-new", lastFilterAfterRemap("folder:x-old"))
+
+    @Test
+    fun aFeedFilterIsNeverRemapped() = assertEquals("feed:x-old", lastFilterAfterRemap("feed:x-old"))
+
+    /** An undecodable value is kept as it is, and so is the legacy `unread`, which a re-encode would turn into `all`. */
+    @Test
+    fun anUndecodableOrLegacyFilterIsKeptAsItIs() {
+        assertEquals("garbage:x-old", lastFilterAfterRemap("garbage:x-old"))
+        assertEquals("unread", lastFilterAfterRemap("unread"))
     }
 
     // --- Re-keys published while the app runs (TagFolderIdRemaps) ---
@@ -652,7 +704,7 @@ class SettingsRepositoryTest {
                     expandedTagIds = setOf("t-old"),
                 ),
             )
-            val remaps = TagFolderIdRemaps(db)
+            val remaps = TagFolderIdRemaps(db, Dispatchers.Unconfined)
             val repo = SettingsRepository(db, store, SyncScheduler {}, Clock { 0L }, writeDispatcher = Dispatchers.Unconfined, idRemaps = remaps)
             assertEquals(0, store.saveCount, "nothing to rewrite at construction")
 
@@ -685,7 +737,7 @@ class SettingsRepositoryTest {
         val (driver, db) = inMemoryDb()
         try {
             val store = RecordingLocalSettingsStore(dir, LocalSettings(lastFilter = "tag:t-old"))
-            val remaps = TagFolderIdRemaps(db)
+            val remaps = TagFolderIdRemaps(db, Dispatchers.Unconfined)
             val repo = SettingsRepository(db, store, SyncScheduler {}, Clock { 0L }, writeDispatcher = Dispatchers.Unconfined, idRemaps = remaps)
             store.error = RuntimeException("disk full")
 
