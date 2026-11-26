@@ -301,6 +301,92 @@ class FeedIdentityMergeTest {
         assertFolded(preDelta)
     }
 
+    @Test
+    fun mergingTheSamePreDeltaFileASecondTimeChangesNothing() {
+        for (mainIsQ in listOf(true, false)) {
+            val local = localDb(
+                "UPDATE sync_capture SET enabled = 1", *common(), *(if (mainIsQ) qRows() else pRows()),
+                "INSERT INTO feed_fetch_state (feed_id, etag) VALUES ('${if (mainIsQ) "fq" else "fp"}', 'e')",
+            )
+            val cloud = fullDb(*common(), *(if (mainIsQ) pRows() else qRows()))
+            mergePreDelta(local, cloud)
+            val once = fullState(local)
+            assertFolded(local)
+            mergePreDelta(local, cloud)
+            assertEquals(once, fullState(local), "mainIsQ=$mainIsQ")
+            assertFolded(local)
+        }
+    }
+
+    // ---- a chain of three ids linked by separate files ----
+
+    /** fa-fb are linked by the first file's edge, fb-fc by the second's; the third carries only fc. */
+    private fun chainFiles(): List<Pair<File, TransportFileName>> {
+        val first = deltaName(DEV_A, 1)
+        val second = deltaName(DEV_A, 2)
+        val third = deltaName(TransportFixtures.DEV_B, 1)
+        return listOf(
+            transportFile(
+                first, *common(),
+                feed("fa", url = "https://chain/a", updatedAt = 100), feed("fb", url = "https://chain/b", updatedAt = 100),
+                feedTag("fa", "t1"), article("aa1", "fa", guid = "g1"),
+                article("ab1", "fb", guid = "g1"), article("ab2", "fb", guid = "g2"),
+                "INSERT INTO feed_edges (a, b) VALUES ('fa', 'fb')",
+            ) to first,
+            transportFile(
+                second, *common(),
+                feed("fb", url = "https://chain/b", updatedAt = 100), feedTag("fb", "t2"), article("ab2", "fb", guid = "g2"),
+                "INSERT INTO feed_edges (a, b) VALUES ('fb', 'fc')",
+            ) to second,
+            transportFile(
+                third, *common(),
+                feed("fc", url = "https://chain/c", updatedAt = 100), feedTag("fc", "t1"),
+                article("ac1", "fc", guid = "g1"), article("ac3", "fc", guid = "g3"),
+            ) to third,
+        )
+    }
+
+    private fun <T> permutations(items: List<T>): List<List<T>> =
+        if (items.size <= 1) listOf(items)
+        else items.flatMap { head -> permutations(items - head).map { listOf(head) + it } }
+
+    private fun assertChainConsolidated(db: File, label: String) {
+        assertEquals(listOf("fa"), rows(db, "SELECT id FROM feeds"), label)
+        assertEquals(listOf("fa|g1", "fa|g2", "fa|g3"), rows(db, "SELECT feed_id, guid FROM articles ORDER BY guid"), label)
+        assertEquals(listOf("fa|t1", "fa|t2"), rows(db, "SELECT feed_id, tag_id FROM feed_tags ORDER BY 2"), label)
+        // Both other ids map straight to the smallest one: one hop, never through fb.
+        assertEquals(listOf("fb|fa", "fc|fa"), rows(db, "SELECT old_id, new_id FROM ks_id_remap WHERE kind = 'feed' ORDER BY 1"), label)
+        assertEquals(emptyList(), foreignKeyViolations(db), label)
+    }
+
+    @Test
+    fun aChainOfThreeIdsLinkedBySeparateFilesEndsOnTheSmallestIdInEveryArrivalOrder() {
+        val files = chainFiles()
+        val expected = identityState(localDb().also { db -> files.forEach { merge(db, it.first) } })
+        assertChainConsolidated(localDb().also { db -> files.forEach { merge(db, it.first) } }, "in order")
+
+        for (order in permutations(files)) {
+            val label = order.joinToString(" ") { it.second.number.toString() + it.second.device.take(1) }
+            val db = localDb()
+            order.forEach { merge(db, it.first) }
+            assertChainConsolidated(db, label)
+            assertEquals(expected, identityState(db), label)
+        }
+    }
+
+    @Test
+    fun aChainOfThreeIdsFoldedFirstEndsOnTheSameStateInEveryOrder() {
+        val files = chainFiles()
+        val expected = identityState(localDb().also { db -> files.forEach { merge(db, it.first) } })
+        for (order in permutations(files)) {
+            val label = order.joinToString(" ") { it.second.number.toString() + it.second.device.take(1) }
+            val db = localDb()
+            merge(db, fold(*order.toTypedArray()))
+            assertChainConsolidated(db, "folded $label")
+            assertEquals(expected, identityState(db), "folded $label")
+        }
+    }
+
     // ---- an article id both sides hold under different keys ----
 
     @Test
