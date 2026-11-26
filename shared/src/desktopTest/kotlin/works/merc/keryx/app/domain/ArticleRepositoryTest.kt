@@ -1172,7 +1172,10 @@ class ArticleRepositoryTest {
         }
     }
 
-    /** After a re-key, the query asked with the old id lists the same articles (and re-runs when it commits). */
+    /**
+     * After a re-key, the query asked with the old id lists the same articles, re-runs when the re-key's
+     * notification arrives, and keeps following later changes.
+     */
     @Test
     fun afterAReKeyTheOldIdStillListsTheSameArticles() = runTest {
         val (driver, db) = inMemoryDb()
@@ -1190,15 +1193,29 @@ class ArticleRepositoryTest {
                 launch(Dispatchers.Unconfined) { repo.watchArticles(ArticleFilter.Tag("t-old")).collect { tagEmissions += it.map { r -> r.id } } },
             )
 
+            val folderEmissionsBefore = folderEmissions.size
+            val tagEmissionsBefore = tagEmissions.size
+
             driver.rekeyFolderForTest("d-old", "d-new")
             driver.rekeyTagForTest("t-old", "t-new")
             // A merge writes through its own connection and then notifies these tables.
             driver.notifyListeners("folders", "feeds", "tags", "feed_tags", "articles", "global_settings")
 
+            assertTrue(folderEmissions.size > folderEmissionsBefore, "the old folder id's query re-ran")
+            assertTrue(tagEmissions.size > tagEmissionsBefore, "the old tag id's query re-ran")
             assertEquals(listOf("a1"), folderEmissions.last())
             assertEquals(listOf("a1"), tagEmissions.last())
             assertEquals(listOf("a1"), repo.watchArticles(ArticleFilter.Folder("d-new")).first().map { it.id })
             assertEquals(listOf("a1"), repo.watchArticles(ArticleFilter.Tag("t-new")).first().map { it.id })
+
+            // The original subscriptions keep following the re-keyed rows: a new article of the feed
+            // reaches both, in the list's own order (newest first).
+            db.insertArticle("a2", "f1", publishedAt = 2L)
+
+            assertEquals(listOf("a2", "a1"), folderEmissions.last())
+            assertEquals(listOf("a2", "a1"), tagEmissions.last())
+            assertEquals(folderEmissions.last(), repo.watchArticles(ArticleFilter.Folder("d-new")).first().map { it.id })
+            assertEquals(tagEmissions.last(), repo.watchArticles(ArticleFilter.Tag("t-new")).first().map { it.id })
             jobs.forEach { it.cancel() }
         } finally {
             driver.close()
