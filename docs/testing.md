@@ -147,6 +147,15 @@ New tests are placed at the same relative path as the code under test.
   either way covers nothing. A window too narrow to occur "in practice" still gets this test (see
   "Error handling and race conditions" in `.claude/CLAUDE.md`).
 - A test that drives concurrent DB writes with real `Thread`s needs `fileDb()`, not `inMemoryDb()` — the latter pins every caller to one shared JDBC connection with no synchronization of its own, so two real threads can corrupt SQLDelight's transaction bookkeeping. Even with `fileDb()`, keep fixtures free of writes the test doesn't care about: SQLite's deferred `BEGIN` means a transaction that reads before it writes can fail an unrelated concurrent writer's lock upgrade with a non-retryable `SQLITE_BUSY` that `busy_timeout` does not cover — see "A concurrent write can fail a read-then-write transaction with a non-retryable SQLITE_BUSY" in `known-issues.md`.
+- **Article visibility.** Whether an article is shown is `(deleted_at IS NULL OR is_starred = 1)` (see "articles"
+  in [db-schema.md](db-schema.md)), and every check of it goes through the shared rule: the `articles.sq` queries spell
+  out the predicate, raw SQL in Kotlin uses `articleVisibleSql` and Kotlin code uses `Articles.isVisible`
+  (`data/local/ArticleVisibility.kt`). Only the `.sq` side is guarded mechanically (`ArticleVisibilityQueriesTest`
+  fails on a `deleted_at IS NULL` used alone outside its allow-list). Raw SQL and Kotlin code are not: neither can tell
+  an article's `deleted_at` from a feed's by type, so a scan would mostly flag the feed checks. A change there that
+  filters articles is covered instead by a test with a starred, deleted article, which must be treated as visible —
+  `FtsSearchTest`, `ArticleContentCacheTest` and `FtsManagerTest`'s
+  `indexMissingAndTheDailyRebuildIndexAStarredDeletedArticle` are the examples.
 - New Android Compose UI instrumented tests go in `androidApp/src/androidTest/` (`composeApp` is a
   library module, so its own instrumented tests live in the application module instead — see
   Structure above). A DB test that depends on the bundled `requery` SQLite goes in

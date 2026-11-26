@@ -170,6 +170,14 @@
   カバーしていない。「現実には起きない」ほど狭い窓でも、このテストを書く（`.claude/CLAUDE.md` の「Error handling and race
   conditions」を参照）。
 - 実スレッドで DB への並行書き込みを行うテストは `inMemoryDb()` ではなく `fileDb()` を使うこと —— 前者は全呼び出し元を、同期機構を持たない 1 本の共有 JDBC コネクションに固定するため、実スレッド 2 本で SQLDelight のトランザクション管理そのものが壊れ得る。`fileDb()` を使う場合でも、テスト対象と無関係な書き込みを fixture に残さないこと: SQLite の deferred `BEGIN` により、write の前に read を行うトランザクションは、無関係な並行書き込み側のロック昇格を、`busy_timeout` では救済されないリトライ不能な `SQLITE_BUSY` で失敗させることがある —— 詳細は `known-issues.md` の「並行書き込みにより read→write トランザクションがリトライ不能な SQLITE_BUSY で失敗する」を参照。
+- **記事の表示判定。** 記事を表示するかは `(deleted_at IS NULL OR is_starred = 1)` で決まり（[db-schema.ja.md](db-schema.ja.md)
+  の「articles」参照）、その判定はすべて共通の規則を通す: `articles.sq` のクエリはこの条件をそのまま書き、Kotlin の
+  生の SQL は `articleVisibleSql` を、Kotlin のコードは `Articles.isVisible` を使う（`data/local/ArticleVisibility.kt`）。
+  機械的に守られているのは `.sq` の側だけである（`ArticleVisibilityQueriesTest` は、許可リストの外で `deleted_at IS NULL`
+  を単独で使うと失敗する）。生の SQL と Kotlin のコードには検査がない: どちらも記事の `deleted_at` と feed の
+  `deleted_at` を型で区別できないので、走査しても feed の判定ばかりを検出してしまう。そこで記事を絞り込む変更は、
+  スター付きかつ削除済みの記事を表示されるものとして扱うことをテストで確かめる——`FtsSearchTest`、
+  `ArticleContentCacheTest`、`FtsManagerTest` の `indexMissingAndTheDailyRebuildIndexAStarredDeletedArticle` が例である。
 - 新規の Android Compose UI 計装テストは `androidApp/src/androidTest/` に置く（`composeApp` は
   ライブラリモジュールなので、その計装テストはアプリケーションモジュール側に置く — 上記「構成」
   参照）。バンドルされた `requery` SQLite に依存する DB テストは
