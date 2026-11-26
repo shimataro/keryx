@@ -25,8 +25,6 @@ import works.merc.keryx.app.insertFeed
 import works.merc.keryx.app.insertFeedTag
 import works.merc.keryx.app.insertTag
 import works.merc.keryx.app.platform.FileIO
-import works.merc.keryx.app.presentation.home.HomeViewModelFixture
-import works.merc.keryx.app.presentation.home.newHomeViewModel
 import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -82,51 +80,54 @@ class ArticleListPaneRestorationTest {
         repeat(40) { db.insertArticleRow("a$it", "fa", createdAt = it.toLong()) }
         val settingsDir = FileIO.join(AppDirs.tempDir(), "restore-test-${Random.nextInt()}")
 
-        // An earlier session: the user chose the tag, so the saved settings name it.
-        newHomeViewModel(driver, db, settingsDir = settingsDir).also { it.vm.selectFilter(ArticleFilter.Tag("t1")) }.stop()
-
-        // Process 1: starts on the restored tag (generation 0) and is scrolled down.
-        val first = newHomeViewModel(driver, db, settingsDir = settingsDir)
-        assertEquals(ArticleFilter.Tag("t1"), first.vm.filter.value)
-        assertEquals(0L, first.vm.filterSelection.value.generation)
-        // As StateRestorationTester does: the content leaves the composition (its remembered state is
-        // gone), then comes back under a new registry restored from the saved values.
-        var showContent by mutableStateOf(true)
-        var registry by mutableStateOf(SaveableStateRegistry(restoredValues = null, canBeSaved = { true }))
-        var currentVm by mutableStateOf(first.vm)
-        var second: HomeViewModelFixture? = null
         try {
-            setContent {
-                if (showContent) {
-                    CompositionLocalProvider(LocalSaveableStateRegistry provides registry) {
-                        ArticleListPane(vm = currentVm, focused = true, onActivated = {}, modifier = Modifier.size(360.dp, 400.dp))
+            // An earlier session: the user chose the tag, so the saved settings name it.
+            useHomeViewModel(driver, db, settingsDir = settingsDir, ownsDriver = false) { it.vm.selectFilter(ArticleFilter.Tag("t1")) }
+
+            // Process 1: starts on the restored tag (generation 0) and is scrolled down.
+            useHomeViewModel(driver, db, settingsDir = settingsDir, ownsDriver = false) { first ->
+                assertEquals(ArticleFilter.Tag("t1"), first.vm.filter.value)
+                assertEquals(0L, first.vm.filterSelection.value.generation)
+                // As StateRestorationTester does: the content leaves the composition (its remembered state is
+                // gone), then comes back under a new registry restored from the saved values.
+                var showContent by mutableStateOf(true)
+                var registry by mutableStateOf(SaveableStateRegistry(restoredValues = null, canBeSaved = { true }))
+                var currentVm by mutableStateOf(first.vm)
+                setContent {
+                    if (showContent) {
+                        CompositionLocalProvider(LocalSaveableStateRegistry provides registry) {
+                            ArticleListPane(vm = currentVm, focused = true, onActivated = {}, modifier = Modifier.size(360.dp, 400.dp))
+                        }
                     }
                 }
+                waitForIdle()
+                onRoot().performMouseInput { moveTo(center); repeat(12) { scroll(3f) } }
+                waitForIdle()
+                assertTrue("article-a39" !in renderedArticleIds(), "precondition: scrolled past the top row")
+
+                // The process dies; meanwhile the tag was deleted elsewhere (a sync), so restoring falls back to All.
+                val savedState = registry.performSave()
+                showContent = false
+                waitForIdle()
+                // Stopped here, before the next process starts; the enclosing call's teardown stops it
+                // again, which only re-joins scopes already cancelled.
+                first.stop()
+                if (deleteTag) db.tagsQueries.softDelete(1L, 1L, "t1")
+                useHomeViewModel(driver, db, settingsDir = settingsDir, ownsDriver = false) { second ->
+                    assertEquals(if (deleteTag) ArticleFilter.All else ArticleFilter.Tag("t1"), second.vm.filter.value)
+                    assertEquals(0L, second.vm.filterSelection.value.generation)
+                    registry = SaveableStateRegistry(restoredValues = savedState, canBeSaved = { true })
+                    currentVm = second.vm
+                    // The new ViewModel's list is loaded before the first frame, so the restored offset has rows to land on.
+                    awaitCondition { second.vm.articles.value.isNotEmpty() }
+                    showContent = true
+                    waitForIdle()
+
+                    check(renderedArticleIds())
+                }
             }
-            waitForIdle()
-            onRoot().performMouseInput { moveTo(center); repeat(12) { scroll(3f) } }
-            waitForIdle()
-            assertTrue("article-a39" !in renderedArticleIds(), "precondition: scrolled past the top row")
-
-            // The process dies; meanwhile the tag was deleted elsewhere (a sync), so restoring falls back to All.
-            val savedState = registry.performSave()
-            showContent = false
-            waitForIdle()
-            first.stop()
-            if (deleteTag) db.tagsQueries.softDelete(1L, 1L, "t1")
-            second = newHomeViewModel(driver, db, settingsDir = settingsDir)
-            assertEquals(if (deleteTag) ArticleFilter.All else ArticleFilter.Tag("t1"), second.vm.filter.value)
-            assertEquals(0L, second.vm.filterSelection.value.generation)
-            registry = SaveableStateRegistry(restoredValues = savedState, canBeSaved = { true })
-            currentVm = second.vm
-            // The new ViewModel's list is loaded before the first frame, so the restored offset has rows to land on.
-            awaitCondition { second.vm.articles.value.isNotEmpty() }
-            showContent = true
-            waitForIdle()
-
-            check(renderedArticleIds())
         } finally {
-            second?.stop()
+            // Once every fixture over it has stopped.
             driver.close()
         }
     }
