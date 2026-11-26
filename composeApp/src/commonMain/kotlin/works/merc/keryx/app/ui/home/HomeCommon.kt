@@ -270,6 +270,39 @@ internal fun InlineEditTarget.remappedBy(remap: TagFolderIdRemap): InlineEditTar
 }
 
 /**
+ * This target under the id the given [folders] / [tags] actually carry for its row, or null when they
+ * hold no such row (it was deleted, or has not arrived yet).
+ *
+ * A row matches the way `FeedListPane`'s `isEditing` matches it: both the row's id and this target's
+ * id are brought up to date by the same [remap] before they are compared. The lists and the map reach
+ * composition separately, so the lists can still show an id the map has already moved on from — even
+ * an intermediate one (`a → b → c` while the lists show `b` and the map already says `a → c`,
+ * `b → c`) — which neither the target's own id nor its remapped id would find. A feed's id is never
+ * re-keyed, so a feed's folder-group row is returned as is; its tag-nested row is resolved through
+ * the tag it sits under. Whether the resolved row is actually rendered (a collapsed folder, a tag not
+ * expanded) is left to `feedListRowIndex`.
+ */
+internal fun InlineEditTarget.resolvedIn(
+    folders: List<Folders>,
+    tags: List<Tags>,
+    remap: TagFolderIdRemap,
+): InlineEditTarget? = when (this) {
+    is InlineEditTarget.Folder -> remap.folder(id).let { current ->
+        folders.firstOrNull { remap.folder(it.id) == current }?.let { if (it.id == id) this else InlineEditTarget.Folder(it.id) }
+    }
+    is InlineEditTarget.Tag -> remap.tag(id).let { current ->
+        tags.firstOrNull { remap.tag(it.id) == current }?.let { if (it.id == id) this else InlineEditTarget.Tag(it.id) }
+    }
+    is InlineEditTarget.Feed -> if (tagId == null) {
+        this
+    } else {
+        remap.tag(tagId).let { current ->
+            tags.firstOrNull { remap.tag(it.id) == current }?.let { if (it.id == tagId) this else copy(tagId = it.id) }
+        }
+    }
+}
+
+/**
  * The feed list's one in-progress inline edit: the [target] row, and the [draft] the user has typed
  * so far. Held by `FeedListPane` rather than by the editor field because a re-key moves the row onto
  * another id, which gives it another list key: the field is then composed afresh under the new id,

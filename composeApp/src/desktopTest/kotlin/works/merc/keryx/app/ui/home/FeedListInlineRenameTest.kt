@@ -654,6 +654,49 @@ class FeedListInlineRenameTest {
     }
 
     /**
+     * The map ahead of the lists by more than one re-key: t-a -> t-b has reached both, then t-b -> t-c
+     * is published (folded: t-a -> t-c, t-b -> t-c) while the lists still show t-b. Neither the edit's
+     * own id (t-a) nor its remapped one (t-c) is in the lists, but t-b is the same row: the editor
+     * stays on it — through the stranded-edit check and its catch-up — with the typed text, and carries
+     * on onto t-c once the lists show it.
+     */
+    @Test
+    fun aMapAheadOfTheListsByAChainedReKeyDoesNotDiscardTheRenameInProgress() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        db.insertTag("t-a", "Tag One", sortOrder = 0L)
+        val remaps = TagFolderIdRemaps(db, Dispatchers.Unconfined)
+        useHomeViewModel(driver, db, idRemaps = remaps) { fixture ->
+            val vm = fixture.vm
+            setInlineRenameContent(vm)
+            startInlineRename(vm, ArticleFilter.Tag("t-a"))
+            typeName("Half typed")
+
+            driver.rekeyTagForTest("t-a", "t-b") { runBlocking { remaps.publishFromDb() } }
+            awaitTags(vm, "t-b")
+            editor().assertTextContains("Half typed")
+
+            // The second re-key's map is published and composed — the stranded-edit check and its
+            // catch-up run on it — before the lists are notified of the re-key, so they still show t-b.
+            driver.rekeyTagForTest("t-b", "t-c") {
+                runBlocking { remaps.publishFromDb() }
+                assertEquals(mapOf("t-a" to "t-c", "t-b" to "t-c"), vm.tagFolderIdRemap.value.tagIds)
+                waitForIdle()
+                mainClock.advanceTimeByFrame()
+                waitForIdle()
+                assertEquals(listOf("t-b"), vm.tags.value.map { it.id }, "the lists have not caught up yet")
+                editor().assertIsDisplayed()
+                editor().assertTextContains("Half typed")
+            }
+            awaitTags(vm, "t-c")
+
+            editor().assertIsDisplayed()
+            editor().assertTextContains("Half typed")
+            pressEnter()
+            assertEquals("Half typed", db.tagOf("t-c").name, "the commit lands on the row the tag became")
+        }
+    }
+
+    /**
      * A [TagFolderIdRemaps] whose reads of `ks_id_remap` fail while [failing] is set — the initial load
      * succeeds (the flag starts clear), so only the catch-up a test provokes afterwards fails.
      */

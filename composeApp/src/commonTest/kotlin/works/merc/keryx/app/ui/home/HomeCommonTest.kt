@@ -5,6 +5,7 @@ import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.data.local.db.Folders
 import works.merc.keryx.app.data.local.db.Tags
 import works.merc.keryx.app.domain.ArticleListRow
+import works.merc.keryx.app.domain.TagFolderIdRemap
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -661,6 +662,66 @@ class HomeCommonTest {
     fun autoScrollVelocityStaysAtFullSpeedOutsideTheViewport() {
         assertEquals(-900f, autoScrollVelocity(pointerY = -300f))
         assertEquals(900f, autoScrollVelocity(pointerY = 1300f))
+    }
+
+    // a → b → c, folded: the map already moves both a and b straight to c.
+    private val chainedRemap = TagFolderIdRemap(
+        tagIds = mapOf("a" to "c", "b" to "c"),
+        folderIds = mapOf("a" to "c", "b" to "c"),
+    )
+
+    @Test
+    fun resolvedInFindsATagUnderTheIntermediateIdTheListStillShows() {
+        // The lists lag the map: they still carry b, which neither a nor its remapped c would find.
+        assertEquals(
+            InlineEditTarget.Tag("b"),
+            InlineEditTarget.Tag("a").resolvedIn(emptyList(), listOf(tag("x"), tag("b")), chainedRemap),
+        )
+    }
+
+    @Test
+    fun resolvedInFindsATagUnderTheStartedOrTheRemappedId() {
+        assertEquals(
+            InlineEditTarget.Tag("c"),
+            InlineEditTarget.Tag("a").resolvedIn(emptyList(), listOf(tag("c")), chainedRemap),
+        )
+        assertEquals(
+            InlineEditTarget.Tag("a"),
+            InlineEditTarget.Tag("a").resolvedIn(emptyList(), listOf(tag("a")), TagFolderIdRemap.EMPTY),
+        )
+    }
+
+    @Test
+    fun resolvedInIsNullWhenTheListsHoldNoRowOfTheIdentity() {
+        assertNull(InlineEditTarget.Tag("a").resolvedIn(emptyList(), listOf(tag("x")), chainedRemap))
+        assertNull(InlineEditTarget.Folder("a").resolvedIn(listOf(folder("x")), emptyList(), chainedRemap))
+        assertNull(InlineEditTarget.Feed("f", tagId = "a").resolvedIn(emptyList(), listOf(tag("x")), chainedRemap))
+    }
+
+    @Test
+    fun resolvedInResolvesAFolderTheSameWay() {
+        assertEquals(
+            InlineEditTarget.Folder("b"),
+            InlineEditTarget.Folder("a").resolvedIn(listOf(folder("b")), emptyList(), chainedRemap),
+        )
+        assertEquals(
+            InlineEditTarget.Folder("c"),
+            InlineEditTarget.Folder("b").resolvedIn(listOf(folder("c")), emptyList(), chainedRemap),
+        )
+    }
+
+    @Test
+    fun resolvedInResolvesATagNestedFeedThroughItsTag() {
+        assertEquals(
+            InlineEditTarget.Feed("f", tagId = "b"),
+            InlineEditTarget.Feed("f", tagId = "a").resolvedIn(emptyList(), listOf(tag("b")), chainedRemap),
+        )
+    }
+
+    @Test
+    fun resolvedInReturnsAFolderGroupFeedAsIs() {
+        val target = InlineEditTarget.Feed("f")
+        assertEquals(target, target.resolvedIn(emptyList(), emptyList(), chainedRemap))
     }
 
 }

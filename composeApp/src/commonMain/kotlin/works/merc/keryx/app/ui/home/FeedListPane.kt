@@ -423,13 +423,13 @@ internal fun FeedListPane(
     // The rendered index of the row the in-progress edit lives on, or null while that row isn't in
     // the list — derived from the same collected state the rows render from, and recomputed only when
     // that state changes rather than on every keystroke's recomposition while the edit is open.
-    // The edit's row is looked up under the id it was started with and under the id a re-key gave
-    // it: the lists use one or the other, depending on which of the two reached composition first.
+    // The edit's row is looked up under the id the lists carry for it, matched the way isEditing
+    // matches a row (both ids brought up to date by idRemap — see resolvedIn): the lists and the map
+    // reach composition separately, so the lists can show the id the edit was started with, the one
+    // the map gives it, or one in between.
     val editRowIndex = remember(inlineEdit, idRemap, feeds, folders, tags, collapsedFolderIds, feedTagMap, expandedTagIds) {
-        inlineEdit?.let { target ->
-            listOf(target, target.remappedBy(idRemap)).firstNotNullOfOrNull {
-                feedListRowIndex(it.rowInstance, feeds, folders, tags, collapsedFolderIds, feedTagMap, expandedTagIds)
-            }
+        inlineEdit?.resolvedIn(folders, tags, idRemap)?.let {
+            feedListRowIndex(it.rowInstance, feeds, folders, tags, collapsedFolderIds, feedTagMap, expandedTagIds)
         }
     }
 
@@ -489,7 +489,9 @@ internal fun FeedListPane(
         val feedTagMapAtStart = feedTagMap
         val collapsedAtStart = vm.collapsedFolderIds.value
         val expandedAtStart = vm.expandedTagIds.value
-        fun renderableUnder(remap: TagFolderIdRemap) = listOf(target, target.remappedBy(remap)).any {
+        // Whether the snapshots render the edit's row, found under whatever id they carry for it the
+        // same way editRowIndex finds it, with [remap] in place of idRemap.
+        fun renderableUnder(remap: TagFolderIdRemap) = target.resolvedIn(foldersAtStart, tagsAtStart, remap)?.let {
             feedListRowIndex(
                 it.rowInstance,
                 feedsAtStart,
@@ -499,7 +501,7 @@ internal fun FeedListPane(
                 feedTagMapAtStart,
                 expandedAtStart,
             ) != null
-        }
+        } ?: false
         // The lists can reach here ahead of the re-key map: a merge publishes the map only after it
         // commits, and another write in between re-runs the tag/folder queries over the re-keyed rows.
         // So the row is not declared gone while the published map might be stale — the map is first
@@ -523,8 +525,8 @@ internal fun FeedListPane(
                 strandedEditRecheck++
                 return@LaunchedEffect
             }
-            // The row, under the id the caught-up map gives it: found, so it only moved (a restart of
-            // this effect follows when the map reaches [idRemap]).
+            // The row, matched through the caught-up map: found, so it only moved (a restart of this
+            // effect follows when the map reaches [idRemap]).
             if (renderableUnder(vm.tagFolderIdRemap.value)) return@LaunchedEffect
         }
         if (editRowSeen || !renderableUnder(vm.tagFolderIdRemap.value)) inlineEdit = null
