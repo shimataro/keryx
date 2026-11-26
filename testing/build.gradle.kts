@@ -25,6 +25,12 @@ kotlin {
     iosSimulatorArm64()
 
     sourceSets {
+        // The version-2 schema fixture lives in a directory of its own because :shared's
+        // androidDeviceTest compiles it in directly (this module has no Android target); every
+        // other consumer gets it through commonMain.
+        commonMain {
+            kotlin.srcDir("src/legacySchemaFixture/kotlin")
+        }
         commonMain.dependencies {
             api(project(":shared"))
             implementation(libs.kotlin.test)

@@ -12,6 +12,7 @@ import works.merc.keryx.app.data.local.FtsSearch
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.domain.IdGenerator
 import works.merc.keryx.app.domain.MergeSql
+import works.merc.keryx.app.SCHEMA_V2_STATEMENTS
 import works.merc.keryx.app.tempFilePath
 import kotlin.test.AfterTest
 import kotlin.test.Test
@@ -61,6 +62,47 @@ class AppleDatabaseTest {
     fun aFreshDatabaseIsCreatedAtTheCurrentSchemaVersion() {
         open("fresh.db")
         assertEquals(KeryxDatabase.Schema.version, RawSqliteConnection.userVersionOf(path("fresh.db")))
+    }
+
+    /**
+     * A schema-version-2 file opened through the Apple factory is migrated to version 3 by the
+     * system sqlite3, and the `AfterVersion(2)` re-key ([works.merc.keryx.app.domain.KERYX_SCHEMA_CALLBACKS])
+     * runs in that migration: the tag and folder move onto the ids their names derive, the feed's
+     * folder and the tag link follow, and each move is recorded in `ks_id_remap` / `ks_v2_edge`.
+     * The desktop counterpart is `SchemaV3MigrationTest`; this proves the callbacks reach the
+     * native driver too.
+     */
+    @Test
+    fun aVersionTwoFileIsRekeyedOntoTheDerivedIdsWhenOpened() {
+        RawSqliteConnection.open(path("v2.db"), create = true).use { db ->
+            SCHEMA_V2_STATEMENTS.forEach { db.exec(it) }
+            db.exec("PRAGMA user_version = 2")
+            db.exec("INSERT INTO folders (id, name, sort_order, updated_at, created_at) VALUES ('d1', 'D', 0, 10, 1)")
+            db.exec("INSERT INTO tags (id, name, updated_at, created_at) VALUES ('t1', 'T', 10, 1)")
+            db.exec("INSERT INTO feeds (id, url, title, folder_id, updated_at, created_at) VALUES ('f1', 'https://a', 'A', 'd1', 10, 1)")
+            db.exec("INSERT INTO feed_tags (feed_id, tag_id, updated_at) VALUES ('f1', 't1', 10)")
+        }
+
+        open("v2.db").close()
+        drivers.clear()
+
+        val dId = IdGenerator.folderId("D")
+        val tId = IdGenerator.tagId("T")
+        RawSqliteConnection.open(path("v2.db")).use { db ->
+            assertEquals(KeryxDatabase.Schema.version, RawSqliteConnection.userVersionOf(path("v2.db")))
+            assertEquals(listOf(listOf<String?>(dId, "D", "d1")), db.queryRowsStrict("SELECT id, name, v2_id FROM folders"))
+            assertEquals(listOf(listOf<String?>(tId, "T", "t1")), db.queryRowsStrict("SELECT id, name, v2_id FROM tags"))
+            assertEquals(listOf(listOf<String?>("f1", dId)), db.queryRowsStrict("SELECT id, folder_id FROM feeds"))
+            assertEquals(listOf(listOf<String?>("f1", tId)), db.queryRowsStrict("SELECT feed_id, tag_id FROM feed_tags"))
+            assertEquals(
+                setOf(listOf<String?>("folder", "d1", dId), listOf<String?>("tag", "t1", tId)),
+                db.queryRowsStrict("SELECT kind, old_id, new_id FROM ks_id_remap").toSet(),
+            )
+            assertEquals(
+                setOf(listOf<String?>("folder", "d1", dId), listOf<String?>("tag", "t1", tId)),
+                db.queryRowsStrict("SELECT kind, v2_id, id FROM ks_v2_edge").toSet(),
+            )
+        }
     }
 
     @Test

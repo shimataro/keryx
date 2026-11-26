@@ -310,6 +310,7 @@ actual object DatabaseMerger {
             val driver = NativeSqliteDriver(
                 schema = KeryxDatabase.Schema,
                 name = name,
+                // One read-only reader connection, stated explicitly (it is the driver's default): reads outside a transaction share it.
                 maxReaderConnections = 1,
                 onConfiguration = { config ->
                     config.copy(
