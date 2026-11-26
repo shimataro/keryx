@@ -531,7 +531,7 @@ class SettingsRepositoryTest {
                     Triple(ID_REMAP_KIND_TAG, "t-old", "t-new"),
                     Triple(ID_REMAP_KIND_FOLDER, "d-old", "d-new"),
                 ),
-                db.sync_bookkeepingQueries.idRemapAll().executeAsList()
+                db.sync_bookkeepingQueries.idRemapTagFolder().executeAsList()
                     .map { Triple(it.kind, it.old_id, it.new_id) }
                     .toSet(),
             )

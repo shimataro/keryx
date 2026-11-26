@@ -134,6 +134,28 @@ class IdRemapSqlTest {
 
     // --- TagFolderIdRemaps ---
 
+    /** The feed and article re-keys share the table, but only the tag and folder ones are loaded. */
+    @Test
+    fun loadingTheRemapReadsOnlyTheTagAndFolderRows() {
+        val (driver, db) = inMemoryDb()
+        try {
+            IdRemapSql.record(driver, ID_REMAP_KIND_TAG, "t-old", "t-new")
+            IdRemapSql.record(driver, ID_REMAP_KIND_FOLDER, "d-old", "d-new")
+            IdRemapSql.record(driver, ID_REMAP_KIND_FEED, "f-old", "f-new")
+            IdRemapSql.record(driver, ID_REMAP_KIND_ARTICLE, "a-old", "a-new")
+
+            assertEquals(
+                setOf(ID_REMAP_KIND_TAG, ID_REMAP_KIND_FOLDER),
+                db.sync_bookkeepingQueries.idRemapTagFolder().executeAsList().map { it.kind }.toSet(),
+            )
+            val remap = loadIdRemap(db)
+            assertEquals(mapOf("t-old" to "t-new"), remap.tagIds)
+            assertEquals(mapOf("d-old" to "d-new"), remap.folderIds)
+        } finally {
+            driver.close()
+        }
+    }
+
     @Test
     fun remapsLoadTheTableInTheBackgroundAndReadItAgainOnEachPublish() = runTest {
         val (driver, db) = inMemoryDb()

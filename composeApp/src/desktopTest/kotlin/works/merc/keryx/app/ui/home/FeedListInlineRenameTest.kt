@@ -704,7 +704,7 @@ class FeedListInlineRenameTest {
         @Volatile var failing = false
         val remaps = TagFolderIdRemaps({
             check(!failing) { "ks_id_remap read failed (test)" }
-            val rows = db.sync_bookkeepingQueries.idRemapAll().executeAsList()
+            val rows = db.sync_bookkeepingQueries.idRemapTagFolder().executeAsList()
             TagFolderIdRemap(
                 tagIds = rows.filter { it.kind == "tag" }.associate { it.old_id to it.new_id },
                 folderIds = rows.filter { it.kind == "folder" }.associate { it.old_id to it.new_id },
@@ -847,7 +847,7 @@ class FeedListInlineRenameTest {
         @Volatile private var gate: CountDownLatch? = null
         val entered = CountDownLatch(1)
         val remaps = TagFolderIdRemaps({
-            val rows = db.sync_bookkeepingQueries.idRemapAll().executeAsList()
+            val rows = db.sync_bookkeepingQueries.idRemapTagFolder().executeAsList()
             val read = TagFolderIdRemap(
                 tagIds = rows.filter { it.kind == "tag" }.associate { it.old_id to it.new_id },
                 folderIds = rows.filter { it.kind == "folder" }.associate { it.old_id to it.new_id },

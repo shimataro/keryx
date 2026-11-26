@@ -152,7 +152,7 @@ class TagFolderIdRemaps(
 
 /** `ks_id_remap` as a [TagFolderIdRemap]. */
 internal fun loadIdRemap(db: KeryxDatabase): TagFolderIdRemap {
-    val rows = db.sync_bookkeepingQueries.idRemapAll().executeAsList()
+    val rows = db.sync_bookkeepingQueries.idRemapTagFolder().executeAsList()
     if (rows.isEmpty()) return TagFolderIdRemap.EMPTY
     return TagFolderIdRemap(
         tagIds = rows.filter { it.kind == ID_REMAP_KIND_TAG }.associate { it.old_id to it.new_id },

@@ -459,8 +459,10 @@ DELETE FROM sync_merging;
 feedFolderRawAll:
 SELECT feed_id, folder_updated_at, folder_id FROM ks_feed_folder_raw ORDER BY feed_id;
 
-idRemapAll:
-SELECT kind, old_id, new_id FROM ks_id_remap;
+-- The tag and folder re-keys only — what TagFolderIdRemaps publishes to the ids held outside the
+-- database. The table also holds feed and article re-keys, which no reader of this query uses.
+idRemapTagFolder:
+SELECT kind, old_id, new_id FROM ks_id_remap WHERE kind IN ('tag', 'folder');
 
 clearIdRemap:
 DELETE FROM ks_id_remap;
