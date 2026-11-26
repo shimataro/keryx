@@ -1,11 +1,18 @@
 package works.merc.keryx.app.domain
 
+import app.cash.sqldelight.Query
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.insertFeed
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import kotlin.random.Random
 import kotlin.test.AfterTest
 import kotlin.test.Test
@@ -107,5 +114,60 @@ class PublishIdRemapsTest {
 
         assertTrue(a.db.hasFeed("lf1"))
         assertNull(a.repo.lastSyncError.value)
+    }
+
+    /**
+     * A sync cancelled while it publishes the re-keys — here waiting for the map's lock, which another
+     * publish holds — still tells SQLDelight's listeners about the merge it committed, so the UI never
+     * misses rows that are already in the database. The cancellation itself still propagates.
+     */
+    @Test
+    fun aSyncCancelledWhilePublishingStillNotifiesTheCommittedMerge() = runTest {
+        val cloud = FakeCloudStorage()
+        val a = device("a", cloud) {}
+        a.db.insertFeed("fa", now = 1)
+        assertIs<Result.Ok<Unit>>(a.repo.sync())
+
+        // The map's initial load holds its publish lock until released, on a thread of its own.
+        val loadEntered = CountDownLatch(1)
+        val releaseLoad = CountDownLatch(1)
+        val remapThread = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
+        try {
+            lateinit var remaps: TagFolderIdRemaps
+            val publishCalled = CompletableDeferred<Unit>()
+            val b = device("b", cloud) {
+                publishCalled.complete(Unit)
+                remaps.publishFromDb()
+            }
+            var firstLoad = true
+            remaps = TagFolderIdRemaps({
+                if (firstLoad) {
+                    firstLoad = false
+                    loadEntered.countDown()
+                    releaseLoad.await()
+                }
+                loadIdRemap(b.db)
+            }, remapThread)
+            assertTrue(loadEntered.await(5, TimeUnit.SECONDS), "the initial load holds the publish lock")
+
+            var feedNotifications = 0
+            b.driver.addListener("feeds", listener = Query.Listener { feedNotifications++ })
+
+            val sync = launch { b.repo.sync() }
+            // The merge has committed and the sync is publishing: it waits for the lock the initial load
+            // holds, and is cancelled there.
+            publishCalled.await()
+            feedNotifications = 0
+            sync.cancel()
+            releaseLoad.countDown()
+            sync.join()
+
+            assertTrue(sync.isCancelled)
+            assertTrue(b.db.hasFeed("fa"), "the merge was committed")
+            assertTrue(feedNotifications > 0, "the committed merge was announced to the listeners")
+        } finally {
+            releaseLoad.countDown()
+            remapThread.close()
+        }
     }
 }

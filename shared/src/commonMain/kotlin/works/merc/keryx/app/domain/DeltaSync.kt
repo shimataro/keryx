@@ -776,10 +776,15 @@ internal class DeltaSync(
         // that the notification below re-runs is never delivered to a holder (the feed list's delete
         // fallback, say) that still knows the old ids. The holders also read the published map at each
         // decision, so this order is a reinforcement, not the only guard.
-        publishIdRemapsAfterCommit()
-        // The merge wrote through its own connection, bypassing SQLDelight's listeners, so the UI is
-        // told at once — whatever happens to the indexing after it.
-        driver.notifyListeners(*SYNCED_TABLES)
+        try {
+            publishIdRemapsAfterCommit()
+        } finally {
+            // The merge wrote through its own connection, bypassing SQLDelight's listeners, so the UI is
+            // told at once — whatever happens to the indexing after it, and even when the sync is
+            // cancelled while publishing (waiting for the re-key map's lock, say): the changes are
+            // committed, so they are always announced. The cancellation still propagates.
+            driver.notifyListeners(*SYNCED_TABLES)
+        }
         return finishIndexing()
     }
 
