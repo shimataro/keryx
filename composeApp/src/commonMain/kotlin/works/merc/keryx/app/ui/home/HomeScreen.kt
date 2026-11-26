@@ -56,7 +56,6 @@ import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.koinInject
 import works.merc.keryx.app.core.AppNotificationAction
-import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.DETAIL_PANE_MIN_WIDTH
 import works.merc.keryx.app.core.PANE_DIVIDER_WIDTH
 import works.merc.keryx.app.data.local.db.Feeds
@@ -933,7 +932,7 @@ internal fun PendingNotificationActionHost(
         // where that list is a screen of its own and focusing it would navigate backwards; see
         // paneForFeedDetail's own KDoc.
         is AppNotificationAction.ShowFeedDetail -> LaunchedEffect(pending) {
-            vm.selectFilter(ArticleFilter.Feed(action.feedId))
+            vm.showFeedDetail(action.feedId)
             onFocusPane(paneForFeedDetail(layout))
             notifVm.clearPendingAction()
         }

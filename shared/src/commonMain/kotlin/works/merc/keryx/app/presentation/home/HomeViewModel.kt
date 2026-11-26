@@ -1143,6 +1143,21 @@ class HomeViewModel(
         settingsRepository.mutateLocalSettings { it.copy(lastFilter = current.encode(), lastArticleId = null) }
     }
 
+    /**
+     * A notification's "show feed" action ([works.merc.keryx.app.core.AppNotificationAction.ShowFeedDetail]):
+     * selects the feed it names, the same as clicking it in the feed list, on its canonical row. The one
+     * implementation both UIs call (each then focuses its own pane).
+     *
+     * The notification keeps the id the feed had when it was raised, and a merge may have moved the
+     * feed onto another id since — possibly committed but not yet published, so the re-key map is first
+     * caught up from the database ([catchUpIdRemapFromDb]); [selectFilter] then resolves the id through
+     * it. A catch-up that fails is logged there and the published map is used as it stands.
+     */
+    suspend fun showFeedDetail(feedId: String) {
+        catchUpIdRemapFromDb()
+        selectFilter(ArticleFilter.Feed(feedId))
+    }
+
     private val articleContentCache = ArticleContentCache(
         scope = viewModelScope,
         dispatcher = dispatcher,

@@ -649,4 +649,21 @@ class HomeViewModelIdRemapTest {
         assertEquals(ArticleFilter.Feed("f0"), vm.filter.value)
         assertEquals(true, vm.filterRestoredOnLaunch)
     }
+
+    /**
+     * A notification's "show feed" names the id the feed had when it was raised; a merge committed since
+     * but not yet published moved it. The action catches the map up from the database first, so it
+     * selects the feed it became rather than a feed that no longer exists.
+     */
+    @Test
+    fun showFeedDetailSelectsTheFeedAMergeMovedTheNotificationsFeedTo() = runVmTest {
+        db.insertFeed("f0")
+        val vm = newViewModel().vm
+        mergeF1IntoF0(publish = false)
+
+        vm.showFeedDetail("f1")
+
+        assertEquals(ArticleFilter.Feed("f0"), vm.filter.value)
+        assertEquals(FeedListRowSelection.FeedInFolderGroup("f0"), vm.selectedRowInstance.value)
+    }
 }

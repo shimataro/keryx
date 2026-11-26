@@ -336,6 +336,32 @@ fun SqlDriver.rekeyFolderForTest(oldId: String, newId: String, beforeNotify: () 
     beforeNotify = beforeNotify,
 )
 
+/**
+ * Folds the feed [oldId] into the existing feed [newId] the way a feed merge leaves them (for tests
+ * outside `:shared`, which cannot reach `FeedIdentitySql`): [oldId]'s articles, tag links and folder
+ * record move to [newId] (its fetch state is dropped), the move is recorded in `ks_id_remap`
+ * ([IdRemapSql.record], kind `feed`), and the old row is deleted — one transaction. The articles keep
+ * their ids, so the fixture must not give both feeds an article of the same guid. [beforeNotify] runs
+ * after the commit and before the observing queries are re-run — where a merge publishes the re-key.
+ */
+fun SqlDriver.mergeFeedForTest(oldId: String, newId: String, beforeNotify: () -> Unit = {}) {
+    object : app.cash.sqldelight.TransacterImpl(this) {}.transaction {
+        fun run(sql: String) = execute(null, sql, 2) {
+            bindString(0, newId)
+            bindString(1, oldId)
+        }
+        run("UPDATE articles SET feed_id = ? WHERE feed_id = ?")
+        run("INSERT OR IGNORE INTO feed_tags (feed_id, tag_id, deleted_at, updated_at) SELECT ?, tag_id, deleted_at, updated_at FROM feed_tags WHERE feed_id = ?")
+        execute(null, "DELETE FROM feed_tags WHERE feed_id = ?", 1) { bindString(0, oldId) }
+        execute(null, "DELETE FROM feed_fetch_state WHERE feed_id = ?", 1) { bindString(0, oldId) }
+        execute(null, "DELETE FROM ks_feed_folder_raw WHERE feed_id = ?", 1) { bindString(0, oldId) }
+        works.merc.keryx.app.domain.IdRemapSql.record(this@mergeFeedForTest, "feed", oldId, newId)
+        execute(null, "DELETE FROM feeds WHERE id = ?", 1) { bindString(0, oldId) }
+    }
+    beforeNotify()
+    notifyListeners("feeds", "articles", "feed_tags", "feed_fetch_state")
+}
+
 private fun SqlDriver.rekeyForTest(
     table: String,
     kind: String,

@@ -41,6 +41,7 @@ import works.merc.keryx.app.insertFeed
 import works.merc.keryx.app.insertFeedTag
 import works.merc.keryx.app.insertFolder
 import works.merc.keryx.app.insertTag
+import works.merc.keryx.app.mergeFeedForTest
 import works.merc.keryx.app.rekeyFolderForTest
 import works.merc.keryx.app.rekeyTagForTest
 import works.merc.keryx.app.presentation.home.FeedListRowSelection
@@ -650,6 +651,35 @@ class FeedListInlineRenameTest {
             editor().assertTextContains("Half typed")
             pressEnter()
             assertEquals("Half typed", db.folderNameOf("d-new"))
+        }
+    }
+
+    /**
+     * A merge folds the feed being renamed into another feed, and the feed list shows only the merged
+     * feed before the re-key is published (the merge's commit notifies the lists first). The editor's
+     * row is not taken for gone: the catch-up from the database finds it moved, the editor carries on
+     * on the merged feed's row with the typed text, and the commit lands on that feed.
+     */
+    @Test
+    fun aListAheadOfTheMapDoesNotDiscardTheFeedRenameInProgressAcrossAMerge() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        db.insertFeed("f-new", sortOrder = 0L)
+        db.insertFeed("f-old", sortOrder = 1L)
+        val remaps = IdRemaps(db, Dispatchers.Unconfined)
+        useHomeViewModel(driver, db, idRemaps = remaps) { fixture ->
+            val vm = fixture.vm
+            setInlineRenameContent(vm)
+            startInlineRename(vm, ArticleFilter.Feed("f-old"))
+            typeName("Half typed")
+
+            driver.mergeFeedForTest("f-old", "f-new")
+            waitUntil(timeoutMillis = 5_000) { vm.feeds.value.map { it.id } == listOf("f-new") }
+            waitForIdle()
+
+            editor().assertIsDisplayed()
+            editor().assertTextContains("Half typed")
+            pressEnter()
+            assertEquals("Half typed", db.customTitleOf("f-new"), "the commit lands on the feed it became")
         }
     }
 

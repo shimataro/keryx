@@ -428,7 +428,7 @@ internal fun FeedListPane(
     // reach composition separately, so the lists can show the id the edit was started with, the one
     // the map gives it, or one in between.
     val editRowIndex = remember(inlineEdit, idRemap, feeds, folders, tags, collapsedFolderIds, feedTagMap, expandedTagIds) {
-        inlineEdit?.resolvedIn(folders, tags, idRemap)?.let {
+        inlineEdit?.resolvedIn(feeds, folders, tags, idRemap)?.let {
             feedListRowIndex(it.rowInstance, feeds, folders, tags, collapsedFolderIds, feedTagMap, expandedTagIds)
         }
     }
@@ -491,7 +491,7 @@ internal fun FeedListPane(
         val expandedAtStart = vm.expandedTagIds.value
         // Whether the snapshots render the edit's row, found under whatever id they carry for it the
         // same way editRowIndex finds it, with [remap] in place of idRemap.
-        fun renderableUnder(remap: IdRemap) = target.resolvedIn(foldersAtStart, tagsAtStart, remap)?.let {
+        fun renderableUnder(remap: IdRemap) = target.resolvedIn(feedsAtStart, foldersAtStart, tagsAtStart, remap)?.let {
             feedListRowIndex(
                 it.rowInstance,
                 feedsAtStart,
@@ -503,7 +503,7 @@ internal fun FeedListPane(
             ) != null
         } ?: false
         // The lists can reach here ahead of the re-key map: a merge publishes the map only after it
-        // commits, and another write in between re-runs the tag/folder queries over the re-keyed rows.
+        // commits, and another write in between re-runs the feed/tag/folder queries over the re-keyed rows.
         // So the row is not declared gone while the published map might be stale — the map is first
         // caught up from the committed database (the one shared ViewModel implementation, also the
         // SwiftUI app's), and only an absence that survives that ends the edit. That absence is judged
