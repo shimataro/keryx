@@ -12,6 +12,10 @@
 -- deliberately leaves error_count alone (it is permanent, not a retry candidate), so the marker is
 -- the only thing that keeps the feed list flagging the feed. Cleared by resetErrorCount once the
 -- feed fetches successfully again.
+--
+-- Every write below resolves its feed id through ks_id_remap, as the writes in feeds.sq do (see the
+-- note there): a refresh holds the feed id across its network I/O, and a re-key in the meantime must
+-- not make its fetch state land on a feed id that no longer has a row (the FOREIGN KEY would fail).
 
 CREATE TABLE feed_fetch_state (
     feed_id       TEXT    NOT NULL PRIMARY KEY REFERENCES feeds(id),
@@ -45,14 +49,14 @@ WHERE error_count > 0 OR last_error = :goneMarker;
 -- alone (a new row starts with no errors).
 upsertValidators:
 INSERT INTO feed_fetch_state (feed_id, etag, last_modified)
-VALUES (:feed_id, :etag, :last_modified)
+VALUES (COALESCE((SELECT id FROM feeds WHERE id = :feed_id), (SELECT new_id FROM ks_id_remap WHERE kind = 'feed' AND old_id = :feed_id), :feed_id), :etag, :last_modified)
 ON CONFLICT(feed_id) DO UPDATE SET
     etag = excluded.etag,
     last_modified = excluded.last_modified;
 
 incrementErrorCount:
 INSERT INTO feed_fetch_state (feed_id, error_count, last_error)
-VALUES (:feed_id, 1, :last_error)
+VALUES (COALESCE((SELECT id FROM feeds WHERE id = :feed_id), (SELECT new_id FROM ks_id_remap WHERE kind = 'feed' AND old_id = :feed_id), :feed_id), 1, :last_error)
 ON CONFLICT(feed_id) DO UPDATE SET
     error_count = error_count + 1,
     last_error = excluded.last_error;
@@ -60,9 +64,9 @@ ON CONFLICT(feed_id) DO UPDATE SET
 -- 410 Gone: records the reason only, deliberately leaving error_count alone (see the header).
 markGone:
 INSERT INTO feed_fetch_state (feed_id, last_error)
-VALUES (:feed_id, :last_error)
+VALUES (COALESCE((SELECT id FROM feeds WHERE id = :feed_id), (SELECT new_id FROM ks_id_remap WHERE kind = 'feed' AND old_id = :feed_id), :feed_id), :last_error)
 ON CONFLICT(feed_id) DO UPDATE SET
     last_error = excluded.last_error;
 
 resetErrorCount:
-UPDATE feed_fetch_state SET error_count = 0, last_error = NULL WHERE feed_id = ?;
+UPDATE feed_fetch_state SET error_count = 0, last_error = NULL WHERE feed_id = COALESCE((SELECT id FROM feeds WHERE id = :feed_id), (SELECT new_id FROM ks_id_remap WHERE kind = 'feed' AND old_id = :feed_id), :feed_id);

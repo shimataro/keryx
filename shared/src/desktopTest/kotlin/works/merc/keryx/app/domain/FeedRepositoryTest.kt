@@ -599,6 +599,82 @@ class FeedRepositoryTest {
         assertEquals(feedIdForSameUrl(), feedIdForSameUrl())
     }
 
+    /** The ordinary case: a url nothing holds derives its feed id deterministically. */
+    @Test
+    fun subscribeFeedDerivesTheFeedIdFromTheUrlWhenNothingHoldsIt(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val repo = newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK) })
+
+            val result = repo.subscribeFeed("https://ex.com/feed")
+
+            assertIs<Result.Ok<Feeds>>(result)
+            assertEquals(IdGenerator.feedId("https://ex.com/feed"), result.value.id)
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
+     * A feed whose url a permanent redirect changed keeps the id derived from its OLD url. Subscribing
+     * to that old url must not upsert onto that row (rewriting its url and dropping its subscription):
+     * a new row with a random id is created instead.
+     */
+    @Test
+    fun subscribeFeedToTheOldUrlOfARedirectedFeedCreatesAnotherRowWithARandomId(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val oldUrl = "https://ex.com/old"
+            val newUrl = "https://ex.com/new"
+            val heldId = IdGenerator.feedId(oldUrl)
+            db.insertFeed(heldId, url = newUrl)
+            val before = db.feedsQueries.getById(heldId).executeAsOne()
+            val repo = newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK) })
+
+            val result = repo.subscribeFeed(oldUrl)
+
+            assertIs<Result.Ok<Feeds>>(result)
+            val redirected = db.feedsQueries.getById(heldId).executeAsOne()
+            assertEquals(newUrl, redirected.url)
+            assertNull(redirected.deleted_at)
+            assertEquals(before, redirected, "the redirected feed's row is untouched")
+            val created = db.feedsQueries.getByUrl(oldUrl).executeAsOne()
+            assertEquals(created, result.value)
+            assertTrue(created.id != heldId, "the derived id is not reused")
+            assertTrue(Regex("[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}").matches(created.id), "a random UUIDv4: ${created.id}")
+            assertEquals(1, db.articlesQueries.watchByFeed(created.id).executeAsList().size)
+            assertTrue(db.articlesQueries.watchByFeed(heldId).executeAsList().isEmpty())
+        } finally {
+            driver.close()
+        }
+    }
+
+    /** An id ks_id_remap maps onto another feed must not name a new subscription, or stale writes would land on the new one. */
+    @Test
+    fun subscribeFeedDoesNotReuseADerivedIdThatKsIdRemapMapsAway(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val url = "https://ex.com/feed"
+            val derived = IdGenerator.feedId(url)
+            db.insertFeed("f-canonical", url = "https://ex.com/canonical")
+            driver.execute(null, "INSERT INTO ks_id_remap (kind, old_id, new_id) VALUES ('feed', ?, 'f-canonical')", 1) {
+                bindString(0, derived)
+            }
+            val repo = newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK) })
+
+            val result = repo.subscribeFeed(url)
+
+            assertIs<Result.Ok<Feeds>>(result)
+            assertTrue(result.value.id != derived)
+            assertTrue(result.value.id != "f-canonical")
+            assertEquals(url, db.feedsQueries.getById(result.value.id).executeAsOne().url)
+            assertEquals(1, db.articlesQueries.watchByFeed(result.value.id).executeAsList().size)
+            assertTrue(db.articlesQueries.watchByFeed("f-canonical").executeAsList().isEmpty())
+        } finally {
+            driver.close()
+        }
+    }
+
     @Test
     fun subscribeFeedFetchErrorInsertsNothing(): Unit = runBlocking {
         val (driver, db) = inMemoryDb()

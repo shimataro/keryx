@@ -25,6 +25,12 @@ import works.merc.keryx.app.data.remote.ParsedArticle
 private const val ID_FETCH_CHUNK = 900
 
 /**
+ * Max ids per `updateReadStatusByIds` call: that statement binds its id list twice (the ids
+ * themselves and their `ks_id_remap` entries), so it takes half of [ID_FETCH_CHUNK].
+ */
+private const val READ_BY_IDS_CHUNK = ID_FETCH_CHUNK / 2
+
+/**
  * Runs [query] over these ids, deduplicated and split into [ID_FETCH_CHUNK]-sized chunks, and
  * collects every id it returns; empty (without querying) when there are no ids.
  */
@@ -266,7 +272,7 @@ class ArticleRepository(
         // One `id IN (...)` UPDATE per chunk instead of a per-id UPDATE, kept inside a single
         // transaction so the batch stays atomic (chunked only to stay under the bound-parameter limit).
         db.transaction {
-            for (chunk in ids.chunked(ID_FETCH_CHUNK)) {
+            for (chunk in ids.chunked(READ_BY_IDS_CHUNK)) {
                 articles.updateReadStatusByIds(read_at = now, updated_at = now, id = chunk)
             }
         }

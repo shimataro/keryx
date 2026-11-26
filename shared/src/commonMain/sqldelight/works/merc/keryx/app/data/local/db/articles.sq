@@ -75,18 +75,18 @@ ORDER BY published_at DESC, created_at DESC, id DESC;
 
 watchByFeed:
 SELECT id, feed_id, title, url, published_at, created_at, is_read, is_starred
-FROM articles WHERE feed_id = ? AND deleted_at IS NULL
+FROM articles WHERE feed_id = COALESCE((SELECT new_id FROM ks_id_remap WHERE kind = 'feed' AND old_id = :feed_id), :feed_id) AND deleted_at IS NULL
 ORDER BY published_at DESC, created_at DESC, id DESC;
 
--- watchByTag / watchByFolder resolve the id through ks_id_remap like the writes do (tags.sq /
+-- watchByFeed / watchByTag / watchByFolder resolve the id through ks_id_remap like the writes do (tags.sq /
 -- folders.sq), as part of the statement: a sync merge that moves the selected tag or folder onto
 -- another id re-runs these queries when it commits, before the selection has followed the move,
 -- and the re-run must still show the same list — an empty one in between would drop the
 -- new-articles pill's count and the list's scroll position. Only ks_id_remap is consulted, not the
--- tags / folders table: no live row has an id that is an old_id in ks_id_remap (IdRemapSql drops the
+-- feeds / tags / folders table: no live row has an id that is an old_id in ks_id_remap (IdRemapSql drops the
 -- entry of an id that names a row again), so "the id unchanged while a row has it" needs no lookup
--- of its own — and a lookup in tags / folders would re-run this query (and so re-emit the list) on
--- every rename or reorder of a tag or folder, which cannot change the articles listed.
+-- of its own — and a lookup in feeds / tags / folders would re-run this query (and so re-emit the
+-- list) on every rename or reorder of a feed, tag or folder, which cannot change the articles listed.
 watchByTag:
 SELECT a.id, a.feed_id, a.title, a.url, a.published_at, a.created_at, a.is_read, a.is_starred
 FROM articles a
@@ -189,12 +189,18 @@ GROUP BY f.folder_id;
 -- (MAX(now, previous + 1), like the other stamps) only when a body column actually changes, so a
 -- refresh that rewrites an unchanged article leaves it where it was. Every SET expression is
 -- evaluated against the row as it was, so the comparison sees the old body.
+-- :feed_id is resolved through ks_id_remap like every feed id a write takes (see feeds.sq): a refresh
+-- holds the feed id across its network I/O, so a re-key that lands meanwhile must not make its
+-- articles fail the FOREIGN KEY or form a second (feed_id, guid) key beside the row the re-key
+-- already moved; with the id resolved, the conflict target sees the canonical feed's row. The
+-- article id itself is left as given: an id a re-key moved away belongs to an article whose
+-- (feed_id, guid) key the moved row now has, so such an insert hits the conflict target.
 insert:
 INSERT INTO articles (
     id, feed_id, guid, url, title, summary, content, author, published_at,
     thumbnail_url, is_read, read_at, is_starred, starred_at, cached_at,
     search_text, updated_at, created_at, body_updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, :updated_at, ?, :updated_at)
+) VALUES (?, COALESCE((SELECT id FROM feeds WHERE id = :feed_id), (SELECT new_id FROM ks_id_remap WHERE kind = 'feed' AND old_id = :feed_id), :feed_id), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, :updated_at, ?, :updated_at)
 ON CONFLICT(feed_id, guid) DO UPDATE SET
     url = excluded.url,
     title = excluded.title,
@@ -221,13 +227,13 @@ ON CONFLICT(feed_id, guid) DO UPDATE SET
 -- As insert, but leaves an article already stored for the feed (tombstoned or not) exactly as it
 -- is, adding only the ones not there yet. For a subscribe that kept a refresh's newer feed values
 -- (FeedRepository.writePrefetchedSubscription): its own fetch is the older response, so it must not
--- put older bodies back under the refresh's validators.
+-- put older bodies back under the refresh's validators. :feed_id is resolved as in insert.
 insertIfAbsent:
 INSERT INTO articles (
     id, feed_id, guid, url, title, summary, content, author, published_at,
     thumbnail_url, is_read, read_at, is_starred, starred_at, cached_at,
     search_text, updated_at, created_at, body_updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, :updated_at, ?, :updated_at)
+) VALUES (?, COALESCE((SELECT id FROM feeds WHERE id = :feed_id), (SELECT new_id FROM ks_id_remap WHERE kind = 'feed' AND old_id = :feed_id), :feed_id), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, :updated_at, ?, :updated_at)
 ON CONFLICT(feed_id, guid) DO NOTHING;
 
 -- Only writes when the state actually changes, so re-opening an already-read article neither
@@ -244,16 +250,24 @@ ON CONFLICT(feed_id, guid) DO NOTHING;
 -- a star or a deletion stamps above BOTH of them: a star made right after a merged deletion (or a
 -- deletion right after a merged star) is then the group's newest event and wins it.
 -- None of these touch body_updated_at.
+--
+-- An article id given to these writes is resolved like a feed id (see feeds.sq), through the article
+-- kind of ks_id_remap: a re-key moves an article onto the smallest id of its (feed, guid) key, and a
+-- read / star change issued with the id held before the move (the selected article, a queued write)
+-- lands on the row it became. 'article' is ID_REMAP_KIND_ARTICLE (TagFolderIdRekey.kt).
 updateReadStatus:
-UPDATE articles SET is_read = :is_read, read_at = MAX(:read_at, COALESCE(read_at, 0) + 1), updated_at = ? WHERE id = ? AND is_read <> :is_read;
+UPDATE articles SET is_read = :is_read, read_at = MAX(:read_at, COALESCE(read_at, 0) + 1), updated_at = ? WHERE id = COALESCE((SELECT id FROM articles WHERE id = :id), (SELECT new_id FROM ks_id_remap WHERE kind = 'article' AND old_id = :id), :id) AND is_read <> :is_read;
 
 -- Marks a batch of articles read in one statement (callers chunk the id list to stay under
 -- SQLite's bound-parameter limit). Used by markArticlesAsRead instead of a per-id UPDATE loop.
 -- Guarded like the markAllRead* queries: the ids can come from optimistic in-memory pins that outrun
 -- the DB, so a tombstoned or already-read row is left alone rather than stamped with a read event
 -- (read_at/updated_at) the user never made, which would otherwise ride the next sync.
+-- The ids are resolved as a set: a live id matches itself, and a moved one matches the row
+-- ks_id_remap maps it to (no live row has an id that is an old_id there). The list is bound twice, so
+-- callers chunk it to half the usual size.
 updateReadStatusByIds:
-UPDATE articles SET is_read = 1, read_at = MAX(:read_at, COALESCE(read_at, 0) + 1), updated_at = ? WHERE id IN ? AND is_read = 0 AND deleted_at IS NULL;
+UPDATE articles SET is_read = 1, read_at = MAX(:read_at, COALESCE(read_at, 0) + 1), updated_at = ? WHERE (id IN :id OR id IN (SELECT new_id FROM ks_id_remap WHERE kind = 'article' AND old_id IN :id)) AND is_read = 0 AND deleted_at IS NULL;
 
 -- Same no-op guard as updateReadStatus, for starred_at. A star also clears deleted_at: starring keeps
 -- the article (cache cleanup never deletes a starred one), so a star made on an article a merge has
@@ -265,7 +279,7 @@ UPDATE articles SET is_starred = :is_starred,
     starred_at = MAX(:starred_at, COALESCE(starred_at, 0) + 1, COALESCE(deleted_updated_at, 0) + 1),
     deleted_at = CASE WHEN :is_starred = 1 THEN NULL ELSE deleted_at END,
     updated_at = ?
-WHERE id = ? AND is_starred <> :is_starred;
+WHERE id = COALESCE((SELECT id FROM articles WHERE id = :id), (SELECT new_id FROM ks_id_remap WHERE kind = 'article' AND old_id = :id), :id) AND is_starred <> :is_starred;
 
 -- The feed_id EXISTS guard on markAllReadAll/markAllReadByTag keeps this in the same row set as
 -- the corresponding plain list query (watchAll/watchByTag, both INNER JOIN feeds ... f.deleted_at
@@ -273,7 +287,8 @@ WHERE id = ? AND is_starred <> :is_starred;
 -- belonging to an unsubscribed (soft-deleted) feed, which never appears in that list. Unlike
 -- watchAll/watchByTag, markAllReadByFeed/markAllReadByFolder don't need this — a soft-deleted
 -- feed can't be the one directly selected, nor carry a folder assignment worth acting on.
--- markAllReadByTag / markAllReadByFolder resolve their tag / folder id (see tags.sq / folders.sq), so
+-- markAllReadByFeed resolves its feed id (see feeds.sq), and markAllReadByTag / markAllReadByFolder
+-- their tag / folder id (see tags.sq / folders.sq), so
 -- a mark-all-read queued with the id a merge has since re-keyed marks the list it became.
 markAllReadAll:
 UPDATE articles SET is_read = 1, read_at = MAX(:read_at, COALESCE(read_at, 0) + 1), updated_at = ?
@@ -281,7 +296,7 @@ WHERE is_read = 0 AND deleted_at IS NULL
   AND EXISTS (SELECT 1 FROM feeds f WHERE f.id = articles.feed_id AND f.deleted_at IS NULL);
 
 markAllReadByFeed:
-UPDATE articles SET is_read = 1, read_at = MAX(:read_at, COALESCE(read_at, 0) + 1), updated_at = ? WHERE feed_id = ? AND is_read = 0 AND deleted_at IS NULL;
+UPDATE articles SET is_read = 1, read_at = MAX(:read_at, COALESCE(read_at, 0) + 1), updated_at = ? WHERE feed_id = COALESCE((SELECT id FROM feeds WHERE id = :feed_id), (SELECT new_id FROM ks_id_remap WHERE kind = 'feed' AND old_id = :feed_id), :feed_id) AND is_read = 0 AND deleted_at IS NULL;
 
 markAllReadByTag:
 UPDATE articles SET is_read = 1, read_at = MAX(:read_at, COALESCE(read_at, 0) + 1), updated_at = ?

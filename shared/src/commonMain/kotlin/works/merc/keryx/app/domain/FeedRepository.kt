@@ -507,8 +507,14 @@ class FeedRepository(
             val current = feeds.getByUrl(effectiveUrl).executeAsOneOrNull()
             // Deterministic id from the (redirect-resolved) url so two devices that subscribe the
             // same feed independently get the SAME id and the sync merge can converge them (existing
-            // feeds keep their id). See IdGenerator.feedId.
-            val feedId = current?.id ?: IdGenerator.feedId(effectiveUrl)
+            // feeds keep their id). See IdGenerator.feedId. With no row for this url, that id can
+            // still be taken: by a feed whose url a permanent redirect has since changed (upserting
+            // it would rewrite that feed's url and drop its subscription), or by an id a re-key moved
+            // onto another feed (ks_id_remap). A random id is used then, as a tag or folder does
+            // (tags.sq's insertIfNameAbsent); it is decided from this transaction's own reads.
+            val feedId = current?.id
+                ?: IdGenerator.feedId(effectiveUrl).takeUnless { feeds.isIdTaken(it).executeAsOne() }
+                ?: IdGenerator.newId()
             val sortOrder = when {
                 current == null -> insertionSortOrderForNewFeed(feedId, folderId, afterFeedId, beforeFeedId, now)
                 current.deleted_at == null -> current.sort_order

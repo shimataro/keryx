@@ -725,6 +725,33 @@ class ArticleRepositoryTest {
     }
 
     /**
+     * `updateReadStatusByIds` binds its id list twice, so the repository chunks at 450 ids. Every id
+     * must still be marked across the chunk boundary (450 fits one chunk, 451 needs two, 900+ needs
+     * three).
+     */
+    @Test
+    fun markArticlesAsReadMarksEveryIdAtEachChunkSizeBoundary() {
+        for (count in listOf(449, 450, 451, 900, 901, 1351)) {
+            val (driver, db) = inMemoryDb()
+            try {
+                db.insertFeed("f1")
+                val ids = (1..count).map { "a$it" }
+                db.transaction { ids.forEach { db.insertArticle(it, "f1") } }
+                db.insertArticle("untouched", "f1")
+                val repo = newRepo(db, driver)
+
+                repo.markArticlesAsRead(ids)
+
+                val unread = db.articlesQueries.getById("untouched").executeAsOne().is_read
+                assertEquals(0L, unread)
+                assertEquals(0, ids.count { db.articlesQueries.getById(it).executeAsOne().is_read != 1L }, "all $count ids marked read")
+            } finally {
+                driver.close()
+            }
+        }
+    }
+
+    /**
      * The ids can come from optimistic in-memory pins that outrun the DB, so the write itself must
      * leave a tombstoned or already-read row alone rather than stamp a read event the user never
      * made (its read_at/updated_at would ride the next sync).
