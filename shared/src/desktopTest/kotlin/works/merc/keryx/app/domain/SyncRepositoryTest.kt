@@ -653,6 +653,33 @@ class SyncRepositoryTest {
         assertNull(a.state(SYNC_STATE_INDEX_PENDING))
     }
 
+    /**
+     * A merge that folds a local feed onto another feed's id (the two shared a url) moves the feed's
+     * device-local fetch state with it, through the merge's own connection: the fetch-state queries are
+     * told too, so the feed list's error flag follows the feed to its canonical id.
+     */
+    @Test
+    fun aMergeFoldingAFeedOntoAnotherIdTellsTheFetchStateQueries() = runTest {
+        val cloud = FakeCloudStorage()
+        val (a, gen) = seeded(cloud)
+        a.db.insertFeed("fq", now = 1, url = "https://fp")
+        a.driver.execute(null, "INSERT INTO feed_fetch_state (feed_id, error_count, last_error) VALUES ('fq', 2, 'boom')", 0)
+        val (name, bytes) = SyncFiles.transportFile(TransportMeta(gen, TransportFileKind.DELTA, ids(), 1, now), feedRow("fp"))
+        cloud.put(name.fileName, bytes)
+        var fetchStateNotified = false
+        val listener = app.cash.sqldelight.Query.Listener { fetchStateNotified = true }
+        a.driver.addListener("feed_fetch_state", listener = listener)
+
+        a.syncOk()
+
+        a.driver.removeListener("feed_fetch_state", listener = listener)
+        assertTrue(fetchStateNotified, "the fetch-state queries hear of the merge")
+        assertEquals(
+            listOf("fp" to 2L),
+            a.db.feed_fetch_stateQueries.watchProblems("gone").executeAsList().map { it.feed_id to it.error_count },
+        )
+    }
+
     // ---- Sending: interruptions at every step ----
 
     private suspend fun TestScope.crashingSend(point: SyncHookPoint): Pair<SyncDevice, FakeCloudStorage> {
