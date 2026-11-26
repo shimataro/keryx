@@ -157,8 +157,17 @@ struct FeedListView: View {
     var orderedRows: [FeedListRowSelection] { sidebar.orderedRows }
 
     private func endRenameIfRowGone(keys: [String]) {
-        if let key = dialogs.renamingRowKey, !home.idRemap.contains(keys, row: key) {
-            dialogs.endRename()
+        guard let key = dialogs.renamingRowKey, !home.idRemap.contains(keys, row: key) else { return }
+        // The lists can reach here ahead of the re-key map (a merge publishes it only after it
+        // commits, and another write in between re-runs the tag/folder queries over the re-keyed
+        // rows), so the row is not declared gone while the map might be stale: it is first caught up
+        // from the committed database — the ViewModel's one shared implementation, as in Compose's
+        // `FeedListPane` — and only an absence that survives that ends the edit.
+        Task { @MainActor in
+            _ = try? await home.viewModel.catchUpIdRemapFromDb()
+            guard dialogs.renamingRowKey == key else { return }
+            let remap = SidebarIdRemap(home.viewModel.tagFolderIdRemap.value)
+            if !remap.contains(sidebar.orderedRowKeys, row: key) { dialogs.endRename() }
         }
     }
 

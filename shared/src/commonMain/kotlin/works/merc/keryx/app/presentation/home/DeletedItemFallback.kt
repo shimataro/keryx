@@ -54,6 +54,19 @@ internal sealed interface DeletedTarget {
  * new id is never taken for "the item is gone" merely because this class has not yet been told to move
  * the request ([remapPending] is delivered on another coroutine, in no fixed order against [shown]).
  *
+ * **An absence is confirmed against the committed re-key map before it is believed.** A merge
+ * publishes the map only after its transaction commits, and any other write in between (a feed
+ * refresh, a user action) re-runs the tag/folder list queries, which then already read the re-keyed
+ * rows while [currentRemap] still holds the old map: the item looks gone when it only moved. So when
+ * [shown] lacks the item and [catchUp] is given, it is run first (on [checkDispatcher]; in production
+ * it re-reads `ks_id_remap` from the database, serialized by `TagFolderIdRemaps`' lock — the list was
+ * read after the commit, so the read sees the re-key), and the decision is taken again with the
+ * refreshed map: still absent means really gone and the fallback runs, present means the request
+ * goes on as for a value that still shows the item. After one catch-up an unexplained absence is a
+ * real disappearance, so a real deletion always falls back. A [catchUp] that fails is logged and
+ * leaves the request pending (best effort, as the liveness check): the next value of [shown] decides.
+ * Without [catchUp] (feeds, whose ids are never re-keyed) an absence is decided at once.
+ *
  * Once dropped, a request is gone, so a deletion that arrives later from elsewhere (a sync merge)
  * never moves the selection (external-spec §9, "Least surprise").
  *
@@ -67,6 +80,7 @@ internal class DeletedItemFallback<T>(
     private val checkDispatcher: CoroutineDispatcher,
     private val isLive: suspend (id: String) -> Boolean,
     private val currentRemap: () -> (String) -> String = { { it } },
+    private val catchUp: (suspend () -> Unit)? = null,
     private val idOf: (T) -> String,
 ) {
     /**
@@ -95,11 +109,16 @@ internal class DeletedItemFallback<T>(
      */
     fun fallBackOnceHidden(id: String, fallback: () -> Unit) {
         val current = shown.value
+        val request = Pending(id, current, fallback)
         if (!shows(current, id)) {
-            fallback()
+            if (catchUp == null) {
+                fallback()
+                return
+            }
+            pending += request
+            decideAbsence(request)
             return
         }
-        val request = Pending(id, current, fallback)
         pending += request
         checkLiveness(request)
     }
@@ -149,11 +168,44 @@ internal class DeletedItemFallback<T>(
         // A StateFlow collector can still be handed the value a request last saw; only a newer one counts.
         for (request in pending.filter { it.reference !== list }) {
             if (!shows(list, request.id)) {
-                pending.remove(request)
-                request.fallback()
+                request.reference = list
+                decideAbsence(request)
             } else {
                 request.reference = list
                 checkLiveness(request)
+            }
+        }
+    }
+
+    /**
+     * [shown] lacks the item of [request]: falls back at once without a [catchUp], else confirms the
+     * absence against the committed re-key map first (see the class KDoc). Shares the request's check
+     * generation with [checkLiveness], so only the newest decision for the request is applied.
+     */
+    private fun decideAbsence(request: Pending) {
+        val catchUp = catchUp
+        if (catchUp == null) {
+            pending.remove(request)
+            request.fallback()
+            return
+        }
+        val generation = ++request.checkGeneration
+        scope.launch {
+            val caughtUp = runCatchingUnlessCancelled {
+                withContext(checkDispatcher) { catchUp() }
+            }.onFailure { e ->
+                Log.warn(TAG, "Catching up the tag/folder re-keys before a deleted item's fallback failed", e)
+            }.isSuccess
+            if (request !in pending || generation != request.checkGeneration) return@launch
+            // Undecided: the next value of [shown] asks again.
+            if (!caughtUp) return@launch
+            val list = shown.value
+            if (shows(list, request.id)) {
+                request.reference = list
+                checkLiveness(request)
+            } else {
+                pending.remove(request)
+                request.fallback()
             }
         }
     }

@@ -431,6 +431,49 @@ class HomeViewModelIdRemapTest {
         assertEquals(emptySet(), vm.collapsedFolderIds.value)
     }
 
+    /**
+     * The re-key is committed and the lists have re-run over it (another write notified them), but the map
+     * is not yet published: [HomeViewModel.catchUpIdRemapFromDb] reads it from the database, publishes it
+     * under the map's lock and applies it, so a UI deciding that a row it holds is gone first sees the row
+     * under its new id. The selection and expansion follow the re-key instead of being lost.
+     */
+    @Test
+    fun catchingUpFromTheDatabaseBringsAListAheadOfTheMapIntoStep() = runVmTest {
+        val vm = newViewModel().vm
+        vm.selectFilter(ArticleFilter.Tag("t-old"))
+        vm.toggleTagExpanded("t-old")
+        vm.selectFilter(ArticleFilter.Tag("t-old"))
+        testScheduler.advanceUntilIdle()
+
+        driver.rekeyTagForTest("t-old", "t-new")
+        driver.rekeyFolderForTest("d-old", "d-new")
+        // Another writer's notification re-runs the lists over the committed rows; the map stays unpublished.
+        db.insertFeed("f2")
+        testScheduler.advanceUntilIdle()
+        assertEquals(emptyMap(), vm.tagFolderIdRemap.value.tagIds, "precondition: the map is still stale")
+        assertEquals(listOf("t-new"), vm.tags.value.map { it.id }, "precondition: the list already has the new id")
+
+        assertEquals(true, vm.catchUpIdRemapFromDb())
+
+        assertEquals(mapOf("t-old" to "t-new"), vm.tagFolderIdRemap.value.tagIds)
+        assertEquals(mapOf("d-old" to "d-new"), vm.tagFolderIdRemap.value.folderIds)
+        assertEquals(ArticleFilter.Tag("t-new"), vm.filter.value)
+        assertEquals(setOf("t-new"), vm.expandedTagIds.value)
+    }
+
+    /** With nothing re-keyed, the catch-up changes nothing: an absence it cannot explain stays a real one. */
+    @Test
+    fun catchingUpWithNothingReKeyedChangesNothing() = runVmTest {
+        val vm = newViewModel().vm
+        vm.selectFilter(ArticleFilter.Tag("t-old"))
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(true, vm.catchUpIdRemapFromDb())
+
+        assertEquals(ArticleFilter.Tag("t-old"), vm.filter.value)
+        assertEquals(emptyMap(), vm.tagFolderIdRemap.value.tagIds)
+    }
+
     private fun unreadIds(): List<String> =
         db.articlesQueries.watchAll().executeAsList().filter { it.is_read == 0L }.map { it.id }.sorted()
 

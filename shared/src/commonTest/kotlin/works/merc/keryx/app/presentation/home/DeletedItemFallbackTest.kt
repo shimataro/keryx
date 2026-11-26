@@ -179,6 +179,113 @@ class DeletedItemFallbackTest {
         }
     }
 
+    // --- lists before the map: another write re-runs the list over the committed re-key before the map is published ---
+
+    private class CatchUpHarness(testScope: TestScope, val shown: MutableStateFlow<List<Row>>) {
+        /** The map as the holders see it: stale until [catchUp] reads the committed one. */
+        var published: Map<String, String> = emptyMap()
+        var committed: Map<String, String> = emptyMap()
+        var catchUps = 0
+        var gate: CompletableDeferred<Unit>? = null
+        var failure: Throwable? = null
+        val dispatcher = UnconfinedTestDispatcher(testScope.testScheduler)
+        val scope = CoroutineScope(SupervisorJob() + dispatcher)
+        val fallback = DeletedItemFallback(
+            scope, shown, dispatcher,
+            isLive = { id -> id == "t-new" },
+            currentRemap = { { id -> published[id] ?: id } },
+            catchUp = {
+                catchUps++
+                gate?.await()
+                failure?.let { throw it }
+                published = committed
+            },
+        ) { it.id }
+    }
+
+    /**
+     * The re-key committed, and a list re-run by another write already shows the row under its new id,
+     * while the published map is still the old one. The absence is not believed until the map has been
+     * caught up from the committed state; the row is then found under its new id, so nothing falls back.
+     */
+    @Test
+    fun aListAheadOfTheMapIsNotTakenForADeletionOnceTheMapIsCaughtUp() = runTest {
+        val shown = MutableStateFlow(listOf(Row("t-old", "News"), Row("other", "Other")))
+        val h = CatchUpHarness(this, shown)
+        var fellBack = 0
+        h.fallback.fallBackOnceHidden("t-old") { fellBack++ }
+        h.committed = mapOf("t-old" to "t-new")
+        h.gate = CompletableDeferred()
+
+        shown.value = listOf(Row("t-new", "News"), Row("other", "Other"))
+        // Undecided while the catch-up is in flight: the stale map says the item is gone, and nothing acts on it.
+        assertEquals(0, fellBack)
+        assertEquals(1, h.catchUps)
+
+        h.gate!!.complete(Unit)
+        // What the ViewModel's re-key collector does once the catch-up has published the map.
+        h.fallback.remapPending { h.published[it] ?: it }
+        assertEquals(0, fellBack)
+        // The request was dropped as live (t-new), so a later deletion moves nothing.
+        shown.value = listOf(Row("other", "Other"))
+        assertEquals(0, fellBack)
+        h.scope.cancel()
+    }
+
+    /** After the catch-up an absence nothing explains is a real deletion: the fallback runs, once, and no loop follows. */
+    @Test
+    fun aRealDeletionStillFallsBackAfterTheCatchUp() = runTest {
+        val shown = MutableStateFlow(listOf(Row("t-old", "News"), Row("other", "Other")))
+        val h = CatchUpHarness(this, shown)
+        var fellBack = 0
+        h.fallback.fallBackOnceHidden("t-old") { fellBack++ }
+
+        shown.value = listOf(Row("other", "Other"))
+
+        assertEquals(1, fellBack)
+        assertEquals(1, h.catchUps)
+        shown.value = listOf(Row("other", "Renamed"))
+        assertEquals(1, fellBack)
+        assertEquals(1, h.catchUps)
+        h.scope.cancel()
+    }
+
+    /** Requested while the list already lacks the item: the same confirmation precedes the fallback. */
+    @Test
+    fun anItemAlreadyAbsentAtTheRequestIsConfirmedBeforeFallingBack() = runTest {
+        val shown = MutableStateFlow(listOf(Row("t-new", "News")))
+        val h = CatchUpHarness(this, shown)
+        h.committed = mapOf("t-old" to "t-new")
+        var fellBack = 0
+
+        h.fallback.fallBackOnceHidden("t-old") { fellBack++ }
+        assertEquals(1, h.catchUps)
+        h.fallback.remapPending { h.published[it] ?: it }
+        // Row t-new is shown and live: dropped without falling back.
+        shown.value = emptyList()
+        assertEquals(0, fellBack)
+        h.scope.cancel()
+    }
+
+    /** A catch-up that fails is best effort: the request stays pending, and the next list decides (asking again). */
+    @Test
+    fun aFailedCatchUpLeavesTheRequestPendingForTheNextList() = runTest {
+        val shown = MutableStateFlow(listOf(Row("t-old", "News"), Row("other", "Other")))
+        val h = CatchUpHarness(this, shown)
+        var fellBack = 0
+        h.fallback.fallBackOnceHidden("t-old") { fellBack++ }
+        h.failure = IllegalStateException("busy")
+
+        shown.value = listOf(Row("other", "Other"))
+        assertEquals(0, fellBack)
+
+        h.failure = null
+        shown.value = listOf(Row("other", "Again"))
+        assertEquals(1, fellBack)
+        assertEquals(2, h.catchUps)
+        h.scope.cancel()
+    }
+
     /** Without a re-key, a list lacking the item still falls back — the map changes nothing else. */
     @Test
     fun theCurrentMapDoesNotHideARealDeletion() = runTest {

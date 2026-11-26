@@ -946,6 +946,7 @@ class HomeViewModel(
         dispatcher,
         isLive = { id -> tagRepository.getTagById(id).let { it != null && it.deleted_at == null } },
         currentRemap = { idRemaps.current.value::tag },
+        catchUp = ::loadIdRemapFromDb,
     ) { it.id }
     private val deletedFolderFallback = DeletedItemFallback(
         viewModelScope,
@@ -953,6 +954,7 @@ class HomeViewModel(
         dispatcher,
         isLive = { id -> folderRepository.getFolderById(id).let { it != null && it.deleted_at == null } },
         currentRemap = { idRemaps.current.value::folder },
+        catchUp = ::loadIdRemapFromDb,
     ) { it.id }
 
     /** Runs [fallback] once the feed list stops showing [target] — see [DeletedItemFallback]. */
@@ -2302,6 +2304,29 @@ class HomeViewModel(
 
     /** See [TagFolderIdRemapping.catchUpAndGet]: [catchUpIdRemap], then the map an id is resolved by. */
     private fun catchUpAndGetIdRemap(): TagFolderIdRemap = idRemapping.catchUpAndGet()
+
+    /**
+     * Re-reads the committed `ks_id_remap` and publishes it ([TagFolderIdRemaps.publishFromDb], under its
+     * lock), off the main thread. A merge publishes the map only after it commits, so a list that was
+     * re-run by another write in between already shows a re-keyed row while the published map is stale;
+     * a decision that an item "disappeared" must first catch the map up from here. Throws on a failed read.
+     */
+    private suspend fun loadIdRemapFromDb() = withContext(dispatcher) { idRemaps.publishFromDb() }
+
+    /**
+     * Catches the published re-key map up with the committed database, then applies it to the state held
+     * here — the one implementation both UIs call before concluding that a row they hold (an inline
+     * rename's) disappeared from the list, since the lists can reach them ahead of the map (see
+     * [loadIdRemapFromDb]). Returns whether the read succeeded; a failure is logged and the caller decides
+     * with the map it has (best effort, docs/error-design.md).
+     */
+    suspend fun catchUpIdRemapFromDb(): Boolean {
+        val caughtUp = runCatchingUnlessCancelled { loadIdRemapFromDb() }.onFailure { e ->
+            Log.warn(TAG, "Catching up the tag/folder re-keys failed", e)
+        }.isSuccess
+        if (caughtUp) catchUpIdRemap()
+        return caughtUp
+    }
 
     // Last in the class body: every property the re-key collector touches is initialized by now.
     init {

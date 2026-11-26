@@ -455,7 +455,7 @@ internal fun FeedListPane(
             editRowSeen = true
             return@LaunchedEffect
         }
-        val renderableNow = listOf(target, target.remappedBy(vm.tagFolderIdRemap.value)).any {
+        fun renderableNow() = listOf(target, target.remappedBy(vm.tagFolderIdRemap.value)).any {
             feedListRowIndex(
                 it.rowInstance,
                 feeds,
@@ -466,7 +466,23 @@ internal fun FeedListPane(
                 vm.expandedTagIds.value,
             ) != null
         }
-        if (editRowSeen || !renderableNow) inlineEdit = null
+        // The lists can reach here ahead of the re-key map: a merge publishes the map only after it
+        // commits, and another write in between re-runs the tag/folder queries over the re-keyed rows.
+        // So the row is not declared gone while the published map might be stale — the map is first
+        // caught up from the committed database (the one shared ViewModel implementation, also the
+        // SwiftUI app's), and only an absence that survives that ends the edit. A re-key that catch-up
+        // reveals changes [idRemap], which restarts this effect with the row found.
+        if (!renderableNow()) {
+            vm.catchUpIdRemapFromDb()
+            // The row, as the lists render it now, under the id the caught-up map gives it: found, so
+            // it only moved (a restart of this effect follows when the map reaches [idRemap]).
+            val freshRemap = vm.tagFolderIdRemap.value
+            val moved = listOf(target, target.remappedBy(freshRemap)).any {
+                feedListRowIndex(it.rowInstance, feeds, folders, tags, collapsedFolderIds, feedTagMap, expandedTagIds) != null
+            }
+            if (moved) return@LaunchedEffect
+        }
+        if (editRowSeen || !renderableNow()) inlineEdit = null
     }
 
     FeedListAutoScrollEffect(dragPointerYState, hostBoundsState, listState, dragController)

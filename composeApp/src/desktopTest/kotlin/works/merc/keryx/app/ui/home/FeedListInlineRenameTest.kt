@@ -594,6 +594,54 @@ class FeedListInlineRenameTest {
             assertEquals("Half typed", db.folderNameOf("d-new"))
         }
     }
+
+    /**
+     * The other order: another write re-runs the lists over the committed re-key before the merge has
+     * published the map (nothing publishes here at all). The row's absence is not believed until the map
+     * is caught up from the database, so the editor stays open with the typed text.
+     */
+    @Test
+    fun aListAheadOfTheMapDoesNotDiscardTheTagRenameInProgress() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        db.insertTag("t-old", "Tag One", sortOrder = 0L)
+        val remaps = TagFolderIdRemaps(db, Dispatchers.Unconfined)
+        useHomeViewModel(driver, db, idRemaps = remaps) { fixture ->
+            val vm = fixture.vm
+            setInlineRenameContent(vm)
+            startInlineRename(vm, ArticleFilter.Tag("t-old"))
+            typeName("Half typed")
+
+            driver.rekeyTagForTest("t-old", "t-new")
+            waitForIdle()
+
+            editor().assertIsDisplayed()
+            editor().assertTextContains("Half typed")
+            pressEnter()
+            assertEquals("Half typed", db.tagOf("t-new").name)
+        }
+    }
+
+    /** As [aListAheadOfTheMapDoesNotDiscardTheTagRenameInProgress], for a folder. */
+    @Test
+    fun aListAheadOfTheMapDoesNotDiscardTheFolderRenameInProgress() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        db.insertFolder("d-old", "Folder One", sortOrder = 0L)
+        val remaps = TagFolderIdRemaps(db, Dispatchers.Unconfined)
+        useHomeViewModel(driver, db, idRemaps = remaps) { fixture ->
+            val vm = fixture.vm
+            setInlineRenameContent(vm)
+            startInlineRename(vm, ArticleFilter.Folder("d-old"))
+            typeName("Half typed")
+
+            driver.rekeyFolderForTest("d-old", "d-new")
+            waitForIdle()
+
+            editor().assertIsDisplayed()
+            editor().assertTextContains("Half typed")
+            pressEnter()
+            assertEquals("Half typed", db.folderNameOf("d-new"))
+        }
+    }
 }
 
 private const val ROOT_TEST_TAG = "root"

@@ -56,6 +56,12 @@ and lose more than the access itself is worth. The accesses that are, today:
   whole `busy_timeout`. A failure is treated as "not live": the pending selection
   fallback stays pending and the next list value decides it. Propagating it would end the app on Android and
   Apple.
+  A tag or folder that a list no longer shows is not believed gone while the published re-key map might be
+  stale (a merge publishes it only after it commits, and another write in between re-runs the lists over the
+  re-keyed rows): the map is first re-read from `ks_id_remap` (`HomeViewModel.catchUpIdRemapFromDb`), and only an
+  absence that survives that falls back. A failed re-read is treated the same way — undecided, the next list value
+  asks again. The Compose and SwiftUI inline renames use the same catch-up before ending an edit whose row
+  vanished.
 - The `ks_id_remap` read that publishes a merge's tag/folder re-keys (`DeltaSync.publishIdRemapsAfterCommit` →
   `TagFolderIdRemaps.publishFromDb`). It runs right after the merge has committed, so it can wait out the whole
   `busy_timeout` behind another write lock, and what it feeds is only ids held outside the database (selection,
