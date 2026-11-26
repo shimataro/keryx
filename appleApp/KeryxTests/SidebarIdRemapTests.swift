@@ -50,4 +50,34 @@ struct SidebarIdRemapTests {
         #expect(remap.match(in: ["all", "tag:t-new"], for: "tag:t-old") == "tag:t-new")
         #expect(remap.match(in: ["all"], for: "tag:t-old") == nil)
     }
+
+    @Test
+    func keysThatChangedDuringTheCatchUpAreLeftToTheirOwnCatchUp() {
+        // The catch-up's map (A -> B) finds the row in the keys it was started for (B), but the keys
+        // have since moved on to a later re-key (C) the map does not know: judged on those, the row
+        // would look gone. Nothing is decided; the newer keys' own catch-up decides.
+        let caughtUp = SidebarIdRemap(tags: ["A": "B"], folders: [:])
+        #expect(caughtUp.renameRowDecision(
+            key: "tag:A", keysAtCatchUp: ["all", "tag:B"], currentKeys: ["all", "tag:C"]) == .recheck)
+        #expect(!caughtUp.contains(["all", "tag:C"], row: "tag:A"))
+    }
+
+    @Test
+    func unchangedKeysDecideWhetherTheRowIsThere() {
+        let caughtUp = SidebarIdRemap(tags: ["A": "B"], folders: [:])
+        #expect(caughtUp.renameRowDecision(
+            key: "tag:A", keysAtCatchUp: ["all", "tag:B"], currentKeys: ["all", "tag:B"]) == .keep)
+        #expect(caughtUp.renameRowDecision(
+            key: "tag:A", keysAtCatchUp: ["all", "tag:other"], currentKeys: ["all", "tag:other"]) == .end)
+    }
+
+    @Test
+    func equalKeysBuiltSeparatelyCountAsUnchanged() {
+        let atCatchUp = ["all", "tag:" + "B"]
+        let current = Array(["all", "tag:B"])
+        #expect(SidebarIdRemap(tags: ["A": "B"], folders: [:]).renameRowDecision(
+            key: "tag:A", keysAtCatchUp: atCatchUp, currentKeys: current) == .keep)
+        #expect(SidebarIdRemap.empty.renameRowDecision(
+            key: "tag:A", keysAtCatchUp: ["tag:B", "all"], currentKeys: ["all", "tag:B"]) == .recheck)
+    }
 }

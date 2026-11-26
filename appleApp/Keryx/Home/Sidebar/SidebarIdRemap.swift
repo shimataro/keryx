@@ -50,4 +50,31 @@ struct SidebarIdRemap: Equatable {
         let wanted = current(key)
         return keys.first { current($0) == wanted }
     }
+
+    /// What an in-place rename whose row was missing from `keysAtCatchUp` does once this map — the
+    /// one a catch-up from the database published — is in hand.
+    ///
+    /// The absence is judged on `keysAtCatchUp`, the keys the catch-up was started for: the map was
+    /// read after them, so it covers every re-key they show. Keys delivered meanwhile
+    /// (`currentKeys`) can show a later re-key the map missed, and judging on them could take the
+    /// row for gone; so when they differ nothing is decided here, and their own change (which runs
+    /// its own catch-up) decides instead.
+    func renameRowDecision(
+        key: String,
+        keysAtCatchUp: [String],
+        currentKeys: [String]
+    ) -> RenameRowDecision {
+        guard currentKeys == keysAtCatchUp else { return .recheck }
+        return contains(keysAtCatchUp, row: key) ? .keep : .end
+    }
+}
+
+/// `SidebarIdRemap.renameRowDecision`'s answer.
+enum RenameRowDecision: Equatable {
+    /// The row is there: the rename stays open.
+    case keep
+    /// The row is gone: the rename ends.
+    case end
+    /// The keys changed during the catch-up: nothing is decided here; their change asks again.
+    case recheck
 }
