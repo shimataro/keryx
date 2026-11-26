@@ -126,8 +126,11 @@ internal class DeletedItemFallback<T>(
     /**
      * Moves every pending request onto the id [remap] gives it — a merge re-keyed the deleted item
      * onto another id (see `TagFolderIdRemapping`), whose row now stands for it. A moved request
-     * is decided against the current value of [shown] at once, as a new request would be: it falls
-     * back if the list lacks the new id, and otherwise checks whether that row is live. A list that
+     * is decided against the current value of [shown] at once, as a new request would be: if the list
+     * lacks the new id, the absence is confirmed as any other is (`decideAbsence`) — with [catchUp], the
+     * committed map is read first, since the list can already show a later re-key of the same row
+     * (A -> B delivered here while the list shows C, the database holding B -> C) — and otherwise that
+     * row's liveness is checked. A list that
      * still shows an old id — the request's previous one, or an earlier id of a chain of re-keys that
      * [remap], which is folded, sends to the same new id — was read before the re-key, so it cannot
      * tell whether the new id is shown: the request then stays pending, with that row's liveness
@@ -147,8 +150,8 @@ internal class DeletedItemFallback<T>(
             // the liveness check or a newer value.
             val predatesTheRemap = current.any { idOf(it).let { shown -> shown != moved && remap(shown) == moved } }
             if (!predatesTheRemap && current.none { idOf(it) == moved }) {
-                pending.remove(request)
-                request.fallback()
+                request.reference = current
+                decideAbsence(request)
             } else {
                 request.reference = current
                 checkLiveness(request)

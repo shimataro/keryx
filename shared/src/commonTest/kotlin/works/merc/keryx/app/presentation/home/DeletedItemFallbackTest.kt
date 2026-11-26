@@ -188,11 +188,12 @@ class DeletedItemFallbackTest {
         var catchUps = 0
         var gate: CompletableDeferred<Unit>? = null
         var failure: Throwable? = null
+        var live: Set<String> = setOf("t-new")
         val dispatcher = UnconfinedTestDispatcher(testScope.testScheduler)
         val scope = CoroutineScope(SupervisorJob() + dispatcher)
         val fallback = DeletedItemFallback(
             scope, shown, dispatcher,
-            isLive = { id -> id == "t-new" },
+            isLive = { id -> id in live },
             currentRemap = { { id -> published[id] ?: id } },
             catchUp = {
                 catchUps++
@@ -459,5 +460,88 @@ class DeletedItemFallbackTest {
         shown.value = emptyList()
         assertEquals(1, fellBack)
         scope.cancel()
+    }
+
+    // --- remapPending ahead of the list: a request moved onto an id the list no longer shows ---
+
+    /**
+     * The map's A -> B reaches [DeletedItemFallback.remapPending] while the list already shows C (the
+     * database holding B -> C, not yet published). The absence of B is confirmed against the committed
+     * map first, which joins A and B to C: the row is shown, so nothing falls back, and once the request
+     * follows the map onto C it is dropped as live.
+     */
+    @Test
+    fun aRequestRemappedOntoAnIdTheListHasMovedPastIsConfirmedBeforeFallingBack() = runTest {
+        val shown = MutableStateFlow(listOf(Row("t-a", "News"), Row("other", "Other")))
+        val h = CatchUpHarness(this, shown)
+        h.live = setOf("t-c")
+        var fellBack = 0
+        h.fallback.fallBackOnceHidden("t-a") { fellBack++ }
+        h.published = mapOf("t-a" to "t-b")
+        h.committed = mapOf("t-a" to "t-c", "t-b" to "t-c")
+        h.gate = CompletableDeferred()
+
+        shown.value = listOf(Row("t-c", "News"), Row("other", "Other"))
+        h.fallback.remapPending { h.published[it] ?: it }
+        assertEquals(0, fellBack, "an absence under the delivered map is not believed before the catch-up")
+        assertEquals(2, h.catchUps)
+
+        h.gate!!.complete(Unit)
+        assertEquals(0, fellBack, "the caught-up map shows the row under C")
+        h.fallback.remapPending { h.published[it] ?: it }
+        // Dropped as live (t-c): a later deletion from elsewhere moves nothing.
+        shown.value = listOf(Row("other", "Other"))
+        assertEquals(0, fellBack)
+        h.scope.cancel()
+    }
+
+    /** As above, with the catch-up failing: the request stays pending, and the next list decides it. */
+    @Test
+    fun aRequestRemappedOntoAnAbsentIdStaysPendingWhenTheCatchUpFails() = runTest {
+        val shown = MutableStateFlow(listOf(Row("t-a", "News"), Row("other", "Other")))
+        val h = CatchUpHarness(this, shown)
+        h.live = setOf("t-c")
+        var fellBack = 0
+        h.fallback.fallBackOnceHidden("t-a") { fellBack++ }
+        h.published = mapOf("t-a" to "t-b")
+        h.committed = mapOf("t-a" to "t-c", "t-b" to "t-c")
+        h.failure = IllegalStateException("busy")
+
+        shown.value = listOf(Row("t-c", "News"), Row("other", "Other"))
+        h.fallback.remapPending { h.published[it] ?: it }
+        assertEquals(0, fellBack, "a failed catch-up decides nothing")
+        assertEquals(2, h.catchUps)
+
+        h.failure = null
+        shown.value = listOf(Row("t-c", "News"), Row("other", "Again"))
+        assertEquals(3, h.catchUps)
+        assertEquals(0, fellBack)
+        h.fallback.remapPending { h.published[it] ?: it }
+        shown.value = listOf(Row("other", "Again"))
+        assertEquals(0, fellBack, "dropped as live once it follows the map onto C")
+        h.scope.cancel()
+    }
+
+    /** The new id really is gone: the fallback runs once, after the catch-up confirmed it. */
+    @Test
+    fun aRequestRemappedOntoAGoneIdFallsBackOnceAfterTheCatchUp() = runTest {
+        val shown = MutableStateFlow(listOf(Row("t-a", "News"), Row("other", "Other")))
+        val h = CatchUpHarness(this, shown)
+        h.live = emptySet()
+        var fellBack = 0
+        h.fallback.fallBackOnceHidden("t-a") { fellBack++ }
+        h.published = mapOf("t-a" to "t-b")
+        h.committed = mapOf("t-a" to "t-b")
+        h.gate = CompletableDeferred()
+
+        shown.value = listOf(Row("other", "Other"))
+        h.fallback.remapPending { h.published[it] ?: it }
+        assertEquals(0, fellBack, "not before the catch-up")
+
+        h.gate!!.complete(Unit)
+        assertEquals(1, fellBack)
+        shown.value = listOf(Row("other", "Again"))
+        assertEquals(1, fellBack, "decided once")
+        h.scope.cancel()
     }
 }
