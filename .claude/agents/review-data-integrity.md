@@ -58,18 +58,22 @@ cloud file format.
   folder must null out its child feeds' `folder_id` in the same transaction, so
   no feed is left pointing at a deleted folder; FKs (feed→folder, article→feed,
   feed_tags) must not dangle.
-- Are logical-deletion semantics correct? `deleted_at IS NULL` = alive and
-  `watch*` queries filter it. Locally, cache cleanup (`articles.softDeleteExpired`)
-  is the only writer that creates a tombstone, and it never deletes a starred
-  article; a feed refresh (`upsert`) must not touch `deleted_at` at all, or it
-  would revive a deleted article. `MergeSql` also writes `deleted_at` during sync:
-  the star and the deletion are one *retention* group (`is_starred`, `starred_at`,
-  `deleted_at`, `deleted_updated_at`) ranked by `MAX(starred_at, deleted_updated_at)`
-  — the newer operation wins the whole group. Locally a star clears `deleted_at`
-  (`updateStarStatus`) and both a star and a cleanup stamp above both stamps, so a
-  row is never both starred and deleted. Re-subscription must clear
-  `feeds.deleted_at` and stamp its per-field timestamp so it wins over a
-  concurrent refresh.
+- Are logical-deletion semantics correct? An article is visible iff
+  `(deleted_at IS NULL OR is_starred = 1)`, decided when it is read, and every
+  list, count, search and lookup must use that one predicate
+  (`data/local/ArticleVisibility.kt`, `articles.sq`) — a filter on `deleted_at`
+  alone hides a star another device's cleanup deleted. Locally, cache cleanup
+  (`articles.softDeleteExpired`) is the only writer that creates a tombstone, and it
+  never deletes a starred article; a feed refresh (`upsert`) must not touch
+  `deleted_at` at all, or it would revive a deleted article. `MergeSql` also writes
+  `deleted_at` during sync: the star (`is_starred` by `starred_at`) and the deletion
+  (`deleted_at` by `deleted_updated_at`) are two independent last-write-wins groups,
+  so a row can be both starred and deleted; no rule across the two groups may be
+  added to a merge, fold or identity step (a "newer star revives" rule was not
+  commutative). A star touches only the star group, and an unstar of a deleted row
+  also stamps an undelete, each stamp above its own group's previous value.
+  Re-subscription must clear `feeds.deleted_at` and stamp its per-field timestamp so
+  it wins over a concurrent refresh.
 
 ## Checklist — compatibility (time)
 
