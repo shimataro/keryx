@@ -99,8 +99,8 @@ class ArticleContentCache(
             // The reader left the composition while this was reading: the body it asked for is not
             // wanted any more, and inserting it would leave behind exactly what clear() dropped.
             if (generation.value != startedGeneration) return@launch
-            // A sync merge can delete the row (making it invisible unless starred) between the page
-            // composing and this returning; rendering it would put deleted content back on screen,
+            // A sync merge can leave the row no longer visible (deleted and not starred) between the
+            // page composing and this returning; rendering it would put deleted content back on screen,
             // the same thing HomeViewModel.selectArticle's own guard prevents for the selection.
             if (full == null || !full.isVisible) return@launch
             _rows.update { trimmedToCacheLimit(it + (id to full.toReaderRow()), limit) }

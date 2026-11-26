@@ -406,9 +406,9 @@ class HomeViewModel(
     // The last-selected article, restored at launch (not via selectArticle(), to avoid re-marking it as
     // read and clobbering another device's "mark as unread" sync via read_at last-write-wins). Looked
     // up here, before [_pinnedReadStates] and the eagerly collected article list, so its pin is in
-    // place before that list first emits. A merged deletion can make it invisible while the app is
-    // closed, so the restored row is filtered by visibility (isVisible: not deleted, or starred) the
-    // same way selectArticle filters a concurrently-deleted one — otherwise the next launch would
+    // place before that list first emits. A merged deletion can leave it no longer visible (deleted
+    // and not starred) while the app is closed, so the restored row is filtered by isVisible the same
+    // way selectArticle filters one a merge deleted concurrently — otherwise the next launch would
     // select and pin deleted content.
     //
     // Best effort (docs/error-design.md): a failing lookup restores nothing. A selection whose body
@@ -647,7 +647,8 @@ class HomeViewModel(
     /**
      * The article whose header [readerContent] shows while its body is still loading: set by
      * [hydrateSelection]'s grace timer once [READER_HEADER_FIRST_GRACE_MS] has passed without the body,
-     * cleared once it lands, by [selectFilter], and by a tombstoned lookup.
+     * cleared once it lands, by [selectFilter], and by a lookup that finds its row no longer visible
+     * (deleted and not starred).
      */
     private val _headerArticleId = MutableStateFlow<String?>(null)
 
@@ -665,8 +666,8 @@ class HomeViewModel(
      * whatever route made it (a click, J/K, a notification); choosing the article that is already
      * selected is not counted — so the article list scrolls the selection into view when this changes, and
      * not whenever [selectedArticleId] does. That id also moves without the user acting: a selection
-     * whose row turns out to have been tombstoned by a sync merge hands the cursor back to the
-     * article before it, and the list must not scroll back to that article on its own
+     * whose row a sync merge has left no longer visible (deleted and not starred) hands the cursor back
+     * to the article before it, and the list must not scroll back to that article on its own
      * (external-spec §9, "Nothing happens unprompted").
      */
     val selectionRevealRequests: StateFlow<Int> = _selectionRevealRequests.asStateFlow()
@@ -1045,8 +1046,8 @@ class HomeViewModel(
             articleRestored = articleRestoredOnLaunch,
         )
 
-        // Any write to `articles` can be a sync merge propagating a soft-delete tombstone for an
-        // article currently pinned here; revalidate the pins so a deleted one can't stay visible.
+        // Any write to `articles` can be a sync merge leaving an article currently pinned here no longer
+        // visible (deleted and not starred); revalidate the pins so such a one can't stay on screen.
         articleChangeSignal
             .onEach { reconcilePinnedArticlesAndSelection() }
             .flowOn(dispatcher)
@@ -1159,7 +1160,7 @@ class HomeViewModel(
         // unread" on this article made while the lookup is still waiting lands after this write,
         // not before it. Also dispatched before the optimistic pin below — see
         // reconcilePinnedArticlesAndSelection's own KDoc for why that order is load-bearing. Should a
-        // sync merge tombstone the row concurrently, marking it read only stamps read_at/updated_at;
+        // sync merge delete the row concurrently, marking it read only stamps read_at/updated_at;
         // deletion's last-write-wins runs on deleted_updated_at, which this write never touches, so
         // it cannot revive or otherwise disturb the deletion.
         val write = launchArticleWrite(ArticleWriteField.READ, listOf(article.id)) { articleRepository.markAsRead(article.id) }
@@ -1276,12 +1277,12 @@ class HomeViewModel(
             }
             return
         }
-        // A null row, or one no longer visible (isVisible), means a sync merge deleted it between the emission the user
-        // clicked and the click itself: leave the selection and the persisted id entirely alone, and
-        // take back the pin selectArticle added, rather than resurrecting deleted content into the
-        // list (the `articles` merge re-adds any pinned id missing from the query result) or
-        // restoring it on the next launch. A pin dropped by a browsing-context switch since is not
-        // this hydration's to touch.
+        // A null row, or one no longer visible (deleted and not starred, isVisible), means a sync merge
+        // deleted it between the emission the user clicked and the click itself: leave the selection
+        // and the persisted id entirely alone, and take back the pin selectArticle added, rather than
+        // resurrecting deleted content into the list (the `articles` merge re-adds any pinned id
+        // missing from the query result) or restoring it on the next launch. A pin dropped by a
+        // browsing-context switch since is not this hydration's to touch.
         if (full == null || !full.isVisible) {
             if (pinnedAtSelect && epoch == browsingEpoch) _pinnedReadStates.update { it - article.id }
             // Resume navigating from what is actually on screen, not from the dead article — and stop
@@ -1292,8 +1293,9 @@ class HomeViewModel(
             return
         }
         // Nothing is selected any more (a filter switch, or an earlier hydration finding its own
-        // article tombstoned), or a newer selection — possibly of this same article — owns the
-        // reader: an older lookup that finished later must not put its result back on screen.
+        // article no longer visible (deleted and not starred)), or a newer selection — possibly of this
+        // same article — owns the reader: an older lookup that finished later must not put its result
+        // back on screen.
         val cursor = selectionCursorId ?: return
         if (cursor != article.id || token != latestSelectionToken) return
         // An explicit read-state intent made on this article after it was selected (e.g. "Mark as
@@ -1763,8 +1765,8 @@ class HomeViewModel(
         // When scoped, exactly the unread rows the update below pins: taken from the pin-resolved
         // results rather than the raw search snapshot, which can lag an optimistic "mark as unread"
         // (its re-run is debounced) and would leave such a row pinned read but never written. Pins
-        // can outrun the DB, so the write itself skips any id whose row is already read or tombstoned
-        // (updateReadStatusByIds).
+        // can outrun the DB, so the write itself skips any id whose row is already read or no longer
+        // visible (deleted and not starred) (updateReadStatusByIds).
         val idsToMark = if (scoped) {
             visibleUnread.map { it.id }.distinct()
         } else {
@@ -1899,12 +1901,12 @@ class HomeViewModel(
         }
         val pin = keptPin
         if (!verifyAlive || candidate == null || pin == null) return
-        // A selected row a sync merge made invisible (deleted, not starred) must not stay read-pinned: the `articles` merge
-        // step re-adds any read-pinned id missing from the repository result, which would put
-        // deleted content back into the visible list. Checked after the re-trim rather than before
-        // it, so the caller's (main) thread never waits on the DB — a write lock held by a merge
-        // would stall it for as long as the merge runs. Read through dbWriteDispatcher, behind any
-        // write already queued there. Only the very pin kept above is dropped: one a later
+        // A selected row a sync merge left no longer visible (deleted and not starred) must not stay
+        // read-pinned: the `articles` merge step re-adds any read-pinned id missing from the repository
+        // result, which would put deleted content back into the visible list. Checked after the re-trim
+        // rather than before it, so the caller's (main) thread never waits on the DB — a write lock
+        // held by a merge would stall it for as long as the merge runs. Read through dbWriteDispatcher,
+        // behind any write already queued there. Only the very pin kept above is dropped: one a later
         // selection or reconcile pass replaced since belongs to that newer state.
         viewModelScope.launch {
             val alive = withContext(dbWriteDispatcher) { candidate.id in articleRepository.aliveArticleFlags(listOf(candidate.id)) }
@@ -1951,7 +1953,8 @@ class HomeViewModel(
      * [toggleStar]/[markAllRead]'s own comments) — but nothing here ever
      * re-checks that the DB actually caught up, so a pin that started as "optimistic" could
      * otherwise stay wrong forever once something *external* changes the same article: another
-     * device's sync propagating a "mark unread" or a restar, or a soft-delete tombstone. This runs
+     * device's sync propagating a "mark unread" or a restar, or a deletion leaving it no longer visible
+     * (deleted and not starred). This runs
      * on every write to `articles` (via the `articleChangeSignal` collector below) precisely so
      * such a change surfaces promptly rather than staying hidden until the next filter switch.
      *

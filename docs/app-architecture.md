@@ -769,8 +769,9 @@ load-bearing:
   - **Settle → selection** (`settledPageSelects`) only promotes a settle to `HomeViewModel.selectArticle`
     (which is what marks the article read) when `ArticleSwipeController` itself recorded that page as
     the target of a committed swipe (`pendingSelectionPage`/`consumePendingSelection`). `PagerState`
-    clamps its own current page whenever the backing list shrinks below it — a search, a sync-merge
-    tombstone, "unread only" hiding the article just read — with no swipe involved at all; without
+    clamps its own current page whenever the backing list shrinks below it — a search, a sync merge
+    leaving an article no longer visible (deleted and not starred), "unread only" hiding the article
+    just read — with no swipe involved at all; without
     this gate that clamp would select, and therefore mark read, whatever article happened to land at
     the clamped index. It also refuses to act when nothing is selected yet, so a `PaneLayout.Dual`
     reader sitting on page 0 beside an untouched list cannot open the first article by itself.
@@ -810,7 +811,8 @@ authoritative row in ahead of the cache, but the cache still holds its own copy,
 the page the user just swiped away from rendered (rather than blanking out and reloading) once the
 selection moves on to its neighbour. `readerPages` is the equivalent fallback on the list side: if
 the selected article is not in `pagerArticles` yet (that flow starts empty, being `WhileSubscribed`
-rather than `Eagerly` — see below) or has just been tombstoned, the pager renders a synthesized
+rather than `Eagerly` — see below) or has just become no longer visible (deleted and not starred), the pager
+renders a synthesized
 one-page list built from the selection alone rather than swapping between an empty pager and a
 populated one, which would tear down and rebuild the one page's `WebView`. `HomeViewModel.pagerArticles`
 is `WhileSubscribed`, unlike its `Eagerly` siblings, precisely because only the reader's pager (and
@@ -1102,11 +1104,13 @@ from before the write. Only the read/unread button keeps `selectedArticleShownUn
 The list scrolls the selection into view on `selectionRevealRequests`, not on `selectedArticleId`: that counts the
 selections the user moves to another article (one per such `selectArticle`, from any route; choosing the article
 that is already selected is not one), whereas the cursor also moves on its own —
-a selection whose row a sync merge has tombstoned hands it back to the article before it — and the list must not
+a selection whose row a sync merge has left no longer visible (deleted and not starred) hands it back to the
+article before it — and the list must not
 scroll back to that article unprompted. Clearing the selection with a filter switch and a restored selection are
 not requests either (the first composition brings a restored selection into view itself). The search results
 list follows the same rule: it scrolls to the selection on a request or when its results first arrive, never because
-its contents changed — a background write re-running the search, or a selection handed back after a tombstone,
+its contents changed — a background write re-running the search, or a selection handed back after its row became no
+longer visible (deleted and not starred),
 must not pull the list back to the selected row. Changing the query is the user asking for a different list, so the
 results go back to the top, as they do when the filter changes (a pane remount keeps the position).
 

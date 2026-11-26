@@ -30,7 +30,8 @@ internal fun <T : Any> retrimmedSelectionPin(prior: T?, now: T?, candidate: T): 
         // refreshes only after the pin, so it can be the staler of the two — and every write that
         // changes the selection's read state re-pins it at the same time anyway.
         now != null -> now
-        // Dropped since (an external change or a tombstone): it stays dropped.
+        // Dropped since (an external change, or the article no longer visible — deleted and not
+        // starred): it stays dropped.
         prior != null -> null
         else -> candidate
     }
@@ -56,7 +57,8 @@ internal fun reconciledReadPins(
     // that justified it was enqueued, so it has no verdict on it (identity, not equality — a
     // re-pin with the same value is still a write `flags` knows nothing about). Otherwise a
     // pin is dropped once the article's current is_read no longer matches the pinned value
-    // (an external "mark unread"/"mark read", or a soft-delete tombstone), the same rule as
+    // (an external "mark unread"/"mark read", or the article no longer visible — deleted and not
+    // starred), the same rule as
     // the starred pin ([reconciledUnstarredPins]) — except the selection's own pin, which while its article is
     // alive is refreshed to the current value instead: under unread-only a dropped unread
     // pin read externally would take the open article out of the list (and the pager).

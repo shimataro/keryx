@@ -121,12 +121,8 @@ object SyncLww {
      * visible while it is not deleted **or** is starred (`articleVisibleSql`, `Articles.isVisible`) — so
      * a star is never lost to a cache cleanup, of this row or another, on this device or another.
      *
-     * The two were once one group ranked by the newer of their stamps, and before that two groups with
-     * a merge-time "a newer star revives the article" rule on top. That rule was what broke
-     * commutativity (a delete, a star and an unstar merged in different orders disagreed), not the
-     * split: with each group a plain last-write-wins of its own, every group — and so the merge and the
-     * fold — stays idempotent, commutative and associative. The single group, in turn, let a newer
-     * cleanup of one row (or of another device's copy) erase an older star outright.
+     * With no rule across the groups, each is a plain last-write-wins of its own, so the merge and the
+     * fold stay idempotent, commutative and associative.
      */
     val ARTICLE_STAR = LwwGroup("starred_at", listOf("is_starred"))
 

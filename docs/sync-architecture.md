@@ -689,13 +689,9 @@ Merge SQL (`MergeSql`) key points:
   the unstarred article is hidden, as in version 2. Version 2 already wrote rows both starred and deleted
   (a star older than another device's cleanup) and hid them; `2.sqm` records each one's star as removed at its
   deletion — for the local database and for a pre-delta cloud file the merge migrates with it alike — so they stay
-  hidden after the upgrade. (Two earlier designs failed. Separate groups plus a
-  merge-time "a star newer than the deletion revives the article" rule was not commutative: a deletion, a later star
-  and a still later unstar, merged in different orders, gave different results — the cross-group rule, not the
-  split, was the cause. One group ranked by the newer of the two stamps was commutative, but a newer cleanup — of
-  another device's copy, or of another row merged into this one — erased an older star outright. With each group a
-  plain last-write-wins of its own and visibility decided at read time, the merge stays idempotent, commutative and
-  associative.)
+  hidden after the upgrade. Why: with no rule across the groups, each is a plain last-write-wins of its own, so the
+  merge and the fold stay idempotent, commutative and associative; and since visibility is decided when an article is
+  read, a cache cleanup never erases a star.
 
   `cached_at` and `updated_at` take the newer value (`updated_at` is the row's generic stamp, no group's key), and
   `created_at` the earlier. `search_text` is not merged: an article whose body the merge
