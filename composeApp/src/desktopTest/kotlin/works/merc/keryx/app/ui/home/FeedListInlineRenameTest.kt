@@ -34,8 +34,8 @@ import org.koin.dsl.module
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.awaitConditionBlocking
 import works.merc.keryx.app.data.local.db.KeryxDatabase
-import works.merc.keryx.app.domain.TagFolderIdRemap
-import works.merc.keryx.app.domain.TagFolderIdRemaps
+import works.merc.keryx.app.domain.IdRemap
+import works.merc.keryx.app.domain.IdRemaps
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
 import works.merc.keryx.app.insertFeedTag
@@ -565,7 +565,7 @@ class FeedListInlineRenameTest {
     fun aReKeyOfTheTagBeingRenamedKeepsTheEditorOpenWithTheTypedText() = runDesktopComposeUiTest {
         val (driver, db) = inMemoryDb()
         db.insertTag("t-old", "Tag One", sortOrder = 0L)
-        val remaps = TagFolderIdRemaps(db, Dispatchers.Unconfined)
+        val remaps = IdRemaps(db, Dispatchers.Unconfined)
         useHomeViewModel(driver, db, idRemaps = remaps) { fixture ->
             val vm = fixture.vm
             setInlineRenameContent(vm)
@@ -588,7 +588,7 @@ class FeedListInlineRenameTest {
     fun aReKeyOfTheFolderBeingRenamedKeepsTheEditorOpenWithTheTypedText() = runDesktopComposeUiTest {
         val (driver, db) = inMemoryDb()
         db.insertFolder("d-old", "Folder One", sortOrder = 0L)
-        val remaps = TagFolderIdRemaps(db, Dispatchers.Unconfined)
+        val remaps = IdRemaps(db, Dispatchers.Unconfined)
         useHomeViewModel(driver, db, idRemaps = remaps) { fixture ->
             val vm = fixture.vm
             setInlineRenameContent(vm)
@@ -614,7 +614,7 @@ class FeedListInlineRenameTest {
     fun aListAheadOfTheMapDoesNotDiscardTheTagRenameInProgress() = runDesktopComposeUiTest {
         val (driver, db) = inMemoryDb()
         db.insertTag("t-old", "Tag One", sortOrder = 0L)
-        val remaps = TagFolderIdRemaps(db, Dispatchers.Unconfined)
+        val remaps = IdRemaps(db, Dispatchers.Unconfined)
         useHomeViewModel(driver, db, idRemaps = remaps) { fixture ->
             val vm = fixture.vm
             setInlineRenameContent(vm)
@@ -636,7 +636,7 @@ class FeedListInlineRenameTest {
     fun aListAheadOfTheMapDoesNotDiscardTheFolderRenameInProgress() = runDesktopComposeUiTest {
         val (driver, db) = inMemoryDb()
         db.insertFolder("d-old", "Folder One", sortOrder = 0L)
-        val remaps = TagFolderIdRemaps(db, Dispatchers.Unconfined)
+        val remaps = IdRemaps(db, Dispatchers.Unconfined)
         useHomeViewModel(driver, db, idRemaps = remaps) { fixture ->
             val vm = fixture.vm
             setInlineRenameContent(vm)
@@ -664,7 +664,7 @@ class FeedListInlineRenameTest {
     fun aMapAheadOfTheListsByAChainedReKeyDoesNotDiscardTheRenameInProgress() = runDesktopComposeUiTest {
         val (driver, db) = inMemoryDb()
         db.insertTag("t-a", "Tag One", sortOrder = 0L)
-        val remaps = TagFolderIdRemaps(db, Dispatchers.Unconfined)
+        val remaps = IdRemaps(db, Dispatchers.Unconfined)
         useHomeViewModel(driver, db, idRemaps = remaps) { fixture ->
             val vm = fixture.vm
             setInlineRenameContent(vm)
@@ -679,7 +679,7 @@ class FeedListInlineRenameTest {
             // catch-up run on it — before the lists are notified of the re-key, so they still show t-b.
             driver.rekeyTagForTest("t-b", "t-c") {
                 runBlocking { remaps.publishFromDb() }
-                assertEquals(mapOf("t-a" to "t-c", "t-b" to "t-c"), vm.tagFolderIdRemap.value.tagIds)
+                assertEquals(mapOf("t-a" to "t-c", "t-b" to "t-c"), vm.idRemap.value.tagIds)
                 waitForIdle()
                 mainClock.advanceTimeByFrame()
                 waitForIdle()
@@ -697,15 +697,15 @@ class FeedListInlineRenameTest {
     }
 
     /**
-     * A [TagFolderIdRemaps] whose reads of `ks_id_remap` fail while [failing] is set — the initial load
+     * A [IdRemaps] whose reads of `ks_id_remap` fail while [failing] is set — the initial load
      * succeeds (the flag starts clear), so only the catch-up a test provokes afterwards fails.
      */
     private class FailableIdRemaps(db: KeryxDatabase) {
         @Volatile var failing = false
-        val remaps = TagFolderIdRemaps({
+        val remaps = IdRemaps({
             check(!failing) { "ks_id_remap read failed (test)" }
-            val rows = db.sync_bookkeepingQueries.idRemapTagFolder().executeAsList()
-            TagFolderIdRemap(
+            val rows = db.sync_bookkeepingQueries.idRemapPublished().executeAsList()
+            IdRemap(
                 tagIds = rows.filter { it.kind == "tag" }.associate { it.old_id to it.new_id },
                 folderIds = rows.filter { it.kind == "folder" }.associate { it.old_id to it.new_id },
             )
@@ -839,16 +839,16 @@ class FeedListInlineRenameTest {
     }
 
     /**
-     * A [TagFolderIdRemaps] whose next read, once armed ([arm]), reads `ks_id_remap` when it starts —
+     * A [IdRemaps] whose next read, once armed ([arm]), reads `ks_id_remap` when it starts —
      * as the database read does — and then waits at a gate until [release]: a re-key committed
      * meanwhile is not in the map it publishes. Later reads are ordinary.
      */
     private class GatedIdRemaps(db: KeryxDatabase) {
         @Volatile private var gate: CountDownLatch? = null
         val entered = CountDownLatch(1)
-        val remaps = TagFolderIdRemaps({
-            val rows = db.sync_bookkeepingQueries.idRemapTagFolder().executeAsList()
-            val read = TagFolderIdRemap(
+        val remaps = IdRemaps({
+            val rows = db.sync_bookkeepingQueries.idRemapPublished().executeAsList()
+            val read = IdRemap(
                 tagIds = rows.filter { it.kind == "tag" }.associate { it.old_id to it.new_id },
                 folderIds = rows.filter { it.kind == "folder" }.associate { it.old_id to it.new_id },
             )
@@ -912,7 +912,7 @@ class FeedListInlineRenameTest {
                     // on the EDT; drain the EDT (twice: anything that continuation queues runs too) so it
                     // has run before frames resume.
                     awaitConditionBlocking { diverting.inFlight.get() == 0 }
-                    assertEquals(mapOf("t-a" to "t-b"), vm.tagFolderIdRemap.value.tagIds)
+                    assertEquals(mapOf("t-a" to "t-b"), vm.idRemap.value.tagIds)
                     SwingUtilities.invokeAndWait {}
                     SwingUtilities.invokeAndWait {}
                 } finally {
@@ -924,7 +924,7 @@ class FeedListInlineRenameTest {
                 waitUntil("the editor is back on the re-keyed row", timeoutMillis = 5_000) {
                     onAllNodesWithTag(INLINE_RENAME_FIELD_TEST_TAG, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
                 }
-                assertEquals("t-c", vm.tagFolderIdRemap.value.tag("t-a"))
+                assertEquals("t-c", vm.idRemap.value.tag("t-a"))
 
                 editor().assertIsDisplayed()
                 editor().assertTextContains("Half typed")

@@ -171,7 +171,7 @@ struct FeedListView: View {
         Task { @MainActor in
             let caughtUp = (try? await home.viewModel.catchUpIdRemapFromDb())?.boolValue ?? false
             guard caughtUp, dialogs.renamingRowKey == key else { return }
-            let remap = SidebarIdRemap(home.viewModel.tagFolderIdRemap.value)
+            let remap = SidebarIdRemap(home.viewModel.idRemap.value)
             let decision = remap.renameRowDecision(
                 key: key, keysAtCatchUp: keys, currentKeys: sidebar.orderedRowKeys)
             if decision == .end { dialogs.endRename() }

@@ -65,8 +65,8 @@ import works.merc.keryx.app.domain.RefreshCycleRunner
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SubscribeOutcome
 import works.merc.keryx.app.domain.SyncRepository
-import works.merc.keryx.app.domain.TagFolderIdRemap
-import works.merc.keryx.app.domain.TagFolderIdRemaps
+import works.merc.keryx.app.domain.IdRemap
+import works.merc.keryx.app.domain.IdRemaps
 import works.merc.keryx.app.domain.TagRepository
 import works.merc.keryx.app.presentation.DerivedStateFlow
 import works.merc.keryx.app.presentation.ManualSync
@@ -111,9 +111,9 @@ class HomeViewModel(
     // Reports a read/star or feed-list write that failed off the UI thread (its optimistic state is
     // then undone here — see [revertFailedArticleWrite]). The app's one instance in production.
     private val localWriteFailureReporter: LocalWriteFailureReporter,
-    // The tag/folder id re-keys a merge publishes (see [TagFolderIdRemapping]). The app's one instance in
+    // The tag/folder id re-keys a merge publishes (see [IdRemapping]). The app's one instance in
     // production; by default the one [settingsRepository] observes, so both always agree.
-    private val idRemaps: TagFolderIdRemaps = settingsRepository.idRemaps,
+    private val idRemaps: IdRemaps = settingsRepository.idRemaps,
 ) : ViewModel() {
 
     // Eagerly (not WhileSubscribed) so these start populating as soon as the ViewModel is
@@ -217,10 +217,10 @@ class HomeViewModel(
      * Restores the last-selected filter from local settings, falling back to
      * [ArticleFilter.All] if it's missing, undecodable, or points at a feed/tag/folder that
      * was deleted while the app was closed. A tag or folder id a merge or the v2->v3 migration has
-     * re-keyed is brought up to date first ([TagFolderIdRemaps]); [RestoredFilter.reproduced] says
+     * re-keyed is brought up to date first ([IdRemaps]); [RestoredFilter.reproduced] says
      * whether the saved filter was actually reproduced (false for any of those fallbacks).
      *
-     * The re-key map loads in the background ([TagFolderIdRemaps.loaded]), and this runs on the UI
+     * The re-key map loads in the background ([IdRemaps.loaded]), and this runs on the UI
      * thread, which must not wait for it. A tag or folder filter restored before the map has loaded
      * is therefore taken as is, unvalidated ([RestoredFilter.validated] false): validating it now
      * would read a re-keyed id as a deleted row and fall back to All. [validateRestoredFilterOnceRemapLoaded]
@@ -326,12 +326,12 @@ class HomeViewModel(
     val selectedRowGeneration: StateFlow<Long> = _selectedRowGeneration.asStateFlow()
 
     /**
-     * The tag/folder id re-keys a sync merge has published ([TagFolderIdRemaps.current]), for a UI
+     * The tag/folder id re-keys a sync merge has published ([IdRemaps.current]), for a UI
      * that holds a tag or folder id of its own — an inline rename's target — to bring up to date.
      * Published before the lists a merge changes are, so a UI that sees a list under a new id reads
      * a map that already holds the move.
      */
-    val tagFolderIdRemap: StateFlow<TagFolderIdRemap> get() = idRemaps.current
+    val idRemap: StateFlow<IdRemap> get() = idRemaps.current
 
     // --- Search ---
     //
@@ -1061,7 +1061,7 @@ class HomeViewModel(
      * filter (see this class's own "Search" section), so switching feeds/folders/tags while
      * actively searching keeps the query and simply re-scopes the search to the new filter.
      *
-     * A tag or folder id a merge has re-keyed is brought up to date first ([TagFolderIdRemaps]).
+     * A tag or folder id a merge has re-keyed is brought up to date first ([IdRemaps]).
      *
      * @param filter The article filter to select.
      * @param instance Which rendered feed-list row was selected — defaults to [filter]'s canonical
@@ -1075,7 +1075,7 @@ class HomeViewModel(
         instance: FeedListRowSelection = FeedListRowSelection.canonicalFor(filter),
     ) {
         // A row the feed list rendered before a merge re-keyed its tag or folder still carries the old
-        // id; select the row it became (see [TagFolderIdRemapping]). The selection itself is caught up first,
+        // id; select the row it became (see [IdRemapping]). The selection itself is caught up first,
         // so both sides of the comparison below are in the same id space.
         val remap = catchUpAndGetIdRemap()
         val current = remap.filter(filter)
@@ -2306,20 +2306,20 @@ class HomeViewModel(
         feedListActions.reorderFolders(draggedFolderId, targetFolderId)
 
     // Applies the tag/folder id re-keys a merge publishes to the state held here (see
-    // [TagFolderIdRemapping]). Declared after every property it touches.
-    private val idRemapping = TagFolderIdRemapping(
+    // [IdRemapping]). Declared after every property it touches.
+    private val idRemapping = IdRemapping(
         idRemaps, _filterSelection, _selectedRowInstance, expansion, refreshController,
         deletedTagFallback, deletedFolderFallback,
     )
 
-    /** See [TagFolderIdRemapping.catchUp]: the ViewModel's state is in the current re-key map's id space. */
+    /** See [IdRemapping.catchUp]: the ViewModel's state is in the current re-key map's id space. */
     private fun catchUpIdRemap() = idRemapping.catchUp()
 
-    /** See [TagFolderIdRemapping.catchUpAndGet]: [catchUpIdRemap], then the map an id is resolved by. */
-    private fun catchUpAndGetIdRemap(): TagFolderIdRemap = idRemapping.catchUpAndGet()
+    /** See [IdRemapping.catchUpAndGet]: [catchUpIdRemap], then the map an id is resolved by. */
+    private fun catchUpAndGetIdRemap(): IdRemap = idRemapping.catchUpAndGet()
 
     /**
-     * Re-reads the committed `ks_id_remap` and publishes it ([TagFolderIdRemaps.publishFromDb], under its
+     * Re-reads the committed `ks_id_remap` and publishes it ([IdRemaps.publishFromDb], under its
      * lock), off the main thread. A merge publishes the map only after it commits, so a list that was
      * re-run by another write in between already shows a re-keyed row while the published map is stale;
      * a decision that an item "disappeared" must first catch the map up from here. Throws on a failed read.

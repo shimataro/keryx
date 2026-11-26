@@ -40,7 +40,7 @@ import works.merc.keryx.app.domain.SettingsFaviconMissStore
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.SyncScheduler
-import works.merc.keryx.app.domain.TagFolderIdRemaps
+import works.merc.keryx.app.domain.IdRemaps
 import works.merc.keryx.app.domain.TagRepository
 import works.merc.keryx.app.domain.UpdateChecker
 import works.merc.keryx.app.domain.UpdateRepository
@@ -130,8 +130,8 @@ fun sharedModule(): Module = module {
             },
             pendingLocalWrites = get(),
             // A merge can move tags or folders onto their canonical ids; once it commits, the ids held
-            // outside the database follow (TagFolderIdRemaps). Lazy like the lambdas above.
-            publishIdRemaps = { get<TagFolderIdRemaps>().publishFromDb() },
+            // outside the database follow (IdRemaps). Lazy like the lambdas above.
+            publishIdRemaps = { get<IdRemaps>().publishFromDb() },
         )
     }
     single<SyncScheduler> { get<SyncRepository>() }
@@ -142,7 +142,7 @@ fun sharedModule(): Module = module {
 
     // The tag/folder id re-keys (ks_id_remap), republished after a merge re-keys rows; one instance, so
     // SettingsRepository and HomeViewModel rewrite their ids from the same value.
-    single { TagFolderIdRemaps(get<KeryxDatabase>()) }
+    single { IdRemaps(get<KeryxDatabase>()) }
     single { SettingsRepository(get(), get(), get(), get(), localWriteFailureReporter = get(), pendingLocalWrites = get(), idRemaps = get()) }
     single { ArticleRepository(get(), get(), get(), get()) }
     single { TagRepository(get(), get(), get()) }
@@ -153,7 +153,7 @@ fun sharedModule(): Module = module {
             driver = get(),
             // A refresh's redirect can merge two feeds (FeedIdentitySql.mergeLocally); once it commits,
             // the ids held outside the database follow, as after a sync merge.
-            publishIdRemaps = { get<TagFolderIdRemaps>().publishFromDb() },
+            publishIdRemaps = { get<IdRemaps>().publishFromDb() },
         )
     }
     single { FolderRepository(get(), get(), get(), get()) }

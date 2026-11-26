@@ -316,7 +316,7 @@ class HomeViewModelTest {
         // Where a failed write is reported; a test can pass one over its own NotificationCenter.
         localWriteFailureReporter: LocalWriteFailureReporter = LocalWriteFailureReporter(NotificationCenter(), clock),
         // The tag/folder re-keys the ViewModel observes — a test publishes one through it.
-        idRemaps: works.merc.keryx.app.domain.TagFolderIdRemaps = works.merc.keryx.app.domain.TagFolderIdRemaps(db, Dispatchers.Unconfined),
+        idRemaps: works.merc.keryx.app.domain.IdRemaps = works.merc.keryx.app.domain.IdRemaps(db, Dispatchers.Unconfined),
     ): HomeViewModel {
         val articleRepository = ArticleRepository(db, FtsSearch(ftsDriver), syncScheduler, clock, Dispatchers.Unconfined)
         // Mirror startup: ensureIndexed() creates articles_fts so the subscribe/refresh path's indexMissing() works.
@@ -1366,7 +1366,7 @@ class HomeViewModelTest {
         db.insertFeedTag("f1", "t-old")
         val gate = CompletableDeferred<Unit>()
         val fetches = java.util.concurrent.atomic.AtomicInteger(0)
-        val remaps = works.merc.keryx.app.domain.TagFolderIdRemaps(db, Dispatchers.Unconfined)
+        val remaps = works.merc.keryx.app.domain.IdRemaps(db, Dispatchers.Unconfined)
         val vm = newViewModel(feedFetcher = gatedCountingFetcher(gate, fetches), idRemaps = remaps)
         subscribeAll(vm)
         vm.selectFilter(ArticleFilter.Tag("t-old"))
@@ -6541,7 +6541,7 @@ class HomeViewModelTest {
         driver.rekeyTagForTest("t-old", "t-new")
 
         val loader = StandardTestDispatcher(mainScheduler)
-        val vm2 = newViewModel(idRemaps = works.merc.keryx.app.domain.TagFolderIdRemaps(db, loader))
+        val vm2 = newViewModel(idRemaps = works.merc.keryx.app.domain.IdRemaps(db, loader))
         subscribeAll(vm2)
         assertEquals(ArticleFilter.Tag("t-old"), vm2.filter.value, "held as saved while the map loads")
         assertTrue(vm2.filterRestoredOnLaunch)
@@ -6563,7 +6563,7 @@ class HomeViewModelTest {
         db.tagsQueries.softDelete(1L, 1L, "t1")
 
         val loader = StandardTestDispatcher(mainScheduler)
-        val vm2 = newViewModel(idRemaps = works.merc.keryx.app.domain.TagFolderIdRemaps(db, loader))
+        val vm2 = newViewModel(idRemaps = works.merc.keryx.app.domain.IdRemaps(db, loader))
         subscribeAll(vm2)
         mainScheduler.advanceUntilIdle()
         testScheduler.advanceUntilIdle()

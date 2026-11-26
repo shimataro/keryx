@@ -5,7 +5,7 @@ import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.data.local.db.Folders
 import works.merc.keryx.app.data.local.db.Tags
 import works.merc.keryx.app.domain.ArticleListRow
-import works.merc.keryx.app.domain.TagFolderIdRemap
+import works.merc.keryx.app.domain.IdRemap
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -665,7 +665,7 @@ class HomeCommonTest {
     }
 
     // a → b → c, folded: the map already moves both a and b straight to c.
-    private val chainedRemap = TagFolderIdRemap(
+    private val chainedRemap = IdRemap(
         tagIds = mapOf("a" to "c", "b" to "c"),
         folderIds = mapOf("a" to "c", "b" to "c"),
     )
@@ -687,7 +687,7 @@ class HomeCommonTest {
         )
         assertEquals(
             InlineEditTarget.Tag("a"),
-            InlineEditTarget.Tag("a").resolvedIn(emptyList(), listOf(tag("a")), TagFolderIdRemap.EMPTY),
+            InlineEditTarget.Tag("a").resolvedIn(emptyList(), listOf(tag("a")), IdRemap.EMPTY),
         )
     }
 

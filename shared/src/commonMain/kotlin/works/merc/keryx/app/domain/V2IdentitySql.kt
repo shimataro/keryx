@@ -44,7 +44,7 @@ package works.merc.keryx.app.domain
  *    then recorded in `ks_id_remap` ([IdRemapSql]); for folders, the table's triggers re-resolve every
  *    feed whose raw assignment names a moving id onto the canonical folder (the raw assignment itself
  *    stays as it was). Then the old rows are deleted. Ids held outside the database follow once the
- *    merge commits (`TagFolderIdRemaps`).
+ *    merge commits (`IdRemaps`).
  *
  * The order is foreign-key safe with foreign keys enforced: a canonical row exists before any child
  * points at it, every child has moved before its old parent is deleted, and a moved child changes only

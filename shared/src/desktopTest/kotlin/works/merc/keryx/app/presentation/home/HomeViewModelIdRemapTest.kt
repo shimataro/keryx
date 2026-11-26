@@ -15,7 +15,7 @@ import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.domain.LocalWriteFailureReporter
 import works.merc.keryx.app.domain.NotificationCenter
-import works.merc.keryx.app.domain.TagFolderIdRemaps
+import works.merc.keryx.app.domain.IdRemaps
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
 import works.merc.keryx.app.insertFeedTag
@@ -30,7 +30,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
 
 /**
- * A merge that re-keys a tag or folder onto another id publishes the move ([TagFolderIdRemaps]), and
+ * A merge that re-keys a tag or folder onto another id publishes the move ([IdRemaps]), and
  * [HomeViewModel] brings every id it holds up to date, so nothing the user had selected or expanded
  * is lost (external-spec §9, "Least surprise"): the selection follows the row instead of falling
  * back to All Feeds. The re-key is simulated as the merge will do it ([rekeyTagForTest] /
@@ -42,7 +42,7 @@ class HomeViewModelIdRemapTest {
     private lateinit var scheduler: TestCoroutineScheduler
     private lateinit var driver: SqlDriver
     private lateinit var db: KeryxDatabase
-    private lateinit var remaps: TagFolderIdRemaps
+    private lateinit var remaps: IdRemaps
     private val notifications = NotificationCenter()
     private val fixtures = mutableListOf<HomeViewModelFixture>()
 
@@ -57,7 +57,7 @@ class HomeViewModelIdRemapTest {
         db.insertTag("t-old", "News")
         db.insertFeed("f1", folderId = "d-old")
         db.insertFeedTag("f1", "t-old")
-        remaps = TagFolderIdRemaps(db, Dispatchers.Unconfined)
+        remaps = IdRemaps(db, Dispatchers.Unconfined)
     }
 
     @AfterTest
@@ -250,7 +250,7 @@ class HomeViewModelIdRemapTest {
     }
 
     /**
-     * The merge's commit re-runs the old id's list query BEFORE [TagFolderIdRemaps] publishes the move
+     * The merge's commit re-runs the old id's list query BEFORE [IdRemaps] publishes the move
      * and the selection follows — the interval this test forces. That query resolves the old id through
      * `ks_id_remap` (`articles.sq`'s `watchByTag` / `watchByFolder`), so it still returns the same rows
      * rather than an empty list that would drop every unseen id ([withList] narrows them to the
@@ -450,13 +450,13 @@ class HomeViewModelIdRemapTest {
         // Another writer's notification re-runs the lists over the committed rows; the map stays unpublished.
         db.insertFeed("f2")
         testScheduler.advanceUntilIdle()
-        assertEquals(emptyMap(), vm.tagFolderIdRemap.value.tagIds, "precondition: the map is still stale")
+        assertEquals(emptyMap(), vm.idRemap.value.tagIds, "precondition: the map is still stale")
         assertEquals(listOf("t-new"), vm.tags.value.map { it.id }, "precondition: the list already has the new id")
 
         assertEquals(true, vm.catchUpIdRemapFromDb())
 
-        assertEquals(mapOf("t-old" to "t-new"), vm.tagFolderIdRemap.value.tagIds)
-        assertEquals(mapOf("d-old" to "d-new"), vm.tagFolderIdRemap.value.folderIds)
+        assertEquals(mapOf("t-old" to "t-new"), vm.idRemap.value.tagIds)
+        assertEquals(mapOf("d-old" to "d-new"), vm.idRemap.value.folderIds)
         assertEquals(ArticleFilter.Tag("t-new"), vm.filter.value)
         assertEquals(setOf("t-new"), vm.expandedTagIds.value)
     }
@@ -471,7 +471,7 @@ class HomeViewModelIdRemapTest {
         assertEquals(true, vm.catchUpIdRemapFromDb())
 
         assertEquals(ArticleFilter.Tag("t-old"), vm.filter.value)
-        assertEquals(emptyMap(), vm.tagFolderIdRemap.value.tagIds)
+        assertEquals(emptyMap(), vm.idRemap.value.tagIds)
     }
 
     private fun unreadIds(): List<String> =

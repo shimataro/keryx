@@ -85,7 +85,7 @@ class FeedRepository(
     private val driver: SqlDriver,
     /**
      * Republishes `ks_id_remap` to the ids held outside the database once such a merge has committed
-     * (`TagFolderIdRemaps.publishFromDb`), as `DeltaSync` does after a sync merge. Best effort: a
+     * (`IdRemaps.publishFromDb`), as `DeltaSync` does after a sync merge. Best effort: a
      * failure is logged.
      */
     private val publishIdRemaps: suspend () -> Unit = {},

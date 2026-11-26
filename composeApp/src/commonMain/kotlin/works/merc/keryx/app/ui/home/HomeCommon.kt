@@ -26,7 +26,7 @@ import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.data.local.db.Folders
 import works.merc.keryx.app.data.local.db.Tags
 import works.merc.keryx.app.domain.ArticleListRow
-import works.merc.keryx.app.domain.TagFolderIdRemap
+import works.merc.keryx.app.domain.IdRemap
 import works.merc.keryx.app.platform.BrowserOpener
 import works.merc.keryx.app.platform.NativeMenuShortcut
 import works.merc.keryx.app.platform.isMacOs
@@ -263,7 +263,7 @@ internal sealed interface InlineEditTarget {
  * after a merge re-keyed it — and the same instance when nothing changes. A feed's id is never
  * re-keyed, but the tag its tag-nested row sits under can be.
  */
-internal fun InlineEditTarget.remappedBy(remap: TagFolderIdRemap): InlineEditTarget = when (this) {
+internal fun InlineEditTarget.remappedBy(remap: IdRemap): InlineEditTarget = when (this) {
     is InlineEditTarget.Folder -> remap.folder(id).let { if (it == id) this else InlineEditTarget.Folder(it) }
     is InlineEditTarget.Tag -> remap.tag(id).let { if (it == id) this else InlineEditTarget.Tag(it) }
     is InlineEditTarget.Feed -> tagId?.let { remap.tag(it) }.let { if (it == tagId) this else copy(tagId = it) }
@@ -285,7 +285,7 @@ internal fun InlineEditTarget.remappedBy(remap: TagFolderIdRemap): InlineEditTar
 internal fun InlineEditTarget.resolvedIn(
     folders: List<Folders>,
     tags: List<Tags>,
-    remap: TagFolderIdRemap,
+    remap: IdRemap,
 ): InlineEditTarget? = when (this) {
     is InlineEditTarget.Folder -> remap.folder(id).let { current ->
         folders.firstOrNull { remap.folder(it.id) == current }?.let { if (it.id == id) this else InlineEditTarget.Folder(it.id) }

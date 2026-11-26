@@ -133,14 +133,14 @@ class PublishIdRemapsTest {
         val releaseLoad = CountDownLatch(1)
         val remapThread = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
         try {
-            lateinit var remaps: TagFolderIdRemaps
+            lateinit var remaps: IdRemaps
             val publishCalled = CompletableDeferred<Unit>()
             val b = device("b", cloud) {
                 publishCalled.complete(Unit)
                 remaps.publishFromDb()
             }
             var firstLoad = true
-            remaps = TagFolderIdRemaps({
+            remaps = IdRemaps({
                 if (firstLoad) {
                     firstLoad = false
                     loadEntered.countDown()

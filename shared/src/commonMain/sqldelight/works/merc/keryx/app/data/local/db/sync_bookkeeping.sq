@@ -59,7 +59,7 @@
 --                    / folders.sq insertIfNameAbsent treat a mapped id as held). Used to keep ids held
 --                    outside the database current: SettingsRepository rewrites local_settings.json
 --                    (lastFilter, collapsedFolderIds, expandedTagIds) at startup and whenever the map
---                    is republished (TagFolderIdRemaps), HomeViewModel its in-memory selection and
+--                    is republished (IdRemaps), HomeViewModel its in-memory selection and
 --                    expansion; and every write taking a tag/folder id resolves it through this
 --                    table in the same statement (tags.sq / folders.sq), so a write made with a
 --                    stale id lands on the row it became. Kept indefinitely, so applying it again is
@@ -459,10 +459,12 @@ DELETE FROM sync_merging;
 feedFolderRawAll:
 SELECT feed_id, folder_updated_at, folder_id FROM ks_feed_folder_raw ORDER BY feed_id;
 
--- The tag and folder re-keys only — what TagFolderIdRemaps publishes to the ids held outside the
--- database. The table also holds feed and article re-keys, which no reader of this query uses.
-idRemapTagFolder:
-SELECT kind, old_id, new_id FROM ks_id_remap WHERE kind IN ('tag', 'folder');
+-- The tag, folder and feed re-keys — what IdRemaps publishes to the ids held outside the database.
+-- Article re-keys are left out: a feed merge moves every article of the folded feeds, far more than
+-- anything outside the database holds, so an article id is resolved one at a time instead
+-- (articles.resolveId).
+idRemapPublished:
+SELECT kind, old_id, new_id FROM ks_id_remap WHERE kind IN ('tag', 'folder', 'feed');
 
 clearIdRemap:
 DELETE FROM ks_id_remap;

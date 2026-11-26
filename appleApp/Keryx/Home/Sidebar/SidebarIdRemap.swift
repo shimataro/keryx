@@ -1,6 +1,6 @@
 import KeryxShared
 
-/// The tag/folder id re-keys a sync merge has published (`HomeViewModel.tagFolderIdRemap`), as the
+/// The tag/folder id re-keys a sync merge has published (`HomeViewModel.idRemap`), as the
 /// sidebar needs them: to tell that a row key it holds from before a re-key and the key the row has
 /// now name the same row. A key is `feedListRowSelectionKey`'s string (`folder:ID`, `tag:ID`,
 /// `feed-in-tag:TAG:FEED`, ...), and only the tag and folder ids in it move.
@@ -21,7 +21,7 @@ struct SidebarIdRemap: Equatable {
         self.folders = folders
     }
 
-    init(_ kotlin: TagFolderIdRemap) {
+    init(_ kotlin: IdRemap) {
         self.init(tags: kotlin.tagIds, folders: kotlin.folderIds)
     }
 

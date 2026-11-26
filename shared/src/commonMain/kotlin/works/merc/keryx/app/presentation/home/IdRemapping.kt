@@ -5,12 +5,12 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.update
-import works.merc.keryx.app.domain.TagFolderIdRemap
-import works.merc.keryx.app.domain.TagFolderIdRemaps
+import works.merc.keryx.app.domain.IdRemap
+import works.merc.keryx.app.domain.IdRemaps
 
 /**
  * Brings every tag/folder id [HomeViewModel] holds up to date after a merge re-keyed rows onto
- * other ids ([TagFolderIdRemaps]), so nothing the user had selected or open is lost to a re-key
+ * other ids ([IdRemaps]), so nothing the user had selected or open is lost to a re-key
  * (external-spec §9, "Least surprise"): the selected filter and row move to the id the tag or
  * folder has now instead of falling back to All Feeds, the feed list's expansion keeps the same
  * folders collapsed and tags expanded, a pull in progress keeps its indicator, and a delete still
@@ -27,8 +27,8 @@ import works.merc.keryx.app.domain.TagFolderIdRemaps
  * so the article list neither scrolls back to the top nor loses its new-articles pill, and a pull
  * in progress on it keeps its indicator ([HomeRefreshController.remapPulls]).
  */
-internal class TagFolderIdRemapping(
-    private val idRemaps: TagFolderIdRemaps,
+internal class IdRemapping(
+    private val idRemaps: IdRemaps,
     private val filterSelection: MutableStateFlow<FilterSelection>,
     private val selectedRowInstance: MutableStateFlow<FeedListRowSelection>,
     private val expansion: FeedListExpansion,
@@ -36,13 +36,13 @@ internal class TagFolderIdRemapping(
     private val deletedTagFallback: DeletedItemFallback<*>,
     private val deletedFolderFallback: DeletedItemFallback<*>,
 ) {
-    /** Applies each map [TagFolderIdRemaps] publishes, as it arrives, for as long as [scope] lives. */
+    /** Applies each map [IdRemaps] publishes, as it arrives, for as long as [scope] lives. */
     fun collectIn(scope: CoroutineScope) {
         idRemaps.current.onEach(::apply).launchIn(scope)
     }
 
     /**
-     * Applies the current re-key map ([TagFolderIdRemaps.current]) to the state held now. The
+     * Applies the current re-key map ([IdRemaps.current]) to the state held now. The
      * collector ([collectIn]) applies each published map, but on the main dispatcher, so it can lag
      * the map's current value: an action that reads that value synchronously would otherwise compare
      * or toggle an id already moved against state still holding the old one — every action that reads
@@ -53,13 +53,13 @@ internal class TagFolderIdRemapping(
     }
 
     /** [catchUp], then the map it applied — the one an action may resolve the ids it was given by. */
-    fun catchUpAndGet(): TagFolderIdRemap {
+    fun catchUpAndGet(): IdRemap {
         val remap = idRemaps.current.value
         apply(remap)
         return remap
     }
 
-    private fun apply(remap: TagFolderIdRemap) {
+    private fun apply(remap: IdRemap) {
         if (remap.isEmpty) return
         // The same selection under the tag's or folder's new id: the generation stays, so neither UI
         // treats it as a switch (the list keeps its scroll position and its new-articles pill).
@@ -73,10 +73,10 @@ internal class TagFolderIdRemapping(
     }
 }
 
-// The id-space rewrites of the state above — see [TagFolderIdRemapping.apply].
+// The id-space rewrites of the state above — see [IdRemapping.apply].
 
 /** This row with its tag or folder id brought up to date by [remap]; the same instance when nothing changes. */
-internal fun FeedListRowSelection.remappedBy(remap: TagFolderIdRemap): FeedListRowSelection = when (this) {
+internal fun FeedListRowSelection.remappedBy(remap: IdRemap): FeedListRowSelection = when (this) {
     is FeedListRowSelection.Folder -> remap.folder(folderId).let { if (it == folderId) this else FeedListRowSelection.Folder(it) }
     is FeedListRowSelection.Tag -> remap.tag(tagId).let { if (it == tagId) this else FeedListRowSelection.Tag(it) }
     is FeedListRowSelection.FeedInTag -> remap.tag(tagId).let { if (it == tagId) this else copy(tagId = it) }
@@ -84,5 +84,5 @@ internal fun FeedListRowSelection.remappedBy(remap: TagFolderIdRemap): FeedListR
 }
 
 /** This selection with its filter's tag or folder id brought up to date by [remap], keeping its generation. */
-internal fun FilterSelection.remappedBy(remap: TagFolderIdRemap): FilterSelection =
+internal fun FilterSelection.remappedBy(remap: IdRemap): FilterSelection =
     remap.filter(filter).let { if (it == filter) this else copy(filter = it) }

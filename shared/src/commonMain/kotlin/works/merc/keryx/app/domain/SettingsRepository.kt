@@ -70,11 +70,11 @@ class SettingsRepository(
     // Counts the global-setting writes queued but not yet run, so a foreground-exit sync flush waits
     // for them (see [PendingLocalWrites]). Shared with `SyncRepository` in production.
     private val pendingLocalWrites: PendingLocalWrites = PendingLocalWrites(),
-    // The tag/folder id re-keys, republished after a merge re-keys rows; the local settings' tag and
-    // folder ids are rewritten from it (see [applyIdRemap]). Production passes the app's one (Koin),
-    // which HomeViewModel observes too. Loaded in the background (see [TagFolderIdRemaps]), so the
+    // The tag/folder/feed id re-keys, republished after a merge re-keys rows; the local settings' tag,
+    // folder and feed ids are rewritten from it (see [applyIdRemap]). Production passes the app's one (Koin),
+    // which HomeViewModel observes too. Loaded in the background (see [IdRemaps]), so the
     // default shares [writeDispatcher]: a test running writes inline then loads inline as well.
-    internal val idRemaps: TagFolderIdRemaps = TagFolderIdRemaps(db, writeDispatcher),
+    internal val idRemaps: IdRemaps = IdRemaps(db, writeDispatcher),
 ) {
     private companion object {
         const val TAG = "SettingsRepository"
@@ -97,8 +97,8 @@ class SettingsRepository(
         }
         // Every re-key — the one loaded from `ks_id_remap` in the background after startup (the
         // v2->v3 migration's, and any an earlier session's merge made) and each one published later (a
-        // merge that moved tag/folder rows onto other ids) — is applied as it arrives. Nothing here
-        // reads the database during construction: see [TagFolderIdRemaps].
+        // merge that moved tag, folder or feed rows onto other ids) — is applied as it arrives. Nothing here
+        // reads the database during construction: see [IdRemaps].
         writeScope.launch { idRemaps.current.collect(::applyIdRemap) }
     }
 
@@ -120,21 +120,21 @@ class SettingsRepository(
     }
 
     /**
-     * Applies the tag/folder id re-keys ([TagFolderIdRemaps.current]) to the three local-settings
-     * fields that hold such ids ([remappedBy]) — the loaded `ks_id_remap` (the v2->v3 migration's, and
+     * Applies the tag/folder/feed id re-keys ([IdRemaps.current]) to the local-settings fields
+     * that hold such ids ([remappedBy]) — the loaded `ks_id_remap` (the v2->v3 migration's, and
      * any a merge made) and each re-key published while the app runs — persisted through the
      * background writer like any other local-settings change ([saveLoggingFailure]; the next launch
-     * applies the table again in any case). Idempotent: an id not in the map (already re-keyed, or not
-     * a tag/folder id) passes through. The remap table is kept, so the rewrite stays idempotent across
+     * applies the table again in any case). Idempotent: an id not in the map (already re-keyed, or of
+     * another kind) passes through. The remap table is kept, so the rewrite stays idempotent across
      * launches. Atomic against a concurrent [mutateLocalSettings]: the rewrite is one [update] of the
      * current value. Writes nothing when the remap changes nothing — the common case (the value
-     * collected first is [TagFolderIdRemap.EMPTY], before the load).
+     * collected first is [IdRemap.EMPTY], before the load).
      *
      * Until the load has landed, [localSettings] may still hold a pre-re-key id; a reader that acts
-     * on one at startup (`HomeViewModel`'s restored selection) waits on [TagFolderIdRemaps.awaitLoaded]
+     * on one at startup (`HomeViewModel`'s restored selection) waits on [IdRemaps.awaitLoaded]
      * and applies the map itself.
      */
-    private fun applyIdRemap(remap: TagFolderIdRemap) {
+    private fun applyIdRemap(remap: IdRemap) {
         if (remap.isEmpty) return
         var changed = false
         _localSettings.update { settings -> settings.remappedBy(remap).also { changed = it != settings } }
@@ -142,22 +142,42 @@ class SettingsRepository(
     }
 
     /**
-     * These settings with every tag/folder id brought up to date by [remap]: a `tag:` / `folder:`
-     * [LocalSettings.lastFilter], [LocalSettings.collapsedFolderIds] and [LocalSettings.expandedTagIds].
-     * The single rewrite both the construction-time pass and the runtime one apply.
+     * These settings with every tag, folder and feed id brought up to date by [remap]: a `tag:` /
+     * `folder:` / `feed:` [LocalSettings.lastFilter], [LocalSettings.collapsedFolderIds],
+     * [LocalSettings.expandedTagIds] and the feed keys of [LocalSettings.faviconMissedAt]. The single
+     * rewrite both the construction-time pass and the runtime one apply.
+     *
+     * [LocalSettings.lastArticleId] is not rewritten here: article re-keys are not in the map (see
+     * [IdRemap]), and `HomeViewModel` resolves the saved article from the database when it restores it.
      */
-    private fun LocalSettings.remappedBy(remap: TagFolderIdRemap): LocalSettings = copy(
+    private fun LocalSettings.remappedBy(remap: IdRemap): LocalSettings = copy(
         lastFilter = lastFilter?.let { remap.encodedFilter(it) },
         collapsedFolderIds = remap.folders(collapsedFolderIds),
         expandedTagIds = remap.tags(expandedTagIds),
+        faviconMissedAt = remap.faviconMisses(faviconMissedAt),
     )
 
     /**
-     * The persisted filter [encoded] with its tag or folder id brought up to date. A string that does
+     * [misses] keyed by the id each feed has now. When a merge folded two feeds that both had a miss,
+     * the earlier one is kept, so the merged feed is looked up again no later than either would have
+     * been. The same map (not a copy) when nothing moves, so an unchanged value is not saved again.
+     */
+    private fun IdRemap.faviconMisses(misses: Map<String, Long>): Map<String, Long> {
+        if (feedIds.isEmpty() || misses.keys.none { it in feedIds }) return misses
+        val remapped = LinkedHashMap<String, Long>()
+        for ((feedId, at) in misses) {
+            val current = feed(feedId)
+            remapped[current] = remapped[current]?.let { minOf(it, at) } ?: at
+        }
+        return remapped
+    }
+
+    /**
+     * The persisted filter [encoded] with its tag, folder or feed id brought up to date. A string that does
      * not decode, and a filter the map does not change, are returned as they are — not re-encoded, so
      * the legacy `unread` value (read by `HomeViewModel.legacyUnreadFilter`) is not rewritten to `all`.
      */
-    private fun TagFolderIdRemap.encodedFilter(encoded: String): String {
+    private fun IdRemap.encodedFilter(encoded: String): String {
         val decoded = decodeArticleFilter(encoded) ?: return encoded
         val remapped = filter(decoded)
         return if (remapped == decoded) encoded else remapped.encode()

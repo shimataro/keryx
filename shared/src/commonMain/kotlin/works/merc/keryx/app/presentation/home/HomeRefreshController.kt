@@ -18,7 +18,7 @@ import works.merc.keryx.app.domain.RefreshCycleRunner
 import works.merc.keryx.app.domain.RefreshOutcome
 import works.merc.keryx.app.domain.RefreshCycleRunner.CycleOutcome
 import works.merc.keryx.app.domain.SyncTrigger
-import works.merc.keryx.app.domain.TagFolderIdRemap
+import works.merc.keryx.app.domain.IdRemap
 import works.merc.keryx.app.presentation.derived
 
 /**
@@ -66,10 +66,10 @@ internal class HomeRefreshController(
 
     /**
      * Moves every pending pull's filter onto the id its tag or folder has now — after a merge re-keyed
-     * it ([works.merc.keryx.app.domain.TagFolderIdRemaps]), so the list it was started on, now under
+     * it ([works.merc.keryx.app.domain.IdRemaps]), so the list it was started on, now under
      * the new id, keeps showing it. Each pull still ends by its own token.
      */
-    fun remapPulls(remap: TagFolderIdRemap) {
+    fun remapPulls(remap: IdRemap) {
         pulls.update { current ->
             val moved = current.mapValues { (_, filter) -> remap.filter(filter) }
             if (moved == current) current else moved

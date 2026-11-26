@@ -60,7 +60,7 @@ import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.data.local.db.Folders
 import works.merc.keryx.app.data.local.db.Tags
-import works.merc.keryx.app.domain.TagFolderIdRemap
+import works.merc.keryx.app.domain.IdRemap
 import works.merc.keryx.app.domain.displayTitle
 import works.merc.keryx.app.presentation.home.FeedListRowSelection
 import works.merc.keryx.app.presentation.home.FeedListSelectionTarget
@@ -236,7 +236,7 @@ internal fun FeedListPane(
     // changes reach composition on separate flows, in either order: a rewrite could name an id the
     // lists do not have yet, and one that waited could name an id they no longer have; but two ids
     // the map joins are the same row, whichever of them the lists currently use.
-    val idRemap by vm.tagFolderIdRemap.collectAsState()
+    val idRemap by vm.idRemap.collectAsState()
     fun isEditing(row: InlineEditTarget): Boolean = inlineEdit?.remappedBy(idRemap) == row.remappedBy(idRemap)
     var searchFieldFocused by remember { mutableStateOf(false) }
     val folderNameDuplicateError = stringResource(Res.string.home_folder_name_duplicate)
@@ -491,7 +491,7 @@ internal fun FeedListPane(
         val expandedAtStart = vm.expandedTagIds.value
         // Whether the snapshots render the edit's row, found under whatever id they carry for it the
         // same way editRowIndex finds it, with [remap] in place of idRemap.
-        fun renderableUnder(remap: TagFolderIdRemap) = target.resolvedIn(foldersAtStart, tagsAtStart, remap)?.let {
+        fun renderableUnder(remap: IdRemap) = target.resolvedIn(foldersAtStart, tagsAtStart, remap)?.let {
             feedListRowIndex(
                 it.rowInstance,
                 feedsAtStart,
@@ -513,7 +513,7 @@ internal fun FeedListPane(
         // of its own. A re-key the catch-up reveals changes [idRemap], which restarts this effect with
         // the row found. A catch-up that failed decides nothing: the edit stays open, and the next value
         // asks again.
-        if (!renderableUnder(vm.tagFolderIdRemap.value)) {
+        if (!renderableUnder(vm.idRemap.value)) {
             if (!vm.catchUpIdRemapFromDb()) return@LaunchedEffect
             val changedSinceStart = feeds != feedsAtStart ||
                 folders != foldersAtStart ||
@@ -527,9 +527,9 @@ internal fun FeedListPane(
             }
             // The row, matched through the caught-up map: found, so it only moved (a restart of this
             // effect follows when the map reaches [idRemap]).
-            if (renderableUnder(vm.tagFolderIdRemap.value)) return@LaunchedEffect
+            if (renderableUnder(vm.idRemap.value)) return@LaunchedEffect
         }
-        if (editRowSeen || !renderableUnder(vm.tagFolderIdRemap.value)) inlineEdit = null
+        if (editRowSeen || !renderableUnder(vm.idRemap.value)) inlineEdit = null
     }
 
     FeedListAutoScrollEffect(dragPointerYState, hostBoundsState, listState, dragController)

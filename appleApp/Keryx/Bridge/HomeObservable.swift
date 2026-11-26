@@ -54,7 +54,7 @@ final class HomeObservable: ObservableAssignment {
     private(set) var labels: TagFolderLabelSet = .empty
     /// The same snapshot as the Kotlin value the shared functions take (`articleListOrdinalName`).
     @ObservationIgnored private var kotlinLabels: TagFolderLabels = TagFolderLabels.companion.EMPTY
-    /// The tag/folder id re-keys a sync merge has published (`HomeViewModel.tagFolderIdRemap`): what an
+    /// The tag/folder id re-keys a sync merge has published (`HomeViewModel.idRemap`): what an
     /// id or row key held from before a re-key — an inline rename's — is compared through.
     private(set) var idRemap: SidebarIdRemap = .empty
     private(set) var feedTagMap: [String: Set<String>] = [:]
@@ -488,7 +488,7 @@ final class HomeObservable: ObservableAssignment {
     }
 
     private func observeIdRemap() async {
-        for await v in viewModel.tagFolderIdRemap { assignIfChanged(\.idRemap, SidebarIdRemap(v)) }
+        for await v in viewModel.idRemap { assignIfChanged(\.idRemap, SidebarIdRemap(v)) }
     }
 
     private func observeFeedTagMap() async {

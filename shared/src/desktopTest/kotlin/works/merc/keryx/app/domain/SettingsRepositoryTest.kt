@@ -531,7 +531,7 @@ class SettingsRepositoryTest {
                     Triple(ID_REMAP_KIND_TAG, "t-old", "t-new"),
                     Triple(ID_REMAP_KIND_FOLDER, "d-old", "d-new"),
                 ),
-                db.sync_bookkeepingQueries.idRemapTagFolder().executeAsList()
+                db.sync_bookkeepingQueries.idRemapPublished().executeAsList()
                     .map { Triple(it.kind, it.old_id, it.new_id) }
                     .toSet(),
             )
@@ -621,7 +621,7 @@ class SettingsRepositoryTest {
     }
 
     /**
-     * Construction does not read `ks_id_remap`: the load is the [TagFolderIdRemaps]'s, run on its own
+     * Construction does not read `ks_id_remap`: the load is the [IdRemaps]'s, run on its own
      * dispatcher. Held behind a gate, the settings keep their pre-re-key ids and nothing was read or
      * written; once the load lands, they are rewritten and persisted.
      */
@@ -631,11 +631,11 @@ class SettingsRepositoryTest {
         try {
             val gate = CompletableDeferred<Unit>()
             var reads = 0
-            val remaps = TagFolderIdRemaps(
+            val remaps = IdRemaps(
                 {
                     reads++
                     runBlocking { gate.await() }
-                    TagFolderIdRemap(tagIds = mapOf("t-old" to "t-new"), folderIds = emptyMap())
+                    IdRemap(tagIds = mapOf("t-old" to "t-new"), folderIds = emptyMap())
                 },
                 Dispatchers.IO,
             )
@@ -667,6 +667,7 @@ class SettingsRepositoryTest {
         try {
             IdRemapSql.record(driver, ID_REMAP_KIND_TAG, "x-old", "t-new")
             IdRemapSql.record(driver, ID_REMAP_KIND_FOLDER, "x-old", "d-new")
+            IdRemapSql.record(driver, ID_REMAP_KIND_FEED, "x-old", "f-new")
             val store = RecordingLocalSettingsStore(dir, LocalSettings(lastFilter = lastFilter))
             return newRepo(db, store = store).getLocalSettings().lastFilter
         } finally {
@@ -681,7 +682,45 @@ class SettingsRepositoryTest {
     fun aFolderFilterIsRemappedThroughTheFolderMap() = assertEquals("folder:d-new", lastFilterAfterRemap("folder:x-old"))
 
     @Test
-    fun aFeedFilterIsNeverRemapped() = assertEquals("feed:x-old", lastFilterAfterRemap("feed:x-old"))
+    fun aFeedFilterIsRemappedThroughTheFeedMap() = assertEquals("feed:f-new", lastFilterAfterRemap("feed:x-old"))
+
+    /**
+     * A feed merge moves the favicon misses onto the id the feed has now; two misses of the feeds it
+     * folded keep the earlier one, and a miss of a feed the merge did not move stays as it was.
+     * The saved article id is left alone: article re-keys are not published (HomeViewModel resolves it).
+     */
+    @Test
+    fun aPublishedFeedReKeyMovesTheFaviconMissesAndLeavesTheSavedArticleAlone() = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val store = RecordingLocalSettingsStore(
+                dir,
+                LocalSettings(
+                    lastFilter = "feed:f-old",
+                    lastArticleId = "a-old",
+                    faviconMissedAt = mapOf("f-old" to 200L, "f-new" to 300L, "f-kept" to 100L),
+                ),
+            )
+            val remaps = IdRemaps(db, Dispatchers.Unconfined)
+            val repo = SettingsRepository(db, store, SyncScheduler {}, Clock { 0L }, writeDispatcher = Dispatchers.Unconfined, idRemaps = remaps)
+
+            IdRemapSql.record(driver, ID_REMAP_KIND_FEED, "f-old", "f-new")
+            IdRemapSql.record(driver, ID_REMAP_KIND_ARTICLE, "a-old", "a-new")
+            remaps.publishFromDb()
+
+            val settings = repo.getLocalSettings()
+            assertEquals("feed:f-new", settings.lastFilter)
+            assertEquals(mapOf("f-new" to 200L, "f-kept" to 100L), settings.faviconMissedAt)
+            assertEquals("a-old", settings.lastArticleId)
+            assertEquals(1, store.saveCount)
+
+            // Applying the same map again changes and writes nothing.
+            remaps.publishFromDb()
+            assertEquals(1, store.saveCount)
+        } finally {
+            driver.close()
+        }
+    }
 
     /** An undecodable value is kept as it is, and so is the legacy `unread`, which a re-encode would turn into `all`. */
     @Test
@@ -690,7 +729,7 @@ class SettingsRepositoryTest {
         assertEquals("unread", lastFilterAfterRemap("unread"))
     }
 
-    // --- Re-keys published while the app runs (TagFolderIdRemaps) ---
+    // --- Re-keys published while the app runs (IdRemaps) ---
 
     /**
      * A re-key a merge publishes after construction rewrites the same three fields as the startup
@@ -708,7 +747,7 @@ class SettingsRepositoryTest {
                     expandedTagIds = setOf("t-old"),
                 ),
             )
-            val remaps = TagFolderIdRemaps(db, Dispatchers.Unconfined)
+            val remaps = IdRemaps(db, Dispatchers.Unconfined)
             val repo = SettingsRepository(db, store, SyncScheduler {}, Clock { 0L }, writeDispatcher = Dispatchers.Unconfined, idRemaps = remaps)
             assertEquals(0, store.saveCount, "nothing to rewrite at construction")
 
@@ -741,7 +780,7 @@ class SettingsRepositoryTest {
         val (driver, db) = inMemoryDb()
         try {
             val store = RecordingLocalSettingsStore(dir, LocalSettings(lastFilter = "tag:t-old"))
-            val remaps = TagFolderIdRemaps(db, Dispatchers.Unconfined)
+            val remaps = IdRemaps(db, Dispatchers.Unconfined)
             val repo = SettingsRepository(db, store, SyncScheduler {}, Clock { 0L }, writeDispatcher = Dispatchers.Unconfined, idRemaps = remaps)
             store.error = RuntimeException("disk full")
 

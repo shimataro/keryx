@@ -106,7 +106,7 @@ internal class DeltaSync(
     private val compactionAllowed: suspend () -> Boolean,
     private val setPhase: (SyncPhase) -> Unit,
     /**
-     * Republishes `ks_id_remap` to the ids held outside the database ([TagFolderIdRemaps.publishFromDb])
+     * Republishes `ks_id_remap` to the ids held outside the database ([IdRemaps.publishFromDb])
      * after a merge has committed — a merge may have moved tags or folders onto their canonical ids
      * ([V2IdentitySql]). Never called inside the merge's transaction.
      */

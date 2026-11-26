@@ -27,7 +27,7 @@ import works.merc.keryx.app.insertFeed
 import works.merc.keryx.app.insertFeedTag
 import works.merc.keryx.app.insertFolder
 import works.merc.keryx.app.insertTag
-import works.merc.keryx.app.domain.TagFolderIdRemap
+import works.merc.keryx.app.domain.IdRemap
 import works.merc.keryx.app.platform.AppDirs
 import works.merc.keryx.app.platform.FileIO
 import works.merc.keryx.app.testThreadDispatcher
@@ -461,7 +461,7 @@ class HomeRefreshControllerTest {
             h.fixture.awaitFeedRefreshing()
             assertEquals(setOf<ArticleFilter>(ArticleFilter.Tag("t-old")), h.controller.pullRefreshingFilters.value)
 
-            h.controller.remapPulls(TagFolderIdRemap(tagIds = mapOf("t-old" to "t-new"), folderIds = emptyMap()))
+            h.controller.remapPulls(IdRemap(tagIds = mapOf("t-old" to "t-new"), folderIds = emptyMap()))
 
             assertEquals(setOf<ArticleFilter>(ArticleFilter.Tag("t-new")), h.controller.pullRefreshingFilters.value)
 
@@ -482,7 +482,7 @@ class HomeRefreshControllerTest {
             h.fixture.awaitFeedRefreshing()
             h.controller.pullToRefresh(ArticleFilter.Feed("f1"))
 
-            h.controller.remapPulls(TagFolderIdRemap(tagIds = emptyMap(), folderIds = mapOf("d-old" to "d-new")))
+            h.controller.remapPulls(IdRemap(tagIds = emptyMap(), folderIds = mapOf("d-old" to "d-new")))
 
             assertEquals(
                 setOf<ArticleFilter>(ArticleFilter.Folder("d-new"), ArticleFilter.Feed("f1")),
@@ -502,8 +502,8 @@ class HomeRefreshControllerTest {
             h.controller.pullToRefresh(ArticleFilter.All)
             h.fixture.awaitFeedRefreshing()
 
-            h.controller.remapPulls(TagFolderIdRemap(tagIds = mapOf("x" to "y"), folderIds = mapOf("p" to "q")))
-            h.controller.remapPulls(TagFolderIdRemap.EMPTY)
+            h.controller.remapPulls(IdRemap(tagIds = mapOf("x" to "y"), folderIds = mapOf("p" to "q")))
+            h.controller.remapPulls(IdRemap.EMPTY)
 
             assertEquals(setOf<ArticleFilter>(ArticleFilter.All), h.controller.pullRefreshingFilters.value)
             gate.complete(Unit)
@@ -520,7 +520,7 @@ class HomeRefreshControllerTest {
             db.insertFeedTag("f1", "t-old")
             h.controller.pullToRefresh(ArticleFilter.Tag("t-old"))
             h.fixture.awaitFeedRefreshing()
-            h.controller.remapPulls(TagFolderIdRemap(tagIds = mapOf("t-old" to "t-new"), folderIds = emptyMap()))
+            h.controller.remapPulls(IdRemap(tagIds = mapOf("t-old" to "t-new"), folderIds = emptyMap()))
 
             val launched = h.job.children.count()
             h.controller.pullToRefresh(ArticleFilter.Tag("t-new"))

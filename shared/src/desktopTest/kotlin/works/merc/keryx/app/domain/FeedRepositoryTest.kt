@@ -3563,15 +3563,15 @@ class FeedRepositoryTest {
     }
 
     /**
-     * Wired to the real [TagFolderIdRemaps.publishFromDb], as production is: the redirect merge's publish
+     * Wired to the real [IdRemaps.publishFromDb], as production is: the redirect merge's publish
      * re-reads `ks_id_remap` after the commit, so a holder sees every tag/folder re-key the table holds.
      */
     @Test
-    fun aRedirectMergePublishesTheIdRemapTableThroughTagFolderIdRemaps(): Unit = runBlocking {
+    fun aRedirectMergePublishesTheIdRemapTableThroughIdRemaps(): Unit = runBlocking {
         val (driver, db) = inMemoryDb()
         try {
             redirectMergeSetup(driver, db)
-            val remaps = TagFolderIdRemaps(db, Dispatchers.Unconfined)
+            val remaps = IdRemaps(db, Dispatchers.Unconfined)
             remaps.awaitLoaded()
             // A re-key recorded after the initial load, which only a publish brings to the holders.
             driver.execute(null, "INSERT INTO ks_id_remap (kind, old_id, new_id) VALUES ('tag', 't-old', 't1')", 0)

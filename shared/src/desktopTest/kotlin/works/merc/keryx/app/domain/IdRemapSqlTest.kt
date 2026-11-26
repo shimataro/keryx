@@ -12,7 +12,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
-/** `ks_id_remap`'s chain folding ([IdRemapSql]) and its publication ([TagFolderIdRemaps]). */
+/** `ks_id_remap`'s chain folding ([IdRemapSql]) and its publication ([IdRemaps]). */
 class IdRemapSqlTest {
 
     private fun SqlDriver.remapRows(table: String = "main.ks_id_remap"): Set<Triple<String, String, String>> =
@@ -132,11 +132,14 @@ class IdRemapSqlTest {
         }
     }
 
-    // --- TagFolderIdRemaps ---
+    // --- IdRemaps ---
 
-    /** The feed and article re-keys share the table, but only the tag and folder ones are loaded. */
+    /**
+     * The article re-keys share the table, but only the tag, folder and feed ones are loaded: the
+     * article ids held outside the database are resolved one at a time instead (articles.resolveId).
+     */
     @Test
-    fun loadingTheRemapReadsOnlyTheTagAndFolderRows() {
+    fun loadingTheRemapReadsTheTagFolderAndFeedRowsButNotTheArticleOnes() {
         val (driver, db) = inMemoryDb()
         try {
             IdRemapSql.record(driver, ID_REMAP_KIND_TAG, "t-old", "t-new")
@@ -145,23 +148,37 @@ class IdRemapSqlTest {
             IdRemapSql.record(driver, ID_REMAP_KIND_ARTICLE, "a-old", "a-new")
 
             assertEquals(
-                setOf(ID_REMAP_KIND_TAG, ID_REMAP_KIND_FOLDER),
-                db.sync_bookkeepingQueries.idRemapTagFolder().executeAsList().map { it.kind }.toSet(),
+                setOf(ID_REMAP_KIND_TAG, ID_REMAP_KIND_FOLDER, ID_REMAP_KIND_FEED),
+                db.sync_bookkeepingQueries.idRemapPublished().executeAsList().map { it.kind }.toSet(),
             )
             val remap = loadIdRemap(db)
             assertEquals(mapOf("t-old" to "t-new"), remap.tagIds)
             assertEquals(mapOf("d-old" to "d-new"), remap.folderIds)
+            assertEquals(mapOf("f-old" to "f-new"), remap.feedIds)
         } finally {
             driver.close()
         }
     }
 
     @Test
+    fun theRemapMovesAFeedFilterAndFeedIdsButLeavesOtherFiltersAlone() {
+        val remap = IdRemap(tagIds = emptyMap(), folderIds = emptyMap(), feedIds = mapOf("f-old" to "f-new", "f-other" to "f-new"))
+        assertEquals(ArticleFilter.Feed("f-new"), remap.filter(ArticleFilter.Feed("f-old")))
+        val untouched = ArticleFilter.Feed("f-live")
+        assertSame(untouched, remap.filter(untouched))
+        assertEquals(ArticleFilter.All, remap.filter(ArticleFilter.All))
+        assertEquals(ArticleFilter.Tag("f-old"), remap.filter(ArticleFilter.Tag("f-old")))
+        // Two ids of one feed become one.
+        assertEquals(setOf("f-new", "f-live"), remap.feeds(setOf("f-old", "f-other", "f-live")))
+        assertEquals(false, remap.isEmpty)
+    }
+
+    @Test
     fun remapsLoadTheTableInTheBackgroundAndReadItAgainOnEachPublish() = runTest {
         val (driver, db) = inMemoryDb()
         try {
-            val remaps = TagFolderIdRemaps(db, Dispatchers.Unconfined)
-            assertSame(TagFolderIdRemap.EMPTY, remaps.current.value)
+            val remaps = IdRemaps(db, Dispatchers.Unconfined)
+            assertSame(IdRemap.EMPTY, remaps.current.value)
             assertTrue(remaps.current.value.isEmpty)
 
             IdRemapSql.record(driver, ID_REMAP_KIND_TAG, "t-old", "t-new")
@@ -174,7 +191,7 @@ class IdRemapSqlTest {
             val remap = remaps.current.value
             assertEquals(mapOf("t-old" to "t-new"), remap.tagIds)
             assertEquals(mapOf("d-old" to "d-new"), remap.folderIds)
-            assertEquals(1, TagFolderIdRemaps(db, Dispatchers.Unconfined).current.value.tagIds.size, "a new instance reads the same table")
+            assertEquals(1, IdRemaps(db, Dispatchers.Unconfined).current.value.tagIds.size, "a new instance reads the same table")
         } finally {
             driver.close()
         }
@@ -182,15 +199,15 @@ class IdRemapSqlTest {
 
     /**
      * Construction reads nothing: the initial load runs on the given dispatcher, so a UI thread
-     * resolving the instance never opens the database. Until it has run, [TagFolderIdRemaps.loaded]
-     * is false and the map is empty; [TagFolderIdRemaps.awaitLoaded] returns once it has.
+     * resolving the instance never opens the database. Until it has run, [IdRemaps.loaded]
+     * is false and the map is empty; [IdRemaps.awaitLoaded] returns once it has.
      */
     @Test
     fun theInitialLoadRunsOnTheDispatcherNotInTheConstructor() = runTest {
         var reads = 0
         val dispatcher = StandardTestDispatcher(testScheduler)
-        val remap = TagFolderIdRemap(tagIds = mapOf("a" to "b"), folderIds = emptyMap())
-        val remaps = TagFolderIdRemaps({ reads++; remap }, dispatcher)
+        val remap = IdRemap(tagIds = mapOf("a" to "b"), folderIds = emptyMap())
+        val remaps = IdRemaps({ reads++; remap }, dispatcher)
 
         assertEquals(0, reads, "construction does not read")
         assertEquals(false, remaps.loaded.value)
@@ -209,11 +226,11 @@ class IdRemapSqlTest {
         val dispatcher = StandardTestDispatcher(testScheduler)
         val reads = ArrayDeque(
             listOf(
-                TagFolderIdRemap(mapOf("a" to "b"), emptyMap()),
-                TagFolderIdRemap(mapOf("a" to "c"), emptyMap()),
+                IdRemap(mapOf("a" to "b"), emptyMap()),
+                IdRemap(mapOf("a" to "c"), emptyMap()),
             ),
         )
-        val remaps = TagFolderIdRemaps({ reads.removeFirst() }, dispatcher)
+        val remaps = IdRemaps({ reads.removeFirst() }, dispatcher)
 
         // The publish takes the lock and reads first; the queued initial load then reads after it.
         remaps.publishFromDb()
@@ -226,7 +243,7 @@ class IdRemapSqlTest {
     /** A failing initial load is logged, not thrown: the map stays empty, the gate still opens. */
     @Test
     fun aFailingInitialLoadStillOpensTheGate() = runTest {
-        val remaps = TagFolderIdRemaps({ error("db is locked") }, StandardTestDispatcher(testScheduler))
+        val remaps = IdRemaps({ error("db is locked") }, StandardTestDispatcher(testScheduler))
 
         remaps.awaitLoaded()
 
@@ -236,7 +253,7 @@ class IdRemapSqlTest {
 
     @Test
     fun theIdSetMappersKeepOrderAndKinds() {
-        val remap = TagFolderIdRemap(tagIds = mapOf("a" to "b"), folderIds = mapOf("a" to "z"))
+        val remap = IdRemap(tagIds = mapOf("a" to "b"), folderIds = mapOf("a" to "z"))
 
         assertEquals(listOf("b", "x"), remap.tags(linkedSetOf("a", "x")).toList())
         assertEquals(listOf("x", "z"), remap.folders(linkedSetOf("x", "a")).toList())
@@ -244,7 +261,7 @@ class IdRemapSqlTest {
 
     @Test
     fun aRemapMovesOnlyTheIdsItMapsAndKeepsKinds() {
-        val remap = TagFolderIdRemap(tagIds = mapOf("a" to "b"), folderIds = mapOf("c" to "d"))
+        val remap = IdRemap(tagIds = mapOf("a" to "b"), folderIds = mapOf("c" to "d"))
 
         assertEquals("b", remap.tag("a"))
         assertEquals("c", remap.tag("c"), "a folder entry never moves a tag id")
