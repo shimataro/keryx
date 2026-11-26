@@ -80,4 +80,34 @@ struct SidebarIdRemapTests {
         #expect(SidebarIdRemap.empty.renameRowDecision(
             key: "tag:A", keysAtCatchUp: ["tag:B", "all"], currentKeys: ["all", "tag:B"]) == .recheck)
     }
+
+    // MARK: Feed re-keys (a merge folding one feed into another)
+
+    private let feedRemap = SidebarIdRemap(tags: ["t-old": "t-new"], folders: [:], feeds: ["f-old": "f-new"])
+
+    @Test
+    func aMergedFeedsRowKeysFollowItsFeed() {
+        #expect(feedRemap.current("feed-in-folder:f-old") == "feed-in-folder:f-new")
+        #expect(feedRemap.current("feed-in-tag:other:f-old") == "feed-in-tag:other:f-new")
+        #expect(feedRemap.current("feed-in-tag:t-old:f-old") == "feed-in-tag:t-new:f-new")
+        #expect(feedRemap.current("feed-in-folder:f-live") == "feed-in-folder:f-live")
+    }
+
+    @Test
+    func aFeedIdIsNotConfusedWithATagOrFolderIdOfTheSameText() {
+        let shared = SidebarIdRemap(tags: [:], folders: [:], feeds: ["x": "fx"])
+        #expect(shared.current("tag:x") == "tag:x")
+        #expect(shared.current("folder:x") == "folder:x")
+        #expect(shared.current("feed-in-folder:x") == "feed-in-folder:fx")
+    }
+
+    /// A rename held on the merged-away feed's row is the merged feed's row in the lists.
+    @Test
+    func aRenameOnAMergedAwayFeedFindsTheMergedFeedsRow() {
+        let keys = ["all", "feed-in-folder:f-new"]
+        #expect(feedRemap.contains(keys, row: "feed-in-folder:f-old"))
+        #expect(feedRemap.match(in: keys, for: "feed-in-folder:f-old") == "feed-in-folder:f-new")
+        #expect(feedRemap.renameRowDecision(
+            key: "feed-in-folder:f-old", keysAtCatchUp: keys, currentKeys: keys) == .keep)
+    }
 }

@@ -166,5 +166,20 @@ class HomeViewModelArticleRekeyTest {
 
         assertEquals("a0", vm.selectedArticleId.value)
         assertEquals(true, vm.articleRestoredOnLaunch)
+        // An id a UI saved with it (the SwiftUI reader's scroll position) is translated the same way.
+        assertEquals("a0", vm.currentArticleId("a1"))
+        assertEquals("other", vm.currentArticleId("other"))
+    }
+
+    /** An in-session move is translated too, for a UI comparing an article id it held across the move. */
+    @Test
+    fun currentArticleIdTranslatesAnIdASelectionMovedFrom() = runVmTest {
+        val vm = newViewModel()
+        vm.selectArticle(vm.row("a1"))
+        testScheduler.advanceUntilIdle()
+
+        mergeF1IntoF0()
+
+        assertEquals("a0", vm.currentArticleId("a1"))
     }
 }

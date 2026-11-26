@@ -54,7 +54,7 @@ final class HomeObservable: ObservableAssignment {
     private(set) var labels: TagFolderLabelSet = .empty
     /// The same snapshot as the Kotlin value the shared functions take (`articleListOrdinalName`).
     @ObservationIgnored private var kotlinLabels: TagFolderLabels = TagFolderLabels.companion.EMPTY
-    /// The tag/folder id re-keys a sync merge has published (`HomeViewModel.idRemap`): what an
+    /// The tag/folder/feed id re-keys a merge has published (`HomeViewModel.idRemap`): what an
     /// id or row key held from before a re-key — an inline rename's — is compared through.
     private(set) var idRemap: SidebarIdRemap = .empty
     private(set) var feedTagMap: [String: Set<String>] = [:]
@@ -266,6 +266,18 @@ final class HomeObservable: ObservableAssignment {
     /// between (a pane-focus change, say) would read the stale selection and flash it back.
     func selectFilter(_ filter: ArticleFilter, instance: FeedListRowSelection) {
         viewModel.selectFilter(filter: filter, instance: instance)
+        assignFilterSelection(viewModel.filterSelection.value)
+        assignSelectedRowInstance(viewModel.selectedRowInstance.value)
+        assignSelectedRowGeneration(viewModel.selectedRowGeneration.value.int64Value)
+        updateFeedListSelectionTarget()
+    }
+
+    /// A notification's "show feed" action (`HomeViewModel.showFeedDetail`, the one implementation both
+    /// UIs call): selects the feed — under the id a merge moved it to since the notification was raised,
+    /// once the re-key map has caught up from the database — then mirrors the selection like
+    /// `selectFilter`.
+    func showFeedDetail(feedId: String) async {
+        try? await viewModel.showFeedDetail(feedId: feedId)
         assignFilterSelection(viewModel.filterSelection.value)
         assignSelectedRowInstance(viewModel.selectedRowInstance.value)
         assignSelectedRowGeneration(viewModel.selectedRowGeneration.value.int64Value)

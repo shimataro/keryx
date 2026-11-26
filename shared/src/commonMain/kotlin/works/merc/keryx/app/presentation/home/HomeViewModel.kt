@@ -632,8 +632,13 @@ class HomeViewModel(
      */
     private val articleIdMoves = HashMap<String, String>()
 
-    /** [id] in the id space of the article moves applied so far ([articleIdMoves]). */
-    private fun currentArticleId(id: String): String = articleIdMoves[id] ?: id
+    /**
+     * [id] in the id space of the article moves applied so far ([articleIdMoves]) — including the move
+     * of the saved article the launch-time restore resolved. For a UI that holds an article id of its
+     * own across such a move (the SwiftUI reader's saved scroll position names its article) to compare
+     * it with [selectedArticleId]. Main thread only.
+     */
+    fun currentArticleId(id: String): String = articleIdMoves[id] ?: id
 
     /**
      * The selected article, fully loaded (body included). It catches up with [selectedArticleId] only
@@ -1072,6 +1077,14 @@ class HomeViewModel(
     init {
         // The restored article (see [restoredArticle]) is already pinned (see [_pinnedReadStates]).
         if (restoredArticle != null) {
+            // The saved id resolved to another article (a feed merge moved it while the app was closed):
+            // recorded as a move, so an id a UI saved alongside it (the reader's scroll position) still
+            // matches, and saved under the id it has now.
+            val savedId = settingsRepository.getLocalSettings().lastArticleId
+            if (savedId != null && savedId != restoredArticle.id) {
+                articleIdMoves[savedId] = restoredArticle.id
+                settingsRepository.mutateLocalSettings { it.copy(lastArticleId = restoredArticle.id) }
+            }
             _selectedArticle.value = restoredArticle
             // Seed the navigation cursor too, so the first arrow key steps from the restored
             // article instead of jumping back to the top of the list.
