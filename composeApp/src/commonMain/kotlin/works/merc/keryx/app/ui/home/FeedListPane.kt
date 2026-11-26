@@ -366,6 +366,12 @@ internal fun FeedListPane(
     // formatter cannot be called (same reason FeedRow pre-resolves its submenu labels). Feed
     // titles carry no ordinal.
     val folderDisplayNames = folders.associate { it.id to nameWithOrdinal(labels.folder(it.id, it.name)) }
+    // The same resolution for the tags, so the feed rows' submenus (and the folders' labels above)
+    // are built once per pane composition rather than once per row. `remember(map)` hands back the
+    // previous equal map, so a row whose labels did not change is skipped.
+    val tagDisplayNames = tags.associate { it.id to nameWithOrdinal(labels.tag(it.id, it.name)) }
+    val stableTagLabels = remember(tagDisplayNames) { tagDisplayNames }
+    val stableFolderLabels = remember(folderDisplayNames) { folderDisplayNames }
     val dragController = rememberFeedListDragController(
         vm = vm,
         listState = listState,
@@ -635,7 +641,8 @@ internal fun FeedListPane(
                             attachedTagIds = feedTagMap[feed.id] ?: emptySet(),
                             onToggleFeedTag = { tagId, attached -> vm.setFeedTag(feed.id, tagId, attached) },
                             folders = folders,
-                            labels = labels,
+                            tagLabels = stableTagLabels,
+                            folderLabels = stableFolderLabels,
                             onMoveFeedToFolder = { moveFolderId -> vm.moveFeed(feed.id, moveFolderId) },
                             onUnsubscribe = { confirmingUnsubscribeFeed = feed },
                             onCopyFeedUrl = { copyUrl(feed.url) },

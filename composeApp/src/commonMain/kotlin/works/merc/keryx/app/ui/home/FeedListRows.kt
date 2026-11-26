@@ -65,7 +65,6 @@ import works.merc.keryx.app.ui.common.KeryxIcon
 import works.merc.keryx.app.ui.common.KeryxIcons
 import works.merc.keryx.app.presentation.home.DropBoundary
 import works.merc.keryx.app.presentation.home.OrdinalName
-import works.merc.keryx.app.presentation.home.TagFolderLabels
 
 /** How long a dragged feed must be held over a collapsed folder header before the folder opens by
  * itself, so the feeds inside it become reachable drop targets without letting go of the drag
@@ -351,9 +350,10 @@ internal fun NoFolderHeader(
  * @param isTouchPrimary Whether this platform's reorder gesture starts from the row's own
  *   [DragHandle] — which is then also given its assistive-technology counterpart, see
  *   [reorderAccessibilityActions]. Overridable for tests only, like `FeedListPane`'s own parameter.
- * @param labels Every tag's and folder's display name with its ordinal
- *   ([works.merc.keryx.app.presentation.home.TagFolderLabels]) — labels the "Assign tags" and
- *   "Move to folder" submenus' items, so a second same-named tag is offered as "X (2)".
+ * @param tagLabels Every tag's display name with its ordinal applied, by tag id — labels the "Assign
+ *   tags" submenu's items, so a second same-named tag is offered as "X (2)". Built once by the pane
+ *   (resolved in composition, since the context menu's items lambda runs outside it).
+ * @param folderLabels The same for every folder, by folder id — labels the "Move to folder" submenu.
  * @param onMoveUp Moves this feed one position up among the feeds of its own group, or `null` when
  *   it is already the first one there (see [reorderTargetWithinScope]).
  * @param onMoveDown Moves this feed one position down in the same group, or `null` when it is
@@ -387,7 +387,8 @@ internal fun FeedRow(
     onCopyFeedUrl: () -> Unit,
     onCopySiteUrl: () -> Unit,
     onOpenSite: () -> Unit,
-    labels: TagFolderLabels,
+    tagLabels: Map<String, String>,
+    folderLabels: Map<String, String>,
     isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
     onMoveUp: (() -> Unit)? = null,
     onMoveDown: (() -> Unit)? = null,
@@ -413,11 +414,6 @@ internal fun FeedRow(
     // any non-blank site URL can be copied, but only an http(s) one is opened.
     val siteUrlCopyable = hasUsableUrl(feed.site_url)
     val siteUrlOpenable = canOpenInBrowser(feed.site_url)
-    // The submenu items' labels, resolved in composition because the context menu's items lambda
-    // runs later, outside it (see nativeContextMenu), where the @Composable formatter cannot be
-    // called. Built from the same lists the submenu iterates, so lookups cannot miss.
-    val tagLabels = tags.associate { it.id to nameWithOrdinal(labels.tag(it.id, it.name)) }
-    val folderLabels = folders.associate { it.id to nameWithOrdinal(labels.folder(it.id, it.name)) }
     val belowBoundary = nextFeedId?.let(DropBoundary::BeforeFeed) ?: DropBoundary.AppendFeeds(folderId)
     val reorderMoves = reorderMoves(isTouchPrimary, onMoveUp, onMoveDown)
     val rowInteraction = remember { MutableInteractionSource() }

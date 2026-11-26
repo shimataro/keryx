@@ -46,10 +46,10 @@ SELECT * FROM folders WHERE id = ?;
 -- (FolderRepository.reorderFolders).
 orderForReorder:
 SELECT id, sort_order,
-    id = COALESCE((SELECT f.id FROM folders f WHERE f.id = :dragged), (SELECT m.new_id FROM ks_id_remap m WHERE m.kind = 'folder' AND m.old_id = :dragged), :dragged) AS is_dragged,
-    CASE WHEN :target IS NULL THEN 0
+    CAST(id = COALESCE((SELECT f.id FROM folders f WHERE f.id = :dragged), (SELECT m.new_id FROM ks_id_remap m WHERE m.kind = 'folder' AND m.old_id = :dragged), :dragged) AS INTEGER) AS is_dragged,
+    CAST(CASE WHEN :target IS NULL THEN 0
         ELSE id = COALESCE((SELECT f.id FROM folders f WHERE f.id = :target), (SELECT m.new_id FROM ks_id_remap m WHERE m.kind = 'folder' AND m.old_id = :target), :target)
-    END AS is_target
+    END AS INTEGER) AS is_target
 FROM folders WHERE deleted_at IS NULL ORDER BY sort_order ASC, name COLLATE NOCASE ASC;
 
 -- The id a folder id given to a write resolves to (see the note above): the id itself while a row

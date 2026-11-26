@@ -139,7 +139,7 @@ class FolderRepository(
      */
     fun reorderFolders(draggedFolderId: String, targetFolderId: String?) {
         val current = folders.orderForReorder(dragged = draggedFolderId, target = targetFolderId).executeAsList()
-        val dragged = current.firstOrNull { it.is_dragged }?.id ?: draggedFolderId
+        val dragged = current.firstOrNull { it.is_dragged != 0L }?.id ?: draggedFolderId
         val target = current.firstOrNull { it.is_target != 0L }?.id
         val sortOrders = current.associate { it.id to it.sort_order }
         val newOrder = reorderIds(current.map { it.id }, dragged, target)

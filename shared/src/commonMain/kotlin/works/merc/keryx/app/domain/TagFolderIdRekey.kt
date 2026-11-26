@@ -122,13 +122,13 @@ private fun rekey(
         mapper = { cursor ->
             QueryResult.Value(
                 buildList {
-                    while (cursor.next().value) add(cursor.getString(0)!! to cursor.getString(1)!!)
+                    while (cursor.next().value) add(checkNotNull(cursor.getString(0)) to checkNotNull(cursor.getString(1)))
                 },
             )
         },
         parameters = 0,
     ).value
-    val id = columns.first()
+    val idColumn = columns.first()
     for ((oldId, name) in rows) {
         val newId = derivedId(name)
         if (oldId == newId) continue
@@ -137,7 +137,7 @@ private fun rekey(
         driver.execute(
             null,
             "INSERT INTO $table (${columns.joinToString(", ")}) " +
-                "SELECT ?, ${columns.drop(1).joinToString(", ")} FROM $table WHERE $id = ?",
+                "SELECT ?, ${columns.drop(1).joinToString(", ")} FROM $table WHERE $idColumn = ?",
             2,
         ) {
             bindString(0, newId)
@@ -149,7 +149,7 @@ private fun rekey(
                 bindString(1, oldId)
             }
         }
-        driver.execute(null, "DELETE FROM $table WHERE $id = ?", 1) {
+        driver.execute(null, "DELETE FROM $table WHERE $idColumn = ?", 1) {
             bindString(0, oldId)
         }
         IdRemapSql.record(driver, kind, oldId, newId)
@@ -157,7 +157,7 @@ private fun rekey(
     // Every row carrying a pre-upgrade id now sits at its derived id: record its identity edge.
     driver.execute(
         null,
-        "INSERT OR IGNORE INTO ks_v2_edge (kind, v2_id, id) SELECT ?, v2_id, $id FROM $table WHERE v2_id IS NOT NULL",
+        "INSERT OR IGNORE INTO ks_v2_edge (kind, v2_id, id) SELECT ?, v2_id, $idColumn FROM $table WHERE v2_id IS NOT NULL",
         1,
     ) {
         bindString(0, kind)
