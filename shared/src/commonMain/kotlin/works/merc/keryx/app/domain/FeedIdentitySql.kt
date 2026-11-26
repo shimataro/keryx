@@ -109,14 +109,14 @@ import app.cash.sqldelight.db.SqlDriver
 internal object FeedIdentitySql {
 
     /** The columns of a feed row both a transport file and a full database carry. */
-    internal val FEED_COLUMNS = listOf(
+    private val FEED_COLUMNS = listOf(
         "id", "url", "site_url", "title", "description", "favicon_url", "custom_title", "folder_id",
         "deleted_at", "updated_at", "created_at", "sort_order",
         "folder_updated_at", "sort_order_updated_at", "custom_title_updated_at", "deleted_updated_at",
     )
 
     /** The columns of an article row both a transport file and a full database carry. */
-    internal val ARTICLE_COLUMNS = listOf(
+    private val ARTICLE_COLUMNS = listOf(
         "id", "feed_id", "guid", "url", "title", "summary", "content", "author", "published_at",
         "thumbnail_url", "is_read", "read_at", "is_starred", "starred_at", "cached_at",
         "updated_at", "created_at", "deleted_at", "deleted_updated_at", "body_updated_at",
@@ -127,13 +127,6 @@ internal object FeedIdentitySql {
      * resolution triggers derive from `ks_feed_folder_raw`.
      */
     private val FEED_ROW_COLUMNS = FEED_COLUMNS - setOf("folder_id", "folder_updated_at")
-
-    /** The groups of a feed row's own columns (the folder assignment is folded on its raw row). */
-    private val FEED_ROW_GROUPS = listOf(
-        SyncLww.FEED_CONTENT, SyncLww.FEED_SORT_ORDER, SyncLww.FEED_CUSTOM_TITLE, SyncLww.FEED_DELETION,
-    )
-
-    private val ARTICLE_GROUPS = listOf(SyncLww.ARTICLE_BODY, SyncLww.ARTICLE_READ, SyncLww.ARTICLE_RETENTION)
 
     /** `ks_feed_canon`: every feed id whose canonical id is another one. */
     val FEED_CANON: String = V2IdentitySql.canonTable(ID_REMAP_KIND_FEED)
@@ -157,16 +150,8 @@ internal object FeedIdentitySql {
     /** The prefix a moving feed's `url` takes while the canonical row is written (see the KDoc, step 1). */
     private const val REKEY_URL_PREFIX = "ks-rekey:"
 
-    private const val EARLIEST_CREATED_AT = "created_at = MIN(created_at, excluded.created_at)"
-
     /** The `ON CONFLICT` assignments that fold one article version into another, as [ReduceSql] does. */
-    private val articleFoldAssignments: String = (
-        ARTICLE_GROUPS.flatMap(SyncLww::upsertAssignments) + listOf(
-            EARLIEST_CREATED_AT,
-            "cached_at = MAX(cached_at, excluded.cached_at)",
-            "updated_at = MAX(updated_at, excluded.updated_at)",
-        )
-        ).joinToString(",\n    ")
+    private val articleFoldAssignments: String = RowFold.ARTICLE_ASSIGNMENTS.joinToString(",\n    ")
 
     /** A temp table with [columns], `id` its primary key and every other column untyped. */
     private fun tempTable(name: String, columns: List<String>): String =
@@ -242,7 +227,7 @@ internal object FeedIdentitySql {
                 else -> "c.$it"
             }
         }
-        val groups = FEED_ROW_GROUPS + SyncLww.FEED_FOLDER
+        val groups = RowFold.FEED_ROW_GROUPS + SyncLww.FEED_FOLDER
         return listOf(
             tempTable(CLOUD_FEEDS, FEED_COLUMNS),
             "DELETE FROM $CLOUD_FEEDS",
@@ -254,7 +239,7 @@ internal object FeedIdentitySql {
             $rawJoin
             WHERE true
             ON CONFLICT(id) DO UPDATE SET
-                ${(groups.flatMap(SyncLww::upsertAssignments) + EARLIEST_CREATED_AT).joinToString(",\n                ")}
+                ${(groups.flatMap(SyncLww::upsertAssignments) + RowFold.EARLIEST_CREATED_AT).joinToString(",\n                ")}
             """.trimIndent(),
         )
     }
@@ -337,7 +322,7 @@ internal object FeedIdentitySql {
             when (it) {
                 "id" -> id
                 "feed_id" -> feedId
-                "summary" -> SyncLww.normalizedSummary(alias)
+                "summary" -> RowFold.articleSummary(alias)
                 else -> "$alias.$it"
             }
         }
@@ -355,7 +340,7 @@ internal object FeedIdentitySql {
 
     /** The rows a moving main feed folds into its canonical row: per-group, `created_at` the earliest. */
     private val feedRowFoldAssignments: String =
-        (FEED_ROW_GROUPS.flatMap(SyncLww::upsertAssignments) + EARLIEST_CREATED_AT).joinToString(",\n    ")
+        (RowFold.FEED_ROW_GROUPS.flatMap(SyncLww::upsertAssignments) + RowFold.EARLIEST_CREATED_AT).joinToString(",\n    ")
 
     /** Step 1 of the object KDoc's main re-key: the feed rows and their raw folder assignments. */
     private val mainFeeds: List<String> = listOf(

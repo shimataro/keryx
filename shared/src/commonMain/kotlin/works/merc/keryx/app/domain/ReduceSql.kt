@@ -12,9 +12,10 @@ package works.merc.keryx.app.domain
  * one.
  *
  * There are no special cases on top of the groups: an article's star and deletion are one group
- * ([SyncLww.ARTICLE_RETENTION]), resolved like any other. `created_at` takes the earliest value,
- * an article's `cached_at` and `updated_at` (no group's key) the latest, and an article's `summary` is
- * dropped once it has `content`.
+ * ([SyncLww.ARTICLE_RETENTION]), resolved like any other. The columns no group keys fold by the
+ * rules [RowFold] shares with the identity steps: `created_at` takes the earliest value, an
+ * article's `cached_at` and `updated_at` the latest, and an article's `summary` is dropped once it
+ * has `content`.
  *
  * The identity edge tables (`folder_v2_edges`, `tag_v2_edges`) are a grow-only set and fold by
  * union ([edges]): every edge of `src`, plus the `(v2_id, id)` of every `src` tag or folder row that
@@ -37,7 +38,7 @@ object ReduceSql {
         val columns = table.columnNames.joinToString(", ")
         // An article's summary is dropped once it has content, as the merge does.
         val selected = table.columnNames.joinToString(", ") {
-            if (table.name == "articles" && it == "summary") "${SyncLww.normalizedSummary("")} AS summary" else it
+            if (table.name == "articles" && it == "summary") "${RowFold.articleSummary("")} AS summary" else it
         }
         val assignments = (groups.flatMap(SyncLww::upsertAssignments) + extra).joinToString(",\n    ")
         // `WHERE true` keeps SQLite from parsing ON CONFLICT as a join constraint of the SELECT.
@@ -51,44 +52,26 @@ object ReduceSql {
 
     private fun table(name: String): TableSpec = TransportSchema.SYNCED_TABLES.first { it.name == name }
 
-    private const val EARLIEST_CREATED_AT = "created_at = MIN(created_at, excluded.created_at)"
-
     private val folders = upsert(
         table("folders"),
-        listOf(SyncLww.FOLDER_EXISTENCE, SyncLww.FOLDER_NAME, SyncLww.FOLDER_SORT_ORDER),
-        listOf(
-            EARLIEST_CREATED_AT,
-            "v2_id = CASE WHEN v2_id IS NULL THEN excluded.v2_id WHEN excluded.v2_id IS NULL THEN v2_id ELSE MAX(v2_id, excluded.v2_id) END",
-        ),
+        RowFold.FOLDER_GROUPS,
+        listOf(RowFold.EARLIEST_CREATED_AT, RowFold.GREATEST_V2_ID),
     )
 
+    // A transport file's feed row carries its folder assignment itself (no raw row).
     private val feeds = upsert(
         table("feeds"),
-        listOf(
-            SyncLww.FEED_CONTENT, SyncLww.FEED_FOLDER, SyncLww.FEED_SORT_ORDER,
-            SyncLww.FEED_CUSTOM_TITLE, SyncLww.FEED_DELETION,
-        ),
-        listOf(EARLIEST_CREATED_AT),
+        RowFold.FEED_ROW_GROUPS + SyncLww.FEED_FOLDER,
+        listOf(RowFold.EARLIEST_CREATED_AT),
     )
 
     private val tags = upsert(
         table("tags"),
-        listOf(SyncLww.TAG_EXISTENCE, SyncLww.TAG_NAME, SyncLww.TAG_COLOR, SyncLww.TAG_SORT_ORDER),
-        listOf(
-            EARLIEST_CREATED_AT,
-            "v2_id = CASE WHEN v2_id IS NULL THEN excluded.v2_id WHEN excluded.v2_id IS NULL THEN v2_id ELSE MAX(v2_id, excluded.v2_id) END",
-        ),
+        RowFold.TAG_GROUPS,
+        listOf(RowFold.EARLIEST_CREATED_AT, RowFold.GREATEST_V2_ID),
     )
 
-    private val articles = upsert(
-        table("articles"),
-        listOf(SyncLww.ARTICLE_BODY, SyncLww.ARTICLE_READ, SyncLww.ARTICLE_RETENTION),
-        listOf(
-            EARLIEST_CREATED_AT,
-            "cached_at = MAX(cached_at, excluded.cached_at)",
-            "updated_at = MAX(updated_at, excluded.updated_at)",
-        ),
-    )
+    private val articles = upsert(table("articles"), RowFold.ARTICLE_GROUPS, RowFold.ARTICLE_EXTRA_ASSIGNMENTS)
 
     private val feedTags = upsert(table("feed_tags"), listOf(SyncLww.FEED_TAG))
 

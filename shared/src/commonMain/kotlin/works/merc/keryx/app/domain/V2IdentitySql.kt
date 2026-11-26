@@ -104,7 +104,7 @@ internal object V2IdentitySql {
         kind = ID_REMAP_KIND_FOLDER,
         columns = FOLDER_COLUMNS,
         columnTypes = listOf("TEXT", "TEXT", "INTEGER", "INTEGER", "INTEGER", "INTEGER", "INTEGER", "INTEGER", "TEXT"),
-        groups = listOf(SyncLww.FOLDER_EXISTENCE, SyncLww.FOLDER_NAME, SyncLww.FOLDER_SORT_ORDER),
+        groups = RowFold.FOLDER_GROUPS,
         // feeds.folder_id is resolved from the raw assignment through ks_id_remap, and recording the
         // moves has re-resolved every feed whose raw assignment names a moving id. A feed whose cache
         // still names a moving folder (one without a raw row) is resolved again here, so no feed points
@@ -124,7 +124,7 @@ internal object V2IdentitySql {
         kind = ID_REMAP_KIND_TAG,
         columns = TAG_COLUMNS,
         columnTypes = listOf("TEXT", "TEXT", "TEXT", "INTEGER", "INTEGER", "INTEGER", "INTEGER", "INTEGER", "INTEGER", "INTEGER", "TEXT"),
-        groups = listOf(SyncLww.TAG_EXISTENCE, SyncLww.TAG_NAME, SyncLww.TAG_COLOR, SyncLww.TAG_SORT_ORDER),
+        groups = RowFold.TAG_GROUPS,
     )
 
     private const val ADJACENCY = "ks_identity_adj"
@@ -132,19 +132,12 @@ internal object V2IdentitySql {
     private const val FEED_TAG_FOLD = "ks_identity_feed_tag_fold"
 
     /**
-     * The `ON CONFLICT` assignments that fold one version of a row into another: every group by
-     * [SyncLww], the earliest `created_at`, and the greatest non-NULL `v2_id` (as [ReduceSql] folds it).
-     * The `v2_id` column decides nothing — the edges do — so the rule only has to be deterministic.
+     * The `ON CONFLICT` assignments that fold one version of a row into another, as [ReduceSql] folds
+     * it ([RowFold]): every group by [SyncLww], the earliest `created_at`, and the greatest non-NULL `v2_id`.
      */
     private fun foldAssignments(kind: Kind): String =
-        (kind.groups.flatMap(SyncLww::upsertAssignments) + listOf(
-            "created_at = MIN(created_at, excluded.created_at)",
-            "v2_id = $GREATEST_V2_ID",
-        )).joinToString(",\n    ")
-
-    /** The greatest non-NULL of a row's `v2_id` and `excluded`'s (NULL only when both are). */
-    const val GREATEST_V2_ID: String =
-        "CASE WHEN v2_id IS NULL THEN excluded.v2_id WHEN excluded.v2_id IS NULL THEN v2_id ELSE MAX(v2_id, excluded.v2_id) END"
+        (kind.groups.flatMap(SyncLww::upsertAssignments) + listOf(RowFold.EARLIEST_CREATED_AT, RowFold.GREATEST_V2_ID))
+            .joinToString(",\n    ")
 
     /** The identity graph of [kind] and its canonical ids, into [Kind.canon]. */
     private fun canonical(kind: Kind): List<String> = listOf(
