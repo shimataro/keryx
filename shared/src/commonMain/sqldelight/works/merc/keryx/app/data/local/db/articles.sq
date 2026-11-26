@@ -12,7 +12,10 @@
 -- NULL = no delete/undelete event yet. In the merge the star (is_starred by starred_at) and the
 -- deletion (deleted_at by deleted_updated_at) are TWO independent last-write-wins groups with no
 -- rule across them, so a row can be both starred and deleted (a star from one device, a cleanup
--- from another). Whether an article is shown is decided here, when it is read:
+-- from another). Version 2 already wrote such rows (a star older than another device's cleanup)
+-- and hid them, since it showed only `deleted_at IS NULL`; migration 2 -> 3 (2.sqm) records each
+-- one's star as removed at its deletion, so it stays hidden. Whether an article is shown is decided
+-- here, when it is read:
 --
 --     VISIBLE = (deleted_at IS NULL OR is_starred = 1)
 --

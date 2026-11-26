@@ -52,7 +52,8 @@
   その間に子を退避・復帰させる（外部キーは有効のまま: `feeds.folder_id` は参照先のフォルダーが存在するときだけ
   退避して NULL にし、タグが存在する `feed_tags` 行を作業表へ移す。親がもともと存在しない子は触らずに残るので、
   `foreign_key_check` に新しい違反は現れない。フィードが存在しないリンクは復帰できないため捨てられる）——、
-  `articles.body_updated_at` を追加し（初期値は `updated_at`）、`search_text` が生の `content` / `summary` と同じままの記事（HTML 除去の
+  `articles.body_updated_at` を追加し（初期値は `updated_at`）、スター付きかつ削除済みの記事のスターを、その削除の時点で
+  外れたものとして記録し（`is_starred` を 0、`starred_at` を 2 つのスタンプの新しいほうにする。後述の「articles」参照）、`search_text` が生の `content` / `summary` と同じままの記事（HTML 除去の
   導入前に書かれた行）を `ks_search_pending` に登録し、さらにすべての移行が走らせる `AfterVersion(2)` コールバック
   （`domain/TagFolderIdRekey.kt`。各プラットフォームのドライバーと `DatabaseMerger` のクラウドファイル移行に
   `KERYX_SCHEMA_CALLBACKS` として配線済み）で、**すべてのタグとフォルダーの id を名前から導かれた id に振り直す**
@@ -169,7 +170,10 @@
   マージではスター（`is_starred` を `starred_at` で）と削除（`deleted_at` を `deleted_updated_at` で）を
   **独立した 2 つのグループ**とし、グループをまたぐ規則は持たない。そのため、行がスター付きかつ削除済みになることが
   ある——ある端末のスターと別の端末のキャッシュ削除をどちらの順序でマージしても、またフィードや記事の同一性が 2 行を
-  1 つに寄せても。**削除されていないか、スター付きの記事は表示される**: `(deleted_at IS NULL OR is_starred = 1)` で、
+  1 つに寄せても。バージョン 2 もこの状態の行——他の端末のキャッシュ削除より古いスター——を書き、`deleted_at IS NULL`
+  の行しか表示しなかったので隠していた。`2.sqm` はその各行のスターを、削除の時点で外れたものとして記録する（ローカル
+  DB でも、マージが移行する pre-delta のクラウドファイルでも同じ）ので、アップグレード後も表示されない。
+  **削除されていないか、スター付きの記事は表示される**: `(deleted_at IS NULL OR is_starred = 1)` で、
   読むときに決める。一覧・未読数・検索・`aliveFlagsIn` / `idsByFeeds` の照会・すべて既読にする、のすべてがちょうど
   この判定を使う（`articles.sq`。生の SQL と Kotlin には `data/local/ArticleVisibility.kt`）ので、スターがキャッシュ
   削除に負けることはない。スターはスターのグループにしか触れない（`updateStarStatus`）。削除済みの行のスターを外すと

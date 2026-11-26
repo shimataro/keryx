@@ -56,7 +56,8 @@ through it rather than composing `AppDirs.appDataDir()` with the filename themse
   saved and NULLed only where its folder exists, the `feed_tags` rows whose tag exists move to a work table, and a
   child whose parent was never there survives untouched, so no new `foreign_key_check` violation appears; a link
   whose feed is gone cannot be restored and is dropped) —, adds `articles.body_updated_at` (initialized from
-  `updated_at`), registers in `ks_search_pending` every
+  `updated_at`), records the star of every article both starred and deleted as removed at its deletion (`is_starred`
+  0, `starred_at` the later of its two stamps — see "articles" below), registers in `ks_search_pending` every
   article whose `search_text` still equals its raw `content` / `summary` (written before HTML stripping), and — in
   the `AfterVersion(2)` callback every migration runs (`domain/TagFolderIdRekey.kt`, wired as
   `KERYX_SCHEMA_CALLBACKS` into every platform's driver and `DatabaseMerger`'s cloud-file migration) — **re-keys
@@ -158,7 +159,10 @@ Indexes: `feed_id`, `is_read`, `is_starred`, and a composite `(published_at DESC
   In the merge the star (`is_starred` by `starred_at`) and the deletion (`deleted_at` by `deleted_updated_at`) are
   **two independent groups**, with no rule across them, so a row can be both starred and deleted — a star made on one
   device and a cleanup made on another, merged in either order, or two rows a feed or article identity merged into
-  one. **An article is visible while it is not deleted or is starred**: `(deleted_at IS NULL OR is_starred = 1)`,
+  one. Version 2 already wrote such a row — a star older than another device's cleanup — and hid it, since it showed
+  only `deleted_at IS NULL`; `2.sqm` records each one's star as removed at its deletion, on the local database and on a
+  pre-delta cloud file the merge migrates alike, so it stays hidden after the upgrade. **An article is visible while
+  it is not deleted or is starred**: `(deleted_at IS NULL OR is_starred = 1)`,
   decided when it is read. Every list, unread count, search, `aliveFlagsIn` / `idsByFeeds` lookup and mark-all-read uses
   exactly that predicate (`articles.sq`; `data/local/ArticleVisibility.kt` for raw SQL and Kotlin), so a star is never
   lost to a cleanup. A star touches only the star group (`updateStarStatus`); an unstar of a deleted row also stamps an

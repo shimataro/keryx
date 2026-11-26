@@ -481,6 +481,51 @@ class SchemaV3MigrationTest {
     }
 
     /**
+     * Version 2 writes a row both starred and deleted when another device's cache cleanup is newer than
+     * the star, and hides it. The migration records that star as removed at the deletion, so the row
+     * stays out of every list once version 3 shows starred rows whatever their deletion says. A row only
+     * starred, or only deleted, is left as it was, and nothing reaches the outbox.
+     */
+    @Test
+    fun migrationUnstarsARowBothStarredAndDeletedSoItStaysHidden() {
+        fun article(id: String, starred: Long, starredAt: Long?, deletedAt: Long?, deletedUpdatedAt: Long?) =
+            """INSERT INTO articles (id, feed_id, guid, url, title, is_starred, starred_at, cached_at, updated_at, created_at,
+                                     deleted_at, deleted_updated_at)
+               VALUES ('$id', 'f1', '$id', 'u', 'T', $starred, ${starredAt ?: "NULL"}, 0, 0, 0,
+                       ${deletedAt ?: "NULL"}, ${deletedUpdatedAt ?: "NULL"})"""
+        val file = migratedDb(
+            listOf(
+                "INSERT INTO feeds (id, url, title, updated_at, created_at) VALUES ('f1', 'https://a', 'A', 0, 0)",
+                article("starred-then-cleaned", starred = 1, starredAt = 150, deletedAt = 250, deletedUpdatedAt = 250),
+                article("starred-no-stamp", starred = 1, starredAt = null, deletedAt = 300, deletedUpdatedAt = null),
+                article("starred-only", starred = 1, starredAt = 150, deletedAt = null, deletedUpdatedAt = null),
+                article("deleted-only", starred = 0, starredAt = 100, deletedAt = 250, deletedUpdatedAt = 250),
+            ),
+        )
+        withConnection(file) { conn ->
+            assertEquals(
+                listOf(
+                    listOf<Any?>("deleted-only", 0, 100, 250, 250),
+                    listOf<Any?>("starred-no-stamp", 0, 0, 300, null),
+                    listOf<Any?>("starred-only", 1, 150, null, null),
+                    listOf<Any?>("starred-then-cleaned", 0, 250, 250, 250),
+                ),
+                conn.rows("SELECT id, is_starred, starred_at, deleted_at, deleted_updated_at FROM articles ORDER BY id"),
+            )
+            assertEquals(listOf(listOf<Any?>(0)), conn.rows("SELECT COUNT(*) FROM sync_outbox"))
+        }
+        val driver = JdbcSqliteDriver("jdbc:sqlite:${file.absolutePath}")
+        try {
+            val queries = KeryxDatabase(driver).articlesQueries
+            assertEquals(listOf("starred-only"), queries.watchAll().executeAsList().map { it.id })
+            assertEquals(listOf("starred-only"), queries.watchStarred().executeAsList().map { it.id })
+            assertEquals(listOf("starred-only"), queries.watchByFeed("f1").executeAsList().map { it.id })
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
      * The desktop factory runs a migration and its `user_version` stamp in one transaction: a migration
      * that fails halfway leaves the file at version 2 with none of its statements applied, so the next
      * launch can run it again.

@@ -1139,6 +1139,49 @@ class SyncMergerTest {
     }
 
     /**
+     * A version-2 cloud file holds rows both starred and deleted (a star older than another device's
+     * cache cleanup), which version 2 never showed. The merge migrates the file with the same `2.sqm` as
+     * a local upgrade, so those stars arrive as removed at the deletion: an article only the cloud holds
+     * is imported hidden, and one main holds starred but not deleted takes the newer unstar and the
+     * deletion — hidden, as version 2 would leave it.
+     */
+    @Test
+    fun aVersionTwoCloudFilesStarredAndDeletedRowsStayHiddenAfterTheMerge() {
+        val cloudFile = File.createTempFile("cloud-v2-", ".db").apply { deleteOnExit() }
+        JdbcSqliteDriver("jdbc:sqlite:${cloudFile.absolutePath}").use { driver ->
+            driver.createSchemaV2()
+            listOf(
+                "INSERT INTO feeds (id, url, title, updated_at, created_at) VALUES ('f1', 'https://a', 'A', 100, 1)",
+                """INSERT INTO articles (id, feed_id, guid, url, title, content, is_starred, starred_at, cached_at,
+                                         updated_at, created_at, deleted_at, deleted_updated_at)
+                   VALUES ('a1', 'f1', 'g1', 'u', 'T', 'c', 1, 150, 100, 250, 0, 250, 250)""",
+                """INSERT INTO articles (id, feed_id, guid, url, title, content, is_starred, starred_at, cached_at,
+                                         updated_at, created_at, deleted_at, deleted_updated_at)
+                   VALUES ('a2', 'f1', 'g2', 'u', 'T', 'c', 1, 150, 100, 250, 0, 250, 250)""",
+            ).forEach { driver.execute(null, it, 0) }
+        }
+
+        val (localFile, localDriver, localDb) = fileDb()
+        localDb.insertFeed("f1", now = 100, url = "https://a")
+        insertArticle(localDb, "a1", "f1", "g1", isRead = 0, readAt = null, updatedAt = 150, isStarred = 1, starredAt = 150)
+        localDriver.close()
+
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, KeryxDatabase.Schema.version, MergeSql.all)
+
+        val (_, verifyDriver, verifyDb) = reopen(localFile)
+        try {
+            for (id in listOf("a1", "a2")) {
+                val row = verifyDb.articlesQueries.getById(id).executeAsOne()
+                assertEquals(listOf<Any?>(0L, 250L, 250L), listOf(row.is_starred, row.starred_at, row.deleted_at), id)
+            }
+            assertEquals(emptyList(), verifyDb.articlesQueries.watchAll().executeAsList().map { it.id })
+            assertEquals(emptyList(), verifyDb.articlesQueries.watchStarred().executeAsList().map { it.id })
+        } finally {
+            verifyDriver.close()
+        }
+    }
+
+    /**
      * Two synced v2 devices share a tag and folder id. One renames them before the rename syncs, then
      * both upgrade to v3. Each side derives a different name-derived id, but the migration kept the
      * shared pre-upgrade id in `v2_id`. The merge must reconcile by `v2_id` so the rows converge to one

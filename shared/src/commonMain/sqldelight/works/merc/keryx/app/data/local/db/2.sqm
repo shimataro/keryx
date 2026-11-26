@@ -102,6 +102,18 @@ CREATE INDEX folders_name ON folders(name);
 ALTER TABLE articles ADD COLUMN body_updated_at INTEGER;
 UPDATE articles SET body_updated_at = updated_at;
 
+-- 2c. A row both starred and deleted is recorded as unstarred at its deletion. Version 2 writes such
+--     a row when another device's cache cleanup is newer than the star (its merge takes the two by
+--     their own stamps), and version 2 hides it: it shows only rows with deleted_at IS NULL. Version 3
+--     shows a starred row whatever its deletion says (docs/db-schema.md "articles"), so without this
+--     the row would reappear on upgrade. Decided by the row's values alone, so every device, and a
+--     pre-delta cloud file migrated by the merge with this same file, converts it the same way. Run
+--     before the capture triggers exist, so nothing is recorded in sync_outbox.
+UPDATE articles
+SET is_starred = 0,
+    starred_at = MAX(COALESCE(starred_at, 0), COALESCE(deleted_updated_at, 0))
+WHERE is_starred = 1 AND deleted_at IS NOT NULL;
+
 -- 3. Sync bookkeeping tables (sync_bookkeeping.sq).
 CREATE TABLE sync_outbox (
     seq   INTEGER PRIMARY KEY AUTOINCREMENT,
