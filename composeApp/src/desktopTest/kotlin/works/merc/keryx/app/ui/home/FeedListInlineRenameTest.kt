@@ -25,12 +25,14 @@ import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.requestFocus
 import androidx.compose.ui.test.v2.runDesktopComposeUiTest
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import org.koin.compose.KoinApplication
 import org.koin.dsl.koinConfiguration
 import org.koin.dsl.module
 import works.merc.keryx.app.core.ArticleFilter
+import works.merc.keryx.app.awaitConditionBlocking
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.domain.TagFolderIdRemap
 import works.merc.keryx.app.domain.TagFolderIdRemaps
@@ -45,6 +47,13 @@ import works.merc.keryx.app.presentation.home.FeedListRowSelection
 import works.merc.keryx.app.presentation.home.HomeViewModel
 import works.merc.keryx.app.ui.menu.MenuCommand
 import works.merc.keryx.app.ui.menu.MenuController
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
+import javax.swing.SwingUtilities
+import kotlin.coroutines.CoroutineContext
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -751,6 +760,136 @@ class FeedListInlineRenameTest {
             reviveT1()
             awaitTags(vm, "t1", "t-other")
             editor().assertDoesNotExist()
+        }
+    }
+
+    /**
+     * The ViewModel's background dispatcher: inline (as [Dispatchers.Unconfined] is) until [diverting]
+     * is set, then onto threads of its own — so a catch-up started then reads `ks_id_remap` and waits
+     * at [GatedIdRemaps]'s gate off the EDT, while the test commits another re-key and the lists
+     * re-run (also on these threads) around it. [inFlight] counts the blocks still running there.
+     */
+    private class DivertingDispatcher : CoroutineDispatcher() {
+        @Volatile var diverting = false
+        val inFlight = AtomicInteger(0)
+        private val pool: ExecutorService = Executors.newCachedThreadPool { runnable ->
+            Thread(runnable, "diverted-vm-dispatcher").apply { isDaemon = true }
+        }
+
+        override fun isDispatchNeeded(context: CoroutineContext): Boolean = diverting
+
+        override fun dispatch(context: CoroutineContext, block: Runnable) {
+            if (!diverting) return block.run()
+            inFlight.incrementAndGet()
+            pool.execute {
+                try {
+                    block.run()
+                } finally {
+                    inFlight.decrementAndGet()
+                }
+            }
+        }
+
+        fun shutdown() {
+            pool.shutdownNow()
+        }
+    }
+
+    /**
+     * A [TagFolderIdRemaps] whose next read, once armed ([arm]), reads `ks_id_remap` when it starts —
+     * as the database read does — and then waits at a gate until [release]: a re-key committed
+     * meanwhile is not in the map it publishes. Later reads are ordinary.
+     */
+    private class GatedIdRemaps(db: KeryxDatabase) {
+        @Volatile private var gate: CountDownLatch? = null
+        val entered = CountDownLatch(1)
+        val remaps = TagFolderIdRemaps({
+            val rows = db.sync_bookkeepingQueries.idRemapAll().executeAsList()
+            val read = TagFolderIdRemap(
+                tagIds = rows.filter { it.kind == "tag" }.associate { it.old_id to it.new_id },
+                folderIds = rows.filter { it.kind == "folder" }.associate { it.old_id to it.new_id },
+            )
+            gate?.let { held ->
+                gate = null
+                entered.countDown()
+                check(held.await(5, TimeUnit.SECONDS)) { "the gated read was never released (test)" }
+            }
+            read
+        }, Dispatchers.Unconfined)
+
+        /** Arms the next read; returns the gate it waits at, opened by [release]. */
+        fun arm(): CountDownLatch = CountDownLatch(1).also { gate = it }
+
+        fun release(gate: CountDownLatch) = gate.countDown()
+    }
+
+    /**
+     * Two re-keys in a row, t-a -> t-b then t-b -> t-c, with the edit's catch-up between them: the list
+     * showing t-b starts a catch-up, which reads the first re-key only; the second commits, and the
+     * lists show t-c, before that catch-up returns. Judged against the map it read, t-c is not the
+     * edit's row — but the lists changed during the catch-up, so nothing is decided on them there: the
+     * newer lists get a catch-up of their own, which reads the second re-key and finds the row. The
+     * editor stays open with the typed text, and the commit lands on t-c.
+     */
+    @Test
+    fun aListNewerThanTheCaughtUpMapDoesNotDiscardTheRenameInProgress() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        db.insertTag("t-a", "Tag One", sortOrder = 0L)
+        val gated = GatedIdRemaps(db)
+        val diverting = DivertingDispatcher()
+        try {
+            useHomeViewModel(driver, db, dispatcher = diverting, idRemaps = gated.remaps) { fixture ->
+                val vm = fixture.vm
+                setInlineRenameContent(vm)
+                startInlineRename(vm, ArticleFilter.Tag("t-a"))
+                typeName("Half typed")
+
+                // The first re-key commits and the lists re-run over it; nothing publishes the map.
+                driver.rekeyTagForTest("t-a", "t-b")
+                awaitConditionBlocking { vm.tags.value.map { it.id } == listOf("t-b") }
+
+                // The lists reach the editor: the edit's catch-up starts and is held after its read.
+                val gate = gated.arm()
+                diverting.diverting = true
+                waitForIdle()
+                assertTrue(gated.entered.await(5, TimeUnit.SECONDS), "the edit's catch-up started")
+
+                // The second re-key commits and the lists re-run over it while that catch-up is held.
+                // Frames are stopped, so the editor's composition does not recompose (which would
+                // cancel the held run) while the lists' delivery reaches it: the collected lists show
+                // t-c when the catch-up returns, before any recomposition — as when both are queued on
+                // the main thread ahead of the next frame.
+                mainClock.autoAdvance = false
+                try {
+                    driver.rekeyTagForTest("t-b", "t-c")
+                    awaitConditionBlocking { vm.tags.value.map { it.id } == listOf("t-c") }
+                    diverting.diverting = false
+                    gated.release(gate)
+                    // The held catch-up publishes the map it read (the first re-key only) and resumes
+                    // on the EDT; drain the EDT (twice: anything that continuation queues runs too) so it
+                    // has run before frames resume.
+                    awaitConditionBlocking { diverting.inFlight.get() == 0 }
+                    assertEquals(mapOf("t-a" to "t-b"), vm.tagFolderIdRemap.value.tagIds)
+                    SwingUtilities.invokeAndWait {}
+                    SwingUtilities.invokeAndWait {}
+                } finally {
+                    mainClock.autoAdvance = true
+                }
+
+                // The newer lists' own catch-up reads the second re-key, and the row is found under it.
+                awaitTags(vm, "t-c")
+                waitUntil("the editor is back on the re-keyed row", timeoutMillis = 5_000) {
+                    onAllNodesWithTag(INLINE_RENAME_FIELD_TEST_TAG, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+                }
+                assertEquals("t-c", vm.tagFolderIdRemap.value.tag("t-a"))
+
+                editor().assertIsDisplayed()
+                editor().assertTextContains("Half typed")
+                pressEnter()
+                assertEquals("Half typed", db.tagOf("t-c").name, "the commit lands on the row the tag became")
+            }
+        } finally {
+            diverting.shutdown()
         }
     }
 }
