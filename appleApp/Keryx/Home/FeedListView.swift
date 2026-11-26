@@ -305,8 +305,8 @@ struct FeedListView: View {
             for: FeedListRowSelectionTag(tagId: tag.id),
             initialName: tag.name,
             blockingError: { NameValidationKt.isDuplicateTagName(name: $0, tags: home.tags, excludeId: tag.id) ? L("home_tag_name_duplicate") : nil },
-            // The tag's color is kept as it is — it has its own menu item and dot popover.
-            commit: { home.viewModel.updateTag(id: tag.id, name: $0, color: tag.color) }
+            // Only the name is written — the color has its own menu item and dot popover.
+            commit: { home.viewModel.renameTag(id: tag.id, name: $0) }
         )
     }
 
@@ -623,8 +623,8 @@ private struct SidebarRenameSheet: ViewModifier {
         case .folder(let id):
             home.viewModel.updateFolder(id: id, name: name)
         case .tag(let id):
-            // The tag's color is kept as it is — it has its own menu palette.
-            home.viewModel.updateTag(id: id, name: name, color: home.tags.first { $0.id == id }?.color)
+            // Only the name is written — the color has its own menu palette.
+            home.viewModel.renameTag(id: id, name: name)
         case .feed(let id):
             home.viewModel.renameFeed(id: id, title: name)
         }

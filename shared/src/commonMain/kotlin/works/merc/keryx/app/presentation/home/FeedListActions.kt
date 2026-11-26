@@ -81,11 +81,16 @@ internal class FeedListActions(
         }, null)
     }
 
-    /** See `HomeViewModel.updateTag`. Blank names are ignored. */
-    fun updateTag(id: String, name: String, color: String?) {
+    /** See `HomeViewModel.renameTag`. Blank names are ignored. */
+    fun renameTag(id: String, name: String) {
         if (name.isBlank()) return
         val trimmed = name.trim()
-        launchWrite({ tagRepository.updateTag(id, trimmed, color) }, null)
+        launchWrite({ tagRepository.renameTag(id, trimmed) }, null)
+    }
+
+    /** See `HomeViewModel.setTagColor`. */
+    fun setTagColor(id: String, color: String?) {
+        launchWrite({ tagRepository.setTagColor(id, color) }, null)
     }
 
     /**

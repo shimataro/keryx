@@ -183,7 +183,7 @@ Indexes: `feed_id`, `is_read`, `is_starred`, and a composite `(published_at DESC
   the same identity; every such move is recorded in `ks_id_remap` (below), and the old row is gone. So that an id
   held from before a move still reaches its row, **every write that takes a tag id resolves it** in the write
   statement itself — the id unchanged while a row has it, else the id `ks_id_remap` maps it to (`tags.sq`:
-  `updateNameAndColor`, `softDelete`; `feed_tags.upsert`; `articles.markAllReadByTag`) — so a rename, delete,
+  `updateName`, `updateColor`, `softDelete`; `feed_tags.upsert`; `articles.markAllReadByTag`) — so a rename, recolor, delete,
   attach or mark-all-read issued with a stale id (an open rename field, a queued feed-list write, a drag) lands on
   the row it became instead of matching nothing or failing a foreign key. The resolution is part of the statement,
   not a read before it, so no transaction gains a read ahead of its first write and no re-key can slip in between.

@@ -2219,15 +2219,23 @@ class HomeViewModel(
         feedListActions.createTag(name, color, attachToFeedId)
 
     /**
-     * Updates a tag with the specified name and color.
+     * Renames a tag, leaving its color alone. Every rename route (inline field, sheet, context menu)
+     * calls this.
      *
      * Blank names are ignored.
      *
-     * @param id The identifier of the tag to update.
+     * @param id The identifier of the tag to rename.
      * @param name The tag's new name.
+     */
+    fun renameTag(id: String, name: String) = feedListActions.renameTag(id, name)
+
+    /**
+     * Sets a tag's color, leaving its name alone. Every color-picking route calls this.
+     *
+     * @param id The identifier of the tag to recolor.
      * @param color The tag's new color, or `null` to remove the color.
      */
-    fun updateTag(id: String, name: String, color: String?) = feedListActions.updateTag(id, name, color)
+    fun setTagColor(id: String, color: String?) = feedListActions.setTagColor(id, color)
 
     /**
      * Deletes a tag and resets the active filter if it references the deleted tag — once the queued

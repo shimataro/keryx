@@ -140,18 +140,23 @@ SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM tags WHERE id = :nameDerivedId)
     :name, :color, 0, NULL, :now, :now, :now, :now, :now
 WHERE NOT EXISTS (SELECT 1 FROM tags WHERE name = :name);
 
--- A rename / recolor of an existing tag (TagRepository.updateTag): the one write, so a value another
--- writer (a sync merge) changed in the meantime — the sort order, the deletion — is never written back
--- from a stale read. Every SET expression reads the row's values from before the update, so each
--- per-field stamp moves (forward, as in upsert) only when its own field changes. :id is resolved
--- (see the note above).
-updateNameAndColor:
+-- A rename of an existing tag (TagRepository.renameTag) writes the name alone, and a recolor
+-- (TagRepository.setTagColor) the color alone, so neither writes back a value the caller read
+-- before another writer (a sync merge) changed it — the other field, the sort order, the deletion.
+-- Every SET expression reads the row's values from before the update, so the field's stamp moves
+-- (forward, as in upsert) only when the field changes. :id is resolved (see the note above).
+updateName:
 UPDATE tags SET
     name_updated_at = CASE WHEN name IS NOT :name
         THEN MAX(:now, COALESCE(name_updated_at, 0) + 1) ELSE name_updated_at END,
+    name = :name,
+    updated_at = MAX(:now, updated_at + 1)
+WHERE id = COALESCE((SELECT id FROM tags WHERE id = :id), (SELECT new_id FROM ks_id_remap WHERE kind = 'tag' AND old_id = :id), :id);
+
+updateColor:
+UPDATE tags SET
     color_updated_at = CASE WHEN color IS NOT :color
         THEN MAX(:now, COALESCE(color_updated_at, 0) + 1) ELSE color_updated_at END,
-    name = :name,
     color = :color,
     updated_at = MAX(:now, updated_at + 1)
 WHERE id = COALESCE((SELECT id FROM tags WHERE id = :id), (SELECT new_id FROM ks_id_remap WHERE kind = 'tag' AND old_id = :id), :id);

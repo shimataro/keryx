@@ -394,7 +394,7 @@ private struct TagRowLabel: View {
             iconPopoverPresented: $showingColorPicker
         ) {
             TagColorPicker(selectedHex: tag.color) { hex in
-                home.viewModel.updateTag(id: tag.id, name: tag.name, color: hex)
+                home.viewModel.setTagColor(id: tag.id, color: hex)
                 showingColorPicker = false
             }
         }

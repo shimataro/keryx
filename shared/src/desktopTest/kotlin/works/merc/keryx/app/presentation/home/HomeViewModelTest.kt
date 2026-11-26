@@ -5713,7 +5713,8 @@ class HomeViewModelTest {
         vm.selectFilter(ArticleFilter.Tag("t2"))
         writes.hold()
 
-        vm.updateTag("t1", "New tag", "#123456")
+        vm.renameTag("t1", "New tag")
+        vm.setTagColor("t1", "#123456")
         vm.deleteTag("t2")
         vm.setFeedTag("f1", "t1", attached = true)
         vm.updateFolder("d1", "New folder")
@@ -5731,7 +5732,7 @@ class HomeViewModelTest {
         assertNull(db.feedsQueries.getById("f2").executeAsOne().folder_id)
         assertNull(db.foldersQueries.getById("d3").executeAsOne().deleted_at)
         // The writes wait in the ViewModel's serial feed-list queue, whose one consumer is held on
-        // the write dispatcher with the first of them; the other six wait behind it in the queue.
+        // the write dispatcher with the first of them; the other seven wait behind it in the queue.
         assertEquals(1, writes.queuedCount)
 
         writes.release()
@@ -5855,25 +5856,26 @@ class HomeViewModelTest {
     }
 
     @Test
-    fun updateTagWithBlankNameIsNoOp() = runTest {
+    fun renameTagWithBlankNameIsNoOp() = runTest {
         db.insertTag("t1", "Old")
         val vm = newViewModel()
         subscribeAll(vm)
 
-        vm.updateTag("t1", "   ", null)
+        vm.renameTag("t1", "   ")
 
         assertEquals("Old", db.tagsQueries.getById("t1").executeAsOne().name)
     }
 
     @Test
-    fun updateTagWithValidNameUpdatesTag() = runTest {
-        db.insertTag("t1", "Old")
+    fun renameTagWithValidNameUpdatesTag() = runTest {
+        db.insertTag("t1", "Old", color = "#111111")
         val vm = newViewModel()
         subscribeAll(vm)
 
-        vm.updateTag("t1", "  New  ", null)
+        vm.renameTag("t1", "  New  ")
 
         assertEquals("New", db.tagsQueries.getById("t1").executeAsOne().name)
+        assertEquals("#111111", db.tagsQueries.getById("t1").executeAsOne().color)
     }
 
     @Test
@@ -5887,16 +5889,17 @@ class HomeViewModelTest {
     }
 
     @Test
-    fun updateTagPropagatesColorToRepositoryWithoutLosingIt() = runTest {
+    fun setTagColorPropagatesColorToRepositoryWithoutLosingIt() = runTest {
         db.insertTag("t1", "Old")
         val vm = newViewModel()
         subscribeAll(vm)
 
-        vm.updateTag("t1", "New", "#00FF00")
+        vm.setTagColor("t1", "#00FF00")
 
-        // A non-null color passed to updateTag must actually be persisted, not silently dropped
+        // A non-null color passed to setTagColor must actually be persisted, not silently dropped
         // to null (the old hardcoded behavior before per-tag color selection existed).
         assertEquals("#00FF00", db.tagsQueries.getById("t1").executeAsOne().color)
+        assertEquals("Old", db.tagsQueries.getById("t1").executeAsOne().name)
     }
 
     @Test

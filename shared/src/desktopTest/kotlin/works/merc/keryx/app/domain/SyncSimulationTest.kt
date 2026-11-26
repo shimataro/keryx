@@ -482,7 +482,7 @@ class SyncSimulationTest {
             in 28..29 -> aliveFolders.randomOrNull(r)?.let { device.folders.deleteFolder(it.id) }
             in 30..34 -> aliveFeeds.randomOrNull(r)?.let { feed -> device.feeds.moveFeed(feed.id, aliveFolders.randomOrNull(r)?.id) }
             in 35..37 -> device.tags.createTag(sharedOrUnique("tag"), if (r.nextBoolean()) "#ff0000" else null)
-            in 38..39 -> aliveTags.randomOrNull(r)?.let { device.tags.updateTag(it.id, sharedOrUnique("tag"), "#00ff00") }
+            in 38..39 -> aliveTags.randomOrNull(r)?.let { device.tags.renameTag(it.id, sharedOrUnique("tag")); device.tags.setTagColor(it.id, "#00ff00") }
             in 40..41 -> aliveTags.randomOrNull(r)?.let { device.tags.deleteTag(it.id) }
             in 42..49 -> {
                 val feed = aliveFeeds.randomOrNull(r)

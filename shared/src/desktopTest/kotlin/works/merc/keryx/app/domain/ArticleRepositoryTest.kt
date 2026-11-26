@@ -1162,7 +1162,7 @@ class ArticleRepositoryTest {
             assertEquals(1, tagEmissions.size)
 
             db.foldersQueries.updateName(name = "Renamed", now = 5L, id = "d1")
-            db.tagsQueries.updateNameAndColor(name = "Renamed", color = null, now = 5L, id = "t1")
+            db.tagsQueries.updateName(name = "Renamed", now = 5L, id = "t1")
 
             assertEquals(1, folderEmissions.size, "a rename re-emitted the folder's list")
             assertEquals(1, tagEmissions.size, "a rename re-emitted the tag's list")

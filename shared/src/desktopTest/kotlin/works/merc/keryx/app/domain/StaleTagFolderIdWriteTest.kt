@@ -67,13 +67,32 @@ class StaleTagFolderIdWriteTest {
             db.insertTag("t-old", "Work", sortOrder = 3L, color = "#111111")
             driver.rekeyTagForTest("t-old", "t-new")
 
-            repos(db, driver).tags.updateTag("t-old", "Office", "#222222")
+            repos(db, driver).tags.renameTag("t-old", "Office")
 
             val row = db.tagsQueries.getById("t-new").executeAsOne()
             assertEquals("Office", row.name)
-            assertEquals("#222222", row.color)
+            assertEquals("#111111", row.color, "a rename leaves the color alone")
             assertEquals(3L, row.sort_order, "a rename leaves the sort order alone")
             assertEquals(1_000L, row.name_updated_at)
+            assertNull(db.tagsQueries.getById("t-old").executeAsOneOrNull())
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun recoloringATagByItsStaleIdRecolorsTheRowItBecame() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertTag("t-old", "Work", color = "#111111")
+            driver.rekeyTagForTest("t-old", "t-new")
+
+            repos(db, driver).tags.setTagColor("t-old", "#222222")
+
+            val row = db.tagsQueries.getById("t-new").executeAsOne()
+            assertEquals("Work", row.name, "a recolor leaves the name alone")
+            assertEquals("#222222", row.color)
+            assertEquals(1_000L, row.color_updated_at)
             assertNull(db.tagsQueries.getById("t-old").executeAsOneOrNull())
         } finally {
             driver.close()
@@ -245,7 +264,7 @@ class StaleTagFolderIdWriteTest {
             driver.rekeyFolderForTest(derivedFolder, "d-other")
             // Renamed away, so "Work" is free to be created again.
             val r = repos(db, driver)
-            r.tags.updateTag("t-other", "Elsewhere", null)
+            r.tags.renameTag("t-other", "Elsewhere")
             r.folders.updateFolder("d-other", "Elsewhere")
 
             val tagId = r.tags.createTag("Work")
@@ -268,8 +287,9 @@ class StaleTagFolderIdWriteTest {
             db.insertTag("t1", "Work")
             val repo = repos(db, driver).tags
 
-            repo.updateTag("t1", "Office", null)
-            repo.updateTag("missing", "Nothing", null)
+            repo.renameTag("t1", "Office")
+            repo.renameTag("missing", "Nothing")
+            repo.setTagColor("missing", "#123456")
 
             assertEquals(listOf("Office"), db.tagsQueries.watchAll().executeAsList().map { it.name })
             assertNull(db.tagsQueries.getById("missing").executeAsOneOrNull())

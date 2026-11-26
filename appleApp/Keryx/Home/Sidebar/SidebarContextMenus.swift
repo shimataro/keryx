@@ -43,7 +43,7 @@ enum SidebarContextMenus {
                     .withTintColor(UIColor(colorFromHex(hex)), renderingMode: .alwaysOriginal),
                 state: tag.color == hex ? .on : .off
             ) { _ in
-                home.viewModel.updateTag(id: tag.id, name: tag.name, color: hex)
+                home.viewModel.setTagColor(id: tag.id, color: hex)
             }
         }
         return UIMenu(title: L("home_change_tag_color_menu"), image: UIImage(systemName: "paintpalette"), children: [

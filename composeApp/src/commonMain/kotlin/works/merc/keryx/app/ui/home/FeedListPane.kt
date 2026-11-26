@@ -815,12 +815,12 @@ internal fun FeedListPane(
                                 onEdit = { inlineEdit = InlineEditTarget.Tag(tag.id) },
                                 onDelete = { confirmingDeleteTag = tag },
                                 editingName = isEditing(InlineEditTarget.Tag(tag.id)),
-                                onRenameCommit = { vm.updateTag(tag.id, it, tag.color); inlineEdit = null },
+                                onRenameCommit = { vm.renameTag(tag.id, it); inlineEdit = null },
                                 onRenameCancel = { inlineEdit = null },
                                 nameError = { name ->
                                     if (isDuplicateTagName(name, tags, excludeId = tag.id)) tagNameDuplicateError else null
                                 },
-                                onSelectColor = { vm.updateTag(tag.id, tag.name, it) },
+                                onSelectColor = { vm.setTagColor(tag.id, it) },
                                 isTouchPrimary = isTouchPrimary,
                             )
                         }
