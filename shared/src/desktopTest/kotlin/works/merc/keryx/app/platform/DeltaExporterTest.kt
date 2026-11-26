@@ -92,7 +92,7 @@ class DeltaExporterTest {
         assertEquals(
             mapOf(
                 "folders" to 2L, "feeds" to 2L, "tags" to 1L, "articles" to 2L, "feed_tags" to 1L, "global_settings" to 1L,
-                "folder_v2_edges" to 0L, "tag_v2_edges" to 0L,
+                "folder_v2_edges" to 0L, "tag_v2_edges" to 0L, "feed_edges" to 0L,
             ),
             export.rowCounts,
         )
@@ -100,7 +100,7 @@ class DeltaExporterTest {
         val tables = query(File(dest), "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").map { it[0] }
         assertEquals(
             listOf(
-                "articles", "feed_tags", "feeds", "folder_v2_edges", "folders", "global_settings", "ks_covered", "ks_meta",
+                "articles", "feed_edges", "feed_tags", "feeds", "folder_v2_edges", "folders", "global_settings", "ks_covered", "ks_meta",
                 "ks_vector", "tag_v2_edges", "tags",
             ),
             tables,
@@ -570,6 +570,102 @@ class DeltaExporterTest {
         val export = DeltaExporter.exportFull(copy, newPath(), meta(2), exceptPath = base)
         // The edge is the only row written: no unchanged feed, tag, folder, article or setting.
         assertEquals(mapOf("tag_v2_edges" to 1L), export.rowCounts.filterValues { it != 0L })
+    }
+
+    // ---- Feed identity edges (ks_feed_edge / feed_edges) ----
+
+    /** An ordinary delta carries the feed edges recorded in the outbox up to `S` (and not those after it). */
+    @Test
+    fun aDeltaCarriesTheFeedEdgesRecordedInTheOutboxUpToTheHighWaterMark() {
+        val local = capturingDb(*seedRows)
+        exec(
+            local,
+            "INSERT INTO ks_feed_edge (a, b) VALUES ('fa', 'fb')",
+            "INSERT OR IGNORE INTO ks_feed_edge (a, b) VALUES ('fa', 'fb')", // already there: records nothing
+            "INSERT INTO sync_merging (flag) VALUES (1)",
+            "INSERT INTO ks_feed_edge (a, b) VALUES ('fc', 'fd')", // inside a merge: recorded all the same
+            "DELETE FROM sync_merging",
+        )
+        assertEquals(
+            listOf(listOf("feed_edges", "fa", "fb"), listOf("feed_edges", "fc", "fd")),
+            query(local, "SELECT tbl, pk, pk2 FROM sync_outbox WHERE tbl = 'feed_edges' ORDER BY seq"),
+        )
+        val delta = newPath()
+        val export = DeltaExporter.exportDelta(local.absolutePath, delta, meta())
+        assertNotNull(export)
+        assertEquals(2L, export.rowCounts["feed_edges"])
+        assertEquals(listOf(listOf("fa", "fb"), listOf("fc", "fd")), query(File(delta), "SELECT a, b FROM feed_edges ORDER BY a"))
+        assertEquals(TransportValidation.Valid, TransportFiles.validate(delta, ValidationTarget.Transport(deltaName(DEV_A, 1))))
+    }
+
+    /** A delta made only of an edge is a delta: it is exported, not treated as empty. */
+    @Test
+    fun aDeltaOfOnlyAFeedEdgeIsExported() {
+        val local = capturingDb()
+        exec(local, "INSERT INTO ks_feed_edge (a, b) VALUES ('fa', 'fb')")
+        val delta = newPath()
+        val export = DeltaExporter.exportDelta(local.absolutePath, delta, meta())
+        assertNotNull(export)
+        assertEquals(mapOf("feed_edges" to 1L), export.rowCounts.filterValues { it != 0L })
+    }
+
+    /** A full send carries every `ks_feed_edge` row, edges added while capture was off included, even with an except file. */
+    @Test
+    fun aFullSendCarriesEveryFeedEdgeAndADeltaNoneThatWasNotCaptured() {
+        val local = capturingDb(*seedRows)
+        exec(
+            local,
+            "UPDATE sync_capture SET enabled = 0",
+            "INSERT INTO ks_feed_edge (a, b) VALUES ('fa', 'fb')",
+            "INSERT INTO ks_feed_edge (a, b) VALUES ('fa', 'fc')",
+            "UPDATE sync_capture SET enabled = 1",
+        )
+        val delta = newPath()
+        assertNotNull(DeltaExporter.exportDelta(local.absolutePath, delta, meta()))
+        assertEquals(emptyList(), query(File(delta), "SELECT a, b FROM feed_edges"))
+
+        val copy = newPath("ks-copy-")
+        DeltaExporter.copyForFullSend(local.absolutePath, copy)
+        for (except in listOf(null, delta)) {
+            val dest = newPath()
+            DeltaExporter.exportFull(copy, dest, meta(2), exceptPath = except)
+            assertEquals(TransportValidation.Valid, TransportFiles.validate(dest, ValidationTarget.Transport(deltaName(DEV_A, 2))))
+            assertEquals(
+                listOf(listOf("fa", "fb"), listOf("fa", "fc")),
+                query(File(dest), "SELECT a, b FROM feed_edges ORDER BY a, b"),
+            )
+        }
+    }
+
+    /** A full send leaves out the feed edges its except file already carries. */
+    @Test
+    fun aFullSendLeavesOutFeedEdgesTheExceptFileCarries() {
+        val local = capturingDb(*seedRows)
+        val base = newPath("ks-base-")
+        exec(File(base).also { TransportFiles.createEmpty(it.absolutePath, meta()) }, "INSERT INTO feed_edges (a, b) VALUES ('fa', 'fb')")
+        exec(
+            local,
+            "INSERT INTO ks_feed_edge (a, b) VALUES ('fa', 'fb')",
+            "INSERT INTO ks_feed_edge (a, b) VALUES ('fa', 'fc')",
+        )
+        val copy = newPath("ks-copy-")
+        DeltaExporter.copyForFullSend(local.absolutePath, copy)
+        val dest = newPath()
+        DeltaExporter.exportFull(copy, dest, meta(2), exceptPath = base)
+        assertEquals(listOf(listOf("fa", "fc")), query(File(dest), "SELECT a, b FROM feed_edges"))
+    }
+
+    /** A full send whose synced rows all equal the except file's still counts a new feed edge: not empty. */
+    @Test
+    fun aFullSendOfOnlyFeedEdgesIsNotEmpty() {
+        val local = capturingDb(*seedRows)
+        val base = newPath("ks-base-")
+        assertNotNull(DeltaExporter.exportDelta(local.absolutePath, base, meta()))
+        exec(local, "INSERT INTO ks_feed_edge (a, b) VALUES ('fa', 'fb')")
+        val copy = newPath("ks-copy-")
+        DeltaExporter.copyForFullSend(local.absolutePath, copy)
+        val export = DeltaExporter.exportFull(copy, newPath(), meta(2), exceptPath = base)
+        assertEquals(mapOf("feed_edges" to 1L), export.rowCounts.filterValues { it != 0L })
     }
 
     @Test

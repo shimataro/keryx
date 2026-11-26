@@ -419,6 +419,16 @@ object MergeSql {
     }
 
     /**
+     * Adds to `main.ks_feed_edge` every feed identity edge of a transport file's `feed_edges`
+     * (version 3 on; an older file is migrated to an empty table first), normalized `a < b` and
+     * without an edge of an id with itself. A pre-delta file has no such table, so this is only in
+     * [transport]. The capture trigger records each edge new to this device in the outbox even inside
+     * the merge (`ks_capture_feed_edge_insert`). Nothing in the merge reads these edges yet.
+     */
+    private val recordCloudFeedEdges: String =
+        "INSERT OR IGNORE INTO main.ks_feed_edge (a, b) SELECT MIN(a, b), MAX(a, b) FROM cloud.feed_edges WHERE a <> b"
+
+    /**
      * Adds to `main.ks_v2_edge` the `(v2_id, id)` of every `main` tag or folder row that carries a
      * `v2_id` (idempotent: the re-key and earlier merges recorded them already). Run before the
      * identity step, so it sees every edge main's own rows imply, and again last, so a `v2_id` this
@@ -458,8 +468,9 @@ object MergeSql {
     /**
      * The merge statements for a transport file — a delta, a base, or the fold of several
      * (`DatabaseMerger.mergeTransport`): the identity edges of its edge tables
-     * (`folder_v2_edges`, `tag_v2_edges`), then the same list as [all] — except that a feed's raw
-     * folder assignment is kept exactly as the file wrote it (see [mergeFeedFolder]).
+     * (`folder_v2_edges`, `tag_v2_edges`) and its feed identity edges (`feed_edges`), then the same list
+     * as [all] — except that a feed's raw folder assignment is kept exactly as the file wrote it (see
+     * [mergeFeedFolder]).
      */
-    val transport: List<String> = recordCloudTransportEdges + statements(preDelta = false)
+    val transport: List<String> = recordCloudTransportEdges + recordCloudFeedEdges + statements(preDelta = false)
 }

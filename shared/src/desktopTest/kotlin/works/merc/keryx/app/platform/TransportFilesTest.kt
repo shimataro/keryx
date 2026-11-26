@@ -124,12 +124,13 @@ class TransportFilesTest {
         assertEquals(TransportValidation.Valid, validate(file, base))
     }
 
-    /** A file of version 1, as an earlier build wrote it: no `v2_id` columns and no identity edge tables. */
+    /** A file of version 1, as an earlier build wrote it: no `v2_id` columns and no identity edge tables (`feed_edges` included). */
     private fun versionOneFile(name: TransportFileName = delta): File = validFile(name).also { file ->
         exec(
             file,
             "DROP TABLE folder_v2_edges",
             "DROP TABLE tag_v2_edges",
+            "DROP TABLE feed_edges",
             "ALTER TABLE folders DROP COLUMN v2_id",
             "ALTER TABLE tags DROP COLUMN v2_id",
             "PRAGMA user_version = 1",
@@ -548,6 +549,171 @@ class TransportFilesTest {
 
         assertEquals("legacy-1", v2Id(TransportFixtures.fold(withV2 to delta, withoutV2 to deltaName(DEV_B, 1))))
         assertEquals("legacy-1", v2Id(TransportFixtures.fold(withoutV2 to deltaName(DEV_B, 1), withV2 to delta)))
+    }
+
+    // ---- Feed identity edges (feed_edges) ----
+
+    private fun feedEdges(file: File): Set<String> = TransportFixtures.connect(file).use { conn ->
+        conn.createStatement().use { st ->
+            st.executeQuery("SELECT a, b FROM feed_edges").use { rs ->
+                buildSet { while (rs.next()) add("${rs.getString(1)}|${rs.getString(2)}") }
+            }
+        }
+    }
+
+    private fun feedEdgeCount(file: File): Int = TransportFixtures.connect(file).use { conn ->
+        conn.createStatement().use { st -> st.executeQuery("SELECT COUNT(*) FROM feed_edges").use { rs -> rs.next(); rs.getInt(1) } }
+    }
+
+    private fun <T> permutations(items: List<T>): List<List<T>> =
+        if (items.size <= 1) listOf(items) else items.flatMap { first -> permutations(items - first).map { listOf(first) + it } }
+
+    private val deltaB = deltaName(DEV_B, 1)
+    private val deltaC = deltaName(TransportFixtures.DEV_C, 1)
+
+    @Test
+    fun foldingRecordsFeedEdgesAsAUnionNormalizedAndWithoutDuplicates() {
+        val one = transportFile(delta, "INSERT INTO feed_edges (a, b) VALUES ('fa', 'fb')")
+        val two = transportFile(
+            deltaB,
+            "INSERT INTO feed_edges (a, b) VALUES ('fa', 'fb')",
+            "INSERT INTO feed_edges (a, b) VALUES ('fc', 'fd')",
+            // Written the wrong way round and as a self-edge: a fold normalizes the one and drops the other.
+            "INSERT INTO feed_edges (a, b) VALUES ('fz', 'fy')",
+            "INSERT INTO feed_edges (a, b) VALUES ('fq', 'fq')",
+        )
+        val folded = TransportFixtures.fold(one to delta, two to deltaB)
+        assertEquals(setOf("fa|fb", "fc|fd", "fy|fz"), feedEdges(folded))
+        assertEquals(3, feedEdgeCount(folded))
+        TransportFiles.fold(folded.absolutePath, two.absolutePath, deltaB)
+        assertEquals(3, feedEdgeCount(folded))
+        assertEquals(TransportValidation.Valid, validate(folded, baseName(DEV_A, 1)))
+    }
+
+    @Test
+    fun foldingTwoFilesWhoseFeedsShareAUrlUnderDifferentIdsRecordsTheEdge() {
+        val one = transportFile(delta, feed("fb", url = "https://x/"))
+        val two = transportFile(deltaB, feed("fa", url = "https://x/"))
+        for (inputs in listOf(listOf(one to delta, two to deltaB), listOf(two to deltaB, one to delta))) {
+            assertEquals(setOf("fa|fb"), feedEdges(TransportFixtures.fold(*inputs.toTypedArray())))
+        }
+    }
+
+    @Test
+    fun foldingAFileWhoseOwnFeedsShareAUrlRecordsTheEdge() {
+        val file = transportFile(delta, feed("fb", url = "https://x/"), feed("fa", url = "https://x/"), feed("fc", url = "https://y/"))
+        assertEquals(setOf("fa|fb"), feedEdges(TransportFixtures.fold(file to delta)))
+    }
+
+    @Test
+    fun aFeedWithTheSameUrlAndTheSameIdIsNoEdge() {
+        val one = transportFile(delta, feed("fa", url = "https://x/"))
+        val two = transportFile(deltaB, feed("fa", url = "https://x/", updatedAt = 200))
+        assertEquals(emptySet(), feedEdges(TransportFixtures.fold(one to delta, two to deltaB)))
+    }
+
+    /** A URL collision that involves no URL move is recorded in every fold order, two files or three. */
+    @Test
+    fun aUrlCollisionWithoutAUrlMoveIsRecordedInEveryFoldOrder() {
+        val two = listOf(
+            transportFile(delta, feed("fa", url = "https://x/")) to delta,
+            transportFile(deltaB, feed("fb", url = "https://x/")) to deltaB,
+        )
+        for (order in permutations(two.indices.toList())) {
+            assertEquals(setOf("fa|fb"), feedEdges(TransportFixtures.fold(*order.map { two[it] }.toTypedArray())), "fold order $order")
+        }
+        val three = listOf(
+            transportFile(delta, feed("fa", url = "https://x/", updatedAt = 100)) to delta,
+            transportFile(deltaB, feed("fb", url = "https://x/", updatedAt = 150)) to deltaB,
+            transportFile(deltaC, feed("fa", url = "https://x/", updatedAt = 200), feed("fc", url = "https://y/")) to deltaC,
+        )
+        for (order in permutations(three.indices.toList())) {
+            assertEquals(setOf("fa|fb"), feedEdges(TransportFixtures.fold(*order.map { three[it] }.toTypedArray())), "fold order $order")
+        }
+    }
+
+    /**
+     * DOCUMENTED LIMITATION: a collision that involves a URL move is not guaranteed to be seen. F1 (fa@X),
+     * F3 (fa@Y, newer), F2 (fb@X): folding F1, F2, F3 sees fa and fb share X; folding F1, F3, F2 has moved fa
+     * to Y by the time F2 arrives, so no edge is recorded (a merge one file at a time behaves the same).
+     * What is guaranteed is only that every edge a device observes is sent and unioned, so the final state
+     * depends on the edge set alone. This test pins that limit down.
+     */
+    @Test
+    fun aUrlCollisionInvolvingAUrlMoveIsSeenOnlyIfTheFoldMeetsItBeforeTheMove_documentedLimitation() {
+        val f1 = transportFile(delta, feed("fa", url = "https://x/", updatedAt = 100)) to delta
+        val f2 = transportFile(deltaB, feed("fb", url = "https://x/", updatedAt = 150)) to deltaB
+        val f3 = transportFile(deltaC, feed("fa", url = "https://y/", updatedAt = 200)) to deltaC
+        assertEquals(setOf("fa|fb"), feedEdges(TransportFixtures.fold(f1, f2, f3)))
+        assertEquals(emptySet(), feedEdges(TransportFixtures.fold(f1, f3, f2)))
+    }
+
+    /** The feed edges of a fold do not depend on the order, the grouping, or on folding again. */
+    @Test
+    fun feedEdgesFoldCommutativelyAssociativelyAndIdempotently() {
+        val files = listOf(
+            transportFile(
+                delta,
+                "INSERT INTO feed_edges (a, b) VALUES ('f1', 'f2')",
+                feed("f3", url = "https://x/"),
+            ) to delta,
+            transportFile(
+                deltaB,
+                "INSERT INTO feed_edges (a, b) VALUES ('f2', 'f4')",
+                feed("f5", url = "https://x/"),
+                feed("f6", url = "https://z/", updatedAt = 100),
+            ) to deltaB,
+            transportFile(
+                deltaC,
+                "INSERT INTO feed_edges (a, b) VALUES ('f1', 'f2')",
+                feed("f6", url = "https://w/", updatedAt = 200),
+                feed("f7", url = "https://w/"),
+            ) to deltaC,
+        )
+        val results = permutations(files.indices.toList()).map { order ->
+            val folded = TransportFixtures.fold(*order.map { files[it] }.toTypedArray())
+            feedEdges(folded)
+        }
+        val expected = setOf("f1|f2", "f2|f4", "f3|f5", "f6|f7")
+        // f6@z then f6@w then f7@w: only the orders folding f7 after f6's move to w see f6|f7 — but the
+        // fold must still agree across orders on everything it was told explicitly or by a visible collision.
+        for (edges in results) assertTrue(edges.containsAll(setOf("f1|f2", "f2|f4", "f3|f5")), "$edges")
+        assertTrue(results.all { it == expected }, "every order yields $expected, got ${results.toSet()}")
+
+        // Idempotent: folding an input again, or folding the result, changes nothing.
+        val folded = TransportFixtures.fold(*files.toTypedArray())
+        files.forEach { (file, name) -> TransportFiles.fold(folded.absolutePath, file.absolutePath, name) }
+        assertEquals(expected, feedEdges(folded))
+        assertEquals(expected, feedEdges(TransportFixtures.fold(folded to baseName(DEV_A, 1))))
+    }
+
+    @Test
+    fun aVersionTwoFileIsMigratedWithAnEmptyFeedEdgesTableAndValidates() {
+        val file = validFile()
+        exec(file, "DROP TABLE feed_edges", "PRAGMA user_version = 2")
+        assertEquals(TransportValidation.Valid, validate(file))
+        assertEquals(expectedInfo(TransportSchema.EDGE_TABLES.first { it.name == "feed_edges" }), tableInfo(file, "feed_edges"))
+        assertEquals(emptySet(), feedEdges(file))
+        assertEquals(true, TransportFiles.schemaMatches(file.absolutePath))
+    }
+
+    @Test
+    fun aVersionThreeFileWithoutFeedEdgesOrWithAWrongColumnSetIsCorrupt() {
+        val missing = validFile()
+        exec(missing, "DROP TABLE feed_edges")
+        assertCorrupt(validate(missing), "feed_edges")
+
+        val extra = validFile()
+        exec(extra, "ALTER TABLE feed_edges ADD COLUMN extra TEXT")
+        assertCorrupt(validate(extra), "unexpected column feed_edges.extra")
+
+        val lacking = validFile()
+        exec(lacking, "DROP TABLE feed_edges", "CREATE TABLE feed_edges (a TEXT NOT NULL, PRIMARY KEY (a))")
+        assertCorrupt(validate(lacking), "feed_edges.b")
+
+        val emptyId = validFile()
+        exec(emptyId, "INSERT INTO feed_edges (a, b) VALUES ('fa', '')")
+        assertCorrupt(validate(emptyId), "feed_edges.b")
     }
 
     @Test

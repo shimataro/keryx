@@ -105,11 +105,12 @@ class SchemaV3MigrationTest {
         assertEquals(created.keys, migrated.keys)
         for (key in created.keys) assertEquals(created[key], migrated[key], "schema differs at $key")
         assertTrue("feed_fetch_state" in (created["tables"] as List<*>))
-        // The twelve capture triggers plus the raw folder row's capture trigger, and the eight that keep
+        // The twelve capture triggers plus the raw folder row's capture trigger, the two identity edge
+        // capture triggers (ks_v2_edge, ks_feed_edge), and the eight that keep
         // feeds.folder_id resolved from ks_feed_folder_raw (its creation with the feed, and resolution
         // on a raw row's insert/update, a folder's insert and liveness change, and a folder entry of
         // ks_id_remap's insert/update/delete); the one view is ks_feed_folder_resolved.
-        assertEquals(22, (created["triggers"] as List<*>).size)
+        assertEquals(23, (created["triggers"] as List<*>).size)
         assertEquals(listOf("ks_feed_folder_resolved"), (created["views"] as List<*>).map { (it as List<*>)[0] })
     }
 
@@ -528,5 +529,27 @@ class SchemaV3MigrationTest {
             assertEquals(listOf(listOf<Any?>(3)), conn.rows("PRAGMA user_version"))
         }
         assertEquals(schemaOf(createdDb()), schemaOf(file))
+    }
+
+    /** `ks_feed_edge(a, b)` with the composite primary key and its capture trigger, created and migrated alike. */
+    @Test
+    fun theFeedEdgeTableAndItsTriggerExistInACreatedAndInAMigratedDatabase() {
+        for (file in listOf(createdDb(), migratedDb())) {
+            withConnection(file) { conn ->
+                assertEquals(
+                    listOf(listOf<Any?>("a", "TEXT", 1, 1), listOf<Any?>("b", "TEXT", 1, 2)),
+                    conn.rows("SELECT name, type, \"notnull\", pk FROM pragma_table_info('ks_feed_edge') ORDER BY cid"),
+                )
+                assertEquals(
+                    listOf(listOf<Any?>("ks_capture_feed_edge_insert")),
+                    conn.rows("SELECT name FROM sqlite_master WHERE type = 'trigger' AND tbl_name = 'ks_feed_edge'"),
+                )
+                conn.createStatement().use { it.execute("INSERT INTO ks_feed_edge (a, b) VALUES ('x', 'y')") }
+                assertFailsWith<java.sql.SQLException> {
+                    conn.createStatement().use { it.execute("INSERT INTO ks_feed_edge (a, b) VALUES ('x', 'y')") }
+                }
+                assertEquals(listOf(listOf<Any?>("x", "y")), conn.rows("SELECT a, b FROM ks_feed_edge"))
+            }
+        }
     }
 }

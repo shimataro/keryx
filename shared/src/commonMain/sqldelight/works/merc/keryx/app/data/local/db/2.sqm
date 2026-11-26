@@ -172,6 +172,12 @@ CREATE TABLE ks_v2_edge (
     PRIMARY KEY (kind, v2_id, id)
 );
 
+CREATE TABLE ks_feed_edge (
+    a TEXT NOT NULL,
+    b TEXT NOT NULL,
+    PRIMARY KEY (a, b)
+) WITHOUT ROWID;
+
 -- 4. Articles whose search_text still equals their raw content / summary (written before HTML
 --    stripping) get it recomputed.
 INSERT INTO ks_search_pending (rowid)
@@ -330,6 +336,20 @@ WHEN (SELECT enabled FROM sync_capture WHERE id = 1) = 1 AND NOT EXISTS (SELECT 
 BEGIN
     INSERT INTO sync_outbox (tbl, pk, pk2)
     VALUES (CASE new.kind WHEN 'folder' THEN 'folder_v2_edges' ELSE 'tag_v2_edges' END, new.v2_id, new.id);
+END;
+
+-- A feed identity edge (two feed ids that shared a url, a < b) is recorded like a row: tbl names the
+-- transport edge table, pk is a and pk2 is b. Unlike every other capture trigger it deliberately has no
+-- sync_merging guard, the one exception to "a merge never records what it writes": whether a device
+-- sees two feed ids share a url depends on when each url changed (one device may see feed a move off a
+-- url before feed b takes it), so an edge only this device discovered during a merge must still reach
+-- the other devices, or their identities would diverge. An edge already in ks_feed_edge is added with
+-- INSERT OR IGNORE, which inserts nothing and fires nothing, so each edge is re-sent at most once per
+-- device.
+CREATE TRIGGER ks_capture_feed_edge_insert AFTER INSERT ON ks_feed_edge
+WHEN (SELECT enabled FROM sync_capture WHERE id = 1) = 1
+BEGIN
+    INSERT INTO sync_outbox (tbl, pk, pk2) VALUES ('feed_edges', new.a, new.b);
 END;
 
 -- 6. A feed's raw folder assignment (sync_bookkeeping.sq): the triggers that create it with every new

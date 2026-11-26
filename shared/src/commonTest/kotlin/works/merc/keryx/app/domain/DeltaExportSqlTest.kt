@@ -25,7 +25,7 @@ class DeltaExportSqlTest {
     @Test
     fun aDeltaReadsOnlyOutboxEntriesUpToTheHighWaterMark() {
         val outboxReads = delta.filter { "sync_outbox" in it }
-        assertEquals(8, outboxReads.size, "one per synced table, and one per identity edge table")
+        assertEquals(9, outboxReads.size, "one per synced table, and one per identity edge table")
         for (statement in outboxReads) {
             assertTrue("seq <= 42" in statement, statement)
             assertFalse(Regex("seq\\s*(>|<(?!=))").containsMatchIn(statement), statement)
@@ -45,14 +45,14 @@ class DeltaExportSqlTest {
     @Test
     fun bothKindsEndWithTheClosureFeedsAndTagsBeforeFolders() {
         val closure = DeltaExportSql.closureStatements
-        assertEquals(closure, delta.dropLast(2).takeLast(closure.size))
+        assertEquals(closure, delta.dropLast(3).takeLast(closure.size))
         // then the identity edges recorded in the outbox
-        assertTrue(delta.takeLast(2).all { "sync_outbox" in it && "_v2_edges" in it })
+        assertTrue(delta.takeLast(3).all { "sync_outbox" in it && "_edges" in it })
         // A full send then writes the identity edges, which reference nothing.
         for (withExcept in listOf(false, true)) {
             assertEquals(
                 closure + DeltaExportSql.edgeStatements(withExcept),
-                DeltaExportSql.fullStatements(withExcept).takeLast(closure.size + 2),
+                DeltaExportSql.fullStatements(withExcept).takeLast(closure.size + 3),
             )
         }
         assertTrue(closure[0].startsWith("INSERT INTO main.feeds"))
@@ -77,13 +77,15 @@ class DeltaExportSqlTest {
             listOf(
                 "INSERT OR IGNORE INTO main.folder_v2_edges (v2_id, id) SELECT pk, pk2 FROM src.sync_outbox WHERE tbl = 'folder_v2_edges' AND seq <= 42",
                 "INSERT OR IGNORE INTO main.tag_v2_edges (v2_id, id) SELECT pk, pk2 FROM src.sync_outbox WHERE tbl = 'tag_v2_edges' AND seq <= 42",
+                "INSERT OR IGNORE INTO main.feed_edges (a, b) SELECT pk, pk2 FROM src.sync_outbox WHERE tbl = 'feed_edges' AND seq <= 42",
             ),
-            delta.takeLast(2),
+            delta.takeLast(3),
         )
         assertEquals(
             listOf(
                 "INSERT OR IGNORE INTO main.folder_v2_edges (v2_id, id) SELECT v2_id, id FROM src.ks_v2_edge WHERE kind = 'folder'",
                 "INSERT OR IGNORE INTO main.tag_v2_edges (v2_id, id) SELECT v2_id, id FROM src.ks_v2_edge WHERE kind = 'tag'",
+                "INSERT INTO main.feed_edges (a, b) SELECT a, b FROM src.ks_feed_edge",
             ),
             DeltaExportSql.edgeStatements(withExcept = false),
         )
@@ -94,6 +96,7 @@ class DeltaExportSqlTest {
                     "EXCEPT SELECT v2_id, id FROM ex.folder_v2_edges",
                 "INSERT OR IGNORE INTO main.tag_v2_edges (v2_id, id) SELECT v2_id, id FROM src.ks_v2_edge WHERE kind = 'tag' " +
                     "EXCEPT SELECT v2_id, id FROM ex.tag_v2_edges",
+                "INSERT INTO main.feed_edges (a, b) SELECT a, b FROM src.ks_feed_edge EXCEPT SELECT a, b FROM ex.feed_edges",
             ),
             DeltaExportSql.edgeStatements(withExcept = true),
         )
@@ -104,7 +107,7 @@ class DeltaExportSqlTest {
         val plain = DeltaExportSql.fullStatements(withExcept = false)
         val except = DeltaExportSql.fullStatements(withExcept = true)
         assertTrue(plain.none { " EXCEPT " in it })
-        assertEquals(8, except.count { " EXCEPT SELECT " in it && "FROM ex." in it })
+        assertEquals(9, except.count { " EXCEPT SELECT " in it && "FROM ex." in it })
         assertTrue(plain.none { "sync_outbox" in it })
     }
 

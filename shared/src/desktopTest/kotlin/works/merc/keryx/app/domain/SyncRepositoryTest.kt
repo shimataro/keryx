@@ -446,7 +446,7 @@ class SyncRepositoryTest {
         val other = ids()
         val (good, goodBytes) = SyncFiles.transportFile(TransportMeta(gen, TransportFileKind.DELTA, other, 1, now), feedRow("good"))
         cloud.put(good.fileName, goodBytes)
-        val (newer, newerBytes) = SyncFiles.transportFile(TransportMeta(gen, TransportFileKind.DELTA, other, 3, now), "PRAGMA user_version = 3")
+        val (newer, newerBytes) = SyncFiles.transportFile(TransportMeta(gen, TransportFileKind.DELTA, other, 3, now), "PRAGMA user_version = ${TransportSchema.VERSION + 1}")
         cloud.put(newer.fileName, newerBytes)
         val cursorsBefore = a.db.sync_bookkeepingQueries.cursorAll().executeAsList()
 
@@ -1185,6 +1185,25 @@ class SyncRepositoryTest {
 
         a.db.insertFeed("f3", now = 6)
         assertTrue(a.outbox().isEmpty(), "nothing is recorded while local-only")
+    }
+
+    @Test
+    fun clearSyncFailureStateKeepsTheFeedAndTagFolderIdentityEdges() = runTest {
+        val cloud = FakeCloudStorage()
+        val a = device("a", cloud)
+        a.syncOk()
+        a.driver.execute(null, "INSERT INTO ks_feed_edge (a, b) VALUES ('fa', 'fb')", 0)
+        a.driver.execute(null, "INSERT INTO ks_v2_edge (kind, v2_id, id) VALUES ('tag', 'p', 't1')", 0)
+        assertTrue(a.outbox().any { it.tbl == "feed_edges" })
+
+        a.repo.clearSyncFailureState()
+
+        assertTrue(a.outbox().isEmpty())
+        fun count(table: String): Long = a.driver.executeQuery(null, "SELECT COUNT(*) FROM $table", { c ->
+            QueryResult.Value(if (c.next().value) c.getLong(0) else null)
+        }, 0).value!!
+        assertEquals(1L, count("ks_feed_edge"), "an edge is a fact about two ids, not about the connection")
+        assertEquals(1L, count("ks_v2_edge"))
     }
 
     @Test

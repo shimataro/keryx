@@ -271,4 +271,53 @@ class SyncCaptureTriggerTest {
     private companion object {
         const val DAY = 86_400_000L
     }
+
+    // ---- Feed identity edges (ks_feed_edge) ----
+
+    @Test
+    fun aFeedEdgeInsertIsRecordedWhileCaptureIsEnabled() {
+        enableCapture()
+        exec("INSERT INTO ks_feed_edge (a, b) VALUES ('fa', 'fb')")
+
+        assertEquals(listOf(listOf<Any?>("feed_edges", "fa", "fb", 0L)), recorded())
+    }
+
+    @Test
+    fun aFeedEdgeInsertInsideAMergeIsRecordedToo() {
+        enableCapture()
+        bookkeeping.beginMerging()
+        exec("INSERT INTO ks_feed_edge (a, b) VALUES ('fa', 'fb')")
+        bookkeeping.endMerging()
+
+        assertEquals(listOf(listOf<Any?>("feed_edges", "fa", "fb", 0L)), recorded())
+    }
+
+    @Test
+    fun aFeedEdgeInsertIsNotRecordedWhileCaptureIsDisabled() {
+        exec("INSERT INTO ks_feed_edge (a, b) VALUES ('fa', 'fb')")
+        bookkeeping.beginMerging()
+        exec("INSERT INTO ks_feed_edge (a, b) VALUES ('fa', 'fc')")
+        bookkeeping.endMerging()
+
+        assertEquals(emptyList(), outbox())
+        assertEquals(2L, driver.rowCount("ks_feed_edge"))
+    }
+
+    @Test
+    fun insertingAKnownFeedEdgeAgainRecordsNothing() {
+        enableCapture()
+        exec("INSERT OR IGNORE INTO ks_feed_edge (a, b) VALUES ('fa', 'fb')")
+        exec("INSERT OR IGNORE INTO ks_feed_edge (a, b) VALUES ('fa', 'fb')")
+        bookkeeping.beginMerging()
+        exec("INSERT OR IGNORE INTO ks_feed_edge (a, b) VALUES ('fa', 'fb')")
+        bookkeeping.endMerging()
+
+        assertEquals(listOf(listOf<Any?>("feed_edges", "fa", "fb", 0L)), recorded())
+        assertEquals(1L, driver.rowCount("ks_feed_edge"))
+    }
+
+    private fun SqlDriver.rowCount(table: String): Long =
+        executeQuery(null, "SELECT COUNT(*) FROM $table", { c ->
+            app.cash.sqldelight.db.QueryResult.Value(if (c.next().value) c.getLong(0) else null)
+        }, 0).value!!
 }

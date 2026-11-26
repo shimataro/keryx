@@ -18,7 +18,7 @@ import kotlin.test.assertNull
  * copy. The export rules themselves are covered in depth by desktopTest's `DeltaExporterTest`.
  *
  * The "live" database here is a stand-in with the synced tables, `sync_outbox`,
- * `ks_feed_folder_raw` (a feed's folder is exported from its raw assignment) and `ks_v2_edge` only.
+ * `ks_feed_folder_raw` (a feed's folder is exported from its raw assignment), `ks_v2_edge` and `ks_feed_edge` only.
  */
 class DeltaExporterPlatformTest {
     private val gen = "0f1e2d3c-4b5a-4968-8778-695a4b3c2d1e"
@@ -39,6 +39,7 @@ class DeltaExporterPlatformTest {
             c.exec("CREATE TABLE sync_outbox (seq INTEGER PRIMARY KEY AUTOINCREMENT, tbl TEXT NOT NULL, pk TEXT NOT NULL, pk2 TEXT, heavy INTEGER NOT NULL DEFAULT 0)")
             c.exec("CREATE TABLE ks_feed_folder_raw (feed_id TEXT NOT NULL PRIMARY KEY, folder_updated_at INTEGER, folder_id TEXT)")
             c.exec("CREATE TABLE ks_v2_edge (kind TEXT NOT NULL, v2_id TEXT NOT NULL, id TEXT NOT NULL, PRIMARY KEY (kind, v2_id, id))")
+            c.exec("CREATE TABLE ks_feed_edge (a TEXT NOT NULL, b TEXT NOT NULL, PRIMARY KEY (a, b)) WITHOUT ROWID")
             rows.forEach(c::exec)
         }
         return path

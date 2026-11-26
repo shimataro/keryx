@@ -22,6 +22,13 @@ package works.merc.keryx.app.domain
  * row-derived edges a fold of two files whose rows share an id but carry different `v2_id`s would
  * lose one of the two links; with them, a base built by folding keeps every input's edges.
  *
+ * The feed identity edges (`feed_edges`, two feed ids that shared a `url`, `a < b`) fold by union as
+ * well, plus every URL collision the fold sees ([feedUrlEdges]): two distinct feed ids sharing a `url`
+ * between `src` and the accumulator, or within `src`. They are recorded before the feeds upsert can
+ * change a `url`, since the fold still matches feeds by primary key only and keeps one `url` per id —
+ * without them, folding `a@X`, then `a@Y`, then `b@X` would lose the collision a merge of the same
+ * files one by one sees.
+ *
  * Columns are listed explicitly; both sides must be transport files of [TransportSchema.VERSION].
  */
 object ReduceSql {
@@ -99,8 +106,29 @@ object ReduceSql {
         )
     }
 
+    /**
+     * Records into `main.feed_edges` every pair of distinct feed ids sharing a `url` — between `src`'s
+     * feeds and the accumulator's, and within `src`'s — normalized `a < b` (see the class comment). Run
+     * before [feeds], which may change the accumulator's `url`s. A collision within the accumulator was
+     * recorded when its second feed was folded in (the accumulator starts empty).
+     */
+    val feedUrlEdges: List<String> = listOf(
+        "INSERT OR IGNORE INTO main.feed_edges (a, b) SELECT MIN(s.id, m.id), MAX(s.id, m.id) " +
+            "FROM src.feeds s JOIN main.feeds m ON m.url = s.url AND m.id <> s.id",
+        "INSERT OR IGNORE INTO main.feed_edges (a, b) SELECT s1.id, s2.id " +
+            "FROM src.feeds s1 JOIN src.feeds s2 ON s2.url = s1.url AND s1.id < s2.id",
+    )
+
+    /**
+     * Unions `src`'s feed identity edges into `main`'s. Normalized `a < b` (and an edge of an id with
+     * itself dropped), so a file's edge is kept once whichever way round it was written.
+     */
+    val feedEdges: String =
+        "INSERT OR IGNORE INTO main.feed_edges (a, b) SELECT MIN(a, b), MAX(a, b) FROM src.feed_edges WHERE a <> b"
+
     /** Folds `src`'s synced rows and identity edges into `main`'s. */
-    val all: List<String> = listOf(folders, feeds, tags, articles, feedTags, globalSettings) + edges
+    val all: List<String> =
+        listOf(folders) + feedUrlEdges + listOf(feeds, tags, articles, feedTags, globalSettings) + edges + feedEdges
 
     /**
      * Combines `src`'s coverage into `main`'s: the vector takes the component-wise maximum and the

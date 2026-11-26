@@ -1,13 +1,15 @@
 -- Delta-sync bookkeeping (device-local — NEVER synced, never part of a delta, base or uploaded
--- snapshot, except that a full send copies ks_v2_edge's rows into its edge tables (and a delta the
--- edges recorded in sync_outbox); see
+-- snapshot, except that a full send copies ks_v2_edge's and ks_feed_edge's rows into its edge tables
+-- (and a delta the edges recorded in sync_outbox); see
 -- docs/sync-architecture.md "Local Bookkeeping (schema version 3)").
 --
 -- sync_outbox        every local change to a synced row, in order, appended by the capture
 --                    triggers below. pk is the row's primary key (feeds/articles/tags/folders: id,
 --                    global_settings: key, feed_tags: feed_id); pk2 is feed_tags' tag_id (NULL for
 --                    every other table). An identity edge added to ks_v2_edge is recorded too (tbl
---                    folder_v2_edges / tag_v2_edges, pk = v2_id, pk2 = id) — see ks_capture_v2_edge_insert. heavy = 1 when the delta must carry an article's body.
+--                    folder_v2_edges / tag_v2_edges, pk = v2_id, pk2 = id) — see ks_capture_v2_edge_insert —
+--                    and so is a feed identity edge added to ks_feed_edge (tbl feed_edges, pk = a,
+--                    pk2 = b) — see ks_capture_feed_edge_insert. heavy = 1 when the delta must carry an article's body.
 -- sync_capture       a single row (id = 1): whether changes are recorded at all (only while a
 --                    cloud provider is connected), and whether a full send is due.
 -- sync_merging       holds a row only inside a merge transaction (inserted first, deleted just
@@ -73,6 +75,15 @@
 --                    two ids, not about the connection or the files merged in a generation. No
 --                    constraint beyond the primary key: a merge must only be able to violate a FOREIGN
 --                    KEY through main's own rows (MergeFailureClassifier).
+-- ks_feed_edge       the identity edges of feeds: two feed ids (a < b) that shared a url at some
+--                    point — a url can move between ids (a 301/308 keeps the id), so a feed
+--                    subscribed anew elsewhere at a moved feed's url gets another id. Feeds connected
+--                    by these edges are one identity. A grow-only set: written by every transport
+--                    merge (MergeSql: the cloud file's feed_edges), carried by full sends and bases
+--                    (feed_edges) and by the next ordinary delta (ks_capture_feed_edge_insert, which
+--                    records even inside a merge), never deleted, and NOT cleared on joining or on
+--                    disconnect, like ks_v2_edge. No constraint beyond the primary key, for the same
+--                    reason as ks_v2_edge; the writers normalize a < b themselves.
 --
 -- The capture triggers fire AFTER INSERT / AFTER UPDATE on the six synced tables, guarded by
 -- sync_capture.enabled and the absence of a sync_merging row. An UPDATE is recorded only when a
@@ -88,6 +99,8 @@
 -- - tags, folders, feed_tags, global_settings: every column.
 -- No row of a synced table is ever physically deleted (every delete is a tombstone), so there are
 -- no DELETE triggers.
+-- The edge capture triggers record identity edges, not rows; ks_capture_feed_edge_insert alone
+-- records inside a merge as well (see its comment).
 --
 -- Keep the column lists in step with 2.sqm (which creates the same objects on an upgraded DB) and
 -- with the synced tables: SchemaTest compares a created schema with a migrated one.
@@ -160,6 +173,12 @@ CREATE TABLE ks_v2_edge (
     id    TEXT NOT NULL,
     PRIMARY KEY (kind, v2_id, id)
 );
+
+CREATE TABLE ks_feed_edge (
+    a TEXT NOT NULL,
+    b TEXT NOT NULL,
+    PRIMARY KEY (a, b)
+) WITHOUT ROWID;
 
 CREATE TRIGGER ks_capture_feeds_insert AFTER INSERT ON feeds
 WHEN (SELECT enabled FROM sync_capture WHERE id = 1) = 1 AND NOT EXISTS (SELECT 1 FROM sync_merging)
@@ -311,6 +330,20 @@ WHEN (SELECT enabled FROM sync_capture WHERE id = 1) = 1 AND NOT EXISTS (SELECT 
 BEGIN
     INSERT INTO sync_outbox (tbl, pk, pk2)
     VALUES (CASE new.kind WHEN 'folder' THEN 'folder_v2_edges' ELSE 'tag_v2_edges' END, new.v2_id, new.id);
+END;
+
+-- A feed identity edge (two feed ids that shared a url, a < b) is recorded like a row: tbl names the
+-- transport edge table, pk is a and pk2 is b. Unlike every other capture trigger it deliberately has no
+-- sync_merging guard, the one exception to "a merge never records what it writes": whether a device
+-- sees two feed ids share a url depends on when each url changed (one device may see feed a move off a
+-- url before feed b takes it), so an edge only this device discovered during a merge must still reach
+-- the other devices, or their identities would diverge. An edge already in ks_feed_edge is added with
+-- INSERT OR IGNORE, which inserts nothing and fires nothing, so each edge is re-sent at most once per
+-- device.
+CREATE TRIGGER ks_capture_feed_edge_insert AFTER INSERT ON ks_feed_edge
+WHEN (SELECT enabled FROM sync_capture WHERE id = 1) = 1
+BEGIN
+    INSERT INTO sync_outbox (tbl, pk, pk2) VALUES ('feed_edges', new.a, new.b);
 END;
 
 -- A feed's raw folder row is created with the feed (a feed inserted with no folder starts with NULL /
