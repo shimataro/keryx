@@ -32,6 +32,7 @@ import org.koin.dsl.koinConfiguration
 import org.koin.dsl.module
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.data.local.db.KeryxDatabase
+import works.merc.keryx.app.domain.TagFolderIdRemap
 import works.merc.keryx.app.domain.TagFolderIdRemaps
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
@@ -640,6 +641,116 @@ class FeedListInlineRenameTest {
             editor().assertTextContains("Half typed")
             pressEnter()
             assertEquals("Half typed", db.folderNameOf("d-new"))
+        }
+    }
+
+    /**
+     * A [TagFolderIdRemaps] whose reads of `ks_id_remap` fail while [failing] is set — the initial load
+     * succeeds (the flag starts clear), so only the catch-up a test provokes afterwards fails.
+     */
+    private class FailableIdRemaps(db: KeryxDatabase) {
+        @Volatile var failing = false
+        val remaps = TagFolderIdRemaps({
+            check(!failing) { "ks_id_remap read failed (test)" }
+            val rows = db.sync_bookkeepingQueries.idRemapAll().executeAsList()
+            TagFolderIdRemap(
+                tagIds = rows.filter { it.kind == "tag" }.associate { it.old_id to it.new_id },
+                folderIds = rows.filter { it.kind == "folder" }.associate { it.old_id to it.new_id },
+            )
+        }, Dispatchers.Unconfined)
+    }
+
+    /**
+     * Waits until the ViewModel's tag list shows exactly [ids], then for Compose to settle. The list
+     * queries re-run on the repositories' own dispatcher, which [waitForIdle] alone does not wait for.
+     */
+    private fun ComposeUiTest.awaitTags(vm: HomeViewModel, vararg ids: String) {
+        waitUntil(timeoutMillis = 5_000) { vm.tags.value.map { it.id }.toSet() == ids.toSet() }
+        waitForIdle()
+    }
+
+    /**
+     * The lists reach the editor ahead of the map, and catching the map up fails: the row's absence is
+     * left undecided — the editor stays open with the typed text. Once the map can be read, the next
+     * list value decides it: the row only moved, so the edit carries on and commits onto the new id.
+     */
+    @Test
+    fun aFailedCatchUpKeepsTheEditUntilTheNextListValueFindsTheMovedRow() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        db.insertTag("t-old", "Tag One", sortOrder = 0L)
+        val failable = FailableIdRemaps(db)
+        useHomeViewModel(driver, db, idRemaps = failable.remaps) { fixture ->
+            val vm = fixture.vm
+            setInlineRenameContent(vm)
+            startInlineRename(vm, ArticleFilter.Tag("t-old"))
+            typeName("Half typed")
+
+            failable.failing = true
+            driver.rekeyTagForTest("t-old", "t-new")
+            awaitTags(vm, "t-new")
+
+            // The lists show the tag only under its new id, which the stale map does not join to the
+            // edit's: no row hosts the editor, but the edit (and its draft) is kept, undecided.
+            editor().assertDoesNotExist()
+
+            // The map can be read again; another tag arriving is the next list value.
+            failable.failing = false
+            db.insertTag("t-other", "Tag Two", sortOrder = 1L)
+            awaitTags(vm, "t-new", "t-other")
+
+            editor().assertIsDisplayed()
+            editor().assertTextContains("Half typed")
+            pressEnter()
+            assertEquals("Half typed", db.tagOf("t-new").name, "the commit lands on the row the tag became")
+        }
+    }
+
+    /**
+     * As [aFailedCatchUpKeepsTheEditUntilTheNextListValueFindsTheMovedRow], for a row that is really
+     * gone: the failed catch-up keeps the edit (the row coming back shows it again, typed text and
+     * all), and the next list value — with the map readable — ends it (the row coming back then shows
+     * no editor).
+     */
+    @Test
+    fun aFailedCatchUpKeepsTheEditUntilTheNextListValueConfirmsTheRowGone() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        db.insertTag("t1", "Tag One", sortOrder = 0L)
+        val failable = FailableIdRemaps(db)
+        useHomeViewModel(driver, db, idRemaps = failable.remaps) { fixture ->
+            val vm = fixture.vm
+            setInlineRenameContent(vm)
+            startInlineRename(vm, ArticleFilter.Tag("t1"))
+            typeName("Half typed")
+
+            fun reviveT1() {
+                driver.execute(null, "UPDATE tags SET deleted_at = NULL WHERE id = 't1'", 0)
+                driver.notifyListeners("tags")
+            }
+
+            failable.failing = true
+            db.tagsQueries.softDelete(deleted_at = 1L, updated_at = 1L, id = "t1")
+            awaitTags(vm)
+            editor().assertDoesNotExist()
+
+            // Still undecided: the row coming back finds the edit where it was.
+            reviveT1()
+            awaitTags(vm, "t1")
+            editor().assertIsDisplayed()
+            editor().assertTextContains("Half typed")
+
+            db.tagsQueries.softDelete(deleted_at = 2L, updated_at = 2L, id = "t1")
+            awaitTags(vm)
+            editor().assertDoesNotExist()
+
+            // The map can be read again; another tag arriving is the next list value, which confirms
+            // the row gone and ends the edit.
+            failable.failing = false
+            db.insertTag("t-other", "Tag Two", sortOrder = 1L)
+            awaitTags(vm, "t-other")
+
+            reviveT1()
+            awaitTags(vm, "t1", "t-other")
+            editor().assertDoesNotExist()
         }
     }
 }

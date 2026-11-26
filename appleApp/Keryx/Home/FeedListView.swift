@@ -162,10 +162,12 @@ struct FeedListView: View {
         // commits, and another write in between re-runs the tag/folder queries over the re-keyed
         // rows), so the row is not declared gone while the map might be stale: it is first caught up
         // from the committed database — the ViewModel's one shared implementation, as in Compose's
-        // `FeedListPane` — and only an absence that survives that ends the edit.
+        // `FeedListPane` — and only an absence that survives that ends the edit. A catch-up that
+        // failed decides nothing: the edit stays open, and the next change of the lists or of the map
+        // (the `onChange`s in `body`) asks again.
         Task { @MainActor in
-            _ = try? await home.viewModel.catchUpIdRemapFromDb()
-            guard dialogs.renamingRowKey == key else { return }
+            let caughtUp = (try? await home.viewModel.catchUpIdRemapFromDb())?.boolValue ?? false
+            guard caughtUp, dialogs.renamingRowKey == key else { return }
             let remap = SidebarIdRemap(home.viewModel.tagFolderIdRemap.value)
             if !remap.contains(sidebar.orderedRowKeys, row: key) { dialogs.endRename() }
         }

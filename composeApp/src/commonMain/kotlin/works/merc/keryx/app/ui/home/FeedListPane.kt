@@ -454,8 +454,13 @@ internal fun FeedListPane(
     // reaches collapsedFolderIds above only on a later frame, so clearing on that first frame would
     // cancel every rename that needed the reveal. A row the ViewModel's live state can't render
     // either is cleared at once, so an edit can never wait forever on a row that will never come.
+    //
+    // Keyed on the lists as well as on the row's index: a row that stays missing while the lists change
+    // (editRowIndex null both times) must be decided again, since a catch-up that failed below left it
+    // undecided until the next list value. A row that is found returns at once, and a catch-up that
+    // publishes the map restarts the effect only through a changed editRowIndex, so this never loops.
     var editRowSeen by remember(inlineEdit) { mutableStateOf(false) }
-    LaunchedEffect(inlineEdit, editRowIndex) {
+    LaunchedEffect(inlineEdit, editRowIndex, feeds, folders, tags, feedTagMap) {
         val target = inlineEdit ?: return@LaunchedEffect
         if (editRowIndex != null) {
             editRowSeen = true
@@ -477,9 +482,10 @@ internal fun FeedListPane(
         // So the row is not declared gone while the published map might be stale — the map is first
         // caught up from the committed database (the one shared ViewModel implementation, also the
         // SwiftUI app's), and only an absence that survives that ends the edit. A re-key that catch-up
-        // reveals changes [idRemap], which restarts this effect with the row found.
+        // reveals changes [idRemap], which restarts this effect with the row found. A catch-up that
+        // failed decides nothing: the edit stays open, and the next list value asks again.
         if (!renderableNow()) {
-            vm.catchUpIdRemapFromDb()
+            if (!vm.catchUpIdRemapFromDb()) return@LaunchedEffect
             // The row, as the lists render it now, under the id the caught-up map gives it: found, so
             // it only moved (a restart of this effect follows when the map reaches [idRemap]).
             val freshRemap = vm.tagFolderIdRemap.value

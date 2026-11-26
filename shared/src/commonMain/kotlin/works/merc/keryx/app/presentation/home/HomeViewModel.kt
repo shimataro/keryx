@@ -2317,8 +2317,9 @@ class HomeViewModel(
      * Catches the published re-key map up with the committed database, then applies it to the state held
      * here — the one implementation both UIs call before concluding that a row they hold (an inline
      * rename's) disappeared from the list, since the lists can reach them ahead of the map (see
-     * [loadIdRemapFromDb]). Returns whether the read succeeded; a failure is logged and the caller decides
-     * with the map it has (best effort, docs/error-design.md).
+     * [loadIdRemapFromDb]). Returns whether the read succeeded; a failure is logged (best effort,
+     * docs/error-design.md), and the caller then leaves the row undecided rather than concluding it
+     * disappeared — the next list value asks again.
      */
     suspend fun catchUpIdRemapFromDb(): Boolean {
         val caughtUp = runCatchingUnlessCancelled { loadIdRemapFromDb() }.onFailure { e ->
