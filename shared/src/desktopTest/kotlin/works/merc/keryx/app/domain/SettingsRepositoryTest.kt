@@ -571,7 +571,8 @@ class SettingsRepositoryTest {
         dir: String,
         private val initial: LocalSettings,
     ) : LocalSettingsStore(dirOverride = dir) {
-        var saveCount = 0
+        // Volatile: a test whose save runs on another thread polls it.
+        @Volatile var saveCount = 0
             private set
         var error: Throwable? = null
 
@@ -646,8 +647,11 @@ class SettingsRepositoryTest {
 
             gate.complete(Unit)
             withTimeout(5_000) { remaps.awaitLoaded() }
-            // The collector applies the loaded value on the (inline) writer, right after it is published.
-            withTimeout(5_000) { while (repo.getLocalSettings().lastFilter != "tag:t-new") delay(5) }
+            // The collector applies the loaded value on the (inline) writer, right after it is published —
+            // on the load's thread, so the in-memory value can be seen before its save has run: wait for both.
+            withTimeout(5_000) {
+                while (repo.getLocalSettings().lastFilter != "tag:t-new" || store.saveCount == 0) delay(5)
+            }
 
             assertEquals(1, reads)
             assertEquals(1, store.saveCount)
