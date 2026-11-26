@@ -548,13 +548,17 @@ private struct SidebarDeleteAlerts: ViewModifier {
 #if os(iOS)
 /// iOS renames a folder, tag or feed in the form sheet that creates one (`NamePromptSheet`), not in
 /// the row itself — a row-sized keyboard editor with an Escape key does not suit touch. It is shown
-/// for as long as `dialogs.renamingRowKey` names a row that still exists; a row removed underneath it
-/// (see the auto-cancel in `FeedListView.body`) closes the sheet.
+/// for as long as `dialogs.renamingRowKey` is set: only the user closing it or a row confirmed gone
+/// (the auto-cancel in `FeedListView.body`) ends the edit. While a re-key has reached the lists ahead
+/// of its map the row resolves to nothing, and the sheet keeps editing the target it last resolved
+/// (`SidebarDialogState.renamingTarget`) — with what has been typed into it — instead of closing.
 private struct SidebarRenameSheet: ViewModifier {
     let home: HomeObservable
     @Bindable var dialogs: SidebarDialogState
 
-    private var target: SidebarRenameTarget? {
+    /// What the edited row resolves to in the current lists and re-key map, or `nil` while it cannot
+    /// be resolved.
+    private func resolvedTarget() -> SidebarRenameTarget? {
         guard let key = dialogs.renamingRowKey,
               let current = home.idRemap.match(in: home.sidebar.orderedRowKeys, for: key),
               let instance = home.sidebar.orderedRowsByKey[current] else { return nil }
@@ -563,26 +567,36 @@ private struct SidebarRenameSheet: ViewModifier {
         )
     }
 
+    private func updateTarget() { dialogs.updateRenamingTarget(resolvedTarget()) }
+
     func body(content: Content) -> some View {
-        content.sheet(isPresented: Binding(
-            get: { target != nil },
-            set: { if !$0 { dialogs.endRename() } }
-        )) {
-            if let target {
-                NamePromptSheet(
-                    titleKey: "home_rename_feed",
-                    placeholderKey: placeholderKey(for: target),
-                    placeholderText: target.placeholder,
-                    duplicateMessageKey: target.duplicateMessageKey ?? "",
-                    confirmTitleKey: "common_save",
-                    allowBlank: target.allowBlank,
-                    initialName: target.initialName,
-                    isDuplicate: { isDuplicate($0, for: target) },
-                    onConfirm: { name, _ in commit(name, for: target) },
-                    isPresented: Binding(get: { dialogs.renamingRowKey != nil }, set: { if !$0 { dialogs.endRename() } })
-                )
+        content
+            .onChange(of: dialogs.renamingRowKey, initial: true) { _, _ in updateTarget() }
+            .onChange(of: home.sidebar.orderedRowKeys) { _, _ in updateTarget() }
+            .onChange(of: home.idRemap) { _, _ in updateTarget() }
+            .sheet(isPresented: Binding(
+                get: { dialogs.renamingRowKey != nil },
+                set: { if !$0 { dialogs.endRename() } }
+            )) {
+                // Before the first `updateTarget` has run for a new edit, the row is resolved here
+                // (a read only), so the sheet never opens empty.
+                if let target = dialogs.renamingTarget ?? resolvedTarget() {
+                    NamePromptSheet(
+                        titleKey: "home_rename_feed",
+                        placeholderKey: placeholderKey(for: target),
+                        placeholderText: target.placeholder,
+                        duplicateMessageKey: target.duplicateMessageKey ?? "",
+                        confirmTitleKey: "common_save",
+                        allowBlank: target.allowBlank,
+                        initialName: target.initialName,
+                        isDuplicate: { isDuplicate($0, for: target) },
+                        // Committed under the id the target last resolved to: a stale one is resolved
+                        // by the write statement itself (`docs/db-schema.md`, "tags / feed_tags").
+                        onConfirm: { name, _ in commit(name, for: target) },
+                        isPresented: Binding(get: { dialogs.renamingRowKey != nil }, set: { if !$0 { dialogs.endRename() } })
+                    )
+                }
             }
-        }
     }
 
     /// The hint shown in an empty folder or tag field; a feed shows its own title instead.
