@@ -1681,6 +1681,33 @@ class HomeViewModelTest {
     }
 
     /**
+     * A starred article stays visible even when another device's cache cleanup deleted it (the star and
+     * the deletion are separate merge groups), so the launch-time restore and a selection both keep it.
+     */
+    @Test
+    fun aStarredArticleDeletedElsewhereIsRestoredAndSelectableAsVisible() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 1L, isStarred = 1L, content = "<p>kept</p>")
+        db.insertArticle("a2", "f1", isRead = 0L, isStarred = 1L, content = "<p>also kept</p>")
+        val store = LocalSettingsStore(dirOverride = dir)
+        store.save(store.load().copy(lastArticleId = "a1"))
+        driver.stampArticleDeleted("a1", deletedAt = 10L)
+        driver.stampArticleDeleted("a2", deletedAt = 10L)
+
+        val vm = newViewModel()
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals("a1", vm.selectedArticle.value?.id)
+        assertEquals(setOf("a1", "a2"), vm.articles.value.map { it.id }.toSet())
+
+        vm.selectArticle(vm.articles.value.first { it.id == "a2" })
+        testScheduler.advanceUntilIdle()
+        assertEquals("a2", vm.selectedArticle.value?.id)
+        assertEquals("<p>also kept</p>", vm.selectedArticle.value?.content)
+    }
+
+    /**
      * The read-state pin set is revalidated on every `articles` write, and "mark all read" sizes it to
      * the whole visible list. Doing that with one `getById` per pin was an N+1 of full-row reads —
      * each on its own connection, inside a `MutableStateFlow.update` CAS lambda that can re-run it.

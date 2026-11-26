@@ -1,5 +1,8 @@
 package works.merc.keryx.app.domain
 
+import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
+import works.merc.keryx.app.data.local.articleVisibleSql
+import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.domain.TransportFixtures.DEV_A
 import works.merc.keryx.app.domain.TransportFixtures.article
 import works.merc.keryx.app.domain.TransportFixtures.baseName
@@ -108,6 +111,57 @@ class FeedIdentityMergeTest {
         assertEquals(listOf("article|aq1|ap1", "feed|fq|fp"), rows(db, "SELECT kind, old_id, new_id FROM ks_id_remap WHERE kind IN ('feed', 'article') ORDER BY 1, 2"))
         assertEquals(listOf("fp|fq"), rows(db, "SELECT a, b FROM ks_feed_edge"))
         assertEquals(emptyList(), foreignKeyViolations(db))
+    }
+
+    // ---- review finding #1: a star on one row and a cleanup of the other, merged into one ----
+
+    /** P's g1 starred at 100; Q's g1 deleted by a cleanup at 200 (never starred there). */
+    private fun starredP() = arrayOf(
+        feed("fp", url = url, title = "P title", updatedAt = 100),
+        article("ap1", "fp", guid = "g1", isStarred = 1, starredAt = 100),
+    )
+
+    private fun deletedQ() = arrayOf(
+        feed("fq", url = url, title = "Q title", updatedAt = 100),
+        article("aq1", "fq", guid = "g1", deletedAt = 200, deletedUpdatedAt = 200),
+    )
+
+    /** The merged g1 keeps both groups' winners — the star and the deletion — and is visible. */
+    private fun assertStarKeptAndVisible(db: File, label: String) {
+        assertEquals(
+            listOf("ap1|1|100|200|200"),
+            rows(db, "SELECT id, is_starred, starred_at, deleted_at, deleted_updated_at FROM articles WHERE guid = 'g1'"),
+            label,
+        )
+        assertEquals(
+            listOf("ap1"),
+            rows(db, "SELECT id FROM articles WHERE guid = 'g1' AND ${articleVisibleSql("")}"),
+            label,
+        )
+    }
+
+    @Test
+    fun aStarOnOneRowSurvivesACleanupOfTheOtherRowInASyncMergeInBothDirections() {
+        assertStarKeptAndVisible(localDb(*common(), *starredP()).also { merge(it, deltaOf(*deletedQ())) }, "main starred")
+        assertStarKeptAndVisible(localDb(*common(), *deletedQ()).also { merge(it, deltaOf(*starredP())) }, "main deleted")
+        // A fold of both, merged anywhere, agrees.
+        val folded = fold(deltaOf(*starredP()) to deltaName(DEV_A, 1), deltaOf(*deletedQ()) to deltaName(DEV_A, 2))
+        assertStarKeptAndVisible(localDb(*common()).also { merge(it, folded) }, "merged fold")
+    }
+
+    @Test
+    fun aStarOnOneRowSurvivesACleanupOfTheOtherRowInALocalMerge() {
+        // As a local 301 does (FeedRepository): both feeds on this device, merged with FeedIdentitySql.mergeLocally.
+        val local = localDb(*common(), *starredP(), *deletedQ().map { it.replace(url, "https://other/feed") }.toTypedArray())
+        val driver = JdbcSqliteDriver("jdbc:sqlite:${local.absolutePath}")
+        try {
+            // In a transaction, as FeedRepository runs it: the JDBC driver keeps one connection only
+            // inside one, and the statements share temp tables.
+            KeryxDatabase(driver).transaction { FeedIdentitySql.mergeLocally(driver, "fq", "fp") }
+        } finally {
+            driver.close()
+        }
+        assertStarKeptAndVisible(local, "local merge")
     }
 
     // ---- a collision between main and the cloud file, both directions ----

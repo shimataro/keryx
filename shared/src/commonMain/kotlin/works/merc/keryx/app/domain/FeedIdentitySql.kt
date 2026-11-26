@@ -45,7 +45,7 @@ import app.cash.sqldelight.db.SqlDriver
  *    `ks_feed_folder_raw`. `ks_article_canon(id, canonical_id)` maps every article id (main's and
  *    the cloud's) whose key holds a smaller id, and [cloudArticles] reads `cloud.articles` with
  *    ids and feed ids mapped and the rows sharing a canonical id folded exactly as [ReduceSql] folds
- *    them (body, read and retention groups; `cached_at` / `updated_at` the latest, `created_at` the
+ *    them (body, read, star and deletion groups; `cached_at` / `updated_at` the latest, `created_at` the
  *    earliest; `summary` dropped once there is `content`). Rows the identity does not touch are read
  *    straight from `cloud.articles`, so a merge whose file holds no collision copies no body.
  * 3. Main is re-keyed ([mainRekey]).

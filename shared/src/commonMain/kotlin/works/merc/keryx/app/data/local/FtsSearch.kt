@@ -128,7 +128,7 @@ class FtsSearch(private val driver: SqlDriver) {
                 FROM articles a
                 INNER JOIN articles_fts ON articles_fts.rowid = a.rowid
                 WHERE articles_fts MATCH ?
-                  AND a.deleted_at IS NULL
+                  AND ${articleVisibleSql("a")}
                 """.trimIndent(),
             )
             if (likeClause != null) append("\n  AND ").append(likeClause)
@@ -162,7 +162,7 @@ class FtsSearch(private val driver: SqlDriver) {
      * Fallback path: every term is too short for the trigram index. Scans `articles` directly with
      * `LIKE`, ordered by recency (no FTS rank is available) and capped at
      * [SEARCH_FALLBACK_RESULT_LIMIT] so a common short term can't stream unbounded results into the
-     * UI. Mirrors [searchByFts]'s `a.deleted_at IS NULL` filter exactly (no `feeds` join either,
+     * UI. Mirrors [searchByFts]'s visibility filter ([articleVisibleSql]) exactly (no `feeds` join either,
      * matching the FTS path's existing scope).
      */
     private fun searchByLikeOnly(shortTerms: List<String>, scope: ArticleScopeSql): List<FtsHit> {
@@ -170,7 +170,7 @@ class FtsSearch(private val driver: SqlDriver) {
         val sql = """
             SELECT a.id, a.title
             FROM articles a
-            WHERE a.deleted_at IS NULL
+            WHERE ${articleVisibleSql("a")}
               AND $likeClause
               AND ${scope.clause}
             ORDER BY a.published_at DESC, a.created_at DESC, a.id DESC

@@ -641,8 +641,35 @@ class FtsSearchTest {
             db.insertFeed("f1", folderId = "d1")
             db.insertFeedTag("f1", "t1")
             db.insertArticle("a1", "f1", "Kotlin one", "shared body", starred = true)
-            db.insertArticle("a2", "f1", "Kotlin two", "shared body", starred = true)
+            db.insertArticle("a2", "f1", "Kotlin two", "shared body")
             driver.stampArticleDeleted("a2", deletedAt = 100L)
+            ftsManagerIndexed(driver)
+
+            val scopes = listOf(
+                ArticleFilter.All, ArticleFilter.Feed("f1"), ArticleFilter.Tag("t1"), ArticleFilter.Folder("d1"),
+            )
+            for (scope in scopes) {
+                // Both the FTS path and the short-term LIKE path.
+                assertEquals(listOf("a1"), FtsSearch(driver).search("Kotlin", scope).map { it.id }, "scope=$scope")
+                assertEquals(listOf("a1"), FtsSearch(driver).search("ot", scope).map { it.id }, "LIKE, scope=$scope")
+            }
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun aStarredArticleThatIsAlsoDeletedIsFoundInEveryScope() {
+        // A star and another device's cache cleanup can both stand on one row (two independent merge
+        // groups); a starred article stays visible, so search finds it too.
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFolder("d1", "Folder")
+            db.insertTag("t1", "Tag")
+            db.insertFeed("f1", folderId = "d1")
+            db.insertFeedTag("f1", "t1")
+            db.insertArticle("a1", "f1", "Kotlin one", "shared body", starred = true)
+            driver.stampArticleDeleted("a1", deletedAt = 100L)
             ftsManagerIndexed(driver)
 
             val scopes = listOf(
@@ -651,6 +678,7 @@ class FtsSearchTest {
             )
             for (scope in scopes) {
                 assertEquals(listOf("a1"), FtsSearch(driver).search("Kotlin", scope).map { it.id }, "scope=$scope")
+                assertEquals(listOf("a1"), FtsSearch(driver).search("ot", scope).map { it.id }, "LIKE, scope=$scope")
             }
         } finally {
             driver.close()

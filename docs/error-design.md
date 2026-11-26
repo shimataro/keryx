@@ -116,8 +116,8 @@ again — unless the user has acted on the same item since, in which case that n
 
 - **Read/star**: the article's pins, the selection and its read/star intents take the DB's values (re-read
   behind the write queue), only on articles whose latest read (or star) write is still the failed one. Pins
-  are refreshed rather than dropped, so a row does not vanish from the list; a tombstoned article loses its
-  pins. See "Optimistic read/star pins" in [app-architecture.md](app-architecture.md).
+  are refreshed rather than dropped, so a row does not vanish from the list; an article no longer visible (deleted
+  and not starred) loses its pins. See "Optimistic read/star pins" in [app-architecture.md](app-architecture.md).
 - **Feed list**: a folder or tag delete or a feed unsubscribe changes the UI — the selection falling back to
   All, the open article closing with it, a folder's or tag's collapsed/expanded state being forgotten — only
   once its write has landed and the feed list has stopped showing the item, so a failed one leaves all of it

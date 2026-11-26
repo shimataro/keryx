@@ -3,15 +3,22 @@
 -- 0/1 (Long). All timestamps are Unix milliseconds.
 -- search_text = plain text of content (else summary), HTML tags stripped; feeds articles_fts.
 --
--- Soft-deleted via deleted_at (NULL = alive). Cache cleanup is the only writer of
--- deleted_at (softDeleteExpired); starred articles are never deleted. `deleted_updated_at`
--- is a field-specific last-wins timestamp for the deletion/undeletion event (like
--- read_at / starred_at, and like feeds.deleted_updated_at), kept separate from the row's
--- `updated_at` so a content refresh / read / star change (which all bump updated_at) can't
--- clobber a deletion during the sync merge. NULL = no delete/undelete event yet. In the merge the
--- star (is_starred / starred_at) and the deletion (deleted_at / deleted_updated_at) are ONE
--- last-write-wins group, ranked by the newer of starred_at and deleted_updated_at: the newer
--- operation wins and the whole group comes from it (no "a newer star revives" special case).
+-- Soft-deleted via deleted_at (NULL = not deleted). Cache cleanup is the only local originator of
+-- a deletion (softDeleteExpired), and it never deletes a starred article; an unstar of a deleted
+-- article stamps an undelete (updateStarStatus). `deleted_updated_at` is a field-specific
+-- last-wins timestamp for the deletion/undeletion event (like read_at / starred_at, and like
+-- feeds.deleted_updated_at), kept separate from the row's `updated_at` so a content refresh /
+-- read / star change (which all bump updated_at) can't clobber a deletion during the sync merge.
+-- NULL = no delete/undelete event yet. In the merge the star (is_starred by starred_at) and the
+-- deletion (deleted_at by deleted_updated_at) are TWO independent last-write-wins groups with no
+-- rule across them, so a row can be both starred and deleted (a star from one device, a cleanup
+-- from another). Whether an article is shown is decided here, when it is read:
+--
+--     VISIBLE = (deleted_at IS NULL OR is_starred = 1)
+--
+-- Every query below that lists, counts or acts on articles as the user sees them uses exactly that
+-- predicate (ArticleVisibility.kt holds the same rule for raw SQL and Kotlin;
+-- ArticleVisibilityQueriesTest fails on a `deleted_at IS NULL` used alone outside its allow-list).
 --
 -- body_updated_at is the body's own last-write-wins stamp (content, summary, title, url, author,
 -- published_at, thumbnail_url): set when the article is inserted and moved forward only when a
@@ -65,17 +72,17 @@ watchAll:
 SELECT a.id, a.feed_id, a.title, a.url, a.published_at, a.created_at, a.is_read, a.is_starred
 FROM articles a
 INNER JOIN feeds f ON f.id = a.feed_id
-WHERE f.deleted_at IS NULL AND a.deleted_at IS NULL
+WHERE f.deleted_at IS NULL AND (a.deleted_at IS NULL OR a.is_starred = 1)
 ORDER BY a.published_at DESC, a.created_at DESC, a.id DESC;
 
 watchStarred:
 SELECT id, feed_id, title, url, published_at, created_at, is_read, is_starred
-FROM articles WHERE is_starred = 1 AND deleted_at IS NULL
+FROM articles WHERE is_starred = 1 AND (deleted_at IS NULL OR is_starred = 1)
 ORDER BY published_at DESC, created_at DESC, id DESC;
 
 watchByFeed:
 SELECT id, feed_id, title, url, published_at, created_at, is_read, is_starred
-FROM articles WHERE feed_id = COALESCE((SELECT new_id FROM ks_id_remap WHERE kind = 'feed' AND old_id = :feed_id), :feed_id) AND deleted_at IS NULL
+FROM articles WHERE feed_id = COALESCE((SELECT new_id FROM ks_id_remap WHERE kind = 'feed' AND old_id = :feed_id), :feed_id) AND (deleted_at IS NULL OR is_starred = 1)
 ORDER BY published_at DESC, created_at DESC, id DESC;
 
 -- watchByFeed / watchByTag / watchByFolder resolve the id through ks_id_remap like the writes do (tags.sq /
@@ -93,7 +100,7 @@ FROM articles a
 INNER JOIN feeds f ON f.id = a.feed_id
 INNER JOIN feed_tags ft ON ft.feed_id = f.id
 WHERE ft.tag_id = COALESCE((SELECT new_id FROM ks_id_remap WHERE kind = 'tag' AND old_id = :tagId), :tagId)
-    AND ft.deleted_at IS NULL AND f.deleted_at IS NULL AND a.deleted_at IS NULL
+    AND ft.deleted_at IS NULL AND f.deleted_at IS NULL AND (a.deleted_at IS NULL OR a.is_starred = 1)
 ORDER BY a.published_at DESC, a.created_at DESC, a.id DESC;
 
 watchByFolder:
@@ -101,7 +108,7 @@ SELECT a.id, a.feed_id, a.title, a.url, a.published_at, a.created_at, a.is_read,
 FROM articles a
 INNER JOIN feeds f ON f.id = a.feed_id
 WHERE f.folder_id = COALESCE((SELECT new_id FROM ks_id_remap WHERE kind = 'folder' AND old_id = :folderId), :folderId)
-    AND f.deleted_at IS NULL AND a.deleted_at IS NULL
+    AND f.deleted_at IS NULL AND (a.deleted_at IS NULL OR a.is_starred = 1)
 ORDER BY a.published_at DESC, a.created_at DESC, a.id DESC;
 
 getById:
@@ -114,19 +121,19 @@ getListRowsByIds:
 SELECT id, feed_id, title, url, published_at, created_at, is_read, is_starred
 FROM articles WHERE id IN ?;
 
--- Which of the given ids still have a live row, and their current read/star flags. Used to
+-- Which of the given ids still have a visible row, and their current read/star flags. Used to
 -- revalidate HomeViewModel._pinnedReadStates/_pinnedUnstarredArticles in one query instead of one
 -- getById per pin (callers chunk to stay under the bound-parameter limit). The column ORDER IS
 -- LOAD-BEARING the same way the list queries' is (see getListRowsByIds above): is_read/is_starred
 -- are both INTEGER and adjacent, so a swap would compile and silently pass.
 aliveFlagsIn:
-SELECT id, is_read, is_starred FROM articles WHERE id IN ? AND deleted_at IS NULL;
+SELECT id, is_read, is_starred FROM articles WHERE id IN ? AND (deleted_at IS NULL OR is_starred = 1);
 
--- Every live article id belonging to the given feeds. Used to acknowledge a just-subscribed
+-- Every visible article id belonging to the given feeds. Used to acknowledge a just-subscribed
 -- feed's articles in the new-articles pill's baseline (callers chunk to stay under the
 -- bound-parameter limit).
 idsByFeeds:
-SELECT id FROM articles WHERE feed_id IN ? AND deleted_at IS NULL;
+SELECT id FROM articles WHERE feed_id IN ? AND (deleted_at IS NULL OR is_starred = 1);
 
 -- The new-articles pill's insertion watermark: the highest rowid currently in the table (0 when
 -- empty). maxRowId/idsInsertedAfter tell a genuinely newly inserted article apart from an
@@ -157,10 +164,10 @@ SELECT guid FROM articles WHERE feed_id = ?;
 watchUnreadCount:
 SELECT COUNT(*) FROM articles a
 INNER JOIN feeds f ON f.id = a.feed_id
-WHERE a.is_read = 0 AND f.deleted_at IS NULL AND a.deleted_at IS NULL;
+WHERE a.is_read = 0 AND f.deleted_at IS NULL AND (a.deleted_at IS NULL OR a.is_starred = 1);
 
 watchStarredUnreadCount:
-SELECT COUNT(*) FROM articles WHERE is_read = 0 AND is_starred = 1 AND deleted_at IS NULL;
+SELECT COUNT(*) FROM articles WHERE is_read = 0 AND is_starred = 1 AND (deleted_at IS NULL OR is_starred = 1);
 
 -- Lightweight change ping: re-emits whenever the `articles` table is mutated (SQLDelight
 -- notifies listeners table-wide, so the value need not change to fire). Used only as a signal
@@ -169,20 +176,20 @@ countArticles:
 SELECT COUNT(*) FROM articles;
 
 watchUnreadCountsByFeed:
-SELECT feed_id, COUNT(*) AS cnt FROM articles WHERE is_read = 0 AND deleted_at IS NULL GROUP BY feed_id;
+SELECT feed_id, COUNT(*) AS cnt FROM articles WHERE is_read = 0 AND (deleted_at IS NULL OR is_starred = 1) GROUP BY feed_id;
 
 watchUnreadCountsByTag:
 SELECT ft.tag_id, COUNT(*) AS cnt
 FROM articles a
 INNER JOIN feed_tags ft ON ft.feed_id = a.feed_id
-WHERE a.is_read = 0 AND ft.deleted_at IS NULL AND a.deleted_at IS NULL
+WHERE a.is_read = 0 AND ft.deleted_at IS NULL AND (a.deleted_at IS NULL OR a.is_starred = 1)
 GROUP BY ft.tag_id;
 
 watchUnreadCountsByFolder:
 SELECT f.folder_id, COUNT(*) AS cnt
 FROM articles a
 INNER JOIN feeds f ON f.id = a.feed_id
-WHERE a.is_read = 0 AND f.folder_id IS NOT NULL AND f.deleted_at IS NULL AND a.deleted_at IS NULL
+WHERE a.is_read = 0 AND f.folder_id IS NOT NULL AND f.deleted_at IS NULL AND (a.deleted_at IS NULL OR a.is_starred = 1)
 GROUP BY f.folder_id;
 
 -- body_updated_at: the insert's own time on a new row; on an existing one it moves forward
@@ -243,12 +250,10 @@ ON CONFLICT(feed_id, guid) DO NOTHING;
 --
 -- read_at, starred_at and deleted_updated_at move only forward on their row: MAX(now, previous + 1),
 -- in every statement below that stamps them. The sync merge settles an equal stamp by its tie rule
--- (the cloud side wins), which knows nothing of which write came later, so a change stamped at the
+-- (decided by value), which knows nothing of which write came later, so a change stamped at the
 -- value the row already holds — two changes within one millisecond, or one made right after a merge
--- brought that stamp in — would lose to the older value on the next merge. See docs/db-schema.md.
--- starred_at and deleted_updated_at rank one merge group together (the newer of the two wins it), so
--- a star or a deletion stamps above BOTH of them: a star made right after a merged deletion (or a
--- deletion right after a merged star) is then the group's newest event and wins it.
+-- brought that stamp in — could lose to the older value on the next merge. See docs/db-schema.md.
+-- Each stamp is its own merge group's, so each is moved above its own previous value only.
 -- None of these touch body_updated_at.
 --
 -- An article id given to these writes is resolved like a feed id (see feeds.sq), through the article
@@ -261,27 +266,33 @@ UPDATE articles SET is_read = :is_read, read_at = MAX(:read_at, COALESCE(read_at
 -- Marks a batch of articles read in one statement (callers chunk the id list to stay under
 -- SQLite's bound-parameter limit). Used by markArticlesAsRead instead of a per-id UPDATE loop.
 -- Guarded like the markAllRead* queries: the ids can come from optimistic in-memory pins that outrun
--- the DB, so a tombstoned or already-read row is left alone rather than stamped with a read event
+-- the DB, so a row no longer visible (deleted and not starred) or already read is left alone rather than stamped with a read event
 -- (read_at/updated_at) the user never made, which would otherwise ride the next sync.
 -- The ids are resolved as a set: a live id matches itself, and a moved one matches the row
 -- ks_id_remap maps it to (no live row has an id that is an old_id there). The list is bound twice, so
 -- callers chunk it to half the usual size.
 updateReadStatusByIds:
-UPDATE articles SET is_read = 1, read_at = MAX(:read_at, COALESCE(read_at, 0) + 1), updated_at = ? WHERE (id IN :id OR id IN (SELECT new_id FROM ks_id_remap WHERE kind = 'article' AND old_id IN :id)) AND is_read = 0 AND deleted_at IS NULL;
+UPDATE articles SET is_read = 1, read_at = MAX(:read_at, COALESCE(read_at, 0) + 1), updated_at = ? WHERE (id IN :id OR id IN (SELECT new_id FROM ks_id_remap WHERE kind = 'article' AND old_id IN :id)) AND is_read = 0 AND (deleted_at IS NULL OR is_starred = 1);
 
--- Same no-op guard as updateReadStatus, for starred_at. A star also clears deleted_at: starring keeps
--- the article (cache cleanup never deletes a starred one), so a star made on an article a merge has
--- just tombstoned — still on screen in the reader — revives it, here and, as the newest event of the
--- retention group, on every other device. An unstar leaves deleted_at alone. So a row is never both
--- starred and deleted, and neither is any version the merge takes the group from.
+-- Same no-op guard as updateReadStatus, for starred_at. A star touches only the star group: a starred
+-- article is visible whatever its deletion says, so a star made on an article a merge has just
+-- deleted — still on screen in the reader — keeps it, here and on every device the star reaches.
+-- An unstar of a deleted row also stamps an undelete in the deletion group (deleted_at NULL,
+-- deleted_updated_at moved forward like any stamp), so the article the user just unstarred stays on
+-- screen until the next cache cleanup deletes it again rather than vanishing under the user. An
+-- unstar of a row that is not deleted leaves the deletion group alone.
 updateStarStatus:
 UPDATE articles SET is_starred = :is_starred,
-    starred_at = MAX(:starred_at, COALESCE(starred_at, 0) + 1, COALESCE(deleted_updated_at, 0) + 1),
-    deleted_at = CASE WHEN :is_starred = 1 THEN NULL ELSE deleted_at END,
+    starred_at = MAX(:starred_at, COALESCE(starred_at, 0) + 1),
+    deleted_updated_at = CASE WHEN :is_starred = 0 AND deleted_at IS NOT NULL
+        THEN MAX(:starred_at, COALESCE(deleted_updated_at, 0) + 1)
+        ELSE deleted_updated_at END,
+    deleted_at = CASE WHEN :is_starred = 0 THEN NULL ELSE deleted_at END,
     updated_at = ?
 WHERE id = COALESCE((SELECT id FROM articles WHERE id = :id), (SELECT new_id FROM ks_id_remap WHERE kind = 'article' AND old_id = :id), :id) AND is_starred <> :is_starred;
 
--- The feed_id EXISTS guard on markAllReadAll/markAllReadByTag keeps this in the same row set as
+-- Every markAllRead* query marks only visible articles (deleted_at IS NULL OR is_starred = 1), the
+-- rows its list shows. The feed_id EXISTS guard on markAllReadAll/markAllReadByTag keeps this in the same row set as
 -- the corresponding plain list query (watchAll/watchByTag, both INNER JOIN feeds ... f.deleted_at
 -- IS NULL): otherwise "mark all read" on All Feeds / a tag would also mark read an article
 -- belonging to an unsubscribed (soft-deleted) feed, which never appears in that list. Unlike
@@ -292,15 +303,15 @@ WHERE id = COALESCE((SELECT id FROM articles WHERE id = :id), (SELECT new_id FRO
 -- a mark-all-read queued with the id a merge has since re-keyed marks the list it became.
 markAllReadAll:
 UPDATE articles SET is_read = 1, read_at = MAX(:read_at, COALESCE(read_at, 0) + 1), updated_at = ?
-WHERE is_read = 0 AND deleted_at IS NULL
+WHERE is_read = 0 AND (deleted_at IS NULL OR is_starred = 1)
   AND EXISTS (SELECT 1 FROM feeds f WHERE f.id = articles.feed_id AND f.deleted_at IS NULL);
 
 markAllReadByFeed:
-UPDATE articles SET is_read = 1, read_at = MAX(:read_at, COALESCE(read_at, 0) + 1), updated_at = ? WHERE feed_id = COALESCE((SELECT id FROM feeds WHERE id = :feed_id), (SELECT new_id FROM ks_id_remap WHERE kind = 'feed' AND old_id = :feed_id), :feed_id) AND is_read = 0 AND deleted_at IS NULL;
+UPDATE articles SET is_read = 1, read_at = MAX(:read_at, COALESCE(read_at, 0) + 1), updated_at = ? WHERE feed_id = COALESCE((SELECT id FROM feeds WHERE id = :feed_id), (SELECT new_id FROM ks_id_remap WHERE kind = 'feed' AND old_id = :feed_id), :feed_id) AND is_read = 0 AND (deleted_at IS NULL OR is_starred = 1);
 
 markAllReadByTag:
 UPDATE articles SET is_read = 1, read_at = MAX(:read_at, COALESCE(read_at, 0) + 1), updated_at = ?
-WHERE is_read = 0 AND deleted_at IS NULL AND feed_id IN (
+WHERE is_read = 0 AND (deleted_at IS NULL OR is_starred = 1) AND feed_id IN (
     SELECT ft.feed_id FROM feed_tags ft
     INNER JOIN feeds f ON f.id = ft.feed_id
     WHERE ft.tag_id = COALESCE((SELECT id FROM tags WHERE id = :tag_id), (SELECT new_id FROM ks_id_remap WHERE kind = 'tag' AND old_id = :tag_id), :tag_id) AND ft.deleted_at IS NULL AND f.deleted_at IS NULL
@@ -308,7 +319,7 @@ WHERE is_read = 0 AND deleted_at IS NULL AND feed_id IN (
 
 markAllReadByFolder:
 UPDATE articles SET is_read = 1, read_at = MAX(:read_at, COALESCE(read_at, 0) + 1), updated_at = ?
-WHERE is_read = 0 AND deleted_at IS NULL AND feed_id IN (
+WHERE is_read = 0 AND (deleted_at IS NULL OR is_starred = 1) AND feed_id IN (
     SELECT id FROM feeds WHERE folder_id = COALESCE((SELECT id FROM folders WHERE id = :folder_id), (SELECT new_id FROM ks_id_remap WHERE kind = 'folder' AND old_id = :folder_id), :folder_id) AND deleted_at IS NULL
 );
 
@@ -316,7 +327,8 @@ WHERE is_read = 0 AND deleted_at IS NULL AND feed_id IN (
 -- propagates via the sync merge instead of being resurrected from the cloud). Keeps starred
 -- articles and the latest 10 alive per feed (the subquery excludes tombstoned rows, so a
 -- persisted tombstone can't occupy a protected slot and drop live retention below 10).
--- `deleted_at IS NULL` makes it idempotent (never re-stamps an already-tombstoned row).
+-- `deleted_at IS NULL` makes it idempotent (never re-stamps an already-tombstoned row). Its stamp
+-- moves above the row's own deleted_updated_at only: the star is a separate merge group.
 --
 -- The protected set is ranked with ROW_NUMBER() rather than a correlated `... WHERE
 -- a2.feed_id = articles.feed_id ORDER BY ... LIMIT 10` subquery, so it is evaluated ONCE for
@@ -326,7 +338,7 @@ WHERE is_read = 0 AND deleted_at IS NULL AND feed_id IN (
 -- set cannot shift while the statement runs — which makes per-row re-evaluation redundant.
 softDeleteExpired:
 UPDATE articles
-SET deleted_at = ?, deleted_updated_at = MAX(:deleted_updated_at, COALESCE(deleted_updated_at, 0) + 1, COALESCE(starred_at, 0) + 1), updated_at = ?
+SET deleted_at = ?, deleted_updated_at = MAX(:deleted_updated_at, COALESCE(deleted_updated_at, 0) + 1), updated_at = ?
 WHERE is_starred = 0
   AND deleted_at IS NULL
   AND cached_at < ?

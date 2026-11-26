@@ -8,8 +8,9 @@ package works.merc.keryx.app.domain
  * - every field group is last-write-wins by its own stamp ([SyncLww]); feeds: content (`updated_at`),
  *   folder, sort order, custom title, subscription state; tags / folders: existence (`updated_at`),
  *   name, sort order (and color for tags); articles: body (`body_updated_at`, content always beating
- *   a summary and any body a light row), read, retention (star and deletion as one group: the newer
- *   operation wins); feed_tags and global_settings: their one group;
+ *   a summary and any body a light row), read, star and deletion (two independent groups; whether an
+ *   article is shown is decided when it is read, not by the merge); feed_tags and global_settings:
+ *   their one group;
  * - **a tie on the stamp is decided by the values, never by the side** ([SyncLww]'s canonical
  *   comparison), so devices merging the same files in different orders converge;
  * - `created_at` takes the earliest value, articles' `cached_at` and `updated_at` the latest;
@@ -306,13 +307,13 @@ object MergeSql {
             ${winner(SyncLww.ARTICLE_BODY, "thumbnail_url")},
             ${winner(SyncLww.ARTICLE_READ, "is_read")},
             ${winner(SyncLww.ARTICLE_READ, "read_at")},
-            ${winner(SyncLww.ARTICLE_RETENTION, "is_starred")},
-            ${winner(SyncLww.ARTICLE_RETENTION, "starred_at")},
+            ${winner(SyncLww.ARTICLE_STAR, "is_starred")},
+            ${winner(SyncLww.ARTICLE_STAR, "starred_at")},
             CASE WHEN l.id IS NULL THEN c.cached_at ELSE MAX(c.cached_at, l.cached_at) END,
             CASE WHEN l.id IS NULL THEN c.updated_at ELSE MAX(c.updated_at, l.updated_at) END,
             CASE WHEN l.id IS NULL THEN c.created_at ELSE MIN(c.created_at, l.created_at) END,
-            ${winner(SyncLww.ARTICLE_RETENTION, "deleted_at")},
-            ${winner(SyncLww.ARTICLE_RETENTION, "deleted_updated_at")},
+            ${winner(SyncLww.ARTICLE_DELETION, "deleted_at")},
+            ${winner(SyncLww.ARTICLE_DELETION, "deleted_updated_at")},
             ${winner(SyncLww.ARTICLE_BODY, "body_updated_at")}
         FROM $cloudArticles
         LEFT JOIN main.articles l ON l.id = c.id

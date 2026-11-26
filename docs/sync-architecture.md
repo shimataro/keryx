@@ -554,13 +554,12 @@ Merge SQL (`MergeSql`) key points:
 - **A tie is decided by value, in every statement.** When both sides carry the same stamp, the group whose
   normalized values compare greater wins. Precisely (`SyncLww`), each version of a field group gets the rank row
   value `(stamp IS NOT NULL, COALESCE(stamp, 0), c1 IS NOT NULL, COALESCE(c1, 0), c2 IS NOT NULL, COALESCE(c2, 0),
-  …)`, where `c1, c2, …` are every column of the group — its stamp column(s), then its values — and the two ranks are
+  …)`, where `c1, c2, …` are every column of the group — its stamp column, then its values — and the two ranks are
   compared with SQLite's row-value `>` (BINARY collation). A version replaces the other only when its rank is
   strictly greater. So a stamped version beats an unstamped one (NULL means "no such event"), the greater stamp wins,
   and at an equal stamp the values decide in column order: NULL lowest, then SQLite's own ordering (integers
   numerically and below text, text byte by byte). Every element is non-NULL, so the comparison is never NULL, and
-  identical versions never replace each other. A group with two stamps (an article's retention group, below) ranks
-  by `any stamp IS NOT NULL, MAX(COALESCE(s1, 0), COALESCE(s2, 0))` in place of the first two elements; an article's
+  identical versions never replace each other. Every group has exactly one stamp; an article's
   body group puts two elements in front of all of these (below). The pre-delta rule ("a tie goes to the cloud") converged only because the
   cloud held a single file; with deltas, devices merge files in different orders, and a side-based rule would let
   that order decide. A device's own write always stamps above what its row already holds (see "Design Philosophy"
@@ -663,7 +662,7 @@ Merge SQL (`MergeSql`) key points:
   their edges join them into one identity and they become one tag or folder holding both rows' feeds. This is
   accepted as intended: such links can only come from migrating v2-era data (a device's own upgrade, or absorbing a
   pre-delta file an older build wrote), never from anything a version-3 device does.
-- articles, three groups:
+- articles, four groups:
   - **Body** — `content`, `summary`, `title`, `url`, `author`, `published_at`, `thumbnail_url` (and `feed_id` /
     `guid`, which the local merge never rewrites on an existing row), stamped by `body_updated_at`. A version with
     `content` outranks one without, and one with any body (`content` or `summary`) outranks one with none, before the
@@ -674,14 +673,24 @@ Merge SQL (`MergeSql`) key points:
     leaves it), never on a read, star or deletion — so a device that merely opened an article cannot make its older
     body beat another device's newer one.
   - **Read** — `is_read` by `read_at`.
-  - **Retention** — `is_starred`, `starred_at`, `deleted_at` and `deleted_updated_at` as one group, ranked by
-    `MAX(COALESCE(starred_at, 0), COALESCE(deleted_updated_at, 0))`: **the newer operation wins**, and the whole group
-    comes from the version that holds it. A star clears the deletion locally (`updateStarStatus`), and both a star
-    and a cleanup stamp above both stamps of their row, so the newest event always wins its group. (The earlier rule
-    — separate star and deletion groups, plus "a star newer than the deletion revives the article" — was not
-    commutative: a deletion, a later star and a still later unstar, merged in different orders, gave different
-    results.) As a consequence, an article revived by a star on another device and then unstarred stays visible
-    until the next cache cleanup deletes it again.
+  - **Star** — `is_starred` by `starred_at`.
+  - **Deletion** — `deleted_at` by `deleted_updated_at` (a cache cleanup, or the undelete an unstar of a deleted
+    article stamps).
+
+  The star and the deletion are **independent**: no rule in the merge or the fold crosses the two groups, so a row
+  can come out both starred and deleted — a star from one device, a cache cleanup from another, or the star of one
+  row and the cleanup of another row that a feed or article identity merged into it. **Whether an article is shown is
+  decided when it is read: an article is visible while it is not deleted or is starred**
+  (`(deleted_at IS NULL OR is_starred = 1)`, the predicate every article list, count, search and mark-all-read uses —
+  `articles.sq`, `data/local/ArticleVisibility.kt`). So a star is never lost to a cleanup made anywhere, in any order.
+  Locally a star touches only its own group; an unstar of a deleted article also stamps an undelete, so the article
+  stays on screen until the next cache cleanup deletes it again. (Two earlier designs failed. Separate groups plus a
+  merge-time "a star newer than the deletion revives the article" rule was not commutative: a deletion, a later star
+  and a still later unstar, merged in different orders, gave different results — the cross-group rule, not the
+  split, was the cause. One group ranked by the newer of the two stamps was commutative, but a newer cleanup — of
+  another device's copy, or of another row merged into this one — erased an older star outright. With each group a
+  plain last-write-wins of its own and visibility decided at read time, the merge stays idempotent, commutative and
+  associative.)
 
   `cached_at` and `updated_at` take the newer value (`updated_at` is the row's generic stamp, no group's key), and
   `created_at` the earlier. `search_text` is not merged: an article whose body the merge
@@ -1227,7 +1236,7 @@ Nextcloud is not reached through OAuth and has no app-only folder; everything ab
 
 Startup cache cleanup **soft-deletes** articles past the retention period (stamps `deleted_at` / `deleted_updated_at`)
 rather than physically removing them. The tombstones travel as light rows and propagate via the merge
-(the retention group's last-write-wins), so a device that missed the deletion converges instead of re-adding the
+(the deletion group's last-write-wins), so a device that missed the deletion converges instead of re-adding the
 article. Tombstones are not physically reclaimed yet (future work).
 
 Cleanup decides by `cached_at`, the last time an article was seen in its feed. The merge still keeps the newest

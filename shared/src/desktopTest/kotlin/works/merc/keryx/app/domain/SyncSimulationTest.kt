@@ -734,7 +734,7 @@ class SyncSimulationTest {
         val aliveFeeds = db.feedsQueries.getAllIncludingDeleted().executeAsList().filter { it.deleted_at == null }
         val aliveFolders = db.foldersQueries.watchAll().executeAsList().filter { it.deleted_at == null }
         val aliveTags = db.tagsQueries.watchAll().executeAsList().filter { it.deleted_at == null }
-        val liveArticles = device.sync.driver.executeQuery(null, "SELECT id FROM articles WHERE deleted_at IS NULL ORDER BY id", { c ->
+        val liveArticles = device.sync.driver.executeQuery(null, "SELECT id FROM articles WHERE (deleted_at IS NULL OR is_starred = 1) ORDER BY id", { c ->
             QueryResult.Value(buildList { while (c.next().value) add(c.getString(0)!!) })
         }, 0).value
         fun name(kind: String) = "$kind-${device.sync.label}-${sim.nameCounter++}"
@@ -835,13 +835,15 @@ class SyncSimulationTest {
         }
         for (
             r in rows(
-                "SELECT id, read_at, is_read, MAX(COALESCE(starred_at, 0), COALESCE(deleted_updated_at, 0)), " +
-                    "is_starred || '/' || (deleted_at IS NULL), body_updated_at, content, summary FROM articles",
+                "SELECT id, read_at, is_read, starred_at, is_starred, deleted_updated_at, deleted_at IS NULL, " +
+                    "body_updated_at, content, summary FROM articles",
             )
         ) {
+            // The star and the deletion are two independent groups (SyncLww.ARTICLE_STAR / ARTICLE_DELETION).
             add(Group("article ${r[0]} read", r[1]?.toLong(), r[2]!!))
-            add(Group("article ${r[0]} retention", r[3]?.toLong()?.takeIf { it > 0 }, r[4]!!))
-            add(Group("article ${r[0]} body", r[5]?.toLong(), "${r[6]}|${r[7]}"))
+            add(Group("article ${r[0]} star", r[3]?.toLong(), r[4]!!))
+            add(Group("article ${r[0]} deleted", r[5]?.toLong(), r[6]!!))
+            add(Group("article ${r[0]} body", r[7]?.toLong(), "${r[8]}|${r[9]}"))
         }
         for (r in rows("SELECT key, updated_at, value FROM global_settings")) {
             add(Group("setting ${r[0]}", r[1]?.toLong(), r[2]!!))
@@ -902,7 +904,7 @@ class SyncSimulationTest {
     }
 
     private companion object {
-        const val COLUMNS = 9
+        const val COLUMNS = 10
 
         /** RFC 822 weekday names, starting from 2024-01-01 (a Monday). */
         val WEEKDAYS = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")

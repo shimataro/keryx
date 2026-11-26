@@ -141,11 +141,11 @@ class SyncAlgebraTest {
                     assertEquals(null, rs.getString(2)) // the stale summary is dropped next to content
                     assertEquals(0L, rs.getLong(3)) // read 250 > 200
                     assertEquals(250L, rs.getLong(4))
-                    assertEquals(1L, rs.getLong(5))
-                    // Retention group: the star (260) is newer than the deletion (180), so the whole
-                    // group comes from fileB's version — which was never deleted.
-                    assertEquals(null, rs.getObject(6))
-                    assertEquals(null, rs.getObject(7))
+                    assertEquals(1L, rs.getLong(5)) // star 260, fileB
+                    // The deletion is a group of its own: fileC's cleanup (180) wins it whatever the
+                    // star says. The article stays visible because it is starred.
+                    assertEquals(180L, rs.getLong(6))
+                    assertEquals(180L, rs.getLong(7))
                     assertEquals(400L, rs.getLong(8)) // the latest cached_at
                     assertEquals(300L, rs.getLong(9)) // updated_at is no group's key: the latest
                 }
@@ -202,22 +202,27 @@ class SyncAlgebraTest {
     }
 
     @Test
-    fun foldTakesTheWholeRetentionGroupFromItsNewestOperation() {
+    fun foldTakesTheStarAndTheDeletionEachFromItsOwnNewestVersion() {
         val folded = fold(fileB() to nameB, fileC() to nameC)
         TransportFixtures.connect(folded).use { conn ->
             conn.createStatement().use { st ->
                 st.executeQuery("SELECT deleted_at, deleted_updated_at, is_starred, starred_at FROM articles WHERE id = 'a1'").use { rs ->
                     rs.next()
-                    assertEquals(null, rs.getObject(1))
-                    assertEquals(null, rs.getObject(2))
-                    assertEquals(1L, rs.getLong(3))
+                    assertEquals(180L, rs.getLong(1)) // fileC's cleanup
+                    assertEquals(180L, rs.getLong(2))
+                    assertEquals(1L, rs.getLong(3)) // fileB's star, kept beside the deletion
                     assertEquals(260L, rs.getLong(4))
                 }
             }
         }
     }
 
-    // ---- The retention group: delete @D, star @S > D, unstar @U > S on three devices ----
+    // ---- Star and deletion: delete @D, star @S > D, unstar @U > S on three devices ----
+    //
+    // Each file is what that device's own local writes leave behind (articles.sq): a star touches only
+    // the star group, and an unstar of a deleted row also stamps an undelete. This is the counterexample
+    // that broke the old "a newer star revives" rule; with two plain last-write-wins groups every merge
+    // and fold order agrees.
 
     private val deleteName = deltaName(DEV_A, 7)
     private val starName = deltaName(DEV_B, 7)
@@ -226,10 +231,10 @@ class SyncAlgebraTest {
     private fun retentionFiles(): List<Pair<File, TransportFileName>> = listOf(
         // Device A's cache cleanup deleted the article.
         transportFile(deleteName, feed("f1"), article("a1", "f1", deletedAt = 100, deletedUpdatedAt = 100)) to deleteName,
-        // Device B, after merging that deletion, starred it (which revives it).
-        transportFile(starName, feed("f1"), article("a1", "f1", isStarred = 1, starredAt = 200, deletedUpdatedAt = 100)) to starName,
-        // Device C, after merging the star, unstarred it.
-        transportFile(unstarName, feed("f1"), article("a1", "f1", isStarred = 0, starredAt = 300, deletedUpdatedAt = 100)) to unstarName,
+        // Device B, after merging that deletion, starred it: the deletion stays, the star keeps it visible.
+        transportFile(starName, feed("f1"), article("a1", "f1", isStarred = 1, starredAt = 200, deletedAt = 100, deletedUpdatedAt = 100)) to starName,
+        // Device C, after merging the star, unstarred it: an unstar of a deleted row stamps an undelete.
+        transportFile(unstarName, feed("f1"), article("a1", "f1", isStarred = 0, starredAt = 300, deletedUpdatedAt = 300)) to unstarName,
     )
 
     private fun retention(file: File): String = TransportFixtures.connect(file).use { conn ->
@@ -242,10 +247,10 @@ class SyncAlgebraTest {
     }
 
     @Test
-    fun theRetentionGroupConvergesOnTheNewestOperationInEveryMergeAndFoldOrder() {
-        // The unstar (300) is the newest operation: not starred, not deleted (it stays visible
-        // until the next cache cleanup deletes it again).
-        val expected = "0|300|null|100"
+    fun deleteStarAndUnstarOnThreeDevicesConvergeInEveryMergeAndFoldOrder() {
+        // The unstar (300) wins the star group, its undelete (300) the deletion group: not starred, not
+        // deleted — visible until the next cache cleanup deletes it again.
+        val expected = "0|300|null|300"
         val inputs = retentionFiles()
         for (local in listOf(emptyArray(), arrayOf(feed("f1"), article("a1", "f1")))) {
             for (order in permutations(listOf(0, 1, 2))) {
@@ -265,9 +270,22 @@ class SyncAlgebraTest {
     }
 
     @Test
-    fun aDeletionNewerThanTheStarWinsTheRetentionGroup() {
-        // The pre-v3 revive rule would have kept a star newer than any deletion alive; the group
-        // simply takes its newest operation, here a deletion after an unstar.
+    fun aDeletionNewerThanTheStarKeepsTheStar() {
+        // Finding #1: a cleanup on a device that never saw the star (deletion 250) is newer than the
+        // star (150), but the two are separate groups — the star stays, and keeps the article visible.
+        val delete = transportFile(nameB, feed("f1"), article("a1", "f1", deletedAt = 250, deletedUpdatedAt = 250))
+        val star = transportFile(nameA, feed("f1"), article("a1", "f1", isStarred = 1, starredAt = 150))
+        for (order in listOf(listOf(star, delete), listOf(delete, star))) {
+            val db = localDb()
+            order.forEach { merge(db, it) }
+            assertEquals("1|150|250|250", retention(db))
+            assertEquals("1|150|250|250", retention(fold(*order.map { it to (if (it == star) nameA else nameB) }.toTypedArray())))
+        }
+    }
+
+    @Test
+    fun anUnstarAndANewerDeletionLeaveTheArticleUnstarredAndDeleted() {
+        // The user unstarred it (200); another device's cleanup (250) deleted it: neither group keeps it.
         val unstar = transportFile(nameA, feed("f1"), article("a1", "f1", isStarred = 0, starredAt = 200))
         val delete = transportFile(nameB, feed("f1"), article("a1", "f1", isStarred = 0, starredAt = 200, deletedAt = 250, deletedUpdatedAt = 250))
         for (order in listOf(listOf(unstar, delete), listOf(delete, unstar))) {
@@ -278,7 +296,7 @@ class SyncAlgebraTest {
     }
 
     @Test
-    fun theRetentionGroupIsIdempotentAndCommutativeForEveryPair() {
+    fun theStarAndDeletionGroupsAreIdempotentAndCommutativeForEveryPair() {
         val inputs = retentionFiles().map { it.first }
         for (file in inputs) {
             val once = localDb().also { merge(it, file) }

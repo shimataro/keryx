@@ -11,8 +11,8 @@ package works.merc.keryx.app.domain
  * idempotent, commutative and associative, and merging a fold equal to merging its inputs one by
  * one.
  *
- * There are no special cases on top of the groups: an article's star and deletion are one group
- * ([SyncLww.ARTICLE_RETENTION]), resolved like any other. The columns no group keys fold by the
+ * There are no special cases on top of the groups: an article's star ([SyncLww.ARTICLE_STAR]) and
+ * deletion ([SyncLww.ARTICLE_DELETION]) are two independent groups, resolved like any other. The columns no group keys fold by the
  * rules [RowFold] shares with the identity steps: `created_at` takes the earliest value, an
  * article's `cached_at` and `updated_at` the latest, and an article's `summary` is dropped once it
  * has `content`.

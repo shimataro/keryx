@@ -40,8 +40,8 @@ internal fun <T : Any> retrimmedSelectionPin(prior: T?, now: T?, candidate: T): 
  *
  * @param pinned The read-state pins as they are now (the map being updated).
  * @param snapshot The read-state pins as they were when [flags] was requested.
- * @param flags The current read/star flags of the alive articles among the pinned ids; an id missing
- *   from it is tombstoned (or gone).
+ * @param flags The current read/star flags of the visible articles among the pinned ids (not deleted,
+ *   or starred); an id missing from it is no longer visible (or gone).
  * @param selectedId The article the user has selected, if any.
  * @return [pinned] minus every pin the DB no longer agrees with, with the selection's own pin
  *   refreshed to the current value instead of dropped while its article is alive.
@@ -76,8 +76,8 @@ internal fun reconciledReadPins(
  *
  * @param pinned The unstarred pins as they are now (the map being updated).
  * @param snapshot The unstarred pins as they were when [flags] was requested.
- * @param flags The current read/star flags of the alive articles among the pinned ids; an id missing
- *   from it is tombstoned (or gone).
+ * @param flags The current read/star flags of the visible articles among the pinned ids (not deleted,
+ *   or starred); an id missing from it is no longer visible (or gone).
  * @return [pinned] minus every pin unchanged since [snapshot] whose article's current is_starred no
  *   longer matches the pinned value; pins added or replaced since [snapshot] are kept.
  */

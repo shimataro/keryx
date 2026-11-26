@@ -10,6 +10,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import works.merc.keryx.app.core.ARTICLE_CONTENT_CACHE_LIMIT
 import works.merc.keryx.app.data.local.db.Articles
+import works.merc.keryx.app.data.local.isVisible
 import works.merc.keryx.app.domain.ArticleReaderRow
 import works.merc.keryx.app.domain.toReaderRow
 
@@ -98,10 +99,10 @@ class ArticleContentCache(
             // The reader left the composition while this was reading: the body it asked for is not
             // wanted any more, and inserting it would leave behind exactly what clear() dropped.
             if (generation.value != startedGeneration) return@launch
-            // A sync merge can tombstone the row between the page composing and this returning;
-            // rendering it would put deleted content back on screen, the same thing
-            // HomeViewModel.selectArticle's own guard prevents for the selection.
-            if (full == null || full.deleted_at != null) return@launch
+            // A sync merge can delete the row (making it invisible unless starred) between the page
+            // composing and this returning; rendering it would put deleted content back on screen,
+            // the same thing HomeViewModel.selectArticle's own guard prevents for the selection.
+            if (full == null || !full.isVisible) return@launch
             _rows.update { trimmedToCacheLimit(it + (id to full.toReaderRow()), limit) }
         }
     }

@@ -32,8 +32,8 @@
   `feeds.custom_title_updated_at` / `folder_updated_at` / `sort_order_updated_at`（`updateCustomTitle`、`updateFolder`、
   `updateSortOrder`、`updateFolderAndSortOrder`）、`articles.read_at` / `starred_at`（`updateReadStatus`、
   `updateReadStatusByIds`、`updateStarStatus`、`markAllRead*` の各クエリ）と `deleted_updated_at`（`softDeleteExpired`）
-  ——`starred_at` と `deleted_updated_at` はマージで 1 つのグループとして順位を付けるので、スターもキャッシュ削除も
-  その*両方*より大きく打刻する——、`articles.body_updated_at`（記事の upsert。本文の列が変わったときだけ進める）、
+  （と、`updateStarStatus` のスター解除が打刻する削除の取り消し）——スターと削除はマージで別々のグループなので、
+  それぞれ自分の前の値より大きく打刻する——、`articles.body_updated_at`（記事の upsert。本文の列が変わったときだけ進める）、
   `tags.name_updated_at` / `color_updated_at` / `sort_order_updated_at` と `folders.name_updated_at` /
   `sort_order_updated_at`（それぞれ自分のフィールドが変わったときだけ進める——`upsert`、`updateSortOrder`、
   `upsertByName`）、`feed_tags.updated_at` / `global_settings.updated_at`（`upsert`）がそれにあたる。こうしないと、行が
@@ -146,7 +146,7 @@
   全デバイスで同一 ID になるため、同期マージ（記事を `id` で照合する）が既読・スターを後勝ちで
   伝播できる。既存行は `upsert` の `ON CONFLICT(feed_id, guid)` が既存 ID を保持する
   （決定的生成は新規行のみに効く）。
-- 既読の競合解決は `read_at` で後勝ち。スターは保持グループ（後述）の一部で、`starred_at` で順位を付ける。どちらも状態が実際に変わったときだけ打刻される（`updateReadStatus` / `updateStarStatus` が変化を条件にしている）ため、既読の記事を再度開いても `read_at` は更新されない。
+- 既読の競合解決は `read_at` で後勝ち。スターは `starred_at` で後勝ちの独立したグループで、削除（後述）とは別に決める。どちらも状態が実際に変わったときだけ打刻される（`updateReadStatus` / `updateStarStatus` が変化を条件にしている）ため、既読の記事を再度開いても `read_at` は更新されない。
 - `body_updated_at` は本文自身の後勝ちタイムスタンプで、マージが 1 つの版からまとめて取る `content`・`summary`・
   `title`・`url`・`author`・`published_at`・`thumbnail_url` に対するもの。記事の upsert（`insert`、`insertIfAbsent`）は
   新しい行では書き込みの時刻を入れ、既存の行では本文の列が実際に変わったときだけ前に進める（`MAX(今の時刻, 前の値 + 1)`）。
@@ -161,21 +161,23 @@
   同期しない。同期マージが本文を埋めた、または変えた記事は `ks_search_pending` に登録し、次の
   `FtsManager.indexMissing()` が索引を作る前に `search_text` を再計算する（新しく挿入された記事は `""` から始まる）。
   `indexMissing()` は登録されたままの行を飛ばす。
-- `deleted_at`（NULL = 生存）で論理削除する。削除を**ローカルで発生させる**のはキャッシュ削除
+- `deleted_at`（NULL = 削除されていない）で論理削除する。削除を**ローカルで発生させる**のはキャッシュ削除
   （`softDeleteExpired`）のみで、スター付き記事は削除しない（同期マージも `deleted_at` を書き込み、
   他デバイスでの削除を伝播する。後述）。`deleted_updated_at` は削除/復活イベントの
   フィールド別後勝ちタイムスタンプ（`read_at` / `starred_at`、および `feeds.deleted_updated_at` と同様）で、
   コンテンツ更新・既読の変更が同期マージで削除を上書きしないよう `updated_at` とは分離する。
-  マージではスターと削除を **1 つのグループ**（*保持*グループ: `is_starred`・`starred_at`・`deleted_at`・
-  `deleted_updated_at`）とし、`MAX(starred_at, deleted_updated_at)`（NULL は 0）で順位を付ける: 新しいほうの操作が
-  勝ち、グループ全体をその操作から取る。スターは `deleted_at` を消す（`updateStarStatus`）——スターは記事を残す操作
-  なので、マージが削除したばかりの記事にスターを付ければ、この端末でもほかのすべての端末でも記事は復活する——一方、
-  スター解除は削除に触れない。スターもキャッシュ削除も行の両方のタイムスタンプより大きく打刻するので、それぞれが
-  自分の変えたグループに勝つ。したがって、スター付きかつ削除済みの行は存在しない。別の端末のスターで復活し、
-  そのあとスターを外された記事は、次のキャッシュ削除で再び削除されるまで表示されたままになる。これにより、
+  マージではスター（`is_starred` を `starred_at` で）と削除（`deleted_at` を `deleted_updated_at` で）を
+  **独立した 2 つのグループ**とし、グループをまたぐ規則は持たない。そのため、行がスター付きかつ削除済みになることが
+  ある——ある端末のスターと別の端末のキャッシュ削除をどちらの順序でマージしても、またフィードや記事の同一性が 2 行を
+  1 つに寄せても。**削除されていないか、スター付きの記事は表示される**: `(deleted_at IS NULL OR is_starred = 1)` で、
+  読むときに決める。一覧・未読数・検索・`aliveFlagsIn` / `idsByFeeds` の照会・すべて既読にする、のすべてがちょうど
+  この判定を使う（`articles.sq`。生の SQL と Kotlin には `data/local/ArticleVisibility.kt`）ので、スターがキャッシュ
+  削除に負けることはない。スターはスターのグループにしか触れない（`updateStarStatus`）。削除済みの行のスターを外すと
+  削除の取り消し（`deleted_at` を NULL にし、`deleted_updated_at` を進める）も打刻するので、ユーザーがスターを外した
+  記事は、次のキャッシュ削除で再び削除されるまで表示されたままになる。これにより、
   削除が次回同期でクラウドから復活せず、他デバイスへ伝播する。ここでは行を物理削除しない（古い
-  トゥームストーンの物理GCは将来対応）。全 UI/一覧/検索クエリは `deleted_at IS NULL` で除外し、
-  `upsert`（フィード更新）は `deleted_at` に触れないため、更新が削除済み記事を復活させることはない。
+  トゥームストーンの物理GCは将来対応）。`getByFeedAndGuid` / `getGuidsByFeed` は削除済みの行も意図的に含める
+  （フィード更新が削除済みの記事を追加し直さないため）。`upsert`（フィード更新）は `deleted_at` に触れないため、更新が削除済み記事を復活させることはない。
 
 ### tags / feed_tags
 
@@ -382,7 +384,7 @@ SQLite を使う。理由と撤退条件は `.claude/rules/android-sqlite-bundli
 ## キャッシュ削除
 
 `cache_retention_days` に基づき、起動時に前回削除から 24 時間以上経過していればバックグラウンドで実行。
-スター付き記事とフィードごとの最新 10 件は保持期間に関わらず削除しない。`null`（無期限）なら実行しない。
+スター付き記事とフィードごとの最新 10 件は保持期間に関わらず削除しない（別の端末のキャッシュ削除が削除したスター付き記事も、そのまま表示される。上の `articles` 参照）。`null`（無期限）なら実行しない。
 削除は行の物理削除ではなく**論理削除**（`articles.deleted_at` / `deleted_updated_at` を刻む）で、削除が
 クラウドから復活せず同期マージで伝播する。古いトゥームストーンの物理回収は将来対応。
 

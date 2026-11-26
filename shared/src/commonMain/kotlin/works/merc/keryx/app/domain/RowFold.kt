@@ -42,7 +42,7 @@ internal object RowFold {
     )
 
     /** The groups of an article row. */
-    val ARTICLE_GROUPS: List<LwwGroup> = listOf(SyncLww.ARTICLE_BODY, SyncLww.ARTICLE_READ, SyncLww.ARTICLE_RETENTION)
+    val ARTICLE_GROUPS: List<LwwGroup> = listOf(SyncLww.ARTICLE_BODY, SyncLww.ARTICLE_READ, SyncLww.ARTICLE_STAR, SyncLww.ARTICLE_DELETION)
 
     /** An article's columns no group keys: `created_at` the earliest, `cached_at` and `updated_at` the latest. */
     val ARTICLE_EXTRA_ASSIGNMENTS: List<String> = listOf(

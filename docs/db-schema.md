@@ -34,8 +34,8 @@ through it rather than composing `AppDirs.appDataDir()` with the filename themse
   `feeds.custom_title_updated_at` / `folder_updated_at` / `sort_order_updated_at` (`updateCustomTitle`,
   `updateFolder`, `updateSortOrder`, `updateFolderAndSortOrder`), `articles.read_at` / `starred_at`
   (`updateReadStatus`, `updateReadStatusByIds`, `updateStarStatus`, the `markAllRead*` queries) and
-  `deleted_updated_at` (`softDeleteExpired`) — `starred_at` and `deleted_updated_at` rank one merge group together, so
-  a star or a cleanup stamps above *both* of them —, `articles.body_updated_at` (the article upsert, moved only when a
+  `deleted_updated_at` (`softDeleteExpired`, and the undelete of `updateStarStatus`'s unstar) — each above its own
+  previous value, since the star and the deletion are separate merge groups —, `articles.body_updated_at` (the article upsert, moved only when a
   body column changes), `tags.name_updated_at` / `color_updated_at` / `sort_order_updated_at`
   and `folders.name_updated_at` / `sort_order_updated_at` (each moved only when its own field changes — `upsert`,
   `updateSortOrder`, `upsertByName`), and `feed_tags.updated_at` / `global_settings.updated_at` (`upsert`).
@@ -140,7 +140,7 @@ the sync bookkeeping tables / `articles_fts` (virtual).
 Indexes: `feed_id`, `is_read`, `is_starred`, and a composite `(published_at DESC, created_at DESC, id DESC)` for list ordering.
 
 - `id` is deterministically generated from `(feed_id, guid)` as **UUIDv5** (`IdGenerator.articleId`). The same article gets the same ID on all devices, so sync merge (articles matched by `id`) can propagate read/star states via last-write-wins. Existing rows keep their id via `upsert`'s `ON CONFLICT(feed_id, guid)` — deterministic generation only applies to new rows.
-- Read conflict resolution is last-write-wins via `read_at`; the star is part of the retention group (below), ranked with `starred_at`. Both are stamped only when the state actually changes (`updateReadStatus` / `updateStarStatus` are guarded on it), so re-opening an already-read article does not move them.
+- Read conflict resolution is last-write-wins via `read_at`; the star is last-write-wins via `starred_at`, a group of its own, independent of the deletion (below). Both are stamped only when the state actually changes (`updateReadStatus` / `updateStarStatus` are guarded on it), so re-opening an already-read article does not move them.
 - `body_updated_at` is the body's own last-write-wins stamp — for `content`, `summary`, `title`, `url`, `author`,
   `published_at` and `thumbnail_url`, which the merge takes together from one version. The article upsert
   (`insert`, `insertIfAbsent`) sets it to the write's time on a new row, and on an existing row moves it forward
@@ -150,21 +150,24 @@ Indexes: `feed_id`, `is_read`, `is_starred`, and a composite `(published_at DESC
   because `2.sqm` adds it (initialized from `updated_at`); every write sets it.
 - `content` is displayed in preference to `summary`. If both are NULL, the reader shows a localized "no content" placeholder in place (with a link/button to open the article in the external browser); nothing opens automatically.
 - `search_text` = the HTML-stripped plain text of `content` (falling back to `summary`), or `""` if both are NULL. Computed at insert/update time (`ArticleRepository`, `HtmlText.toPlainText`). It is **device-local**: never synced, since it is derived. An article whose body a sync merge filled in or changed is listed in `ks_search_pending`, and its `search_text` is recomputed by the next `FtsManager.indexMissing()` before it indexes anything (a newly inserted one starts as `""`); `indexMissing()` skips rows still listed.
-- Logical deletion via `deleted_at` (NULL = alive). Cache cleanup (`softDeleteExpired`) is the only **local**
-  originator of a deletion; starred articles are never deleted. (Sync merge also writes `deleted_at`, propagating a
+- Logical deletion via `deleted_at` (NULL = not deleted). Cache cleanup (`softDeleteExpired`) is the only **local**
+  originator of a deletion; it never deletes a starred article. (Sync merge also writes `deleted_at`, propagating a
   deletion made on another device — see below.) `deleted_updated_at` is a field-specific last-wins
   timestamp for the delete/undelete event (like `read_at` / `starred_at`, and like `feeds.deleted_updated_at`), kept
   separate from `updated_at` so a content refresh / read change can't clobber a deletion during the sync merge.
-  In the merge the star and the deletion are **one group** (the *retention* group: `is_starred`, `starred_at`,
-  `deleted_at`, `deleted_updated_at`), ranked by `MAX(starred_at, deleted_updated_at)` (NULL as 0): the newer operation
-  wins and the whole group comes from it. A star clears `deleted_at` (`updateStarStatus`) — starring keeps the
-  article, so a star on an article a merge has just deleted revives it, here and on every device — while an unstar
-  leaves the deletion alone; both a star and a cleanup stamp above both stamps of their row, so each wins the group
-  it changed. A row is therefore never both starred and deleted. An article revived by a star elsewhere and then
-  unstarred stays visible until the next cache cleanup deletes it again. This makes the deletion propagate across
+  In the merge the star (`is_starred` by `starred_at`) and the deletion (`deleted_at` by `deleted_updated_at`) are
+  **two independent groups**, with no rule across them, so a row can be both starred and deleted — a star made on one
+  device and a cleanup made on another, merged in either order, or two rows a feed or article identity merged into
+  one. **An article is visible while it is not deleted or is starred**: `(deleted_at IS NULL OR is_starred = 1)`,
+  decided when it is read. Every list, unread count, search, `aliveFlagsIn` / `idsByFeeds` lookup and mark-all-read uses
+  exactly that predicate (`articles.sq`; `data/local/ArticleVisibility.kt` for raw SQL and Kotlin), so a star is never
+  lost to a cleanup. A star touches only the star group (`updateStarStatus`); an unstar of a deleted row also stamps an
+  undelete (`deleted_at` NULL, `deleted_updated_at` moved forward), so an article the user unstars stays visible until
+  the next cache cleanup deletes it again. This makes the deletion propagate across
   devices instead of the article being resurrected from the cloud on the next sync. Rows are
   never physically removed here (physical GC of old tombstones is future work); the row is kept so its deletion — and
-  starred-article references — survive. All UI/list/search queries filter `deleted_at IS NULL`; `upsert` (feed refresh)
+  starred-article references — survive. `getByFeedAndGuid` / `getGuidsByFeed` deliberately include deleted rows (a
+  refresh must not re-add one); `upsert` (feed refresh)
   never touches `deleted_at`, so a refresh cannot revive a deleted article.
 
 ### tags / feed_tags
@@ -375,7 +378,7 @@ Setup completion = file exists.
 
 ## Cache Cleanup
 
-Based on `cache_retention_days`, runs in the background at startup if 24+ hours have passed since the last cleanup. Starred articles and the latest 10 articles per feed are preserved regardless of retention period. If `null` (unlimited), cleanup is skipped. Cleanup **soft-deletes** (stamps `articles.deleted_at` / `deleted_updated_at`) rather than physically removing rows, so the deletion propagates via the sync merge instead of being resurrected from the cloud. Physical reclamation of old tombstones is future work.
+Based on `cache_retention_days`, runs in the background at startup if 24+ hours have passed since the last cleanup. Starred articles and the latest 10 articles per feed are preserved regardless of retention period (a starred article that another device's cleanup deleted stays visible all the same, see `articles` above). If `null` (unlimited), cleanup is skipped. Cleanup **soft-deletes** (stamps `articles.deleted_at` / `deleted_updated_at`) rather than physically removing rows, so the deletion propagates via the sync merge instead of being resurrected from the cloud. Physical reclamation of old tombstones is future work.
 
 Cleanup decides by `cached_at` (the last time the article was seen in its feed). Sync carries a `cached_at` change
 only when its day changes, so a device that does not refresh a feed itself can see another device's `cached_at` up to

@@ -41,6 +41,7 @@ import works.merc.keryx.app.core.decodeArticleFilter
 import works.merc.keryx.app.core.encode
 import works.merc.keryx.app.core.toDbFlag
 import works.merc.keryx.app.data.local.db.Articles
+import works.merc.keryx.app.data.local.isVisible
 import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.domain.FeedFetchProblem
 import works.merc.keryx.app.data.local.db.Folders
@@ -405,9 +406,10 @@ class HomeViewModel(
     // The last-selected article, restored at launch (not via selectArticle(), to avoid re-marking it as
     // read and clobbering another device's "mark as unread" sync via read_at last-write-wins). Looked
     // up here, before [_pinnedReadStates] and the eagerly collected article list, so its pin is in
-    // place before that list first emits. A tombstone can land while the app is closed, so the
-    // restored row is filtered the same way selectArticle filters a concurrently-deleted one —
-    // otherwise the next launch would select and pin deleted content.
+    // place before that list first emits. A merged deletion can make it invisible while the app is
+    // closed, so the restored row is filtered by visibility (isVisible: not deleted, or starred) the
+    // same way selectArticle filters a concurrently-deleted one — otherwise the next launch would
+    // select and pin deleted content.
     //
     // Best effort (docs/error-design.md): a failing lookup restores nothing. A selection whose body
     // lookup failed is persisted too (see applyHydratedSelection), so a lookup that fails every time
@@ -419,7 +421,7 @@ class HomeViewModel(
                 null
             }
         }
-        ?.takeIf { it.deleted_at == null }
+        ?.takeIf { it.isVisible }
 
     // Read state the user just set on an article while browsing the current filter: read (as a side
     // effect of selection, or an explicit "mark as read") or unread (an explicit "mark as unread"). The
@@ -1268,19 +1270,19 @@ class HomeViewModel(
             if (token == latestSelectionToken && selectionCursorId == article.id) {
                 _headerArticleId.value = article.id
                 // It is still the selection on screen, so it is the one the next launch restores. Whether
-                // it was tombstoned is unknown here, but the launch-time restore filters tombstones itself,
+                // it is still visible is unknown here, but the launch-time restore filters by visibility itself,
                 // and restores nothing if its own lookup of this article fails again.
                 settingsRepository.mutateLocalSettings { it.copy(lastArticleId = article.id) }
             }
             return
         }
-        // A null (or tombstoned) row means a sync merge deleted it between the emission the user
+        // A null row, or one no longer visible (isVisible), means a sync merge deleted it between the emission the user
         // clicked and the click itself: leave the selection and the persisted id entirely alone, and
         // take back the pin selectArticle added, rather than resurrecting deleted content into the
         // list (the `articles` merge re-adds any pinned id missing from the query result) or
         // restoring it on the next launch. A pin dropped by a browsing-context switch since is not
         // this hydration's to touch.
-        if (full == null || full.deleted_at != null) {
+        if (full == null || !full.isVisible) {
             if (pinnedAtSelect && epoch == browsingEpoch) _pinnedReadStates.update { it - article.id }
             // Resume navigating from what is actually on screen, not from the dead article — and stop
             // standing in for it in the reader and the toolbar.
@@ -1684,8 +1686,8 @@ class HomeViewModel(
      * that shows it only through its pin; the selection ([_selectedArticle], [_pendingSelectedRow])
      * takes it too; and it is recorded as the article's latest intent ([readIntents] / [starIntents]),
      * so a selection still loading its body lays the DB's value over its row rather than the failed
-     * one. An article the DB no longer has alive (a sync merge tombstoned it) loses its pins instead,
-     * as in [reconcilePinnedArticlesAndSelection]. Search results showing are re-run.
+     * one. An article the DB no longer shows (a sync merge deleted it, and it is not starred) loses its
+     * pins instead, as in [reconcilePinnedArticlesAndSelection]. Search results showing are re-run.
      *
      * Should the read itself fail, only the pins [write] set — as long as they are still in place —
      * are dropped; the next change to `articles` reconciles the rest.
@@ -1880,7 +1882,7 @@ class HomeViewModel(
      *
      * @param verifyAlive Whether to check the selection is still alive — a DB read, run afterwards on
      *   [dbWriteDispatcher] rather than on the caller's thread, which then drops the selection's pin
-     *   if it was tombstoned. A tombstone a sync merge wrote does not necessarily tick the
+     *   if it is no longer visible. A deletion a sync merge wrote does not necessarily tick the
      *   reconcile, so the refresh/sync edges and the user's own re-trims check; mark-all-read under
      *   Starred, which never did, skips it.
      */
@@ -1897,7 +1899,7 @@ class HomeViewModel(
         }
         val pin = keptPin
         if (!verifyAlive || candidate == null || pin == null) return
-        // A selected row tombstoned by a sync merge must not stay read-pinned: the `articles` merge
+        // A selected row a sync merge made invisible (deleted, not starred) must not stay read-pinned: the `articles` merge
         // step re-adds any read-pinned id missing from the repository result, which would put
         // deleted content back into the visible list. Checked after the re-trim rather than before
         // it, so the caller's (main) thread never waits on the DB — a write lock held by a merge

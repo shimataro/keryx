@@ -1120,7 +1120,7 @@ merge's or an FTS rebuild's write lock) does the grace timer `hydrateSelection` 
 new article's title, date and link from its list row over an empty body, the same document the pager draws for
 a page whose body has not loaded. The timer is cancelled on every exit from the hydration and re-checks on
 firing that its selection is still the newest, still the cursor's and still unloaded. The header is cleared
-once the body lands, by `selectFilter` and by a tombstoned lookup; a newer selection made while a header is
+once the body lands, by `selectFilter` and by a lookup that finds the article no longer visible; a newer selection made while a header is
 showing takes the header over at once rather than returning the reader to the previously loaded article for
 another grace period. Compose's single reader and the macOS SwiftUI reader both render it; the iOS pager does
 not (a page with no body yet shows only the reader's background, as before).
@@ -1453,7 +1453,7 @@ the reader keeps showing it.
 These pins are therefore a deliberately optimistic cache that can outrun the DB by design — but
 nothing about setting one re-checks that the DB actually caught up, so without revalidation a pin
 could hide an external change (another device's sync propagating a "mark unread"/restar, or a
-soft-delete tombstone) forever, not just for the brief window the write is in flight for.
+deletion of an unstarred article) forever, not just for the brief window the write is in flight for.
 
 `HomeViewModel.reconcilePinnedArticlesAndSelection` closes that gap: it runs on every write to `articles` (via
 an `articleChangeSignal` collector), revalidating every pinned id — and the current selection's own
@@ -1512,10 +1512,11 @@ their "mark as unread" write may still be in flight, and dropping one would let 
 lose the row until that write lands. The selection's pin is decided inside one `update`, against the
 map being updated, so a re-trim composes with a concurrent reconcile pass. A pin that pass dropped
 since stays dropped, and an existing pin is kept as it is: it is never re-created from the
-selection, which the pass refreshes only after the pin. Whether the selection still exists (a sync
-merge may have tombstoned it) is checked afterwards, by a read on `dbWriteDispatcher` rather than on
-the calling (main) thread, so a write lock held by a merge never stalls the UI; a tombstoned
-selection's pin is then dropped, but only if it is still the very pin the re-trim kept.
+selection, which the pass refreshes only after the pin. Whether the selection is still visible (a sync
+merge may have deleted it; a starred article stays visible even when deleted — see `articles` in
+[db-schema.md](db-schema.md)) is checked afterwards, by a read on `dbWriteDispatcher` rather than on
+the calling (main) thread, so a write lock held by a merge never stalls the UI; the pin of a selection
+no longer visible is then dropped, but only if it is still the very pin the re-trim kept.
 
 Every call site that runs it is a moment the read-state pins are expected to have accumulated
 entries worth dropping: turning unread-only on (`setUnreadOnly`), either side of a refresh
