@@ -150,6 +150,10 @@ fun sharedModule(): Module = module {
         FeedRepository(
             get(), get(), get(), get(), get(), get(), get(), get(),
             faviconMisses = SettingsFaviconMissStore(get()),
+            driver = get(),
+            // A refresh's redirect can merge two feeds (FeedIdentitySql.mergeLocally); once it commits,
+            // the ids held outside the database follow, as after a sync merge.
+            publishIdRemaps = { get<TagFolderIdRemaps>().publishFromDb() },
         )
     }
     single { FolderRepository(get(), get(), get(), get()) }

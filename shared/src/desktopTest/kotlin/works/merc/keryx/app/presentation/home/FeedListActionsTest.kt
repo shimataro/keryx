@@ -86,6 +86,7 @@ class FeedListActionsTest {
             articleRepository, ftsManagerIndexed(driver), scheduler, NotificationCenter(),
             clock, Dispatchers.Unconfined,
             faviconMisses = InMemoryFaviconMissStore(),
+            driver = driver,
         )
         val settings = SettingsRepository(
             db, LocalSettingsStore(dirOverride = dir), scheduler, clock, writeDispatcher = Dispatchers.Unconfined,

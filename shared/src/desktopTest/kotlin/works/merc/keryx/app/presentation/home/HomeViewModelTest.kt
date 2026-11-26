@@ -325,6 +325,7 @@ class HomeViewModelTest {
             NotificationCenter(), clock, listDispatcher,
             faviconMisses = InMemoryFaviconMissStore(),
             feedPlacementMutex = feedPlacementMutex,
+            driver = driver,
         )
         val tagRepository = TagRepository(db, syncScheduler, clock, listDispatcher)
         val folderRepository = FolderRepository(db, feedRepository, syncScheduler, clock, listDispatcher)

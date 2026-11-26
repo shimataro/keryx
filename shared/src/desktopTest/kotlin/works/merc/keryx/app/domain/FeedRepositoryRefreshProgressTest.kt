@@ -93,6 +93,7 @@ class FeedRepositoryRefreshProgressTest {
         return FeedRepository(
             db, fetcher, faviconResolver(), articles, ftsManagerIndexed(driver), sync,
             NotificationCenter(), clock, Dispatchers.Unconfined, InMemoryFaviconMissStore(),
+            driver = driver,
         )
     }
 

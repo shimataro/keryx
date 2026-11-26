@@ -107,6 +107,7 @@ class RefreshCycleRunnerFixtures(private val settingsDir: String) : AutoCloseabl
             db, fetcher, favicons, articleRepository, ftsManagerIndexed(driver), SyncScheduler {},
             notificationCenter, clock, Dispatchers.Unconfined,
             faviconMisses = InMemoryFaviconMissStore(),
+            driver = driver,
         )
         val syncScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined).also { scope -> cleanups += { scope.cancel() } }
         val syncRepository = SyncRepository(

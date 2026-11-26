@@ -58,6 +58,11 @@ SELECT * FROM feeds WHERE id = ?;
 getByUrl:
 SELECT * FROM feeds WHERE url = ?;
 
+-- The id the feed :id has now: :id itself while a row has it, else the id a re-key moved it to
+-- (ks_id_remap), else :id unchanged — the same resolution the writes below make in their statements.
+resolveId:
+SELECT COALESCE((SELECT id FROM feeds WHERE id = :id), (SELECT new_id FROM ks_id_remap WHERE kind = 'feed' AND old_id = :id), :id);
+
 getAllIncludingDeleted:
 SELECT * FROM feeds;
 
@@ -112,6 +117,14 @@ UPDATE feeds SET deleted_at = ?, updated_at = ?, deleted_updated_at = MAX(?, COA
 -- forward, as in softDelete.
 stampResubscribed:
 UPDATE feeds SET deleted_updated_at = MAX(?, COALESCE(deleted_updated_at, 0) + 1) WHERE id = COALESCE((SELECT id FROM feeds WHERE id = :id), (SELECT new_id FROM ks_id_remap WHERE kind = 'feed' AND old_id = :id), :id);
+
+-- A refresh's redirect merged a feed the user still had into a tombstoned one, and the merged feed
+-- came out deleted (FeedRepository.applyFetch): the merge is treated as a re-subscribe, so the
+-- redirect never unsubscribes a feed silently. deleted_updated_at moves only forward, as in
+-- stampResubscribed, and the merged row already holds the greatest stamp of the feeds it folded, so
+-- the new stamp beats every one of them and wins on the other devices too.
+reviveAfterMerge:
+UPDATE feeds SET deleted_at = NULL, updated_at = :updated_at, deleted_updated_at = MAX(:updated_at, COALESCE(deleted_updated_at, 0) + 1) WHERE id = COALESCE((SELECT id FROM feeds WHERE id = :id), (SELECT new_id FROM ks_id_remap WHERE kind = 'feed' AND old_id = :id), :id) AND deleted_at IS NOT NULL;
 
 -- Each user-edit stamp below (custom_title_updated_at, folder_updated_at, sort_order_updated_at)
 -- moves only forward on its row, as deleted_updated_at does: MAX(now, previous + 1). The sync merge

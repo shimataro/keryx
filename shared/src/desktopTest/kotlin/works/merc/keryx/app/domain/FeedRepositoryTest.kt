@@ -314,6 +314,7 @@ class FeedRepositoryTest {
             notificationCenter, clock, Dispatchers.Unconfined,
             faviconMisses = InMemoryFaviconMissStore(),
             feedPlacementMutex = feedPlacementMutex,
+            driver = driver,
         )
     }
 
@@ -1675,6 +1676,7 @@ class FeedRepositoryTest {
                 ArticleRepository(db, FtsSearch(driver), SyncScheduler {}, Clock { 1000L }, Dispatchers.Unconfined),
                 ftsManagerIndexed(driver), SyncScheduler {}, NotificationCenter(), Clock { 1000L }, Dispatchers.Unconfined,
                 faviconMisses = store,
+                driver = driver,
             )
 
             repo().refreshAll()
@@ -3103,6 +3105,222 @@ class FeedRepositoryTest {
             assertIs<Result.Ok<Feeds>>(subscription.result)
             assertFalse(subscription.wasNewlyCreated)
             assertNull(db.feedsQueries.getById(feed.id).executeAsOne().deleted_at)
+        } finally {
+            driver.close()
+        }
+    }
+
+    // ---- a permanent redirect onto a URL another feed holds ----
+
+    private val rssG1G2G5 = """<?xml version="1.0"?><rss version="2.0"><channel>
+<title>Feed</title><link>https://ex.com</link>
+<item><title>One</title><link>https://ex.com/1</link><guid>g1</guid></item>
+<item><title>Two</title><link>https://ex.com/2</link><guid>g2</guid></item>
+<item><title>Five</title><link>https://ex.com/5</link><guid>g5</guid></item>
+</channel></rss>"""
+
+    /** `/old` redirects permanently to `/new`, which serves [rssG1G2G5]. */
+    private fun redirectOldToNew(): FeedFetcher = fetcherWith { request ->
+        if (request.url.toString() == "https://ex.com/old") {
+            respond("", HttpStatusCode.MovedPermanently, headersOf(HttpHeaders.Location, "https://ex.com/new"))
+        } else {
+            respond(rssG1G2G5, HttpStatusCode.OK)
+        }
+    }
+
+    private fun works.merc.keryx.app.data.local.db.KeryxDatabase.seedArticle(
+        id: String, feedId: String, guid: String,
+        isRead: Long = 0, readAt: Long? = null, isStarred: Long = 0, starredAt: Long? = null,
+    ) = articlesQueries.insert(
+        id = id, feed_id = feedId, guid = guid, url = "https://ex.com/$guid", title = "Seed $guid",
+        summary = null, content = "seed body $guid", author = null, published_at = 10, thumbnail_url = null,
+        is_read = isRead, read_at = readAt, is_starred = isStarred, starred_at = starredAt, cached_at = 100,
+        search_text = "seed body $guid", updated_at = 100, created_at = 100,
+    )
+
+    private fun SqlDriver.rows(sql: String): List<String> = executeQuery(
+        null, sql,
+        { c ->
+            val out = mutableListOf<String>()
+            val n = sql.substringAfter("SELECT ").substringBefore(" FROM").split(",").size
+            while (c.next().value) out += (0 until n).joinToString("|") { "${c.getString(it) ?: c.getLong(it)}" }
+            QueryResult.Value(out)
+        },
+        0,
+    ).value
+
+    /**
+     * The refresh of a feed whose permanent redirect lands on another feed's URL (the same feed, subscribed
+     * anew at the moved URL — here or on another device) must not fail on UNIQUE(url) now and on every
+     * refresh after: the two merge onto the smallest id, and nothing the user did is lost.
+     */
+    @Test
+    fun aRedirectOntoAnotherFeedsUrlMergesTheTwoOntoTheSmallestIdAndLosesNothing(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertTag("t1", "news")
+            db.insertTag("t2", "tech")
+            db.insertFeed("f-p", now = 100, url = "https://ex.com/new")
+            db.insertFeed("f-q", now = 100, url = "https://ex.com/old")
+            db.insertFeedTag("f-q", "t1")
+            db.insertFeedTag("f-p", "t2")
+            db.seedArticle("ap1", "f-p", "g1", isRead = 1, readAt = 500)
+            db.seedArticle("ap3", "f-p", "g3")
+            db.seedArticle("aq2", "f-q", "g2", isStarred = 1, starredAt = 600)
+            db.seedArticle("aq9", "f-q", "g9", isRead = 1, readAt = 700)
+            driver.execute(null, "UPDATE sync_capture SET enabled = 1", 0)
+            driver.execute(null, "DELETE FROM sync_outbox", 0)
+            val center = NotificationCenter()
+            val repo = newRepo(db, driver, redirectOldToNew(), notificationCenter = center)
+            val staleRow = db.feedsQueries.getById("f-q").executeAsOne()
+
+            val result = repo.refreshFeed(staleRow)
+
+            // g1 sits in the canonical feed already and g2 in the refreshed one: only g5 is new, whichever
+            // feed the count is read against.
+            assertEquals(Result.Ok(1), result)
+            assertEquals(listOf("f-p|https://ex.com/new"), driver.rows("SELECT id, url FROM feeds"))
+            assertEquals(
+                listOf("ap1|f-p|g1|1", "ap3|f-p|g3|0", "aq2|f-p|g2|0", "aq9|f-p|g9|1"),
+                driver.rows("SELECT id, feed_id, guid, is_read FROM articles WHERE guid <> 'g5' ORDER BY id"),
+            )
+            // Starred and read states survived the move; the fetched g5 landed in the canonical feed.
+            assertEquals(listOf("aq2|1|600"), driver.rows("SELECT id, is_starred, starred_at FROM articles WHERE id = 'aq2'"))
+            assertEquals(listOf("f-p|g5"), driver.rows("SELECT feed_id, guid FROM articles WHERE guid = 'g5'"))
+            assertEquals(5L, db.articlesQueries.getGuidsByFeed("f-p").executeAsList().size.toLong())
+            assertEquals(emptyList(), db.articlesQueries.getGuidsByFeed("f-q").executeAsList())
+            assertEquals(listOf("f-p|t1", "f-p|t2"), driver.rows("SELECT feed_id, tag_id FROM feed_tags ORDER BY 1, 2"))
+            assertEquals(listOf("feed|f-q|f-p"), driver.rows("SELECT kind, old_id, new_id FROM ks_id_remap"))
+            assertEquals(listOf("f-p|f-q"), driver.rows("SELECT a, b FROM ks_feed_edge"))
+            // The edge is sent (capture on) so the other devices merge the same rows; the re-key itself is not.
+            assertEquals(listOf("feed_edges|f-p|f-q"), driver.rows("SELECT tbl, pk, pk2 FROM sync_outbox WHERE tbl = 'feed_edges'"))
+            assertEquals(emptyList(), driver.rows("SELECT tbl, pk, pk2 FROM sync_outbox WHERE tbl IN ('feed_tags') AND pk = 'f-q'"))
+            assertEquals(emptyList(), driver.rows("PRAGMA foreign_key_check"))
+            // The notification names the feed the user now has.
+            val notification = center.items.value.single()
+            assertIs<NotificationText.FeedUrlChanged>(notification.text)
+            assertEquals(AppNotificationAction.ShowFeedDetail("f-p"), notification.action)
+
+            // Refreshing again — through the stale row of the id that moved, and the canonical one — is fine.
+            assertIs<Result.Ok<Int>>(repo.refreshFeed(staleRow))
+            val announced = center.items.value.size
+            assertEquals(Result.Ok(0), repo.refreshFeed(db.feedsQueries.getById("f-p").executeAsOne()))
+            assertEquals(emptyList(), driver.rows("PRAGMA foreign_key_check"))
+            assertEquals(listOf("f-p|https://ex.com/new"), driver.rows("SELECT id, url FROM feeds"))
+            assertEquals(announced, center.items.value.size, "a refresh of the canonical feed announces nothing")
+        } finally {
+            driver.close()
+        }
+    }
+
+    /** The refreshed feed already has the smaller id: it is the canonical one, and the holder folds into it. */
+    @Test
+    fun aRedirectOntoTheGreaterIdsUrlKeepsTheRefreshedFeedAsTheCanonicalOne(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f-p", now = 100, url = "https://ex.com/old")
+            db.insertFeed("f-q", now = 100, url = "https://ex.com/new")
+            db.seedArticle("aq1", "f-q", "g1", isRead = 1, readAt = 500)
+            db.feed_fetch_stateQueries.upsertValidators("f-p", "p-etag", null)
+            db.feed_fetch_stateQueries.upsertValidators("f-q", "q-etag", null)
+            val center = NotificationCenter()
+            val repo = newRepo(db, driver, redirectOldToNew(), notificationCenter = center)
+
+            assertEquals(Result.Ok(2), repo.refreshFeed(db.feedsQueries.getById("f-p").executeAsOne()))
+
+            assertEquals(listOf("f-p|https://ex.com/new"), driver.rows("SELECT id, url FROM feeds"))
+            assertEquals(listOf("aq1|f-p|1"), driver.rows("SELECT id, feed_id, is_read FROM articles WHERE guid = 'g1'"))
+            assertEquals(listOf("feed|f-q|f-p"), driver.rows("SELECT kind, old_id, new_id FROM ks_id_remap"))
+            assertEquals(AppNotificationAction.ShowFeedDetail("f-p"), center.items.value.single().action)
+            // The canonical feed keeps its own device-local state (the fetch rewrites the validators after).
+            assertNull(db.fetchStateOf("f-q"))
+            assertNotNull(db.fetchStateOf("f-p"))
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
+     * Reproduces a defect in `applyFetch`'s merge branch: when the merged feed already holds the redirect
+     * target as its URL, `feeds.updateUrl` still moves `updated_at` (the content group's stamp), which no
+     * capture trigger sends — a stamp only this device holds, which can beat a peer's later edit locally
+     * while the peer keeps it. `updateUrl` is skipped when the merged feed already holds the target.
+     */
+    @Test
+    fun aRedirectMergeWhoseHolderContentWinsDoesNotMoveTheContentStampWithoutSendingIt(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f-p", now = 200, url = "https://ex.com/new")
+            db.insertFeed("f-q", now = 100, url = "https://ex.com/old")
+            // The stored content already equals what the refresh fetches, so only the URL differs.
+            driver.execute(null, "UPDATE feeds SET title = 'Feed', site_url = 'https://ex.com'", 0)
+            driver.execute(null, "UPDATE sync_capture SET enabled = 1", 0)
+            driver.execute(null, "DELETE FROM sync_outbox", 0)
+            val repo = newRepo(db, driver, redirectOldToNew())
+            repo.refreshFeed(db.feedsQueries.getById("f-q").executeAsOne())
+            val sent = driver.rows("SELECT pk FROM sync_outbox WHERE tbl = 'feeds'")
+            val stamp = driver.rows("SELECT updated_at FROM feeds WHERE id = 'f-p'").single().toLong()
+            // A stamp the local row holds but no send carries would let a later peer edit lose to it.
+            assertTrue(sent.isNotEmpty() || stamp <= 200L, "updated_at=$stamp moved with nothing in the outbox")
+        } finally {
+            driver.close()
+        }
+    }
+
+    private fun reviveSetup(
+        refreshedId: String, holderId: String, refreshedDeletedAt: Long?, holderDeletedAt: Long?,
+    ): Triple<SqlDriver, works.merc.keryx.app.data.local.db.KeryxDatabase, FeedRepository> {
+        val (driver, db) = inMemoryDb()
+        db.insertFeed(refreshedId, now = 100, url = "https://ex.com/old", deletedAt = refreshedDeletedAt)
+        db.insertFeed(holderId, now = 100, url = "https://ex.com/new", deletedAt = holderDeletedAt)
+        driver.execute(null, "UPDATE sync_capture SET enabled = 1", 0)
+        driver.execute(null, "DELETE FROM sync_outbox", 0)
+        return Triple(driver, db, newRepo(db, driver, redirectOldToNew()))
+    }
+
+    /** The user still has one of the two feeds, so the merged feed is theirs: a stamped re-subscribe that syncs. */
+    @Test
+    fun aRedirectMergingALiveFeedIntoATombstoneRevivesItAboveEveryFoldedStamp(): Unit = runBlocking {
+        for ((refreshed, holder) in listOf("f-q" to "f-p", "f-p" to "f-q")) {
+            // The refreshed feed is alive and the holder a tombstone stamped at 5000 (clock: 1000).
+            val (driver, db, repo) = reviveSetup(refreshed, holder, refreshedDeletedAt = null, holderDeletedAt = 5000)
+            try {
+                assertIs<Result.Ok<Int>>(repo.refreshFeed(db.feedsQueries.getById(refreshed).executeAsOne()))
+                val merged = db.feedsQueries.getById("f-p").executeAsOne()
+                assertNull(merged.deleted_at, "refreshed=$refreshed")
+                assertEquals(5001L, merged.deleted_updated_at, "refreshed=$refreshed")
+                assertEquals("https://ex.com/new", merged.url)
+                assertEquals(listOf("feeds|f-p"), driver.rows("SELECT tbl, pk FROM sync_outbox WHERE tbl = 'feeds' ORDER BY seq").distinct(), "refreshed=$refreshed")
+            } finally {
+                driver.close()
+            }
+        }
+    }
+
+    @Test
+    fun aRedirectMergingATombstoneIntoALiveFeedAlsoKeepsTheMergedFeedAliveAboveBothStamps(): Unit = runBlocking {
+        // The holder is alive; the refreshed feed's own row is the tombstone (stamped 7000, past the clock).
+        val (driver, db, repo) = reviveSetup("f-q", "f-p", refreshedDeletedAt = 7000, holderDeletedAt = null)
+        try {
+            assertIs<Result.Ok<Int>>(repo.refreshFeed(db.feedsQueries.getById("f-q").executeAsOne()))
+            val merged = db.feedsQueries.getById("f-p").executeAsOne()
+            assertNull(merged.deleted_at)
+            assertEquals(7001L, merged.deleted_updated_at)
+            assertTrue(driver.rows("SELECT pk FROM sync_outbox WHERE tbl = 'feeds'").contains("f-p"))
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun aRedirectMergingTwoTombstonesLeavesTheMergedFeedDeleted(): Unit = runBlocking {
+        val (driver, db, repo) = reviveSetup("f-q", "f-p", refreshedDeletedAt = 3000, holderDeletedAt = 5000)
+        try {
+            assertIs<Result.Ok<Int>>(repo.refreshFeed(db.feedsQueries.getById("f-q").executeAsOne()))
+            val merged = db.feedsQueries.getById("f-p").executeAsOne()
+            assertEquals(5000L, merged.deleted_at)
+            assertEquals(5000L, merged.deleted_updated_at)
+            assertEquals(listOf("f-p"), driver.rows("SELECT id FROM feeds"))
         } finally {
             driver.close()
         }

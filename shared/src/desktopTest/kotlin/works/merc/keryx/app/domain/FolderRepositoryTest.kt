@@ -67,6 +67,7 @@ class FolderRepositoryTest {
             clock, Dispatchers.Unconfined,
             faviconMisses = InMemoryFaviconMissStore(),
             feedPlacementMutex = placementMutex,
+            driver = driver,
         )
         return FolderRepository(db, feedRepository, syncScheduler, clock, Dispatchers.Unconfined)
     }

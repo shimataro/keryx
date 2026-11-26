@@ -69,6 +69,7 @@ class AddFeedPreviewResolverTest {
             articleRepository, ftsManagerIndexed(driver), SyncScheduler {},
             NotificationCenter(), clock, Dispatchers.Unconfined,
             faviconMisses = InMemoryFaviconMissStore(),
+            driver = driver,
         )
         return AddFeedPreviewResolver(feedRepository, TagRepository(db, SyncScheduler {}, clock, Dispatchers.Unconfined))
     }

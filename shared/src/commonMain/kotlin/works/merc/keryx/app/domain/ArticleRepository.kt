@@ -371,6 +371,17 @@ class ArticleRepository(
     }
 
     /**
+     * [prepared] counted again against [feedId] — the feed its articles land in once a refresh's
+     * permanent redirect merged the refreshed feed into another ([FeedIdentitySql.mergeLocally]) —
+     * so an article the merged feed already held is not counted as new. Read in the caller's
+     * transaction, after the merge.
+     */
+    internal fun recountPrepared(prepared: PreparedArticles, feedId: String): PreparedArticles {
+        val seenGuids = HashSet(articles.getGuidsByFeed(feedId).executeAsList())
+        return prepared.copy(feedId = feedId, newCount = prepared.rows.count { seenGuids.add(it.parsed.guid) })
+    }
+
+    /**
      * The pure CPU half of [prepareParsed]: builds each article's row without touching the database,
      * so it can run off the refresh's single writer.
      *

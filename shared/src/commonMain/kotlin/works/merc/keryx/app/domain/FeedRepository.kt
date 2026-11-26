@@ -2,6 +2,7 @@ package works.merc.keryx.app.domain
 
 import app.cash.sqldelight.coroutines.asFlow
 import app.cash.sqldelight.coroutines.mapToList
+import app.cash.sqldelight.db.SqlDriver
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
@@ -75,6 +76,18 @@ class FeedRepository(
     // Guards feed placement — see the "[feedPlacementMutex] guards" comment below. A constructor parameter only so
     // tests can wrap or hold it and observe a placement waiting on it.
     private val feedPlacementMutex: Mutex = Mutex(),
+    /**
+     * The driver [db] runs on: a refresh whose permanent redirect lands on a URL another feed holds
+     * merges the two feeds with raw statements ([FeedIdentitySql.mergeLocally]) inside its own
+     * transaction, which only the same driver joins.
+     */
+    private val driver: SqlDriver,
+    /**
+     * Republishes `ks_id_remap` to the ids held outside the database once such a merge has committed
+     * (`TagFolderIdRemaps.publishFromDb`), as `DeltaSync` does after a sync merge. Best effort: a
+     * failure is logged.
+     */
+    private val publishIdRemaps: suspend () -> Unit = {},
 ) {
     private val feeds get() = db.feedsQueries
 
@@ -776,7 +789,9 @@ class FeedRepository(
         // Each write is additionally guarded on the value actually changing, so a refresh that
         // changed nothing writes nothing at all and notifies no one. The fetch state lives in its
         // own device-local table, so its writes never move the feed row's sync stamps.
-        val newCount = db.transactionWithResult {
+        // `mergedInto` is the feed id this feed was merged into when its redirect target was held by
+        // another feed (see below), else null.
+        val (newCount, mergedInto) = db.transactionWithResult {
             if (state != null && (state.error_count != 0L || state.last_error != null)) {
                 fetchStates.resetErrorCount(feed.id)
             }
@@ -808,11 +823,50 @@ class FeedRepository(
                 }
             }
 
+            // The redirect target may already be another feed's URL — that feed subscribed at the new
+            // URL here or merged in from another device — and rewriting this feed's URL would then
+            // violate UNIQUE(url) on every refresh from now on. The two are one feed: their edge is
+            // recorded and both are merged onto the identity's canonical id in this transaction
+            // (FeedIdentitySql), which then takes the target URL; the edge reaches the other devices
+            // with the next send, so they merge the same rows. The fetched articles land in the
+            // canonical feed (insert resolves the feed id through ks_id_remap and conflicts on
+            // (feed_id, guid)), so the new-article count read before the merge is recounted against it.
+            var toInsert = prepared
+            var merged: String? = null
             if (redirectTarget != null) {
-                feeds.updateUrl(redirectTarget, now, feed.id)
+                val ownId = feeds.resolveId(feed.id).executeAsOne()
+                val holder = feeds.getByUrl(redirectTarget).executeAsOneOrNull()
+                if (holder != null && holder.id != ownId) {
+                    // Read before the merge: whether the user still had either feed.
+                    val anyAlive = holder.deleted_at == null ||
+                        feeds.getById(ownId).executeAsOneOrNull()?.deleted_at == null
+                    FeedIdentitySql.mergeLocally(driver, ownId, holder.id)
+                    val canonicalId = feeds.resolveId(ownId).executeAsOne()
+                    // The merge's subscription state is plain last-write-wins, so a tombstone holding
+                    // the target can unsubscribe the merged feed. A redirect must never silently
+                    // unsubscribe a feed the user still has: that case is a re-subscribe, stamped above
+                    // every folded stamp so it also wins on the other devices. Two tombstones stay deleted.
+                    if (anyAlive) feeds.reviveAfterMerge(now, canonicalId)
+                    // Writes only when the merged feed does not hold the target yet (its content group came
+                    // from this feed): updateUrl is guarded on the url changing, so it never moves
+                    // updated_at — a stamp the capture trigger does not watch — without a captured change.
+                    feeds.updateUrl(redirectTarget, now, canonicalId)
+                    toInsert = articleRepository.recountPrepared(prepared, canonicalId)
+                    merged = canonicalId
+                } else {
+                    // A no-op when the row already has the target (a merge brought it since the snapshot).
+                    feeds.updateUrl(redirectTarget, now, feed.id)
+                }
             }
 
-            articleRepository.insertPrepared(prepared)
+            articleRepository.insertPrepared(toInsert) to merged
+        }
+        if (mergedInto != null) {
+            // The merge's raw statements bypass SQLDelight's listeners (feed_tags and the fetch state
+            // are not written by any generated statement here), so the lists are told after the commit;
+            // ids held outside the database follow first, as after a sync merge.
+            publishIdRemapsAfterMerge()
+            driver.notifyListeners("feeds", "articles", "feed_tags", "feed_fetch_state")
         }
 
         // Notifications are emitted after the commit, so a listener never observes a half-applied
@@ -822,7 +876,7 @@ class FeedRepository(
             notify(
                 NotificationText.FeedUrlChanged(feed.displayTitle()),
                 AppNotificationLevel.WARNING,
-                action = AppNotificationAction.ShowFeedDetail(feed.id),
+                action = AppNotificationAction.ShowFeedDetail(mergedInto ?: feed.id),
             )
         }
         // No sync is scheduled here: a refresh of many feeds would otherwise arm the debounce once
@@ -830,6 +884,21 @@ class FeedRepository(
         // (it syncs right after, or schedules one when the cycle synced first); the single-feed
         // refreshFeed() schedules its own.
         return RefreshOutcome(Result.Ok(newCount), fetched.articles.isNotEmpty())
+    }
+
+    /**
+     * Brings the ids held outside the database onto the canonical ids a redirect's feed merge moved
+     * rows to. Logged, not thrown: the merge has committed and every write resolves a stale id itself
+     * (feeds.sq / articles.sq), so the next publish (a sync merge, the next launch) catches up.
+     */
+    private suspend fun publishIdRemapsAfterMerge() {
+        try {
+            publishIdRemaps()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            Log.warn(TAG, "Publishing id re-keys after a redirect merge failed; the next merge or launch catches up: ${e.message}")
+        }
     }
 
     /**
