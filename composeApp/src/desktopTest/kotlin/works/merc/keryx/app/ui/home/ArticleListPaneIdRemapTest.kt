@@ -12,6 +12,7 @@ import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performMouseInput
 import androidx.compose.ui.test.v2.runDesktopComposeUiTest
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.Dispatchers
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.domain.TagFolderIdRemaps
@@ -61,7 +62,7 @@ class ArticleListPaneIdRemapTest {
             db.insertFeed("fa", folderId = "d-old")
             db.insertFeedTag("fa", "t-old")
             repeat(40) { db.insertArticleRow("a$it", "fa", createdAt = it.toLong()) }
-            val remaps = TagFolderIdRemaps(db)
+            val remaps = TagFolderIdRemaps(db, Dispatchers.Unconfined)
             useHomeViewModel(driver, db, idRemaps = remaps) { fixture ->
                 val vm = fixture.vm
                 setContent { ArticleListPane(vm = vm, focused = true, onActivated = {}, modifier = Modifier.size(360.dp, 400.dp)) }
@@ -76,9 +77,11 @@ class ArticleListPaneIdRemapTest {
 
                 rekey(driver)
                 remaps.publishFromDb()
+                // The ViewModel applies the re-key on Dispatchers.Main (the Swing EDT here), which waitForIdle
+                // does not drain: wait for it to land, then for the recomposition it causes.
+                waitUntil("the selection followed the re-key") { vm.filter.value == expected }
                 waitForIdle()
 
-                assertEquals(expected, vm.filter.value, "the selection followed the re-key")
                 assertEquals(before, renderedArticleIds(), "the list kept its scroll position")
             }
         }

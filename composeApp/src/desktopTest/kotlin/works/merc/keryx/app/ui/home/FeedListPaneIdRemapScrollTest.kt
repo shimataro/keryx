@@ -69,8 +69,10 @@ class FeedListPaneIdRemapScrollTest {
             // A sync merge re-keys the tag onto another id.
             driver.rekeyTagForTest("t-old", "t-new")
             remaps.publishFromDb()
+            // The ViewModel applies the re-key on Dispatchers.Main (the Swing EDT here), which waitForIdle
+            // does not drain: wait for it to land, then for the recomposition it causes.
+            waitUntil("the selection followed the re-key") { vm.filter.value == ArticleFilter.Tag("t-new") }
             waitForIdle()
-            assertEquals(ArticleFilter.Tag("t-new"), vm.filter.value, "the selection followed the re-key")
 
             onNodeWithText("Feed f0", useUnmergedTree = true).assertIsDisplayed()
             assertEquals(0, onAllNodesWithTextCount("Tag One"), "the list stayed where the user left it")
