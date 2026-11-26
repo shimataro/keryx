@@ -836,11 +836,18 @@ class FeedRepository(
             )
         }
         if (applied.mergedInto != null) {
-            // The merge's raw statements bypass SQLDelight's listeners (feed_tags and the fetch state
-            // are not written by any generated statement here), so the lists are told after the commit;
-            // ids held outside the database follow first, as after a sync merge.
-            publishIdRemapsAfterMerge()
-            driver.notifyListeners("feeds", "articles", "feed_tags", "feed_fetch_state")
+            // The merge's raw statements bypass SQLDelight's listeners (feed_tags and the fetch state are
+            // not written by any generated statement here), so the lists are told after the commit. The
+            // generated statements in the same transaction (the revival, the URL, the article insert)
+            // already notified their listeners at that commit — before this publish — so a holder of an
+            // id the merge moved must catch up from the database (ks_id_remap) before it decides the id
+            // is gone. In `finally`, as after a sync merge, so a publish that throws (cancellation
+            // included) still leaves the lists told.
+            try {
+                publishIdRemapsAfterMerge()
+            } finally {
+                driver.notifyListeners("feeds", "articles", "feed_tags", "feed_fetch_state")
+            }
         }
 
         // Notifications are emitted after the commit, so a listener never observes a half-applied

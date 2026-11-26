@@ -3508,6 +3508,85 @@ class FeedRepositoryTest {
         }
     }
 
+    /** Seeds a redirect onto another feed's URL on the same host; counts the `feed_tags` notifications. */
+    private fun redirectMergeSetup(driver: SqlDriver, db: works.merc.keryx.app.data.local.db.KeryxDatabase): () -> Int {
+        db.insertTag("t1", "news")
+        db.insertFeed("f-p", now = 100, url = "https://ex.com/new")
+        db.insertFeed("f-q", now = 100, url = "https://ex.com/old")
+        db.insertFeedTag("f-q", "t1")
+        val notified = java.util.concurrent.atomic.AtomicInteger()
+        // No generated statement of a refresh writes feed_tags: only the merge's own notification reaches it.
+        driver.addListener("feed_tags", listener = { notified.incrementAndGet() })
+        return { notified.get() }
+    }
+
+    /**
+     * Publishing the re-keys after a redirect merge is best effort: the merge has committed, so a
+     * publisher that throws leaves the refresh Ok, the database merged, and the lists told.
+     */
+    @Test
+    fun aRedirectMergeWhosePublishThrowsStillSucceedsAndNotifies(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val notified = redirectMergeSetup(driver, db)
+            val repo = newRepo(db, driver, redirectOldToNew(), publishIdRemaps = { error("simulated publish failure") })
+
+            assertIs<Result.Ok<Int>>(repo.refreshFeed(db.feedsQueries.getById("f-q").executeAsOne()))
+
+            assertEquals(listOf("f-p|https://ex.com/new"), driver.rows("SELECT id, url FROM feeds"))
+            assertEquals(listOf("f-p|t1"), driver.rows("SELECT feed_id, tag_id FROM feed_tags"))
+            assertEquals(1, notified())
+        } finally {
+            driver.close()
+        }
+    }
+
+    /** A publish cancelled midway propagates the cancellation, and the committed merge is still announced. */
+    @Test
+    fun aRedirectMergeWhosePublishIsCancelledPropagatesItAndStillNotifies(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val notified = redirectMergeSetup(driver, db)
+            val repo = newRepo(
+                db, driver, redirectOldToNew(),
+                publishIdRemaps = { throw kotlinx.coroutines.CancellationException("simulated cancellation") },
+            )
+
+            val failure = runCatching { repo.refreshFeed(db.feedsQueries.getById("f-q").executeAsOne()) }
+
+            assertIs<kotlinx.coroutines.CancellationException>(failure.exceptionOrNull(), "result: $failure")
+            assertEquals(1, notified())
+            assertEquals(listOf("f-p|https://ex.com/new"), driver.rows("SELECT id, url FROM feeds"))
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
+     * Wired to the real [TagFolderIdRemaps.publishFromDb], as production is: the redirect merge's publish
+     * re-reads `ks_id_remap` after the commit, so a holder sees every tag/folder re-key the table holds.
+     */
+    @Test
+    fun aRedirectMergePublishesTheIdRemapTableThroughTagFolderIdRemaps(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            redirectMergeSetup(driver, db)
+            val remaps = TagFolderIdRemaps(db, Dispatchers.Unconfined)
+            remaps.awaitLoaded()
+            // A re-key recorded after the initial load, which only a publish brings to the holders.
+            driver.execute(null, "INSERT INTO ks_id_remap (kind, old_id, new_id) VALUES ('tag', 't-old', 't1')", 0)
+            assertEquals(emptyMap(), remaps.current.value.tagIds)
+            val repo = newRepo(db, driver, redirectOldToNew(), publishIdRemaps = { remaps.publishFromDb() })
+
+            assertIs<Result.Ok<Int>>(repo.refreshFeed(db.feedsQueries.getById("f-q").executeAsOne()))
+
+            assertEquals(mapOf("t-old" to "t1"), remaps.current.value.tagIds)
+            assertEquals(listOf("feed|f-q|f-p"), driver.rows("SELECT kind, old_id, new_id FROM ks_id_remap WHERE kind = 'feed'"))
+        } finally {
+            driver.close()
+        }
+    }
+
     /**
      * The local merge folds two articles of the same key, and the survivor (the larger rowid, on the
      * canonical feed) takes the other one's newer body: its rowid is registered in `ks_search_pending`
