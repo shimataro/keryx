@@ -68,9 +68,7 @@ through it rather than composing `AppDirs.appDataDir()` with the filename themse
   recorded as an identity edge in `ks_v2_edge`, through which the sync merge links two devices that renamed the same
   pre-upgrade row differently before upgrading (see "tags / feed_tags" below).
   Idempotent:
-  running again changes nothing. Version 3 is unreleased; a pre-release development environment that already
-  ran version 3 with the interim random ids is NOT re-keyed (the callback fires only when crossing version 2) —
-  such an environment needs its cloud sync data reset once.
+  running again changes nothing.
   (SQLDelight derives the version from the highest migration file + 1.) When the schema changes, add a `.sqm` file
   (`<from-version>.sqm`) and the version bumps automatically; `domain/MergeSchema.EXPECTED_SCHEMAS` (which
   `DatabaseMerger.validateSchema` checks against), `domain/TransportSchema` (the delta file schema and its
@@ -235,7 +233,7 @@ Indexes: `feed_id`, `is_read`, `is_starred`, and a composite `(published_at DESC
 - Name and sort order are each last-write-wins by their own stamp; `updated_at` stamps creation, deletion and
   reactivation, as for `tags`.
 - Independent classification axis from tags. Since 1 feed = max 1 folder (`feeds.folder_id`, not many-to-many), there is no junction table like `feed_tags`.
-- When deleting a folder, `FolderRepository.deleteFolder` resets the linked `feeds.folder_id` to NULL in the same transaction, then logically deletes the folder itself. However, this only affects the local DB, so after sync, feeds on other devices may point to a logically deleted / non-existent folder. The UI (`groupFeedsByFolder`) defensively treats this as "no folder".
+- When deleting a folder, `FolderRepository.deleteFolder` moves the linked feeds to "no folder" in the same transaction, as an ordinary stamped change of each feed's raw folder assignment (`feeds.updateFolderAndSortOrder` writing `ks_feed_folder_raw`, with `folder_updated_at` / `sort_order_updated_at` stamped), and then logically deletes the folder itself. The move therefore syncs like any other move, so other devices unassign those feeds as well; a feed another device moved into the folder concurrently with the delete keeps its raw assignment and returns to the folder if it is revived (see `feeds` above). The UI (`groupFeedsByFolder`) still treats a feed pointing at a deleted or missing folder defensively as "no folder", for the window before a sync arrives.
 
 ### global_settings (KVS, sync target)
 

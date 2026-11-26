@@ -41,11 +41,11 @@
                   CloudFileTransfer, SecretStoreTokenStorage
     data/cloud/nextcloud/  NextcloudStorage（WebDAV）, NextcloudLoginFlow（Login Flow v2）, NextcloudServerProbe（status.php）, normalizeNextcloudUrl, revokeNextcloudAppPassword — sync-architecture.ja.md の「Nextcloud（Login Flow v2）」参照
     data/opml/    OpmlCodec
-    domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, IdRemapSql/TagFolderIdRemaps（タグ/フォルダー id の振り直し——後述の「タグ/フォルダー id の振り直し」を参照）, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport（interface + CustomUri）, AuthorizationLauncher（interface + schemeOf。`OAuthConnectFlow` が認可 URL をどう開くか——デスクトップ/Android は既定でシステムのブラウザ、Apple アプリは Swift に委ねる。下記「KeryxSdk」参照）, LoginPageLauncher（インターフェース + BrowserLoginPageLauncher — Nextcloud の Login Flow v2 がサインインページを表示し、そこから戻る方法）, OAuthCallbackParams, OAuthUriParser（parseOAuthUri。すべての `keryx://`・ループバックのリダイレクト処理が共有）, StartupMaintenanceTasks（runStartupMaintenance/checkForUpdateAndNotify/maybeRebuildFtsIndex）, BackgroundRefreshLoop（backgroundUpdateLoop——デスクトップ版自身のポーリングループ。Apple 版の `KeryxSdk.startMaintenance()` も使う。Android は `WorkManager` でスケジュールするため、これに相当するものはない）, RefreshCycleRunner（すべての更新経路が共有する 更新 → 通知 → 同期 のサイクル）, NetworkUsagePolicy（現在の回線でどの自動通信を許可するか——sync-architecture.ja.md の「ネットワークゲート」参照）, UpdateChecker/UpdateRepository/UpdateAsset/UpdateInstallPolicy/UpdateInstaller（expect 相当の interface）/AvailableUpdate/UpdateState（アプリ内アップデート——下記「アプリ内アップデート」参照）
+    domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, V2IdentitySql（同期マージの同一性ステップ: 同一のタグ/フォルダーの行をすべて正準 id へ移す）, TagFolderIdRekey（`KERYX_SCHEMA_CALLBACKS`: v2→v3 でタグ/フォルダーを名前から導かれる id へ振り直す。各プラットフォームのデータベースドライバーと `DatabaseMerger` が実行する）, IdRemapSql/TagFolderIdRemaps（タグ/フォルダー id の振り直し——後述の「タグ/フォルダー id の振り直し」を参照）, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport（interface + CustomUri）, AuthorizationLauncher（interface + schemeOf。`OAuthConnectFlow` が認可 URL をどう開くか——デスクトップ/Android は既定でシステムのブラウザ、Apple アプリは Swift に委ねる。下記「KeryxSdk」参照）, LoginPageLauncher（インターフェース + BrowserLoginPageLauncher — Nextcloud の Login Flow v2 がサインインページを表示し、そこから戻る方法）, OAuthCallbackParams, OAuthUriParser（parseOAuthUri。すべての `keryx://`・ループバックのリダイレクト処理が共有）, StartupMaintenanceTasks（runStartupMaintenance/checkForUpdateAndNotify/maybeRebuildFtsIndex）, BackgroundRefreshLoop（backgroundUpdateLoop——デスクトップ版自身のポーリングループ。Apple 版の `KeryxSdk.startMaintenance()` も使う。Android は `WorkManager` でスケジュールするため、これに相当するものはない）, RefreshCycleRunner（すべての更新経路が共有する 更新 → 通知 → 同期 のサイクル）, NetworkUsagePolicy（現在の回線でどの自動通信を許可するか——sync-architecture.ja.md の「ネットワークゲート」参照）, UpdateChecker/UpdateRepository/UpdateAsset/UpdateInstallPolicy/UpdateInstaller（expect 相当の interface）/AvailableUpdate/UpdateState（アプリ内アップデート——下記「アプリ内アップデート」参照）
     di/           SharedModule（sharedModule + updateModule + presentationModule）と HttpClientFactory［:shared］、AppModule（+ expect platformModule）と ImageLoaderSetup［:composeApp］
     presentation/ ［:shared］すべての UI が共有する、UI フレームワーク非依存の画面状態：home/（HomeViewModel——ホーム画面の
                   フィルタ・選択・記事リスト・検索・未読のみ・新着の状態と操作。ArticleContentCache、HomeRefreshController、
-                  NewArticleTracking。FeedListExpansion——フォルダ・タグの開閉状態（端末ローカルに永続化）。
+                  NewArticleTracking。FeedListExpansion——フォルダ・タグの開閉状態（端末ローカルに永続化）。NameOrdinals——同名のタグ/フォルダーを見分ける「(2)」の序数（`tagFolderLabels`）。両 UI のために 1 か所で決める。TagFolderIdRemapping——マージが振り直したタグ/フォルダー id へ、`HomeViewModel` が保持するすべての id を移す。
                   SelectionReadIntents——選択した記事の本文の読み込み中に行った、既読・未読の明示的な操作の記録（その選択の
                   暗黙の既読より優先させるため）。FeedListModel——FeedListRowSelection とフィードリストの並び・グループ化の規則。
                   ArticleListModel。ReaderPaging——リーダーのページャのページ／選択の規則。ReaderContent——単一（非ページャ）のリーダーが表示するもの
@@ -1105,6 +1105,15 @@ JVM ドライバがステートメントごとに開く接続で読むため、�
 描画する。iOS の pager は描画しない（本文がまだないページは従来どおりリーダーの背景だけを表示する）。
 
 ### タグ/フォルダー id の振り直し
+
+**レイヤリングの例外: `DatabaseDriverFactory` の actual は `domain/` に依存する。** 各プラットフォームの
+`DatabaseDriverFactory` の actual（`data/local/`）は `KERYX_SCHEMA_CALLBACKS` を組み込み、その `TagFolderIdRekey`
+（`domain/`）が `IdGenerator` と `IdRemapSql` を使うため、`data/local/` が通常とは逆向きに `domain/` へ届く。
+これは意図したもので、そのままにしてある。`IdGenerator` は名前から導かれる id の唯一の出どころで、タグとフォルダーを
+作るリポジトリと共有している。移行は、ずれていく恐れのあるコピーではなく、そのコードそのものを呼ばなければならない。
+また `TagFolderIdRekey` は、`DatabaseMerger` がダウンロードしたファイルの移行でも実行し、`V2IdentitySql` と多くの
+テストも使っている。これと `IdGenerator` / `IdRemapSql` を `data/local/` へ移しても、逆向きになる層が入れ替わるだけで、
+広いパッケージ名の変更という代償だけが残る。
 
 タグやフォルダーの id は変わりうる。v2→v3 移行はすべての行を名前由来の id へ振り直し、同期マージは行をその同一性の
 正規の id へ移す（`domain/V2IdentitySql.kt`。[sync-architecture.ja.md](sync-architecture.ja.md) の「タグとフォルダーの

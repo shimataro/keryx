@@ -566,7 +566,7 @@ UI で番号を振られ、1 つの論理的なタグやフォルダーが 2 つ
   データがどれだけ古いかについての運用上の仮定であり、1 台の端末が検証できるものではない。列を削除する版は、たとえば
   先に辺を十分な期間保つリリースを出すか、クラウドデータを一度リセットする（新しい世代になり、各端末が収束した状態
   から全量送信で参加し直す）べきである。
-- **対象とするすべてのプラットフォームで SQLite の `DROP COLUMN` が使えること。** SQLite 3.35.0 以上が必要。既知の同梱バージョン: desktop の sqlite-jdbc 3.53.4 → SQLite 3.53.4; Android の requery 3.49.0 → SQLite 3.49.0。Apple（iOS 17 / macOS 14）は実際には SQLite 3.39.x 以降を搭載しており、対応している見込みだが、依存する前に実機で確認すること。
+- **対象とするすべてのプラットフォームで SQLite の `DROP COLUMN` が使えること。** `ALTER TABLE … DROP COLUMN` には SQLite 3.35 以上が必要。同梱バージョンは、ここに書かれた数字を当てにせず、`gradle/libs.versions.toml`（desktop の sqlite-jdbc）と `.claude/rules/android-sqlite-bundling.md`（Android）で確認すること。Apple は OS 標準の SQLite を使うので、サポートする最も古い OS の実機で確認してから依存すること。
 
 削除は、v3 より後のマイグレーション（つまり v4 以降）で行い、以下の順序で実施する必要がある。
 

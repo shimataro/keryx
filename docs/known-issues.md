@@ -592,7 +592,7 @@ and are numbered by the UI — one logical tag or folder split in two.
   verify; a version that drops the column should, for example, first ship a release that keeps the edges for a long
   enough period, or reset the cloud data once (a new generation, which every device rejoins with a full send from its
   converged state).
-- **SQLite `DROP COLUMN` is supported on every targeted platform.** SQLite ≥ 3.35.0 is required. Known bundled versions: desktop sqlite-jdbc 3.53.4 → SQLite 3.53.4; Android requery 3.49.0 → SQLite 3.49.0. Apple (iOS 17 / macOS 14) ships SQLite 3.39.x or later in practice and is expected to support it, but confirm on a real device before relying on it.
+- **SQLite `DROP COLUMN` is supported on every targeted platform.** `ALTER TABLE … DROP COLUMN` needs SQLite ≥ 3.35. Check the bundled versions in `gradle/libs.versions.toml` (desktop sqlite-jdbc) and `.claude/rules/android-sqlite-bundling.md` (Android) rather than trusting a number written here, and on Apple (which uses the OS's own SQLite) confirm on a real device of the oldest supported OS before relying on it.
 
 The removal must be performed by a schema migration after version 3 (i.e., version 4 or later) and must follow this order:
 
