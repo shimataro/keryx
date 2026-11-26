@@ -15,7 +15,7 @@ import works.merc.keryx.app.data.local.db.Articles
  * predicate: the `articles.sq` queries spell it out (`(deleted_at IS NULL OR is_starred = 1)`, guarded by
  * `ArticleVisibilityQueriesTest`), raw SQL uses [articleVisibleSql], and Kotlin uses [isVisible].
  */
-fun articleVisibleSql(alias: String): String {
+fun articleVisibleSql(alias: String = ""): String {
     val prefix = if (alias.isEmpty()) "" else "$alias."
     return "(${prefix}deleted_at IS NULL OR ${prefix}is_starred = 1)"
 }

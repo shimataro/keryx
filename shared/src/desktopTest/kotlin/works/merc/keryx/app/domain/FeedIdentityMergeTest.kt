@@ -135,7 +135,7 @@ class FeedIdentityMergeTest {
         )
         assertEquals(
             listOf("ap1"),
-            rows(db, "SELECT id FROM articles WHERE guid = 'g1' AND ${articleVisibleSql("")}"),
+            rows(db, "SELECT id FROM articles WHERE guid = 'g1' AND ${articleVisibleSql()}"),
             label,
         )
     }

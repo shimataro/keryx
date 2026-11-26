@@ -41,11 +41,11 @@ import works.merc.keryx.app.core.decodeArticleFilter
 import works.merc.keryx.app.core.encode
 import works.merc.keryx.app.core.toDbFlag
 import works.merc.keryx.app.data.local.db.Articles
-import works.merc.keryx.app.data.local.isVisible
 import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.domain.FeedFetchProblem
 import works.merc.keryx.app.data.local.db.Folders
 import works.merc.keryx.app.data.local.db.Tags
+import works.merc.keryx.app.data.local.isVisible
 import works.merc.keryx.app.domain.ActivityCenter
 import works.merc.keryx.app.domain.ActivitySnapshot
 import works.merc.keryx.app.domain.AddFeedPreview

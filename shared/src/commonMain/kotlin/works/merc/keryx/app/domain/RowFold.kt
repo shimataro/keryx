@@ -42,7 +42,12 @@ internal object RowFold {
     )
 
     /** The groups of an article row. */
-    val ARTICLE_GROUPS: List<LwwGroup> = listOf(SyncLww.ARTICLE_BODY, SyncLww.ARTICLE_READ, SyncLww.ARTICLE_STAR, SyncLww.ARTICLE_DELETION)
+    val ARTICLE_GROUPS: List<LwwGroup> = listOf(
+        SyncLww.ARTICLE_BODY,
+        SyncLww.ARTICLE_READ,
+        SyncLww.ARTICLE_STAR,
+        SyncLww.ARTICLE_DELETION,
+    )
 
     /** An article's columns no group keys: `created_at` the earliest, `cached_at` and `updated_at` the latest. */
     val ARTICLE_EXTRA_ASSIGNMENTS: List<String> = listOf(
@@ -52,7 +57,8 @@ internal object RowFold {
     )
 
     /** Every assignment that folds one article version into another. */
-    val ARTICLE_ASSIGNMENTS: List<String> = ARTICLE_GROUPS.flatMap(SyncLww::upsertAssignments) + ARTICLE_EXTRA_ASSIGNMENTS
+    val ARTICLE_ASSIGNMENTS: List<String> =
+        ARTICLE_GROUPS.flatMap(SyncLww::upsertAssignments) + ARTICLE_EXTRA_ASSIGNMENTS
 
     /**
      * An article's `summary` as a version of the row in [alias] is folded in (`""` for the bare

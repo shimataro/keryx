@@ -136,7 +136,7 @@ class ArticleVisibilityQueriesTest {
             assertFalse(q.getById("deleted").executeAsOne().isVisible)
             assertTrue(q.getById("alive").executeAsOne().isVisible)
             assertEquals("(a.deleted_at IS NULL OR a.is_starred = 1)", articleVisibleSql("a"))
-            assertEquals("(deleted_at IS NULL OR is_starred = 1)", articleVisibleSql(""))
+            assertEquals("(deleted_at IS NULL OR is_starred = 1)", articleVisibleSql())
         } finally {
             driver.close()
         }
