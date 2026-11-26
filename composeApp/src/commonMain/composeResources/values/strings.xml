@@ -90,6 +90,9 @@
     <string name="home_move_up">Move up</string>
     <string name="home_move_down">Move down</string>
     <string name="home_no_folder">No Folder</string>
+    <!-- A tag/folder name another live tag/folder shares, numbered to tell them apart on screen
+         (NameOrdinals in :shared decides which row gets which number). -->
+    <string name="name_with_ordinal">%1$s (%2$d)</string>
     <string name="home_rename_feed">Rename</string>
     <string name="home_unsubscribe_menu">Unsubscribe</string>
     <string name="home_copy_feed_url">Copy feed URL</string>

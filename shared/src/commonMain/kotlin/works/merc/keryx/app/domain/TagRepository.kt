@@ -17,7 +17,7 @@ class TagRepository(
     private val syncScheduler: SyncScheduler,
     private val clock: Clock,
     private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
-    /** Issues the id of a newly created row (a test passes a deterministic source). */
+    /** Issues the id of a newly created row whose name-derived id is already held (a test passes a deterministic source). */
     private val newId: () -> String = IdGenerator::newId,
 ) {
     private val tags get() = db.tagsQueries
@@ -93,28 +93,63 @@ class TagRepository(
     }
 
     /**
-     * Creates the tag named [name], or reactivates the existing one in place, and returns its id —
-     * to be called inside a transaction. The statement itself resolves a name conflict (`upsertByName`),
-     * so a same-named row another writer (a sync merge, a concurrent create) inserted just before is
-     * reused rather than failing `UNIQUE(name)`. The id is read only after that write, so the
-     * transaction never reads before it writes (the lock upgrade `docs/known-issues.md` describes).
+     * Creates the tag named [name], or reactivates the canonical one of that name in place, and
+     * returns its id — to be called inside a transaction. The two statements (`reactivateByName`,
+     * then `insertIfNameAbsent`) resolve the name themselves, so a same-named row another writer (a
+     * sync merge, a concurrent create) inserted just before is reused rather than doubled; names are
+     * not unique, so the canonical row (an alive one over a deleted one, then the earliest
+     * `created_at`, then the smallest id — the row `getByName` returns) is the one reused. A new
+     * row's id is the one its name derives from ([IdGenerator.tagId]), so two devices that create
+     * the same name independently converge on one row in the sync merge; when that id is already
+     * held (a row renamed off the name keeps its id), `insertIfNameAbsent` falls back to a random
+     * one from [newId]. The id is read only after that write, so the transaction never reads before
+     * it writes (the lock upgrade `docs/known-issues.md` describes).
      */
     private fun upsertTagByName(name: String, color: String?, now: Long): String {
-        tags.upsertByName(id = newId(), name = name, color = color, now = now)
+        tags.reactivateByName(now = now, color = color, name = name)
+        tags.insertIfNameAbsent(
+            nameDerivedId = IdGenerator.tagId(name),
+            randomId = newId(),
+            name = name,
+            color = color,
+            now = now,
+        )
         return tags.getByName(name).executeAsOne().id
     }
 
-    fun updateTag(id: String, name: String, color: String?) {
-        val existing = tags.getById(id).executeAsOneOrNull() ?: return
-        tags.upsert(id, name, color, existing.sort_order, existing.deleted_at, clock.nowMillis(), existing.created_at)
-        syncScheduler.scheduleSync()
+    /**
+     * Renames the tag [id] to [name]; a tag that no longer exists is left alone. One statement
+     * (`updateName`), which resolves [id] itself: an id a merge has re-keyed since the caller read it
+     * (an open rename field, a queued feed-list write) names the row it became, so the change lands
+     * there rather than matching nothing (`ks_id_remap`, see tags.sq). It writes the name alone, so it
+     * never writes back a color, sort order or deletion the caller read before another device's
+     * change reached this one in a merge.
+     */
+    fun renameTag(id: String, name: String) {
+        val updated = tags.updateName(name = name, now = clock.nowMillis(), id = id).value
+        if (updated > 0L) syncScheduler.scheduleSync()
     }
 
+    /**
+     * Sets the color of the tag [id] to [color], or clears it when [color] is `null`; a tag that no
+     * longer exists is left alone. [id] is resolved like [renameTag]'s, and the color is the only
+     * field written, so a name another device changed meanwhile is never written back.
+     */
+    fun setTagColor(id: String, color: String?) {
+        val updated = tags.updateColor(color = color, now = clock.nowMillis(), id = id).value
+        if (updated > 0L) syncScheduler.scheduleSync()
+    }
+
+    /** Soft-deletes the tag [id], resolved like [renameTag]'s. */
     fun deleteTag(id: String) {
         tags.softDelete(clock.nowMillis(), clock.nowMillis(), id)
         syncScheduler.scheduleSync()
     }
 
+    /**
+     * Attaches [tagId] to [feedId], or detaches it. [tagId] is resolved like [renameTag]'s, so a
+     * stale id lands on the tag it became instead of failing `feed_tags.tag_id`'s FOREIGN KEY.
+     */
     fun setFeedTag(feedId: String, tagId: String, attached: Boolean) {
         val now = clock.nowMillis()
         feedTags.upsert(feedId, tagId, if (attached) null else now, now)

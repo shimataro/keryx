@@ -86,6 +86,7 @@ import works.merc.keryx.app.setFeedFetchState
 import works.merc.keryx.app.insertFeedTag
 import works.merc.keryx.app.insertFolder
 import works.merc.keryx.app.insertTag
+import works.merc.keryx.app.rekeyTagForTest
 import works.merc.keryx.app.stampArticleDeleted
 import works.merc.keryx.app.platform.AppDirs
 import works.merc.keryx.app.platform.FileIO
@@ -314,6 +315,8 @@ class HomeViewModelTest {
         pendingLocalWrites: PendingLocalWrites = PendingLocalWrites(),
         // Where a failed write is reported; a test can pass one over its own NotificationCenter.
         localWriteFailureReporter: LocalWriteFailureReporter = LocalWriteFailureReporter(NotificationCenter(), clock),
+        // The tag/folder re-keys the ViewModel observes — a test publishes one through it.
+        idRemaps: works.merc.keryx.app.domain.TagFolderIdRemaps = works.merc.keryx.app.domain.TagFolderIdRemaps(db, Dispatchers.Unconfined),
     ): HomeViewModel {
         val articleRepository = ArticleRepository(db, FtsSearch(ftsDriver), syncScheduler, clock, Dispatchers.Unconfined)
         // Mirror startup: ensureIndexed() creates articles_fts so the subscribe/refresh path's indexMissing() works.
@@ -328,7 +331,10 @@ class HomeViewModelTest {
         // Unconfined write dispatcher so saveLocalSettings persists inline (store.load() assertions
         // in these tests are synchronous).
         val settingsRepository =
-            SettingsRepository(db, LocalSettingsStore(dirOverride = dir), syncScheduler, clock, writeDispatcher = Dispatchers.Unconfined)
+            SettingsRepository(
+                db, LocalSettingsStore(dirOverride = dir), syncScheduler, clock, writeDispatcher = Dispatchers.Unconfined,
+                idRemaps = idRemaps,
+            )
         val syncRepository = SyncRepository(
             driver = driver,
             db = db,
@@ -1350,6 +1356,38 @@ class HomeViewModelTest {
         pumpUntil { !vm.pulling }
         assertEquals(emptySet(), vm.pullRefreshingFilters.value)
         assertEquals(1, fetches.get(), "only the first selection's feed is fetched")
+    }
+
+    @Test
+    fun aPullInFlightOnATagFollowsTheTagsReKeyAndEndsWithItsRefresh() = runTest {
+        db.insertFeed("f1")
+        db.insertTag("t-old", "News")
+        db.insertFeedTag("f1", "t-old")
+        val gate = CompletableDeferred<Unit>()
+        val fetches = java.util.concurrent.atomic.AtomicInteger(0)
+        val remaps = works.merc.keryx.app.domain.TagFolderIdRemaps(db, Dispatchers.Unconfined)
+        val vm = newViewModel(feedFetcher = gatedCountingFetcher(gate, fetches), idRemaps = remaps)
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.Tag("t-old"))
+        testScheduler.advanceUntilIdle()
+
+        val baseline = vm.launchedJobs()
+        vm.pullToRefresh()
+        pumpUntil { fetches.get() >= 1 }
+        assertEquals(setOf<ArticleFilter>(ArticleFilter.Tag("t-old")), vm.pullRefreshingFilters.value)
+
+        driver.rekeyTagForTest("t-old", "t-new")
+        remaps.publishFromDb()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(ArticleFilter.Tag("t-new"), vm.filter.value)
+        assertEquals(setOf<ArticleFilter>(ArticleFilter.Tag("t-new")), vm.pullRefreshingFilters.value)
+        assertTrue(vm.filter.value in vm.pullRefreshingFilters.value, "the list still shows its pull")
+
+        gate.complete(Unit)
+        pumpUntil { !vm.pulling }
+        assertEquals(emptySet(), vm.pullRefreshingFilters.value)
+        pumpUntilSettled(vm, baseline)
     }
 
     @Test
@@ -5675,7 +5713,8 @@ class HomeViewModelTest {
         vm.selectFilter(ArticleFilter.Tag("t2"))
         writes.hold()
 
-        vm.updateTag("t1", "New tag", "#123456")
+        vm.renameTag("t1", "New tag")
+        vm.setTagColor("t1", "#123456")
         vm.deleteTag("t2")
         vm.setFeedTag("f1", "t1", attached = true)
         vm.updateFolder("d1", "New folder")
@@ -5693,7 +5732,7 @@ class HomeViewModelTest {
         assertNull(db.feedsQueries.getById("f2").executeAsOne().folder_id)
         assertNull(db.foldersQueries.getById("d3").executeAsOne().deleted_at)
         // The writes wait in the ViewModel's serial feed-list queue, whose one consumer is held on
-        // the write dispatcher with the first of them; the other six wait behind it in the queue.
+        // the write dispatcher with the first of them; the other seven wait behind it in the queue.
         assertEquals(1, writes.queuedCount)
 
         writes.release()
@@ -5817,25 +5856,26 @@ class HomeViewModelTest {
     }
 
     @Test
-    fun updateTagWithBlankNameIsNoOp() = runTest {
+    fun renameTagWithBlankNameIsNoOp() = runTest {
         db.insertTag("t1", "Old")
         val vm = newViewModel()
         subscribeAll(vm)
 
-        vm.updateTag("t1", "   ", null)
+        vm.renameTag("t1", "   ")
 
         assertEquals("Old", db.tagsQueries.getById("t1").executeAsOne().name)
     }
 
     @Test
-    fun updateTagWithValidNameUpdatesTag() = runTest {
-        db.insertTag("t1", "Old")
+    fun renameTagWithValidNameUpdatesTag() = runTest {
+        db.insertTag("t1", "Old", color = "#111111")
         val vm = newViewModel()
         subscribeAll(vm)
 
-        vm.updateTag("t1", "  New  ", null)
+        vm.renameTag("t1", "  New  ")
 
         assertEquals("New", db.tagsQueries.getById("t1").executeAsOne().name)
+        assertEquals("#111111", db.tagsQueries.getById("t1").executeAsOne().color)
     }
 
     @Test
@@ -5849,16 +5889,17 @@ class HomeViewModelTest {
     }
 
     @Test
-    fun updateTagPropagatesColorToRepositoryWithoutLosingIt() = runTest {
+    fun setTagColorPropagatesColorToRepositoryWithoutLosingIt() = runTest {
         db.insertTag("t1", "Old")
         val vm = newViewModel()
         subscribeAll(vm)
 
-        vm.updateTag("t1", "New", "#00FF00")
+        vm.setTagColor("t1", "#00FF00")
 
-        // A non-null color passed to updateTag must actually be persisted, not silently dropped
+        // A non-null color passed to setTagColor must actually be persisted, not silently dropped
         // to null (the old hardcoded behavior before per-tag color selection existed).
         assertEquals("#00FF00", db.tagsQueries.getById("t1").executeAsOne().color)
+        assertEquals("Old", db.tagsQueries.getById("t1").executeAsOne().name)
     }
 
     @Test
@@ -6431,6 +6472,72 @@ class HomeViewModelTest {
 
         val vm2 = newViewModel()
         subscribeAll(vm2)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(ArticleFilter.All, vm2.filter.value)
+    }
+
+    /**
+     * A tag filter saved under an id a re-key has since moved is restored on the id the tag has now,
+     * not dropped to All Feeds as a deleted tag would be.
+     */
+    @Test
+    fun restartRestoresATagFilterUnderItsReKeyedId() = runTest {
+        db.insertTag("t-old", "News")
+        val vm1 = newViewModel()
+        subscribeAll(vm1)
+        vm1.selectFilter(ArticleFilter.Tag("t-old"))
+        testScheduler.advanceUntilIdle()
+        driver.rekeyTagForTest("t-old", "t-new")
+
+        val vm2 = newViewModel()
+        subscribeAll(vm2)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(ArticleFilter.Tag("t-new"), vm2.filter.value)
+        assertTrue(vm2.filterRestoredOnLaunch)
+    }
+
+    /**
+     * The same restore with the re-key map still loading in the background when the ViewModel is
+     * built: the saved filter is taken as is for now (the UI thread does not wait), then follows the
+     * re-key once the map lands — it never falls back to All Feeds because of the stale id.
+     */
+    @Test
+    fun aTagFilterRestoredBeforeTheReKeyMapHasLoadedFollowsItsReKey() = runTest {
+        db.insertTag("t-old", "News")
+        val vm1 = newViewModel()
+        subscribeAll(vm1)
+        vm1.selectFilter(ArticleFilter.Tag("t-old"))
+        testScheduler.advanceUntilIdle()
+        driver.rekeyTagForTest("t-old", "t-new")
+
+        val loader = StandardTestDispatcher(mainScheduler)
+        val vm2 = newViewModel(idRemaps = works.merc.keryx.app.domain.TagFolderIdRemaps(db, loader))
+        subscribeAll(vm2)
+        assertEquals(ArticleFilter.Tag("t-old"), vm2.filter.value, "held as saved while the map loads")
+        assertTrue(vm2.filterRestoredOnLaunch)
+
+        mainScheduler.advanceUntilIdle()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(ArticleFilter.Tag("t-new"), vm2.filter.value)
+    }
+
+    /** A filter restored before the map has loaded, whose target is gone for good, still falls back to All. */
+    @Test
+    fun aDeletedTagFilterRestoredBeforeTheReKeyMapHasLoadedFallsBackToAll() = runTest {
+        db.insertTag("t1", "News")
+        val vm1 = newViewModel()
+        subscribeAll(vm1)
+        vm1.selectFilter(ArticleFilter.Tag("t1"))
+        testScheduler.advanceUntilIdle()
+        db.tagsQueries.softDelete(1L, 1L, "t1")
+
+        val loader = StandardTestDispatcher(mainScheduler)
+        val vm2 = newViewModel(idRemaps = works.merc.keryx.app.domain.TagFolderIdRemaps(db, loader))
+        subscribeAll(vm2)
+        mainScheduler.advanceUntilIdle()
         testScheduler.advanceUntilIdle()
 
         assertEquals(ArticleFilter.All, vm2.filter.value)

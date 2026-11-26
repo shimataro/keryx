@@ -351,6 +351,7 @@ private fun folder(id: String): Folders = Folders(
     created_at = 0L,
     name_updated_at = null,
     sort_order_updated_at = null,
+    v2_id = null,
 )
 
 private fun feed(id: String, folderId: String?): Feeds = Feeds(

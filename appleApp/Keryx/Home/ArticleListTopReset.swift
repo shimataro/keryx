@@ -11,9 +11,11 @@
 struct ArticleListTopReset {
     /// What the list shows, as far as this decision needs it.
     struct Input: Equatable {
-        /// The selected filter (`ArticleListView.filterKey`).
-        var filterKey: String
-        /// Whether the rows on screen belong to `filterKey`'s filter
+        /// The generation of the user's filter selection (`HomeObservable.filterGeneration`): it moves on
+        /// a switch to another filter, not when a merge re-keys the selected tag or folder, so a re-key
+        /// is never taken for a switch.
+        var selectionKey: Int64
+        /// Whether the rows on screen belong to the selected filter
         /// (`HomeObservable.articleRowsMatchFilter` / `searchRowsMatchFilter`).
         var rowsMatchFilter: Bool
         /// The first row on screen.
@@ -22,13 +24,13 @@ struct ArticleListTopReset {
 
     /// nil until the first update: the filter the list is created under is not a switch — the first
     /// composition keeps its position (a restored selection is brought into view instead).
-    private var lastFilterKey: String?
+    private var lastSelectionKey: Int64?
     private var pending = false
 
     /// - Returns: The row to scroll to the top now, or nil to leave the scroll position alone.
     mutating func update(_ input: Input) -> String? {
-        if let lastFilterKey, lastFilterKey != input.filterKey { pending = true }
-        lastFilterKey = input.filterKey
+        if let lastSelectionKey, lastSelectionKey != input.selectionKey { pending = true }
+        lastSelectionKey = input.selectionKey
         guard pending, input.rowsMatchFilter else { return nil }
         pending = false
         return input.firstRowId

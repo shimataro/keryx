@@ -50,23 +50,10 @@ struct ArticleListView: View {
     private var displayed: ArticleRowList { home.searchActive ? home.searchRows : home.articleRows }
     private var displayedRows: [ArticleRowModel] { displayed.rows }
 
-    /// A plain `String` key for `home.filter` (a Kotlin sealed-type protocol value), so
-    /// `.onChange(of:)` — which requires a genuinely `Equatable` value type, not a bridged
-    /// existential — has something safe to compare.
-    private var filterKey: String {
-        switch onEnum(of: home.filter) {
-        case .all: return "all"
-        case .starred: return "starred"
-        case .feed(let f): return "feed:\(f.feedId)"
-        case .folder(let f): return "folder:\(f.folderId)"
-        case .tag(let t): return "tag:\(t.tagId)"
-        }
-    }
-
     #if os(iOS)
     private var topResetInput: ArticleListTopReset.Input {
         ArticleListTopReset.Input(
-            filterKey: filterKey,
+            selectionKey: home.filterGeneration,
             rowsMatchFilter: home.searchActive ? home.searchRowsMatchFilter : home.articleRowsMatchFilter,
             firstRowId: displayedRows.first?.id
         )
@@ -84,7 +71,9 @@ struct ArticleListView: View {
                     newestFirst: home.newestFirst
                 )
             }
-            .onChange(of: filterKey, initial: false) { _, _ in
+            // A switch is a new selection generation, not any change of `home.filter`: a merge
+            // re-keying the selected tag or folder keeps the generation and the scroll position.
+            .onChange(of: home.filterGeneration, initial: false) { _, _ in
                 tableResetGeneration += 1
             }
             #else

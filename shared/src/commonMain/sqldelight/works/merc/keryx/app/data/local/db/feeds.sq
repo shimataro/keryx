@@ -105,20 +105,49 @@ UPDATE feeds SET site_url = ?, title = ?, description = ?, updated_at = ? WHERE 
 updateUrl:
 UPDATE feeds SET url = ?, updated_at = ? WHERE id = ?;
 
-updateFolder:
-UPDATE feeds SET folder_id = ?, updated_at = ?, folder_updated_at = MAX(:folder_updated_at, COALESCE(folder_updated_at, 0) + 1) WHERE id = ?;
+-- A folder move writes the feed's raw assignment (ks_feed_folder_raw, the source of truth — see
+-- sync_bookkeeping.sq); the resolution trigger then derives feeds.folder_id / folder_updated_at from
+-- it. The feeds row is written first with the requested folder so feeds' FOREIGN KEY rejects a folder
+-- id that does not exist: a raw row therefore only ever names an existing folder, which every send's
+-- closure relies on (DeltaExportSql). Moving into a soft-deleted folder (a delete that raced the move)
+-- keeps that raw assignment, resolved to "no folder" until the folder is alive again.
+-- :folderId is resolved in both statements like every folder id a write takes (see folders.sq), so a
+-- move issued with the id a merge has since re-keyed lands in the folder it became rather than
+-- failing the FOREIGN KEY. The two resolve alike: they run in one transaction, which holds the write
+-- lock from the first, so no merge can re-key in between. The CASE passes a NULL :folderId (no
+-- folder) straight through; it also states :folderId's nullability, which SQLDelight would otherwise
+-- infer as NOT NULL from the id comparisons inside the resolution.
+updateFolder {
+    UPDATE feeds SET folder_id = CASE WHEN :folderId IS NULL THEN NULL ELSE COALESCE((SELECT id FROM folders WHERE id = :folderId), (SELECT new_id FROM ks_id_remap WHERE kind = 'folder' AND old_id = :folderId), :folderId) END, updated_at = :updatedAt WHERE id = :id;
+    UPDATE ks_feed_folder_raw SET
+        folder_id = CASE WHEN :folderId IS NULL THEN NULL ELSE COALESCE((SELECT id FROM folders WHERE id = :folderId), (SELECT new_id FROM ks_id_remap WHERE kind = 'folder' AND old_id = :folderId), :folderId) END,
+        folder_updated_at = MAX(:folderUpdatedAt, COALESCE(folder_updated_at, 0) + 1)
+    WHERE feed_id = :id;
+}
 
 updateSortOrder:
 UPDATE feeds SET sort_order = ?, updated_at = ?, sort_order_updated_at = MAX(:sort_order_updated_at, COALESCE(sort_order_updated_at, 0) + 1) WHERE id = ?;
 
--- Updates a moved feed's own folder_id and sort_order together.
-updateFolderAndSortOrder:
-UPDATE feeds SET folder_id = ?, sort_order = ?, updated_at = ?, folder_updated_at = MAX(:folder_updated_at, COALESCE(folder_updated_at, 0) + 1), sort_order_updated_at = MAX(:sort_order_updated_at, COALESCE(sort_order_updated_at, 0) + 1) WHERE id = ?;
+-- Updates a moved feed's own folder assignment and sort_order together (the folder as in updateFolder).
+updateFolderAndSortOrder {
+    UPDATE feeds SET
+        folder_id = CASE WHEN :folderId IS NULL THEN NULL ELSE COALESCE((SELECT id FROM folders WHERE id = :folderId), (SELECT new_id FROM ks_id_remap WHERE kind = 'folder' AND old_id = :folderId), :folderId) END,
+        sort_order = :sortOrder,
+        updated_at = :updatedAt,
+        sort_order_updated_at = MAX(:sortOrderUpdatedAt, COALESCE(sort_order_updated_at, 0) + 1)
+    WHERE id = :id;
+    UPDATE ks_feed_folder_raw SET
+        folder_id = CASE WHEN :folderId IS NULL THEN NULL ELSE COALESCE((SELECT id FROM folders WHERE id = :folderId), (SELECT new_id FROM ks_id_remap WHERE kind = 'folder' AND old_id = :folderId), :folderId) END,
+        folder_updated_at = MAX(:folderUpdatedAt, COALESCE(folder_updated_at, 0) + 1)
+    WHERE feed_id = :id;
+}
 
--- All surviving feeds belonging to the given folder (NULL = "no folder"), in display order.
+-- All surviving feeds belonging to the given folder (NULL = "no folder"), in display order. The folder
+-- id is resolved (see folders.sq), so a placement computed for a stale id reads the group it became.
 getByFolder:
-SELECT * FROM feeds WHERE deleted_at IS NULL AND (folder_id = :folderId OR (folder_id IS NULL AND :folderId IS NULL)) ORDER BY sort_order ASC, title COLLATE NOCASE ASC;
+SELECT * FROM feeds WHERE deleted_at IS NULL AND (folder_id = COALESCE((SELECT id FROM folders WHERE id = :folderId), (SELECT new_id FROM ks_id_remap WHERE kind = 'folder' AND old_id = :folderId), :folderId) OR (folder_id IS NULL AND :folderId IS NULL)) ORDER BY sort_order ASC, title COLLATE NOCASE ASC;
 
--- The next sort_order value to append to the end of the given folder's group (NULL = "no folder").
+-- The next sort_order value to append to the end of the given folder's group (NULL = "no folder"),
+-- the folder id resolved as in getByFolder.
 nextSortOrderInGroup:
-SELECT COALESCE(MAX(sort_order), -1) + 1 FROM feeds WHERE deleted_at IS NULL AND (folder_id = :folderId OR (folder_id IS NULL AND :folderId IS NULL));
+SELECT COALESCE(MAX(sort_order), -1) + 1 FROM feeds WHERE deleted_at IS NULL AND (folder_id = COALESCE((SELECT id FROM folders WHERE id = :folderId), (SELECT new_id FROM ks_id_remap WHERE kind = 'folder' AND old_id = :folderId), :folderId) OR (folder_id IS NULL AND :folderId IS NULL));

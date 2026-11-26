@@ -13,6 +13,7 @@ import works.merc.keryx.app.domain.DeferredRerunOutcome
 import works.merc.keryx.app.domain.ForeignKeyViolation
 import works.merc.keryx.app.domain.MainRuledOutVerdict
 import works.merc.keryx.app.domain.MergeFailureClassifier
+import works.merc.keryx.app.domain.KERYX_SCHEMA_CALLBACKS
 import works.merc.keryx.app.domain.MergeSchema
 import works.merc.keryx.app.domain.SqliteFailureCategory
 import works.merc.keryx.app.domain.TransportSchema
@@ -423,7 +424,7 @@ actual object DatabaseMerger {
             val db = SQLiteDatabase.openDatabase(cloudDbPath, null, SQLiteDatabase.OPEN_READWRITE, NoOpDatabaseErrorHandler)
             val driver = AndroidSqliteDriver(db)
             try {
-                KeryxDatabase.Schema.migrate(driver, cloudVersion, localSchemaVersion)
+                KeryxDatabase.Schema.migrate(driver, cloudVersion, localSchemaVersion, *KERYX_SCHEMA_CALLBACKS)
                 driver.execute(null, "PRAGMA user_version=$localSchemaVersion;", 0)
             } finally {
                 // Closes the underlying SupportSQLiteDatabase too (confirmed by disassembling

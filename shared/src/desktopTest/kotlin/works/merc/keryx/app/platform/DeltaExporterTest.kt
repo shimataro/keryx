@@ -1,5 +1,9 @@
 package works.merc.keryx.app.platform
 
+import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
+import works.merc.keryx.app.createSchemaV2
+import works.merc.keryx.app.data.local.db.KeryxDatabase
+import works.merc.keryx.app.domain.MergeSql
 import works.merc.keryx.app.domain.TransportFileKind
 import works.merc.keryx.app.domain.TransportFixtures
 import works.merc.keryx.app.domain.TransportFixtures.DEV_A
@@ -86,12 +90,21 @@ class DeltaExporterTest {
         assertEquals(listOf("a1", "a2"), ids(dest, "articles"))
         assertEquals(listOf("<p>one</p>", "<p>two</p>"), query(File(dest), "SELECT content FROM articles ORDER BY id").map { it[0] })
         assertEquals(
-            mapOf("folders" to 2L, "feeds" to 2L, "tags" to 1L, "articles" to 2L, "feed_tags" to 1L, "global_settings" to 1L),
+            mapOf(
+                "folders" to 2L, "feeds" to 2L, "tags" to 1L, "articles" to 2L, "feed_tags" to 1L, "global_settings" to 1L,
+                "folder_v2_edges" to 0L, "tag_v2_edges" to 0L,
+            ),
             export.rowCounts,
         )
         // Nothing device-local, and no platform table, reaches the file.
         val tables = query(File(dest), "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").map { it[0] }
-        assertEquals(listOf("articles", "feed_tags", "feeds", "folders", "global_settings", "ks_covered", "ks_meta", "ks_vector", "tags"), tables)
+        assertEquals(
+            listOf(
+                "articles", "feed_tags", "feeds", "folder_v2_edges", "folders", "global_settings", "ks_covered", "ks_meta",
+                "ks_vector", "tag_v2_edges", "tags",
+            ),
+            tables,
+        )
     }
 
     @Test
@@ -254,6 +267,309 @@ class DeltaExporterTest {
         assertEquals(listOf("d1"), ids(dest, "folders"))
         assertEquals(emptyList(), ids(dest, "tags"))
         assertEquals(1L, export.rowCounts["articles"])
+    }
+
+    // ---- A feed's folder is sent as its raw assignment ----
+
+    private fun feedFolderIn(file: String): List<String?> =
+        query(File(file), "SELECT folder_id, folder_updated_at FROM feeds WHERE id = 'f1'").single()
+
+    private fun outboxEntries(local: File): List<String> =
+        query(local, "SELECT tbl || ':' || pk FROM sync_outbox ORDER BY seq").map { it[0]!! }
+
+    /**
+     * A folder's deletion and revival only re-resolve the feeds still assigned to it: the folder's own
+     * change is recorded, but nothing for the feeds, whose sent (raw) value did not change. A change
+     * of a feed's raw assignment is recorded as the feed's entry, and sent.
+     */
+    @Test
+    fun aReResolutionAloneRecordsNothingAndARawChangeIsRecordedForTheFeed() {
+        val local = capturingDb(*seedRows)
+        exec(local, "DELETE FROM sync_outbox", "UPDATE folders SET deleted_at = 200, updated_at = 200 WHERE id = 'd1'")
+        assertNull(query(local, "SELECT folder_id FROM feeds WHERE id = 'f1'").single()[0], "resolved to no folder")
+        exec(local, "UPDATE folders SET deleted_at = NULL, updated_at = 300 WHERE id = 'd1'")
+        assertEquals("d1", query(local, "SELECT folder_id FROM feeds WHERE id = 'f1'").single()[0])
+        assertEquals(listOf("folders:d1", "folders:d1"), outboxEntries(local))
+
+        exec(local, "DELETE FROM sync_outbox", "UPDATE ks_feed_folder_raw SET folder_id = 'd2', folder_updated_at = 400 WHERE feed_id = 'f1'")
+        assertEquals(listOf("feeds:f1"), outboxEntries(local))
+        val dest = newPath()
+        assertNotNull(DeltaExporter.exportDelta(local.absolutePath, dest, meta()))
+        assertEquals(listOf("d2", "400"), feedFolderIn(dest))
+        assertEquals(listOf("d2"), ids(dest, "folders"))
+    }
+
+    /**
+     * A feed assigned to a folder that is deleted here is sent with that raw assignment, not the
+     * resolved "no folder" — and the closure carries the deleted folder's row — in a delta and in a
+     * full send alike.
+     */
+    @Test
+    fun aFeedInADeletedFolderIsSentWithItsRawAssignmentAndTheFoldersRow() {
+        val local = capturingDb(*seedRows)
+        exec(
+            local,
+            "UPDATE folders SET deleted_at = 200, updated_at = 200 WHERE id = 'd1'",
+            "DELETE FROM sync_outbox",
+            "UPDATE feeds SET title = 'Renamed', updated_at = 300 WHERE id = 'f1'",
+        )
+        assertEquals(listOf(null, "100"), query(local, "SELECT folder_id, folder_updated_at FROM feeds WHERE id = 'f1'").single())
+
+        val delta = newPath()
+        assertNotNull(DeltaExporter.exportDelta(local.absolutePath, delta, meta()))
+        assertEquals(TransportValidation.Valid, TransportFiles.validate(delta, ValidationTarget.Transport(deltaName(DEV_A, 1))))
+        assertEquals(listOf("d1", "100"), feedFolderIn(delta))
+        assertEquals(listOf(listOf("d1", "200")), query(File(delta), "SELECT id, deleted_at FROM folders"))
+
+        val copy = newPath("ks-copy-")
+        DeltaExporter.copyForFullSend(local.absolutePath, copy)
+        val full = newPath()
+        DeltaExporter.exportFull(copy, full, meta(2), exceptPath = null)
+        assertEquals(TransportValidation.Valid, TransportFiles.validate(full, ValidationTarget.Transport(deltaName(DEV_A, 2))))
+        assertEquals(listOf("d1", "100"), feedFolderIn(full))
+    }
+
+    // ---- A raw assignment that is an alias with no local row ----
+
+    /**
+     * After a re-key a feed's raw folder can be an alias this device holds no row of (the row moved to
+     * the canonical id). The file still carries the raw value, so it also carries the folder's identity
+     * edges (the component of the alias in the source's `ks_v2_edge`, and nothing of any other) and the
+     * source's folder rows of that component; it passes validation, and a device that merges it
+     * resolves the feed to the canonical folder while storing the raw alias.
+     */
+    @Test
+    fun aDeltaWhoseRawFolderIsAnAliasWithNoRowCarriesTheEdgesOfItsComponent() {
+        val local = capturingDb(folder("d-a", "A"), folder("d-y", "Y"), feed("f1"))
+        exec(
+            local,
+            "UPDATE ks_feed_folder_raw SET folder_id = 'x', folder_updated_at = 500 WHERE feed_id = 'f1'",
+            "INSERT INTO ks_id_remap (kind, old_id, new_id) VALUES ('folder', 'x', 'd-a')",
+            "INSERT INTO ks_v2_edge (kind, v2_id, id) VALUES ('folder', 'p', 'x')",
+            "INSERT INTO ks_v2_edge (kind, v2_id, id) VALUES ('folder', 'p', 'd-a')",
+            "INSERT INTO ks_v2_edge (kind, v2_id, id) VALUES ('folder', 'p', 'd-y')",
+            // Another component, which must not travel.
+            "INSERT INTO ks_v2_edge (kind, v2_id, id) VALUES ('folder', 'q', 'other-1')",
+            "INSERT INTO ks_v2_edge (kind, v2_id, id) VALUES ('folder', 'q', 'other-2')",
+        )
+        assertEquals(listOf("d-a", "500"), query(local, "SELECT folder_id, folder_updated_at FROM feeds WHERE id = 'f1'").single())
+        exec(local, "DELETE FROM sync_outbox", "INSERT INTO sync_outbox (tbl, pk, pk2, heavy) VALUES ('feeds', 'f1', NULL, 0)")
+
+        val dest = newPath()
+        assertNotNull(DeltaExporter.exportDelta(local.absolutePath, dest, meta()))
+        assertEquals(TransportValidation.Valid, TransportFiles.validate(dest, ValidationTarget.Transport(deltaName(DEV_A, 1))))
+        assertEquals(listOf("x", "500"), feedFolderIn(dest))
+        assertEquals(listOf("d-a", "d-y"), ids(dest, "folders"))
+        assertEquals(
+            listOf(listOf("p", "d-a"), listOf("p", "d-y"), listOf("p", "x")),
+            query(File(dest), "SELECT v2_id, id FROM folder_v2_edges ORDER BY v2_id, id"),
+        )
+
+        val other = TransportFixtures.localDb()
+        TransportFixtures.merge(other, File(dest))
+        assertEquals(listOf("d-a", "500"), query(other, "SELECT folder_id, folder_updated_at FROM feeds WHERE id = 'f1'").single())
+        assertEquals(listOf("x", "500"), query(other, "SELECT folder_id, folder_updated_at FROM ks_feed_folder_raw").single())
+        assertEquals(listOf("d-a"), query(other, "SELECT id FROM folders").map { it[0] })
+        assertEquals(listOf(listOf("x", "d-a")), query(other, "SELECT old_id, new_id FROM ks_id_remap WHERE kind = 'folder' AND old_id = 'x'"))
+    }
+
+    /**
+     * A received file whose feed's raw folder is an id that appears only on the pre-upgrade side of an
+     * identity edge (`folder_v2_edges.v2_id`), never as a row or an edge's row id: the merge records a
+     * move from it onto the identity's canonical folder — it never becomes canonical itself — so the
+     * receiver keeps the raw value and shows the feed in the live canonical folder, as the sender does.
+     */
+    @Test
+    fun aReceivedRawFolderThatIsOnlyAnEdgesPreUpgradeIdResolvesToTheCanonicalFolder() {
+        val cloud = TransportFixtures.transportFile(
+            deltaName(DEV_A, 1),
+            folder("d-a", "A"),
+            feed("f1", folderId = "x", folderAt = 500),
+            "INSERT INTO folder_v2_edges (v2_id, id) VALUES ('x', 'd-a')",
+        )
+        assertEquals(TransportValidation.Valid, TransportFiles.validate(cloud.absolutePath, ValidationTarget.Transport(deltaName(DEV_A, 1))))
+
+        val other = TransportFixtures.localDb()
+        TransportFixtures.merge(other, cloud)
+
+        assertEquals(listOf("x", "500"), query(other, "SELECT folder_id, folder_updated_at FROM ks_feed_folder_raw").single())
+        assertEquals(listOf("d-a", "500"), query(other, "SELECT folder_id, folder_updated_at FROM feeds WHERE id = 'f1'").single())
+        assertEquals(listOf("d-a"), query(other, "SELECT id FROM folders").map { it[0] })
+        assertEquals(listOf(listOf("x", "d-a")), query(other, "SELECT old_id, new_id FROM ks_id_remap WHERE kind = 'folder'"))
+    }
+
+    /**
+     * What a device stored as a feed's raw folder after a merge re-keyed its rows is exactly what it
+     * sends — never the canonical id the feed resolves to.
+     */
+    @Test
+    fun theSentFolderOfAFeedIsTheStoredRawValueAfterAMergeReKeyedItsRows() {
+        val local = TransportFixtures.localDb(
+            folder("d-b", "Folder b", v2Id = "q"),
+            feed("f1", folderId = "d-b", folderAt = 150),
+        )
+        val cloud = TransportFixtures.transportFile(
+            deltaName(DEV_A, 1),
+            "INSERT INTO folder_v2_edges (v2_id, id) VALUES ('q', 'd-a')",
+        )
+        TransportFixtures.merge(local, cloud)
+        assertEquals(listOf("d-a"), query(local, "SELECT id FROM folders").map { it[0] }, "the row moved")
+        assertEquals(listOf("d-a"), query(local, "SELECT folder_id FROM feeds WHERE id = 'f1'").map { it[0] })
+        val stored = query(local, "SELECT folder_id FROM ks_feed_folder_raw WHERE feed_id = 'f1'").single()[0]
+        assertEquals("d-b", stored)
+
+        exec(local, "UPDATE sync_capture SET enabled = 1", "INSERT INTO sync_outbox (tbl, pk, pk2, heavy) VALUES ('feeds', 'f1', NULL, 0)")
+        val delta = newPath()
+        assertNotNull(DeltaExporter.exportDelta(local.absolutePath, delta, meta()))
+        assertEquals(TransportValidation.Valid, TransportFiles.validate(delta, ValidationTarget.Transport(deltaName(DEV_A, 1))))
+        assertEquals(stored, feedFolderIn(delta)[0])
+
+        val copy = newPath("ks-copy-")
+        DeltaExporter.copyForFullSend(local.absolutePath, copy)
+        val full = newPath()
+        DeltaExporter.exportFull(copy, full, meta(2), exceptPath = null)
+        assertEquals(TransportValidation.Valid, TransportFiles.validate(full, ValidationTarget.Transport(deltaName(DEV_A, 2))))
+        assertEquals(stored, feedFolderIn(full)[0])
+    }
+
+    /**
+     * A pre-delta file's feed that references a folder with no row and no mapping is recorded with no
+     * folder (the one place a raw value is cleaned), so this device's next delta and full send pass the
+     * closure check. See `V2IdentityMergeTest.aPreDeltaFileReferenceToAnUnknownFolderIsRecordedAsNoFolder`.
+     */
+    @Test
+    fun aPreDeltaOrphanFolderReferenceIsRecordedAsNoFolderAndTheDeviceCanStillSend() {
+        val cloud = File.createTempFile("v2-orphan", ".db").apply { deleteOnExit() }
+        JdbcSqliteDriver("jdbc:sqlite:${cloud.absolutePath}").use { driver ->
+            driver.createSchemaV2()
+            driver.execute(
+                null,
+                "INSERT INTO feeds (id, url, title, etag, folder_id, folder_updated_at, updated_at, created_at) " +
+                    "VALUES ('f1', 'https://a', 'Feed', 'e', 'ghost', 500, 100, 1)",
+                0,
+            )
+        }
+        val local = TransportFixtures.localDb()
+        DatabaseMerger.merge(local.absolutePath, cloud.absolutePath, KeryxDatabase.Schema.version, MergeSql.all)
+        assertNull(query(local, "SELECT folder_id FROM ks_feed_folder_raw WHERE feed_id = 'f1'").single()[0])
+        assertNull(query(local, "SELECT folder_id FROM feeds WHERE id = 'f1'").single()[0])
+
+        exec(local, "UPDATE sync_capture SET enabled = 1", "UPDATE feeds SET title = 'Renamed', updated_at = 300 WHERE id = 'f1'")
+        val delta = newPath()
+        assertNotNull(DeltaExporter.exportDelta(local.absolutePath, delta, meta()))
+        assertEquals(TransportValidation.Valid, TransportFiles.validate(delta, ValidationTarget.Transport(deltaName(DEV_A, 1))))
+        assertNull(feedFolderIn(delta)[0])
+
+        val copy = newPath("ks-copy-")
+        DeltaExporter.copyForFullSend(local.absolutePath, copy)
+        val full = newPath()
+        DeltaExporter.exportFull(copy, full, meta(2), exceptPath = null)
+        assertEquals(TransportValidation.Valid, TransportFiles.validate(full, ValidationTarget.Transport(deltaName(DEV_A, 2))))
+        assertNull(feedFolderIn(full)[0])
+    }
+
+    /** An edge added while capture is on and no merge is running is recorded and rides in the next delta. */
+    @Test
+    fun aDeltaCarriesTheIdentityEdgesRecordedInTheOutbox() {
+        val local = capturingDb(*seedRows)
+        exec(
+            local,
+            "INSERT INTO ks_v2_edge (kind, v2_id, id) VALUES ('folder', 'p', 'd1')",
+            "INSERT INTO ks_v2_edge (kind, v2_id, id) VALUES ('tag', 'q', 't1')",
+            "INSERT OR IGNORE INTO ks_v2_edge (kind, v2_id, id) VALUES ('tag', 'q', 't1')", // already there: records nothing
+        )
+        assertEquals(
+            listOf(listOf("folder_v2_edges", "p", "d1"), listOf("tag_v2_edges", "q", "t1")),
+            query(local, "SELECT tbl, pk, pk2 FROM sync_outbox WHERE tbl LIKE '%_v2_edges' ORDER BY seq"),
+        )
+        val delta = newPath()
+        assertNotNull(DeltaExporter.exportDelta(local.absolutePath, delta, meta()))
+        assertEquals(listOf(listOf("p", "d1")), query(File(delta), "SELECT v2_id, id FROM folder_v2_edges"))
+        assertEquals(listOf(listOf("q", "t1")), query(File(delta), "SELECT v2_id, id FROM tag_v2_edges"))
+    }
+
+    /** A transport merge (the `sync_merging` marker) records no edge: the other devices receive its file too. */
+    @Test
+    fun anEdgeAddedInsideATransportMergeIsNotRecorded() {
+        val local = capturingDb(*seedRows)
+        exec(
+            local,
+            "INSERT INTO sync_merging (flag) VALUES (1)",
+            "INSERT INTO ks_v2_edge (kind, v2_id, id) VALUES ('folder', 'p', 'd1')",
+            "DELETE FROM sync_merging",
+        )
+        assertEquals(emptyList(), query(local, "SELECT tbl FROM sync_outbox WHERE tbl LIKE '%_v2_edges'"))
+    }
+
+    /**
+     * A full send carries every identity edge of `ks_v2_edge`, split by kind — an edge of an id it holds
+     * no row of included, and with an except file that carries none of them — while a delta carries
+     * only the edges recorded in the outbox (none here: they were added while capture was off, as the
+     * v2→v3 re-key adds them).
+     */
+    @Test
+    fun aFullSendCarriesEveryIdentityEdgeAndADeltaNoneThatWasNotCaptured() {
+        val local = capturingDb(*seedRows)
+        exec(
+            local,
+            "UPDATE sync_capture SET enabled = 0",
+            "INSERT INTO ks_v2_edge (kind, v2_id, id) VALUES ('folder', 'p', 'd1')",
+            "INSERT INTO ks_v2_edge (kind, v2_id, id) VALUES ('folder', 'p', 'd-elsewhere')",
+            "INSERT INTO ks_v2_edge (kind, v2_id, id) VALUES ('tag', 'q', 't1')",
+            "UPDATE sync_capture SET enabled = 1",
+        )
+        val delta = newPath()
+        assertNotNull(DeltaExporter.exportDelta(local.absolutePath, delta, meta()))
+        assertEquals(emptyList(), query(File(delta), "SELECT v2_id, id FROM folder_v2_edges"))
+        assertEquals(emptyList(), query(File(delta), "SELECT v2_id, id FROM tag_v2_edges"))
+
+        val copy = newPath("ks-copy-")
+        DeltaExporter.copyForFullSend(local.absolutePath, copy)
+        for (except in listOf(null, delta)) {
+            val dest = newPath()
+            DeltaExporter.exportFull(copy, dest, meta(2), exceptPath = except)
+            assertEquals(TransportValidation.Valid, TransportFiles.validate(dest, ValidationTarget.Transport(deltaName(DEV_A, 2))))
+            assertEquals(
+                listOf(listOf("p", "d-elsewhere"), listOf("p", "d1")),
+                query(File(dest), "SELECT v2_id, id FROM folder_v2_edges ORDER BY v2_id, id"),
+            )
+            assertEquals(listOf(listOf("q", "t1")), query(File(dest), "SELECT v2_id, id FROM tag_v2_edges"))
+        }
+    }
+
+    /** A full send leaves out the edges its except file (the base just merged) already carries. */
+    @Test
+    fun aFullSendLeavesOutEdgesTheExceptFileCarries() {
+        val local = capturingDb(*seedRows)
+        val base = newPath("ks-base-")
+        exec(File(base).also { TransportFiles.createEmpty(it.absolutePath, meta()) }, "INSERT INTO tag_v2_edges (v2_id, id) VALUES ('q', 't1')")
+        exec(
+            local,
+            "INSERT INTO ks_v2_edge (kind, v2_id, id) VALUES ('tag', 'q', 't1')",
+            "INSERT INTO ks_v2_edge (kind, v2_id, id) VALUES ('tag', 'q', 't2')",
+        )
+        val copy = newPath("ks-copy-")
+        DeltaExporter.copyForFullSend(local.absolutePath, copy)
+        val dest = newPath()
+        DeltaExporter.exportFull(copy, dest, meta(2), exceptPath = base)
+        assertEquals(listOf(listOf("q", "t2")), query(File(dest), "SELECT v2_id, id FROM tag_v2_edges"))
+    }
+
+    /**
+     * A full send whose synced rows are all identical to the except file's still counts its edges, so it
+     * is not taken for an empty file and left unsent.
+     */
+    @Test
+    fun aFullSendOfOnlyEdgesIsNotEmpty() {
+        val local = capturingDb(*seedRows)
+        val base = newPath("ks-base-")
+        assertNotNull(DeltaExporter.exportDelta(local.absolutePath, base, meta()))
+        exec(local, "INSERT INTO ks_v2_edge (kind, v2_id, id) VALUES ('tag', 'q', 't1')")
+        val copy = newPath("ks-copy-")
+        DeltaExporter.copyForFullSend(local.absolutePath, copy)
+        val export = DeltaExporter.exportFull(copy, newPath(), meta(2), exceptPath = base)
+        // The edge is the only row written: no unchanged feed, tag, folder, article or setting.
+        assertEquals(mapOf("tag_v2_edges" to 1L), export.rowCounts.filterValues { it != 0L })
     }
 
     @Test

@@ -10,7 +10,9 @@ import works.merc.keryx.app.data.local.DatabaseTooNewException
 import works.merc.keryx.app.data.local.FtsManager
 import works.merc.keryx.app.data.local.FtsSearch
 import works.merc.keryx.app.data.local.db.KeryxDatabase
+import works.merc.keryx.app.domain.IdGenerator
 import works.merc.keryx.app.domain.MergeSql
+import works.merc.keryx.app.SCHEMA_V2_STATEMENTS
 import works.merc.keryx.app.tempFilePath
 import kotlin.test.AfterTest
 import kotlin.test.Test
@@ -60,6 +62,47 @@ class AppleDatabaseTest {
     fun aFreshDatabaseIsCreatedAtTheCurrentSchemaVersion() {
         open("fresh.db")
         assertEquals(KeryxDatabase.Schema.version, RawSqliteConnection.userVersionOf(path("fresh.db")))
+    }
+
+    /**
+     * A schema-version-2 file opened through the Apple factory is migrated to version 3 by the
+     * system sqlite3, and the `AfterVersion(2)` re-key ([works.merc.keryx.app.domain.KERYX_SCHEMA_CALLBACKS])
+     * runs in that migration: the tag and folder move onto the ids their names derive, the feed's
+     * folder and the tag link follow, and each move is recorded in `ks_id_remap` / `ks_v2_edge`.
+     * The desktop counterpart is `SchemaV3MigrationTest`; this proves the callbacks reach the
+     * native driver too.
+     */
+    @Test
+    fun aVersionTwoFileIsRekeyedOntoTheDerivedIdsWhenOpened() {
+        RawSqliteConnection.open(path("v2.db"), create = true).use { db ->
+            SCHEMA_V2_STATEMENTS.forEach { db.exec(it) }
+            db.exec("PRAGMA user_version = 2")
+            db.exec("INSERT INTO folders (id, name, sort_order, updated_at, created_at) VALUES ('d1', 'D', 0, 10, 1)")
+            db.exec("INSERT INTO tags (id, name, updated_at, created_at) VALUES ('t1', 'T', 10, 1)")
+            db.exec("INSERT INTO feeds (id, url, title, folder_id, updated_at, created_at) VALUES ('f1', 'https://a', 'A', 'd1', 10, 1)")
+            db.exec("INSERT INTO feed_tags (feed_id, tag_id, updated_at) VALUES ('f1', 't1', 10)")
+        }
+
+        open("v2.db").close()
+        drivers.clear()
+
+        val dId = IdGenerator.folderId("D")
+        val tId = IdGenerator.tagId("T")
+        RawSqliteConnection.open(path("v2.db")).use { db ->
+            assertEquals(KeryxDatabase.Schema.version, RawSqliteConnection.userVersionOf(path("v2.db")))
+            assertEquals(listOf(listOf<String?>(dId, "D", "d1")), db.queryRowsStrict("SELECT id, name, v2_id FROM folders"))
+            assertEquals(listOf(listOf<String?>(tId, "T", "t1")), db.queryRowsStrict("SELECT id, name, v2_id FROM tags"))
+            assertEquals(listOf(listOf<String?>("f1", dId)), db.queryRowsStrict("SELECT id, folder_id FROM feeds"))
+            assertEquals(listOf(listOf<String?>("f1", tId)), db.queryRowsStrict("SELECT feed_id, tag_id FROM feed_tags"))
+            assertEquals(
+                setOf(listOf<String?>("folder", "d1", dId), listOf<String?>("tag", "t1", tId)),
+                db.queryRowsStrict("SELECT kind, old_id, new_id FROM ks_id_remap").toSet(),
+            )
+            assertEquals(
+                setOf(listOf<String?>("folder", "d1", dId), listOf<String?>("tag", "t1", tId)),
+                db.queryRowsStrict("SELECT kind, v2_id, id FROM ks_v2_edge").toSet(),
+            )
+        }
     }
 
     @Test
@@ -150,6 +193,7 @@ class AppleDatabaseTest {
         drivers -= cloud
         RawSqliteConnection.open(path(name)).use { db ->
             VERSION_3_TRIGGERS.forEach { db.exec("DROP TRIGGER $it") }
+            VERSION_3_VIEWS.forEach { db.exec("DROP VIEW $it") }
             VERSION_3_TABLES.forEach { db.exec("DROP TABLE $it") }
             db.exec("ALTER TABLE feeds ADD COLUMN etag TEXT")
             db.exec("ALTER TABLE feeds ADD COLUMN last_modified TEXT")
@@ -181,6 +225,31 @@ class AppleDatabaseTest {
         assertTrue("deleted_updated_at" in cloudColumns)
         RawSqliteConnection.open(path("main.db")).use { db ->
             assertEquals(1, db.queryLong("SELECT count(*) FROM articles WHERE id = 'cloud-article' AND deleted_at IS NULL"))
+        }
+    }
+
+    /**
+     * The migration callbacks run on the Apple path too: a version-1 cloud file's tag arrives
+     * re-keyed onto the id its name derives from (`IdGenerator.tagId`), so it meets a migrated
+     * device's own same-named row under the same id.
+     */
+    @Test
+    fun anOlderCloudFilesTagsArriveRekeyedOntoTheirNameDerivedIds() {
+        open("main.db").close()
+        drivers.clear()
+        writeVersion1CloudFile("cloud-v1-rekey.db")
+        RawSqliteConnection.open(path("cloud-v1-rekey.db")).use { db ->
+            db.exec("INSERT INTO tags (id, name, sort_order, deleted_at, updated_at, created_at) VALUES ('t1', 'Legacy tag', 0, NULL, 1, 1)")
+        }
+
+        DatabaseMerger.merge(path("main.db"), path("cloud-v1-rekey.db"), KeryxDatabase.Schema.version, MergeSql.all)
+
+        RawSqliteConnection.open(path("main.db")).use { db ->
+            assertEquals(
+                1,
+                db.queryLong("SELECT count(*) FROM tags WHERE id = '${IdGenerator.tagId("Legacy tag")}' AND name = 'Legacy tag'"),
+            )
+            assertEquals(0, db.queryLong("SELECT count(*) FROM tags WHERE id = 't1'"))
         }
     }
 
@@ -488,12 +557,20 @@ class AppleDatabaseTest {
          */
         val VERSION_3_TABLES = listOf(
             "feed_fetch_state", "sync_outbox", "sync_capture", "sync_merging", "sync_applied", "sync_cursor", "ks_search_pending",
-            "ks_search_awaiting_body", "ks_feed_folder_raw",
+            "ks_search_awaiting_body", "ks_feed_folder_raw", "ks_id_remap", "ks_v2_edge",
         )
 
-        /** The capture triggers `2.sqm` creates, dropped before the tables they write to. */
+        /** The triggers `2.sqm` creates, dropped before the tables they read and write. */
         val VERSION_3_TRIGGERS = listOf("feeds", "articles", "tags", "folders", "feed_tags", "global_settings")
-            .flatMap { listOf("ks_capture_${it}_insert", "ks_capture_${it}_update") }
+            .flatMap { listOf("ks_capture_${it}_insert", "ks_capture_${it}_update") } + listOf(
+            "ks_capture_feed_folder_raw_update", "ks_feed_folder_raw_init", "ks_feed_folder_resolve_raw_insert",
+            "ks_feed_folder_resolve_raw_update", "ks_feed_folder_resolve_folder",
+            "ks_feed_folder_resolve_folder_insert", "ks_feed_folder_resolve_remap_insert",
+            "ks_feed_folder_resolve_remap_update", "ks_feed_folder_resolve_remap_delete",
+        )
+
+        /** The views `2.sqm` creates, dropped before the tables they read. */
+        val VERSION_3_VIEWS = listOf("ks_feed_folder_resolved")
 
         /** Copies every cloud folder without MergeSql's guards, so a shared id hits the PRIMARY KEY. */
         const val UNGUARDED_FOLDER_INSERT =

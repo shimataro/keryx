@@ -411,34 +411,116 @@ class SyncAlgebraTest {
     }
 
     @Test
-    fun duplicatesInsideAFoldAreResolvedToTheSameWinnerWhateverTheFoldOrder() {
-        // Two devices created the same tag name, folder name and feed URL independently.
+    fun twoDevicesCreatingTheSameNameConvergeOnOneRowWhateverTheOrder() {
+        // A tag's and a folder's id derive from the name (IdGenerator.tagId / folderId), so two
+        // devices that created the same name independently hold the same id: the fold keys by id and
+        // merges their rows into one, and merging the fold — or the files one by one — lands on that
+        // one row in every order. A feed's URL under two ids is the one remaining duplicate of this
+        // kind (see "Feeds sharing one URL under different ids" in docs/known-issues.md).
         val p = transportFile(
             nameA,
-            tag("tp", "dup", updatedAt = 100),
-            folder("dp", "Dup", updatedAt = 300),
+            tag(IdGenerator.tagId("dup"), "dup", updatedAt = 100),
+            folder(IdGenerator.folderId("Dup"), "Dup", updatedAt = 100),
             feed("fp", url = "https://same/feed", updatedAt = 100),
         )
         val q = transportFile(
             nameB,
-            tag("tq", "dup", updatedAt = 200),
-            folder("dq", "Dup", updatedAt = 100),
+            tag(IdGenerator.tagId("dup"), "dup", updatedAt = 200),
+            folder(IdGenerator.folderId("Dup"), "Dup", updatedAt = 300),
             feed("fq", url = "https://same/feed", updatedAt = 100),
         )
         val pq = fold(p to nameA, q to nameB)
         val qp = fold(q to nameB, p to nameA)
-        // The fold keys by id only: both rows of each pair stay.
         assertEquals(dump(pq), dump(qp))
-        assertEquals(2, dump(pq).getValue("tags").size)
+        assertEquals(1, dump(pq).getValue("tags").size)
+        assertEquals(1, dump(pq).getValue("folders").size)
 
         val viaPq = localDb().also { merge(it, pq) }
         val viaQp = localDb().also { merge(it, qp) }
         assertEquals(dump(viaPq), dump(viaQp))
         val merged = dump(viaPq)
-        // Greatest updated_at, then greatest id.
-        assertEquals(listOf("tq"), merged.getValue("tags").map { it.substringBefore('|') })
-        assertEquals(listOf("dp"), merged.getValue("folders").map { it.substringBefore('|') })
+        // Each row's greater updated_at wins; the feeds' URL collision keeps the greater id.
+        assertEquals(listOf(IdGenerator.tagId("dup")), merged.getValue("tags").map { it.substringBefore('|') })
+        assertEquals(listOf(IdGenerator.folderId("Dup")), merged.getValue("folders").map { it.substringBefore('|') })
         assertEquals(listOf("fq"), merged.getValue("feeds").map { it.substringBefore('|') })
+    }
+
+    // ---- A rename onto a name another row holds (no UNIQUE(name) blocks it any more) ----
+
+    private val renameLocal = arrayOf(
+        tag("a", "Old", updatedAt = 100, nameAt = 100),
+        tag("b", "Taken", updatedAt = 100, nameAt = 100),
+        folder("d1", "Work", updatedAt = 100, nameAt = 100),
+        folder("d2", "Home", updatedAt = 100, nameAt = 100),
+    )
+
+    private fun renameFileA() = transportFile(
+        nameA,
+        tag("a", "Taken", updatedAt = 100, nameAt = 200), // a takes the name b holds
+        folder("d1", "Home", updatedAt = 100, nameAt = 200),
+    )
+
+    private fun renameFileB() = transportFile(
+        nameB,
+        tag("b", "Old", updatedAt = 100, nameAt = 200), // the swap: b takes a's old name
+        folder("d2", "Work", updatedAt = 100, nameAt = 200),
+    )
+
+    /**
+     * The finding this closes: under the old UNIQUE(name) guard, whichever rename merged first was
+     * dropped for good (the other row still held the name), so the arrival order decided the names
+     * and the fold — which has no such guard — disagreed with the merges. With names not unique,
+     * every order applies both renames and ends with the same rows.
+     */
+    @Test
+    fun renamesOntoANameAnotherRowHoldsApplyInEveryOrder() {
+        val results = listOf(
+            "P, Q" to localDb(*renameLocal).also { db -> merge(db, renameFileA()); merge(db, renameFileB()) },
+            "Q, P" to localDb(*renameLocal).also { db -> merge(db, renameFileB()); merge(db, renameFileA()) },
+            "fold(P, Q)" to localDb(*renameLocal).also { merge(it, fold(renameFileA() to nameA, renameFileB() to nameB)) },
+            "fold(Q, P)" to localDb(*renameLocal).also { merge(it, fold(renameFileB() to nameB, renameFileA() to nameA)) },
+        )
+        fun names(db: File): List<String> = TransportFixtures.connect(db).use { conn ->
+            conn.createStatement().use { st ->
+                listOf(
+                    "SELECT name FROM tags WHERE id = 'a'",
+                    "SELECT name FROM tags WHERE id = 'b'",
+                    "SELECT name FROM folders WHERE id = 'd1'",
+                    "SELECT name FROM folders WHERE id = 'd2'",
+                ).map { sql -> st.executeQuery(sql).use { it.next(); it.getString(1) } }
+            }
+        }
+        for ((label, db) in results) assertEquals(listOf("Taken", "Old", "Home", "Work"), names(db), label)
+        val dumps = results.map { (_, db) -> dump(db, local = true) }
+        dumps.drop(1).forEach { assertEquals(dumps.first(), it) }
+    }
+
+    @Test
+    fun separateRowsThatBecomeSameNamedLeaveTheSameRowsWhateverTheOrder() {
+        // Device A renames its tag to "Z" — its id stays the one its original name derived — and
+        // device B creates a tag named "Z", whose id is the one "Z" derives. Two different rows share
+        // the name once the files meet, and every merge and fold order leaves the same two rows with
+        // the same names (the UI numbers them).
+        val local = arrayOf(tag("a", "X", updatedAt = 100, nameAt = 100))
+        val p = transportFile(nameA, tag("a", "Z", updatedAt = 100, nameAt = 200))
+        val q = transportFile(nameB, tag(IdGenerator.tagId("Z"), "Z", updatedAt = 300, createdAt = 300, nameAt = 300))
+        val results = listOf(
+            "P, Q" to localDb(*local).also { db -> merge(db, p); merge(db, q) },
+            "Q, P" to localDb(*local).also { db -> merge(db, q); merge(db, p) },
+            "fold(P, Q)" to localDb(*local).also { merge(it, fold(p to nameA, q to nameB)) },
+            "fold(Q, P)" to localDb(*local).also { merge(it, fold(q to nameB, p to nameA)) },
+        )
+        fun rowIdsAndNames(db: File): Set<String> = TransportFixtures.connect(db).use { conn ->
+            conn.createStatement().use { st ->
+                st.executeQuery("SELECT id, name FROM tags ORDER BY id").use { rs ->
+                    buildSet { while (rs.next()) add("${rs.getString(1)}|${rs.getString(2)}") }
+                }
+            }
+        }
+        val expected = setOf("a|Z", "${IdGenerator.tagId("Z")}|Z")
+        for ((label, db) in results) assertEquals(expected, rowIdsAndNames(db), label)
+        val dumps = results.map { (_, db) -> dump(db, local = true) }
+        dumps.drop(1).forEach { assertEquals(dumps.first(), it) }
     }
 
     @Test
@@ -458,9 +540,9 @@ class SyncAlgebraTest {
 
     /**
      * Two files carry the same feed into different folders at the same `folder_updated_at`, and each
-     * file's folder resolves by name to a different local folder (`dz` "A" → `da`, `dm` "B" → `db`).
-     * The tie must be decided between the raw ids the files carry (as the fold does: `dz` > `dm`),
-     * never between a raw id and the resolved one stored locally — or the merge order would decide.
+     * file's folder lands in main under its own id (same-named rows are allowed now), so the feed's
+     * resolved folder is the raw id the winning file carried. The tie must be decided between the
+     * raw ids the files carry (as the fold does: `dz` > `dm`), never by the merge order.
      */
     private fun assertFolderTieConverges(p: File, q: File, expected: String?) {
         val names = listOf(nameA, nameB)
@@ -490,7 +572,7 @@ class SyncAlgebraTest {
         assertFolderTieConverges(
             transportFile(nameA, folder("dz", "A", updatedAt = 50), feed("f1", folderId = "dz", folderAt = 500)),
             transportFile(nameB, folder("dm", "B", updatedAt = 50), feed("f1", folderId = "dm", folderAt = 500)),
-            expected = "da",
+            expected = "dz",
         )
     }
 
@@ -502,5 +584,124 @@ class SyncAlgebraTest {
             transportFile(nameB, folder("dm", "B", updatedAt = 50), feed("f1", folderId = "dm", folderAt = 500)),
             expected = null,
         )
+    }
+
+    @Test
+    fun twoDevicesAssigningTheirFeedToTheSameNamedFolderSettleOnTheSameId() {
+        // Two devices created the same folder name independently — the same name-derived id — and
+        // each moved their feed into it. The assignment settles on that id on both devices, whatever
+        // the merge order.
+        val folderId = IdGenerator.folderId("X")
+        val p = transportFile(nameA, folder(folderId, "X", updatedAt = 50), feed("f1", updatedAt = 100, folderId = folderId, folderAt = 500))
+        val q = transportFile(nameB, folder(folderId, "X", updatedAt = 50), feed("f1", updatedAt = 100, folderId = folderId, folderAt = 500))
+        val deviceA = localDb(
+            folder(folderId, "X", updatedAt = 50),
+            feed("f1", updatedAt = 100, folderId = folderId, folderAt = 500),
+        ).also { merge(it, q) }
+        val deviceB = localDb(
+            folder(folderId, "X", updatedAt = 50),
+            feed("f1", updatedAt = 100, folderId = folderId, folderAt = 500),
+        ).also { merge(it, p) }
+        fun folderOf(db: File): String = TransportFixtures.connect(db).use { conn ->
+            conn.createStatement().use { st ->
+                st.executeQuery("SELECT folder_id FROM feeds WHERE id = 'f1'").use { rs -> rs.next(); rs.getString(1) }
+            }
+        }
+        assertEquals(folderId, folderOf(deviceA))
+        assertEquals(folderOf(deviceA), folderOf(deviceB))
+    }
+
+    // ---- A feed's folder across its folder's deletion and revival ----
+
+    private fun feedFolder(db: File, feedId: String = "f1"): String = TransportFixtures.connect(db).use { conn ->
+        conn.createStatement().use { st ->
+            st.executeQuery(
+                "SELECT f.folder_id, f.folder_updated_at, r.folder_id, r.folder_updated_at " +
+                    "FROM feeds f JOIN ks_feed_folder_raw r ON r.feed_id = f.id WHERE f.id = '$feedId'",
+            ).use { rs -> rs.next(); "resolved=${rs.getString(1)}@${rs.getObject(2)} raw=${rs.getString(3)}@${rs.getObject(4)}" }
+        }
+    }
+
+    /** Every merge and fold order of [p] and [q] into a fresh [local], each with its label. */
+    private fun everyOrder(local: Array<String>, p: File, q: File): List<Pair<String, File>> = listOf(
+        "P then Q" to localDb(*local).also { merge(it, p); merge(it, q) },
+        "Q then P" to localDb(*local).also { merge(it, q); merge(it, p) },
+        "fold(P, Q)" to localDb(*local).also { merge(it, fold(p to nameA, q to nameB)) },
+        "fold(Q, P)" to localDb(*local).also { merge(it, fold(q to nameB, p to nameA)) },
+    )
+
+    /**
+     * The former known issue "A feed can be left pointing at a deleted folder across the folder's
+     * deletion and revival": with folder d live and f assigned to d at 500, one file keeps d live and
+     * one deletes it, both assigning f to d at 500. The assignment's tie is no change, and the
+     * folder's deletion re-resolves the feed whichever file arrives last, so every order stores — and
+     * exports, as the raw value — the same thing: raw d@500, resolved "no folder".
+     */
+    @Test
+    fun aFolderDeletionAndAnEqualAssignmentConvergeWhateverTheOrder() {
+        val local = arrayOf(folder("d", "D", updatedAt = 100), feed("f1", folderId = "d", folderAt = 500))
+        val p = transportFile(nameA, folder("d", "D", updatedAt = 100), feed("f1", folderId = "d", folderAt = 500))
+        val q = transportFile(nameB, folder("d", "D", updatedAt = 600, deletedAt = 600), feed("f1", folderId = "d", folderAt = 500))
+        val results = everyOrder(local, p, q)
+        for ((label, db) in results) assertEquals("resolved=null@500 raw=d@500", feedFolder(db), label)
+        val dumps = results.map { (_, db) -> dump(db, local = true) }
+        dumps.drop(1).forEach { assertEquals(dumps.first(), it) }
+    }
+
+    /**
+     * A folder deleted by one file and revived by a newer one: the feed still assigned to it is back
+     * in it in every order — the revival re-resolves the feeds whose raw assignment names the folder,
+     * even when no file carries the feed again.
+     */
+    @Test
+    fun aFolderRevivedByAMergeRestoresItsFeedsWhateverTheOrder() {
+        val local = arrayOf(folder("d", "D", updatedAt = 100), feed("f1", folderId = "d", folderAt = 500))
+        val p = transportFile(nameA, folder("d", "D", updatedAt = 600, deletedAt = 600), feed("f1", folderId = "d", folderAt = 500))
+        val q = transportFile(nameB, folder("d", "D", updatedAt = 700))
+        val results = everyOrder(local, p, q)
+        for ((label, db) in results) assertEquals("resolved=d@500 raw=d@500", feedFolder(db), label)
+        val dumps = results.map { (_, db) -> dump(db, local = true) }
+        dumps.drop(1).forEach { assertEquals(dumps.first(), it) }
+
+        // Merged alone, the deletion leaves the feed in "no folder" — and the revival restores it.
+        val db = localDb(*local)
+        merge(db, p)
+        assertEquals("resolved=null@500 raw=d@500", feedFolder(db))
+        merge(db, q)
+        assertEquals("resolved=d@500 raw=d@500", feedFolder(db))
+    }
+
+    /**
+     * An assignment to a folder that is deleted here is recorded raw: the feed shows no folder, but a
+     * later revival of the folder by a file that does not carry the feed puts it back, and a newer
+     * move elsewhere still wins.
+     */
+    @Test
+    fun anAssignmentToADeletedFolderIsKeptRawAndResolvedLater() {
+        val db = localDb(folder("d", "D", updatedAt = 600, deletedAt = 600), feed("f1"))
+        merge(db, transportFile(nameA, folder("d", "D", updatedAt = 100), feed("f1", folderId = "d", folderAt = 500)))
+        assertEquals("resolved=null@500 raw=d@500", feedFolder(db), "the local deletion is newer")
+        merge(db, transportFile(nameB, folder("d", "D", updatedAt = 700)))
+        assertEquals("resolved=d@500 raw=d@500", feedFolder(db))
+        merge(db, transportFile(nameC, folder("e", "E", updatedAt = 100), feed("f1", folderId = "e", folderAt = 800)))
+        assertEquals("resolved=e@800 raw=e@800", feedFolder(db))
+    }
+
+    /**
+     * A transport file's reference to a folder main does not hold (never in a valid file — check 9 —
+     * but a merge must not depend on it) is stored as the file wrote it — a raw assignment is never
+     * rewritten, so a tie is settled by the same values in every merge and fold — and resolves to "no
+     * folder": the resolution never writes a dangling `feeds.folder_id`.
+     */
+    @Test
+    fun aReferenceToAFolderMainLacksIsKeptRawAndResolvesToNoFolder() {
+        val db = localDb(feed("f1"))
+        merge(db, transportFile(nameA, feed("f1", folderId = "gone", folderAt = 500)))
+        assertEquals("resolved=null@500 raw=gone@500", feedFolder(db))
+        TransportFixtures.connect(db).use { conn ->
+            conn.createStatement().use { st ->
+                st.executeQuery("SELECT COUNT(*) FROM pragma_foreign_key_check").use { rs -> rs.next(); assertEquals(0, rs.getInt(1)) }
+            }
+        }
     }
 }

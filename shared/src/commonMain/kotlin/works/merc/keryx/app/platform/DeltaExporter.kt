@@ -11,7 +11,7 @@ import works.merc.keryx.app.domain.TransportMeta
  *
  * @property highWaterSeq `S`: every outbox entry `seq <= S` is covered by the file (and may be
  * deleted once it is committed); every later write carries a greater `seq`.
- * @property rowCounts rows written per synced table.
+ * @property rowCounts rows written per synced table (and per identity edge table, filled in a delta only with the edges recorded in the outbox).
  */
 data class DeltaExport(val highWaterSeq: Long, val rowCounts: Map<String, Long>)
 
@@ -19,7 +19,7 @@ data class DeltaExport(val highWaterSeq: Long, val rowCounts: Map<String, Long>)
  * A full send written by [DeltaExporter.exportFull].
  *
  * @property highWaterSeq `S` of the copy it was built from, or `null` when the copy's outbox was empty.
- * @property rowCounts rows written per synced table.
+ * @property rowCounts rows written per synced table and per identity edge table.
  */
 data class FullExport(val highWaterSeq: Long?, val rowCounts: Map<String, Long>)
 

@@ -11,6 +11,7 @@ import works.merc.keryx.app.data.local.db.Folders
 import works.merc.keryx.app.data.local.db.Tags
 import works.merc.keryx.app.domain.displayTitle
 import works.merc.keryx.app.presentation.home.HomeViewModel
+import works.merc.keryx.app.presentation.home.TagFolderLabels
 import works.merc.keryx.app.presentation.home.isDuplicateFolderName
 import works.merc.keryx.app.presentation.home.isDuplicateTagName
 import works.merc.keryx.app.resources.Res
@@ -40,12 +41,16 @@ import works.merc.keryx.app.ui.common.KeryxConfirmDialog
  *
  * @param tags The tags used for duplicate-name validation.
  * @param folders The folders used for duplicate-name validation.
+ * @param labels Every tag's and folder's display name with its ordinal
+ *   ([works.merc.keryx.app.presentation.home.TagFolderLabels]) — numbers the tag or folder a
+ *   delete confirmation names, so it says which of several same-named rows is meant.
  */
 @Composable
 internal fun FeedListDialogs(
     vm: HomeViewModel,
     tags: List<Tags>,
     folders: List<Folders>,
+    labels: TagFolderLabels,
     showAddTag: Boolean,
     onShowAddTagChange: (Boolean) -> Unit,
     confirmingDeleteTag: Tags?,
@@ -81,7 +86,7 @@ internal fun FeedListDialogs(
     confirmingDeleteTag?.let { tag ->
         KeryxConfirmDialog(
             title = stringResource(Res.string.home_delete_tag_menu),
-            body = stringResource(Res.string.home_delete_tag_confirm, tag.name),
+            body = stringResource(Res.string.home_delete_tag_confirm, nameWithOrdinal(labels.tag(tag.id, tag.name))),
             confirmText = stringResource(Res.string.common_delete),
             onConfirm = { vm.deleteTag(tag.id); onConfirmingDeleteTagChange(null) },
             onDismiss = { onConfirmingDeleteTagChange(null) },
@@ -108,7 +113,7 @@ internal fun FeedListDialogs(
     confirmingDeleteFolder?.let { folder ->
         KeryxConfirmDialog(
             title = stringResource(Res.string.home_delete_folder_menu),
-            body = stringResource(Res.string.home_delete_folder_confirm, folder.name),
+            body = stringResource(Res.string.home_delete_folder_confirm, nameWithOrdinal(labels.folder(folder.id, folder.name))),
             confirmText = stringResource(Res.string.common_delete),
             onConfirm = { vm.deleteFolder(folder.id); onConfirmingDeleteFolderChange(null) },
             onDismiss = { onConfirmingDeleteFolderChange(null) },

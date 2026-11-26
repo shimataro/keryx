@@ -20,6 +20,11 @@ import SwiftUI
 /// since a keyboard-driven in-row editor with an Escape key does not suit touch.
 struct InlineRenameField: View {
     let initialName: String
+    /// What was typed before this field was built afresh (a re-keyed row), or `nil`: the field then
+    /// starts from `initialName`. `initialName` stays what an unchanged edit is judged against.
+    var draft: String?
+    /// Reports each change of the text, for the owner to keep as `draft`.
+    var onDraftChange: (String) -> Void = { _ in }
     /// Shown while the field is empty — the title a blanked feed name falls back to.
     var placeholder: String = ""
     /// Whether a blank value is itself meaningful (a feed: it clears the custom title).
@@ -38,6 +43,8 @@ struct InlineRenameField: View {
 
     init(
         initialName: String,
+        draft: String? = nil,
+        onDraftChange: @escaping (String) -> Void = { _ in },
         placeholder: String = "",
         allowBlank: Bool = false,
         blockingError: @escaping (String) -> String?,
@@ -46,18 +53,25 @@ struct InlineRenameField: View {
         focusedPane: FocusState<HomeFocusedPane?>.Binding
     ) {
         self.initialName = initialName
+        self.draft = draft
+        self.onDraftChange = onDraftChange
         self.placeholder = placeholder
         self.allowBlank = allowBlank
         self.blockingError = blockingError
         self.onCommit = onCommit
         self.onCancel = onCancel
         self.focusedPane = focusedPane
-        self._text = State(initialValue: initialName)
+        self._text = State(initialValue: draft ?? initialName)
     }
 
     private var validation: InlineRenameValidation {
         InlineRenameValidationKt.inlineRenameValidation(text: text, allowBlank: allowBlank, blockingError: blockingError)
     }
+
+    /// The validation message the editor shows: none for a value the user has not changed. A row whose
+    /// own name is already shared (two same-named rows, shown with an ordinal) opens on that name, and a
+    /// red frame there would blame them for what they have not touched. Committing it stays blocked.
+    private var shownError: String? { text == initialName ? nil : validation.error }
 
     // Fixed colors rather than hierarchical styles: inside a selected sidebar row `.secondary` is
     // drawn for the row's emphasized background, which would vanish against the field's own fill.
@@ -76,7 +90,7 @@ struct InlineRenameField: View {
                 onCancel: { finish(commit: false, restoreFocus: true) },
                 onFocusLost: { finish(commit: true, restoreFocus: false) }
             )
-            .accessibilityHint(validation.error ?? "")
+            .accessibilityHint(shownError ?? "")
             // Escape is hard to discover, so the editor also carries an explicit cancel. Not focusable, so pressing it doesn't first take focus off the field
             // and commit the edit.
             Button {
@@ -89,6 +103,7 @@ struct InlineRenameField: View {
             .focusable(false)
             .accessibilityLabel(L("common_cancel"))
         }
+        .onChange(of: text) { _, new in onDraftChange(new) }
         // A text-field fill of its own, like Finder's sidebar rename: without it the selected row's
         // color shows through and the editor reads as a selection rather than an input.
         .background {
@@ -98,13 +113,13 @@ struct InlineRenameField: View {
         }
         .overlay {
             RoundedRectangle(cornerRadius: 4)
-                .strokeBorder(validation.error == nil ? Color.secondary.opacity(0.4) : Color.red, lineWidth: 1)
+                .strokeBorder(shownError == nil ? Color.secondary.opacity(0.4) : Color.red, lineWidth: 1)
                 .padding(-2)
                 .allowsHitTesting(false)
         }
-        .help(validation.error ?? "")
+        .help(shownError ?? "")
         // The red border and `.help` do not reach VoiceOver, so a new error is announced as it appears.
-        .onChange(of: validation.error) { _, error in
+        .onChange(of: shownError) { _, error in
             if let error { AccessibilityNotification.Announcement(error).post() }
         }
         // Another pane (or the search field) taking focus ends the edit; a click on another row is

@@ -1220,7 +1220,11 @@ should follow the same rules:
   value is *not* an error — no message, no red frame, it simply cannot be committed — unless
   `allowBlank` says a blank value is itself meaningful. `blockingError` (e.g. the duplicate-name
   check) is what turns the frame red. Per-row-kind differences are real and deliberate: a feed
-  title allows blank and has no duplicate check; folder and tag names allow neither.
+  title allows blank and has no duplicate check; folder and tag names allow neither. The frame
+  turns red only once the value differs from the one the editor opened with — a row whose own
+  name is already shared opens unmarked — and the reason a red frame stands for is exposed through
+  the field's error semantics (and a hover tooltip), since the editor has no supporting text to
+  carry it.
 - **The whole state machine stays platform-agnostic.** `inlineEdit`, commit/cancel, and validation
   know nothing about right-click menus, F2/Return, or hover — starting an edit is just an
   `onRename`/`onEdit` lambda, so a touch long-press could call the same one later.

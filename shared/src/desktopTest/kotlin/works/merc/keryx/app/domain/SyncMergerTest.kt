@@ -13,12 +13,16 @@ import works.merc.keryx.app.insertTag
 import works.merc.keryx.app.setFeedFetchState
 import works.merc.keryx.app.stampArticleDeleted
 import works.merc.keryx.app.platform.DatabaseMerger
+import works.merc.keryx.app.platform.DeltaExporter
+import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
+import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 /** Verifies the ATTACH-DATABASE merge (timestamp-last-wins) via [DatabaseMerger]. */
 class SyncMergerTest {
@@ -137,7 +141,10 @@ class SyncMergerTest {
     }
 
     @Test
-    fun tagNameCollisionGuardSkipsCloudTag() {
+    fun sameNamedCloudTagIsImportedUnderItsOwnIdWithoutTouchingTheLocalRow() {
+        // Rows match by id only (a tag's id is name-derived, so the same name created on two devices
+        // carries the same id): a same-named row under a different id — two renames that landed on
+        // one name, or a file from the random-id era — is imported as its own row and touches nothing.
         val (cloudFile, cloudDriver, cloudDb) = fileDb()
         cloudDb.insertTag("t-cloud", "shared-name", now = 200)
         cloudDriver.close()
@@ -149,8 +156,11 @@ class SyncMergerTest {
         DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
-        assertNull(verifyDb.tagsQueries.getById("t-cloud").executeAsOneOrNull())
-        assertNotNull(verifyDb.tagsQueries.getById("t-local").executeAsOneOrNull())
+        val local = verifyDb.tagsQueries.getById("t-local").executeAsOne()
+        assertEquals(100L, local.updated_at)
+        val cloud = verifyDb.tagsQueries.getById("t-cloud").executeAsOne()
+        assertEquals("shared-name", cloud.name)
+        assertEquals(200L, cloud.updated_at)
         verifyDriver.close()
     }
 
@@ -385,7 +395,9 @@ class SyncMergerTest {
     }
 
     @Test
-    fun folderNameCollisionGuardSkipsCloudFolder() {
+    fun sameNamedCloudFolderIsImportedUnderItsOwnIdWithoutTouchingTheLocalRow() {
+        // Rows match by id only: a same-named row under a different id is imported as its own row
+        // and touches nothing (see sameNamedCloudTagIsImportedUnderItsOwnIdWithoutTouchingTheLocalRow).
         val (cloudFile, cloudDriver, cloudDb) = fileDb()
         cloudDb.insertFolder("d-cloud", "shared-name", now = 200)
         cloudDriver.close()
@@ -397,8 +409,11 @@ class SyncMergerTest {
         DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
-        assertNull(verifyDb.foldersQueries.getById("d-cloud").executeAsOneOrNull())
-        assertNotNull(verifyDb.foldersQueries.getById("d-local").executeAsOneOrNull())
+        val local = verifyDb.foldersQueries.getById("d-local").executeAsOne()
+        assertEquals(100L, local.updated_at)
+        val cloud = verifyDb.foldersQueries.getById("d-cloud").executeAsOne()
+        assertEquals("shared-name", cloud.name)
+        assertEquals(200L, cloud.updated_at)
         verifyDriver.close()
     }
 
@@ -614,7 +629,7 @@ class SyncMergerTest {
     }
 
     @Test
-    fun feedAssignedToLocalFolderWhenCloudHasSameNamedFolder() {
+    fun feedFollowsTheCloudsFolderIdWhenTheSameNamedFolderIsImported() {
         val (cloudFile, cloudDriver, cloudDb) = fileDb()
         cloudDb.insertFolder("d-cloud", "IT", now = 100)
         cloudDb.insertFeed("f1", now = 100, folderId = "d-cloud")
@@ -627,13 +642,18 @@ class SyncMergerTest {
         DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
-        assertNull(verifyDb.foldersQueries.getById("d-cloud").executeAsOneOrNull())
-        assertEquals("d-local", verifyDb.feedsQueries.getById("f1").executeAsOne().folder_id)
+        // The same-named folder arrives under the cloud's id (no UNIQUE(name) stops it), so the
+        // feed's resolved folder is that row, and the local same-named one stays alongside it.
+        assertNotNull(verifyDb.foldersQueries.getById("d-cloud").executeAsOneOrNull())
+        assertNotNull(verifyDb.foldersQueries.getById("d-local").executeAsOneOrNull())
+        assertEquals("d-cloud", verifyDb.feedsQueries.getById("f1").executeAsOne().folder_id)
         verifyDriver.close()
     }
 
     @Test
-    fun feedLosesFolderWhenCloudFolderDeletedAndNameMatchesLocal() {
+    fun feedLosesFolderWhenTheCloudsFolderIsDeletedButTheLocalSameNamedOneSurvives() {
+        // The cloud deleted its folder d-cloud, so the feed loses the assignment (folder_id -> NULL);
+        // the local same-named folder is a different row (matched by id) and stays alive.
         val (cloudFile, cloudDriver, cloudDb) = fileDb()
         cloudDb.insertFolder("d-cloud", "IT", now = 100, deletedAt = 200)
         cloudDb.insertFeed("f1", now = 100, folderId = "d-cloud")
@@ -646,13 +666,14 @@ class SyncMergerTest {
         DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
-        assertEquals(200L, verifyDb.foldersQueries.getById("d-local").executeAsOne().deleted_at)
+        assertNull(verifyDb.foldersQueries.getById("d-local").executeAsOne().deleted_at)
+        assertEquals(200L, verifyDb.foldersQueries.getById("d-cloud").executeAsOne().deleted_at)
         assertNull(verifyDb.feedsQueries.getById("f1").executeAsOne().folder_id)
         verifyDriver.close()
     }
 
     @Test
-    fun localFolderUpdatedWhenCloudHasSameNamedNewerFolder() {
+    fun aSameNamedNewerCloudFolderIsImportedAlongsideTheLocalRowItDoesNotUpdate() {
         val (cloudFile, cloudDriver, cloudDb) = fileDb()
         cloudDb.insertFolder("d-cloud", "IT", now = 200, sortOrder = 5L)
         cloudDriver.close()
@@ -664,15 +685,19 @@ class SyncMergerTest {
         DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
-        val folder = verifyDb.foldersQueries.getById("d-local").executeAsOneOrNull()
-        assertNotNull(folder)
-        assertEquals(5L, folder.sort_order)
-        assertEquals(200L, folder.updated_at)
+        // The rows share only a name: the local one keeps its values, the cloud one is imported.
+        val local = verifyDb.foldersQueries.getById("d-local").executeAsOneOrNull()
+        assertNotNull(local)
+        assertEquals(1L, local.sort_order)
+        assertEquals(100L, local.updated_at)
+        val cloud = verifyDb.foldersQueries.getById("d-cloud").executeAsOne()
+        assertEquals(5L, cloud.sort_order)
+        assertEquals(200L, cloud.updated_at)
         verifyDriver.close()
     }
 
     @Test
-    fun cloudFolderSkippedWhenLocalHasSameNamedNewerFolder() {
+    fun sameNamedCloudFolderIsImportedEvenWhenTheLocalRowIsNewer() {
         val (cloudFile, cloudDriver, cloudDb) = fileDb()
         cloudDb.insertFolder("d-cloud", "IT", now = 100)
         cloudDriver.close()
@@ -684,14 +709,16 @@ class SyncMergerTest {
         DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
-        assertNull(verifyDb.foldersQueries.getById("d-cloud").executeAsOneOrNull())
-        val folder = verifyDb.foldersQueries.getById("d-local").executeAsOne()
-        assertEquals(200L, folder.updated_at)
+        // The local row is newer, so it keeps its values; the cloud row is still imported under its
+        // own id — same-named rows may coexist.
+        val local = verifyDb.foldersQueries.getById("d-local").executeAsOne()
+        assertEquals(200L, local.updated_at)
+        assertEquals(100L, verifyDb.foldersQueries.getById("d-cloud").executeAsOne().updated_at)
         verifyDriver.close()
     }
 
     @Test
-    fun feedTagAssignedToLocalTagWhenCloudHasSameNamedTag() {
+    fun feedTagFollowsTheCloudsTagIdWhenTheSameNamedTagIsImported() {
         val (cloudFile, cloudDriver, cloudDb) = fileDb()
         cloudDb.insertFeed("f1", now = 100)
         cloudDb.insertTag("t-cloud", "News", now = 100)
@@ -706,15 +733,19 @@ class SyncMergerTest {
         DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
-        assertNull(verifyDb.tagsQueries.getById("t-cloud").executeAsOneOrNull())
+        // The same-named tag arrives under the cloud's id (no UNIQUE(name) stops it), so the link
+        // uses that row, and the local same-named one stays alongside it.
+        assertNotNull(verifyDb.tagsQueries.getById("t-cloud").executeAsOneOrNull())
         val activeTags = verifyDb.feed_tagsQueries.watchAllActive().executeAsList()
         assertEquals(1, activeTags.size)
-        assertEquals("t-local", activeTags[0].tag_id)
+        assertEquals("t-cloud", activeTags[0].tag_id)
         verifyDriver.close()
     }
 
     @Test
-    fun feedTagLosesLinkWhenCloudTagDeletedAndNameMatchesLocal() {
+    fun feedTagKeepsItsLinkWhenTheCloudsTagIsDeletedButTheLocalSameNamedOneSurvives() {
+        // The cloud deleted its tag t-cloud (and its link); the local same-named tag is a different
+        // row (matched by id) and keeps its link alive. The cloud's deleted tag and link are imported.
         val (cloudFile, cloudDriver, cloudDb) = fileDb()
         cloudDb.insertFeed("f1", now = 50)
         cloudDb.insertTag("t-cloud", "News", now = 100, deletedAt = 200)
@@ -730,13 +761,14 @@ class SyncMergerTest {
         DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
-        assertEquals(200L, verifyDb.tagsQueries.getById("t-local").executeAsOne().deleted_at)
-        assertEquals(emptyList(), verifyDb.feed_tagsQueries.watchAllActive().executeAsList())
+        assertNull(verifyDb.tagsQueries.getById("t-local").executeAsOne().deleted_at)
+        assertEquals(200L, verifyDb.tagsQueries.getById("t-cloud").executeAsOne().deleted_at)
+        assertEquals(listOf("t-local"), verifyDb.feed_tagsQueries.watchAllActive().executeAsList().map { it.tag_id })
         verifyDriver.close()
     }
 
     @Test
-    fun localTagUpdatedWhenCloudHasSameNamedNewerTag() {
+    fun aSameNamedNewerCloudTagIsImportedAlongsideTheLocalRowItDoesNotUpdate() {
         val (cloudFile, cloudDriver, cloudDb) = fileDb()
         cloudDb.insertTag("t-cloud", "News", now = 200, sortOrder = 5L)
         cloudDriver.close()
@@ -748,15 +780,19 @@ class SyncMergerTest {
         DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
-        val tag = verifyDb.tagsQueries.getById("t-local").executeAsOneOrNull()
-        assertNotNull(tag)
-        assertEquals(5L, tag.sort_order)
-        assertEquals(200L, tag.updated_at)
+        // The rows share only a name: the local one keeps its values, the cloud one is imported.
+        val local = verifyDb.tagsQueries.getById("t-local").executeAsOneOrNull()
+        assertNotNull(local)
+        assertEquals(1L, local.sort_order)
+        assertEquals(100L, local.updated_at)
+        val cloud = verifyDb.tagsQueries.getById("t-cloud").executeAsOne()
+        assertEquals(5L, cloud.sort_order)
+        assertEquals(200L, cloud.updated_at)
         verifyDriver.close()
     }
 
     @Test
-    fun cloudTagSkippedWhenLocalHasSameNamedNewerTag() {
+    fun sameNamedCloudTagIsImportedEvenWhenTheLocalRowIsNewer() {
         val (cloudFile, cloudDriver, cloudDb) = fileDb()
         cloudDb.insertTag("t-cloud", "News", now = 100)
         cloudDriver.close()
@@ -768,9 +804,11 @@ class SyncMergerTest {
         DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
-        assertNull(verifyDb.tagsQueries.getById("t-cloud").executeAsOneOrNull())
-        val tag = verifyDb.tagsQueries.getById("t-local").executeAsOne()
-        assertEquals(200L, tag.updated_at)
+        // The local row is newer, so it keeps its values; the cloud row is still imported under its
+        // own id — same-named rows may coexist.
+        val local = verifyDb.tagsQueries.getById("t-local").executeAsOne()
+        assertEquals(200L, local.updated_at)
+        assertEquals(100L, verifyDb.tagsQueries.getById("t-cloud").executeAsOne().updated_at)
         verifyDriver.close()
     }
 
@@ -807,11 +845,12 @@ class SyncMergerTest {
         }
 
     @Test
-    fun aLocalMoveAfterAMergeInvalidatesTheRawFolderVersion() {
-        // The cloud's folder d-cloud resolves by name to the local d-local; the raw version (100, d-cloud)
-        // is kept beside it. A local move in the same millisecond stamps 101, so the raw row no longer
-        // describes the feed's folder: neither re-merging the same file nor a file carrying the stamp 101
-        // with a raw id below the local one (d-aaa < d-other) may undo the move.
+    fun aLocalMoveAfterAMergeWritesTheRawFolderAssignment() {
+        // The cloud's folder d-cloud is imported under its own id (names are not unique), so the feed
+        // takes it and the raw assignment (100, d-cloud) is recorded. A local move in the same
+        // millisecond writes the raw row itself, stamped 101: neither re-merging the same file nor a
+        // file carrying the stamp 101 with a raw id below the local one (d-aaa < d-other) may undo
+        // the move.
         val (cloudFile, cloudDriver, cloudDb) = fileDb()
         cloudDb.insertFolder("d-cloud", "IT", now = 100)
         cloudDb.insertFeed("f1", now = 100, folderId = "d-cloud") // folder_updated_at = 100
@@ -830,18 +869,19 @@ class SyncMergerTest {
 
         DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
         reopen(localFile).let { (_, driver, db) ->
-            assertEquals("d-local", db.feedsQueries.getById("f1").executeAsOne().folder_id)
+            assertEquals("d-cloud", db.feedsQueries.getById("f1").executeAsOne().folder_id)
             driver.close()
         }
         assertEquals("100|d-cloud", folderRaw(localFile, "f1"))
 
         reopen(localFile).let { (_, driver, db) ->
-            db.feedsQueries.updateFolder("d-other", 100L, 100L, "f1") // stamps MAX(100, 100 + 1) = 101
+            db.feedsQueries.updateFolder(folderId = "d-other", updatedAt = 100L, folderUpdatedAt = 100L, id = "f1") // stamps MAX(100, 100 + 1) = 101
             driver.close()
         }
+        assertEquals("101|d-other", folderRaw(localFile, "f1"), "the local move writes the raw assignment")
 
         DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
-        assertEquals("101|d-other", folderRaw(localFile, "f1"), "a stale raw row is refreshed from main's own value")
+        assertEquals("101|d-other", folderRaw(localFile, "f1"))
         DatabaseMerger.merge(localFile.absolutePath, tieFile.absolutePath, 1L, MergeSql.all)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
@@ -858,7 +898,7 @@ class SyncMergerTest {
         // still has it assigned. The removal must propagate.
         val (cloudFile, cloudDriver, cloudDb) = fileDb()
         cloudDb.insertFeed("f1", now = 50)
-        cloudDb.feedsQueries.updateFolder(null, 200L, 200L, "f1") // removed at folder_updated_at = 200
+        cloudDb.feedsQueries.updateFolder(folderId = null, updatedAt = 200L, folderUpdatedAt = 200L, id = "f1") // removed at folder_updated_at = 200
         cloudDriver.close()
 
         val (localFile, localDriver, localDb) = fileDb()
@@ -956,12 +996,12 @@ class SyncMergerTest {
                 st.execute(
                     "CREATE TABLE folders (id TEXT NOT NULL PRIMARY KEY, name TEXT NOT NULL UNIQUE, " +
                         "sort_order INTEGER NOT NULL DEFAULT 0, deleted_at INTEGER, updated_at INTEGER NOT NULL, created_at INTEGER NOT NULL, " +
-                        "name_updated_at INTEGER, sort_order_updated_at INTEGER)",
+                        "name_updated_at INTEGER, sort_order_updated_at INTEGER, v2_id TEXT)",
                 )
                 st.execute(
                     "CREATE TABLE tags (id TEXT NOT NULL PRIMARY KEY, name TEXT NOT NULL UNIQUE, color TEXT, " +
                         "sort_order INTEGER NOT NULL DEFAULT 0, deleted_at INTEGER, updated_at INTEGER NOT NULL, created_at INTEGER NOT NULL, " +
-                        "name_updated_at INTEGER, color_updated_at INTEGER, sort_order_updated_at INTEGER)",
+                        "name_updated_at INTEGER, color_updated_at INTEGER, sort_order_updated_at INTEGER, v2_id TEXT)",
                 )
                 st.execute(
                     "CREATE TABLE articles (id TEXT NOT NULL PRIMARY KEY, feed_id TEXT NOT NULL, guid TEXT NOT NULL, " +
@@ -976,6 +1016,8 @@ class SyncMergerTest {
                         "updated_at INTEGER NOT NULL, PRIMARY KEY (feed_id, tag_id))",
                 )
                 st.execute("CREATE TABLE global_settings (key TEXT NOT NULL PRIMARY KEY, value TEXT NOT NULL, updated_at INTEGER NOT NULL)")
+                // A pre-delta file at the current schema holds its feeds' raw folder assignments.
+                st.execute("CREATE TABLE ks_feed_folder_raw (feed_id TEXT NOT NULL PRIMARY KEY, folder_updated_at INTEGER, folder_id TEXT)")
                 st.execute("INSERT INTO feeds (id, url, title, updated_at, created_at) VALUES ('f-dup-1', 'https://dup.example/feed', 'Dup 1', 0, 0)")
                 st.execute("INSERT INTO feeds (id, url, title, updated_at, created_at) VALUES ('f-dup-2', 'https://dup.example/feed', 'Dup 2', 0, 0)")
             }
@@ -1086,13 +1128,656 @@ class SyncMergerTest {
             assertEquals(listOf("f1"), states.map { it.feed_id })
             assertEquals("\"local-etag\"", states.single().etag)
             assertEquals(0L, states.single().error_count)
-            val tag = verifyDb.tagsQueries.getById("t1").executeAsOne()
+            val tag = verifyDb.tagsQueries.getById(IdGenerator.tagId("Tag")).executeAsOne()
             assertEquals(listOf<Long?>(600L, 600L, 600L), listOf(tag.name_updated_at, tag.color_updated_at, tag.sort_order_updated_at))
-            val folder = verifyDb.foldersQueries.getById("d1").executeAsOne()
+            val folder = verifyDb.foldersQueries.getById(IdGenerator.folderId("Folder")).executeAsOne()
             assertEquals(listOf<Long?>(700L, 700L), listOf(folder.name_updated_at, folder.sort_order_updated_at))
         } finally {
             verifyDriver.close()
         }
+    }
+
+    /**
+     * Two synced v2 devices share a tag and folder id. One renames them before the rename syncs, then
+     * both upgrade to v3. Each side derives a different name-derived id, but the migration kept the
+     * shared pre-upgrade id in `v2_id`. The merge must reconcile by `v2_id` so the rows converge to one
+     * identity and feed-tag/folder references are unified.
+     */
+    @Test
+    fun preUpgradeRowsRenamedBeforeMigrationAreReconciledByOldId() {
+        val oldTagId = "old-tag-id"
+        val oldFolderId = "old-folder-id"
+
+        // Local v2 DB: shared id, already renamed. Migrate it to v3 so re-key runs.
+        val localFile = File.createTempFile("local-v2-", ".db").apply { deleteOnExit() }
+        JdbcSqliteDriver("jdbc:sqlite:${localFile.absolutePath}").use { driver ->
+            driver.createSchemaV2()
+            driver.execute(null, """
+                INSERT INTO feeds (id, url, title, etag, updated_at, created_at)
+                VALUES ('f1', 'https://a', 'Feed', '"e"', 100, 1)
+            """.trimIndent(), 0)
+            driver.execute(null, "UPDATE feeds SET folder_id = '$oldFolderId' WHERE id = 'f1'", 0)
+            driver.execute(null, """
+                INSERT INTO tags (id, name, color, sort_order, updated_at, created_at)
+                VALUES ('$oldTagId', 'Job', '#f00', 0, 200, 1)
+            """.trimIndent(), 0)
+            driver.execute(null, """
+                INSERT INTO feed_tags (feed_id, tag_id, updated_at)
+                VALUES ('f1', '$oldTagId', 200)
+            """.trimIndent(), 0)
+            driver.execute(null, """
+                INSERT INTO folders (id, name, sort_order, updated_at, created_at)
+                VALUES ('$oldFolderId', 'JobDir', 0, 200, 1)
+            """.trimIndent(), 0)
+        }
+        JdbcSqliteDriver("jdbc:sqlite:${localFile.absolutePath}").use { driver ->
+            KeryxDatabase.Schema.migrate(driver, 2, KeryxDatabase.Schema.version, *KERYX_SCHEMA_CALLBACKS)
+            driver.execute(null, "PRAGMA user_version=${KeryxDatabase.Schema.version}", 0)
+        }
+
+        // Cloud v2 DB: same old ids, not yet renamed. The merge migrates it to v3.
+        val cloudFile = File.createTempFile("cloud-v2-", ".db").apply { deleteOnExit() }
+        JdbcSqliteDriver("jdbc:sqlite:${cloudFile.absolutePath}").use { driver ->
+            driver.createSchemaV2()
+            driver.execute(null, """
+                INSERT INTO feeds (id, url, title, etag, updated_at, created_at)
+                VALUES ('f1', 'https://a', 'Feed', '"e"', 100, 1)
+            """.trimIndent(), 0)
+            driver.execute(null, "UPDATE feeds SET folder_id = '$oldFolderId' WHERE id = 'f1'", 0)
+            driver.execute(null, """
+                INSERT INTO tags (id, name, color, sort_order, updated_at, created_at)
+                VALUES ('$oldTagId', 'Work', '#0f0', 0, 100, 1)
+            """.trimIndent(), 0)
+            driver.execute(null, """
+                INSERT INTO feed_tags (feed_id, tag_id, updated_at)
+                VALUES ('f1', '$oldTagId', 100)
+            """.trimIndent(), 0)
+            driver.execute(null, """
+                INSERT INTO folders (id, name, sort_order, updated_at, created_at)
+                VALUES ('$oldFolderId', 'WorkDir', 0, 100, 1)
+            """.trimIndent(), 0)
+        }
+
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, KeryxDatabase.Schema.version, MergeSql.all)
+
+        val (_, verifyDriver, verifyDb) = reopen(localFile)
+        try {
+            // One identity per kind, at the smaller of the two name-derived ids (not main's): the
+            // renamed values (newer stamps) win per field.
+            val expectedTagId = minOf(IdGenerator.tagId("Job"), IdGenerator.tagId("Work"))
+            val expectedFolderId = minOf(IdGenerator.folderId("JobDir"), IdGenerator.folderId("WorkDir"))
+            assertEquals(listOf(expectedTagId), verifyDb.tagsQueries.watchAll().executeAsList().map { it.id })
+            assertEquals(listOf(expectedFolderId), verifyDb.foldersQueries.watchAll().executeAsList().map { it.id })
+
+            val tag = verifyDb.tagsQueries.getById(expectedTagId).executeAsOne()
+            assertEquals("Job", tag.name)
+            assertEquals("#f00", tag.color)
+            val folder = verifyDb.foldersQueries.getById(expectedFolderId).executeAsOne()
+            assertEquals("JobDir", folder.name)
+
+            // Feed references point at the canonical id.
+            val feed = verifyDb.feedsQueries.getById("f1").executeAsOne()
+            assertEquals(expectedFolderId, feed.folder_id)
+            val feedTagIds = verifyDb.feed_tagsQueries.watchTagIdsForFeed("f1").executeAsList()
+            assertEquals(listOf(expectedTagId), feedTagIds)
+        } finally {
+            verifyDriver.close()
+        }
+    }
+
+    /**
+     * A version-2 device migrated to version 3, its shared pre-upgrade tag and folder renamed to
+     * [tagName] / [folderName] at [stamp] before the migration — so each device derives a different
+     * name-derived id while `v2_id` keeps the shared pre-upgrade id. With [assignChildren], the feed is
+     * put in the folder and linked to the tag before the migration; otherwise it has neither, so a
+     * value the test finds afterwards can only have come from the other device's file.
+     */
+    private fun migratedRenamedDevice(
+        prefix: String,
+        oldTagId: String,
+        oldFolderId: String,
+        tagName: String,
+        folderName: String,
+        stamp: Long,
+        assignChildren: Boolean,
+    ): File {
+        val file = File.createTempFile(prefix, ".db").apply { deleteOnExit() }
+        JdbcSqliteDriver("jdbc:sqlite:${file.absolutePath}").use { driver ->
+            driver.createSchemaV2()
+            val folderId = if (assignChildren) "'$oldFolderId'" else "NULL"
+            val folderAt = if (assignChildren) stamp.toString() else "NULL"
+            driver.execute(null, """
+                INSERT INTO feeds (id, url, title, etag, folder_id, folder_updated_at, updated_at, created_at)
+                VALUES ('f1', 'https://a', 'Feed', '"e"', $folderId, $folderAt, 100, 1)
+            """.trimIndent(), 0)
+            driver.execute(null, """
+                INSERT INTO tags (id, name, color, sort_order, updated_at, created_at)
+                VALUES ('$oldTagId', '$tagName', '#f00', 0, $stamp, 1)
+            """.trimIndent(), 0)
+            if (assignChildren) {
+                driver.execute(null, """
+                    INSERT INTO feed_tags (feed_id, tag_id, updated_at)
+                    VALUES ('f1', '$oldTagId', $stamp)
+                """.trimIndent(), 0)
+            }
+            driver.execute(null, """
+                INSERT INTO folders (id, name, sort_order, updated_at, created_at)
+                VALUES ('$oldFolderId', '$folderName', 0, $stamp, 1)
+            """.trimIndent(), 0)
+        }
+        JdbcSqliteDriver("jdbc:sqlite:${file.absolutePath}").use { driver ->
+            KeryxDatabase.Schema.migrate(driver, 2, KeryxDatabase.Schema.version, *KERYX_SCHEMA_CALLBACKS)
+            driver.execute(null, "PRAGMA user_version=${KeryxDatabase.Schema.version}", 0)
+        }
+        return file
+    }
+
+    /**
+     * Two devices renamed the same pre-upgrade tag and folder differently before upgrading, so they
+     * hold different name-derived ids under one `v2_id`. Device A sends its whole state as a base; B
+     * merges it. Both rows are one identity whose canonical id is the smaller derived id (whichever
+     * device held it), the feed-tag link and folder assignment, which only A's file carries, follow it,
+     * A's newer name wins by the ordinary per-field last-write-wins, and the other id does not survive
+     * as a second row.
+     */
+    @Test
+    fun preUpgradeRowsRenamedDifferentlyBeforeMigrationAreReconciledByV2Id() = reconcileRenamedPreUpgradeRows(stripFolderV2Ids = false)
+
+    /**
+     * As [preUpgradeRowsRenamedDifferentlyBeforeMigrationAreReconciledByV2Id], with the base's folder
+     * rows carrying no `v2_id`: the folder identity is reachable only through the base's exported
+     * `folder_v2_edges`, which [MergeSql.transport] reads (and [MergeSql.all] does not).
+     */
+    @Test
+    fun preUpgradeFoldersAreReconciledThroughTheBasesEdgeTableAlone() = reconcileRenamedPreUpgradeRows(stripFolderV2Ids = true)
+
+    private fun reconcileRenamedPreUpgradeRows(stripFolderV2Ids: Boolean) {
+        val oldTagId = "old-tag-id"
+        val oldFolderId = "old-folder-id"
+        val aFile = migratedRenamedDevice("device-a-", oldTagId, oldFolderId, "Job", "JobDir", stamp = 300, assignChildren = true)
+        val bFile = migratedRenamedDevice("device-b-", oldTagId, oldFolderId, "Work", "WorkDir", stamp = 100, assignChildren = false)
+
+        // A sends every synced row as a base, as a full send does; the transport file carries v2_id.
+        val snapshot = File.createTempFile("device-a-snapshot-", ".db").apply { deleteOnExit() }
+        DeltaExporter.copyForFullSend(aFile.absolutePath, snapshot.absolutePath)
+        val base = File.createTempFile("device-a-base-", ".db").apply { delete(); deleteOnExit() }
+        DeltaExporter.exportFull(
+            snapshot.absolutePath,
+            base.absolutePath,
+            TransportMeta(TransportFixtures.GEN, TransportFileKind.BASE, TransportFixtures.DEV_A, 1, 1_000),
+            exceptPath = null,
+        )
+        if (stripFolderV2Ids) {
+            java.sql.DriverManager.getConnection("jdbc:sqlite:${base.absolutePath}").use { conn ->
+                conn.createStatement().use { st ->
+                    st.execute("UPDATE folders SET v2_id = NULL")
+                    st.executeQuery("SELECT COUNT(*) FROM folder_v2_edges WHERE v2_id = '$oldFolderId'").use { rs ->
+                        rs.next()
+                        assertTrue(rs.getInt(1) > 0, "precondition: the base carries A's folder edge")
+                    }
+                }
+            }
+        }
+
+        DatabaseMerger.mergeTransport(bFile.absolutePath, base.absolutePath, MergeSql.transport)
+
+        // The canonical id is the smaller of the two derived ids, whichever device held it.
+        val bTagId = minOf(IdGenerator.tagId("Job"), IdGenerator.tagId("Work"))
+        val bFolderId = minOf(IdGenerator.folderId("JobDir"), IdGenerator.folderId("WorkDir"))
+        val (_, verifyDriver, verifyDb) = reopen(bFile)
+        try {
+            // One identity: the canonical id carries A's newer name, and the other id is gone.
+            assertEquals(listOf(bTagId), verifyDb.tagsQueries.watchAll().executeAsList().map { it.id })
+            assertEquals(listOf(bFolderId), verifyDb.foldersQueries.watchAll().executeAsList().map { it.id })
+            val tag = verifyDb.tagsQueries.getById(bTagId).executeAsOne()
+            assertEquals("Job", tag.name)
+            assertEquals(oldTagId, tag.v2_id)
+            val folder = verifyDb.foldersQueries.getById(bFolderId).executeAsOne()
+            assertEquals("JobDir", folder.name)
+            assertEquals(oldFolderId, folder.v2_id)
+
+            // The link and folder assignment only A carried follow the canonical ids.
+            val feed = verifyDb.feedsQueries.getById("f1").executeAsOne()
+            assertEquals(bFolderId, feed.folder_id)
+            assertEquals(listOf(bTagId), verifyDb.feed_tagsQueries.watchTagIdsForFeed("f1").executeAsList())
+        } finally {
+            verifyDriver.close()
+        }
+    }
+
+    /**
+     * A device that never held the v2 identity (it joined after the upgrade) merges a base holding two
+     * rows that share one `v2_id` — the same pre-upgrade row, renamed differently on the two devices
+     * that sent it. Only the canonical cloud row (greatest `updated_at`, then id) is kept, and the
+     * feed's folder assignment and tag link follow it; the loser rows never arrive.
+     */
+    @Test
+    fun aBaseWithTwoRowsSharingOneV2IdCollapsesToTheCanonicalRow() {
+        val oldTagId = "old-tag-id"
+        val oldFolderId = "old-folder-id"
+        val base = TransportFixtures.transportFile(
+            TransportFixtures.baseName(TransportFixtures.DEV_A, 1),
+            TransportFixtures.folder("folder-a", "JobDir", updatedAt = 300, v2Id = oldFolderId),
+            TransportFixtures.folder("folder-b", "WorkDir", updatedAt = 100, v2Id = oldFolderId),
+            TransportFixtures.feed("f1", folderId = "folder-b", folderAt = 100),
+            TransportFixtures.tag("tag-a", "Job", updatedAt = 300, v2Id = oldTagId),
+            TransportFixtures.tag("tag-b", "Work", updatedAt = 100, v2Id = oldTagId),
+            TransportFixtures.feedTag("f1", "tag-b", updatedAt = 100),
+        )
+        val local = TransportFixtures.localDb()
+
+        TransportFixtures.merge(local, base)
+
+        val (_, verifyDriver, verifyDb) = reopen(local)
+        try {
+            assertEquals(listOf("tag-a"), verifyDb.tagsQueries.watchAll().executeAsList().map { it.id })
+            assertEquals(listOf("folder-a"), verifyDb.foldersQueries.watchAll().executeAsList().map { it.id })
+            val feed = verifyDb.feedsQueries.getById("f1").executeAsOne()
+            assertEquals("folder-a", feed.folder_id)
+            assertEquals(listOf("tag-a"), verifyDb.feed_tagsQueries.watchTagIdsForFeed("f1").executeAsList())
+        } finally {
+            verifyDriver.close()
+        }
+    }
+
+    /**
+     * Two devices renamed two synced v2 folders in opposite directions before upgrading, so each
+     * device's name-derived id for one folder equals the other's id for the *other* folder. The
+     * identity edges `(old1, Job)`, `(old2, Work)` (main) and `(old1, Work)`, `(old2, Job)` (cloud)
+     * connect all four ids, so under the identity rule — ids sharing a `v2_id` are one identity,
+     * transitively — the two folders are one identity whose canonical id is the smaller derived id.
+     * The merge must succeed with foreign keys enforced, leave one row and keep the feed's folder
+     * assignment on it.
+     */
+    @Test
+    fun swappedV2FolderRenamesReconcileWhenBothTargetsAreFreedBySourceDeletion() {
+        val oldFolderId1 = "old-folder-1"
+        val oldFolderId2 = "old-folder-2"
+        val localFile = migratedSwappedDevice(
+            "local-", oldFolderId1, oldFolderId2,
+            folderNames = "Job" to "Work",
+            tagNames = "Job" to "Work",
+            assignChildren = false,
+            stamp = 100L,
+        )
+        val cloudFile = migratedSwappedDevice(
+            "cloud-", oldFolderId1, oldFolderId2,
+            folderNames = "Work" to "Job",
+            tagNames = "Work" to "Job",
+            assignChildren = true,
+            stamp = 300L,
+        )
+
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, KeryxDatabase.Schema.version, MergeSql.all)
+
+        val (_, verifyDriver, verifyDb) = reopen(localFile)
+        try {
+            val canonical = minOf(IdGenerator.folderId("Job"), IdGenerator.folderId("Work"))
+            val folders = verifyDb.foldersQueries.watchAll().executeAsList()
+            assertEquals(listOf(canonical), folders.map { it.id })
+            // The cloud's names are newer (300 against 100); its two rows folded onto the canonical id
+            // tie on the stamp, which is decided by value — the greater name, "Work" — and the fold
+            // keeps the greater v2_id.
+            assertEquals("Work", folders.single().name)
+            assertEquals(oldFolderId2, folders.single().v2_id)
+            assertEquals(canonical, verifyDb.feedsQueries.getById("f1").executeAsOne().folder_id)
+        } finally {
+            verifyDriver.close()
+        }
+    }
+
+    /**
+     * A cloud folder row sits at the id main's renamed row derived (it has no `v2_id`, so it looks
+     * like an unrelated folder). A row at an id of an identity is that identity — rows are matched by
+     * id — so it folds into it: one folder at the smaller derived id, named by the newest stamp
+     * (the "Occupied" row's), holding both feeds. (The old design kept the two apart.)
+     */
+    @Test
+    fun folderReconciliationKeepsSourceIdentityWhenTargetIsOccupiedByAnUnrelatedRow() {
+        val oldFolderId = "old-folder"
+        val localFile = migratedRenamedDevice("local-", oldTagId = "old-tag", oldFolderId, "Job", "JobDir", stamp = 100, assignChildren = false)
+
+        val cloudFile = migratedRenamedDevice("cloud-", oldTagId = "old-tag", oldFolderId, "Work", "WorkDir", stamp = 200, assignChildren = true)
+        // Add an unrelated v3-created folder whose name-derived id collides with the target id,
+        // with its own newer name and its own child feed, to make sure both identities survive intact.
+        JdbcSqliteDriver("jdbc:sqlite:${cloudFile.absolutePath}").use { driver ->
+            val db = KeryxDatabase(driver)
+            val targetId = IdGenerator.folderId("JobDir")
+            db.insertFolder(targetId, "Occupied", now = 300)
+            db.insertFeed("f2", folderId = targetId, now = 310)
+        }
+
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, KeryxDatabase.Schema.version, MergeSql.all)
+
+        val (_, verifyDriver, verifyDb) = reopen(localFile)
+        try {
+            val canonical = minOf(IdGenerator.folderId("JobDir"), IdGenerator.folderId("WorkDir"))
+            val folder = verifyDb.foldersQueries.watchAll().executeAsList().single()
+            assertEquals(canonical, folder.id)
+            assertEquals("Occupied", folder.name) // stamp 300 beats 200 and 100
+            assertEquals(oldFolderId, folder.v2_id)
+            // Both feeds follow the canonical id.
+            assertEquals(canonical, verifyDb.feedsQueries.getById("f1").executeAsOne().folder_id)
+            assertEquals(canonical, verifyDb.feedsQueries.getById("f2").executeAsOne().folder_id)
+        } finally {
+            verifyDriver.close()
+        }
+    }
+
+    /**
+     * Same as [swappedV2FolderRenamesReconcileWhenBothTargetsAreFreedBySourceDeletion] for tags and
+     * their feed_tag links: the crossing renames make one identity, with its link on the canonical id.
+     */
+    @Test
+    fun swappedV2TagRenamesReconcileWhenBothTargetsAreFreedBySourceDeletion() {
+        val oldTagId1 = "old-tag-1"
+        val oldTagId2 = "old-tag-2"
+        val localFile = migratedSwappedDevice(
+            "local-", oldTagId1, oldTagId2,
+            folderNames = "Job" to "Work",
+            tagNames = "Job" to "Work",
+            assignChildren = false,
+            stamp = 100L,
+        )
+        val cloudFile = migratedSwappedDevice(
+            "cloud-", oldTagId1, oldTagId2,
+            folderNames = "Work" to "Job",
+            tagNames = "Work" to "Job",
+            assignChildren = true,
+            stamp = 300L,
+        )
+
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, KeryxDatabase.Schema.version, MergeSql.all)
+
+        val (_, verifyDriver, verifyDb) = reopen(localFile)
+        try {
+            val canonical = minOf(IdGenerator.tagId("Job"), IdGenerator.tagId("Work"))
+            val tags = verifyDb.tagsQueries.watchAll().executeAsList()
+            assertEquals(listOf(canonical), tags.map { it.id })
+            // As for folders: the tie on the cloud's stamp goes to the greater name, and the fold keeps
+            // the greater v2_id.
+            assertEquals("Work", tags.single().name)
+            assertEquals(oldTagId2, tags.single().v2_id)
+            assertEquals(listOf(canonical), verifyDb.feed_tagsQueries.watchTagIdsForFeed("f1").executeAsList())
+        } finally {
+            verifyDriver.close()
+        }
+    }
+
+    /**
+     * Same as [folderReconciliationKeepsSourceIdentityWhenTargetIsOccupiedByAnUnrelatedRow] for tags
+     * and their feed_tag links: one tag at the canonical id, both feeds linked to it.
+     */
+    @Test
+    fun tagReconciliationKeepsSourceIdentityWhenTargetIsOccupiedByAnUnrelatedRow() {
+        val oldTagId = "old-tag"
+        val localFile = migratedRenamedDevice("local-", oldTagId, oldFolderId = "old-folder", "Job", "JobDir", stamp = 100, assignChildren = false)
+
+        val cloudFile = migratedRenamedDevice("cloud-", oldTagId, oldFolderId = "old-folder", "Work", "WorkDir", stamp = 200, assignChildren = true)
+        // Add an unrelated v3-created tag whose name-derived id collides with the target id,
+        // with its own newer name and its own child feed, to make sure both identities survive intact.
+        JdbcSqliteDriver("jdbc:sqlite:${cloudFile.absolutePath}").use { driver ->
+            val db = KeryxDatabase(driver)
+            val targetId = IdGenerator.tagId("Job")
+            db.insertTag(targetId, "Occupied", now = 300)
+            db.insertFeed("f2", now = 310)
+            db.insertFeedTag("f2", targetId, now = 320)
+        }
+
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, KeryxDatabase.Schema.version, MergeSql.all)
+
+        val (_, verifyDriver, verifyDb) = reopen(localFile)
+        try {
+            val canonical = minOf(IdGenerator.tagId("Job"), IdGenerator.tagId("Work"))
+            val tag = verifyDb.tagsQueries.watchAll().executeAsList().single()
+            assertEquals(canonical, tag.id)
+            assertEquals("Occupied", tag.name) // stamp 300 beats 200 and 100
+            assertEquals(oldTagId, tag.v2_id)
+            assertEquals(listOf(canonical), verifyDb.feed_tagsQueries.watchTagIdsForFeed("f1").executeAsList())
+            assertEquals(listOf(canonical), verifyDb.feed_tagsQueries.watchTagIdsForFeed("f2").executeAsList())
+        } finally {
+            verifyDriver.close()
+        }
+    }
+
+    /**
+     * A local row whose id matches cloud but has no `v2_id` picks up the cloud `v2_id`, and a later
+     * cloud row with the same `v2_id` is then the same identity: both ids are one row at the smaller
+     * of them (not necessarily the local one), under the newer name.
+     */
+    @Test
+    fun v2IdIsCopiedOnIdMatchAndEnablesLaterReconciliation() {
+        val idA = IdGenerator.folderId("A")
+        val idB = IdGenerator.folderId("B")
+        val local = TransportFixtures.localDb(TransportFixtures.folder(id = idA, name = "A", updatedAt = 100))
+
+        val firstCloud = TransportFixtures.transportFile(
+            TransportFixtures.baseName(TransportFixtures.DEV_A, 1),
+            TransportFixtures.folder(id = idA, name = "A", updatedAt = 100, v2Id = "old-1"),
+        )
+        TransportFixtures.merge(local, firstCloud)
+
+        val secondCloud = TransportFixtures.transportFile(
+            TransportFixtures.baseName(TransportFixtures.DEV_A, 2),
+            TransportFixtures.folder(id = idB, name = "B", updatedAt = 200, v2Id = "old-1"),
+        )
+        TransportFixtures.merge(local, secondCloud)
+
+        val (_, verifyDriver, verifyDb) = reopen(local)
+        try {
+            val folder = verifyDb.foldersQueries.watchAll().executeAsList().single()
+            assertEquals(minOf(idA, idB), folder.id)
+            assertEquals("B", folder.name)
+            assertEquals("old-1", folder.v2_id)
+        } finally {
+            verifyDriver.close()
+        }
+    }
+
+    /**
+     * - folder/tag A (v2 [folder/tag]OldId1) derives id A
+     * - folder/tag B (v2 [folder/tag]OldId2) derives id B
+     * - a v3-created folder/tag C (no v2_id) derives id C
+     *
+     * After migration, main holds B (v2 old1) and C (v2 old2), while cloud holds A (v2 old1),
+     * B (v2 old2) and C (no v2_id). This gives mappings A->B and B->C, but C is occupied by an
+     * unrelated identity so the chain is blocked.
+     */
+    private fun migratedBlockedChainDevice(
+        prefix: String,
+        folderOldId1: String,
+        folderOldId2: String,
+        tagOldId1: String = folderOldId1.replace("folder", "tag"),
+        tagOldId2: String = folderOldId2.replace("folder", "tag"),
+        folderNames: Pair<String, String> = "A" to "B",
+        tagNames: Pair<String, String> = "A" to "B",
+        assignChildren: Boolean,
+        stamp: Long,
+    ): File {
+        val file = File.createTempFile(prefix, ".db").apply { deleteOnExit() }
+        JdbcSqliteDriver("jdbc:sqlite:${file.absolutePath}").use { driver ->
+            driver.createSchemaV2()
+            driver.execute(null, """
+                INSERT INTO feeds (id, url, title, etag, updated_at, created_at)
+                VALUES ('f1', 'https://a', 'Feed', '"e"', 100, 1)
+            """.trimIndent(), 0)
+            driver.execute(null, """
+                INSERT INTO tags (id, name, color, sort_order, updated_at, created_at)
+                VALUES ('$tagOldId1', '${tagNames.first}', '#f00', 0, $stamp, 1)
+            """.trimIndent(), 0)
+            driver.execute(null, """
+                INSERT INTO tags (id, name, color, sort_order, updated_at, created_at)
+                VALUES ('$tagOldId2', '${tagNames.second}', '#0f0', 0, $stamp, 1)
+            """.trimIndent(), 0)
+            driver.execute(null, """
+                INSERT INTO folders (id, name, sort_order, updated_at, created_at)
+                VALUES ('$folderOldId1', '${folderNames.first}', 0, $stamp, 1)
+            """.trimIndent(), 0)
+            driver.execute(null, """
+                INSERT INTO folders (id, name, sort_order, updated_at, created_at)
+                VALUES ('$folderOldId2', '${folderNames.second}', 0, $stamp, 1)
+            """.trimIndent(), 0)
+            if (assignChildren) {
+                driver.execute(null, """
+                    INSERT INTO feed_tags (feed_id, tag_id, updated_at)
+                    VALUES ('f1', '$tagOldId1', $stamp)
+                """.trimIndent(), 0)
+                driver.execute(null, """
+                    UPDATE feeds SET folder_id = '$folderOldId1', folder_updated_at = $stamp WHERE id = 'f1'
+                """.trimIndent(), 0)
+            }
+        }
+        JdbcSqliteDriver("jdbc:sqlite:${file.absolutePath}").use { driver ->
+            KeryxDatabase.Schema.migrate(driver, 2, KeryxDatabase.Schema.version, *KERYX_SCHEMA_CALLBACKS)
+            driver.execute(null, "PRAGMA user_version=${KeryxDatabase.Schema.version}", 0)
+            val db = KeryxDatabase(driver)
+            db.insertFolder(IdGenerator.folderId("C"), "C", now = 50)
+            db.insertTag(IdGenerator.tagId("C"), "C", now = 50)
+        }
+        return file
+    }
+
+    /**
+     * The former "blocked chain": the cloud's `A(v2-old1)`, `B(v2-old2)` meet main's `B(v2-old1)`,
+     * `C(v2-old2)` plus a v3-created `C`. Every id is connected through the shared `v2_id`s, so there
+     * is no blocking any more: the whole chain is one identity at the smallest of A, B and C, and
+     * the merge succeeds with foreign keys enforced, leaving one row with the feed's assignment on it.
+     */
+    @Test
+    fun blockedChainFolderReconciliationSkipsMoveWhenFinalTargetIsOccupiedByUnrelatedRow() {
+        val oldFolderId1 = "old-folder-1"
+        val oldFolderId2 = "old-folder-2"
+        val localFile = migratedBlockedChainDevice(
+            "local-", oldFolderId1, oldFolderId2,
+            tagOldId1 = "old-tag-1",
+            tagOldId2 = "old-tag-2",
+            folderNames = "B" to "C",
+            tagNames = "B" to "C",
+            assignChildren = false,
+            stamp = 100L,
+        )
+        val cloudFile = migratedBlockedChainDevice(
+            "cloud-", oldFolderId1, oldFolderId2,
+            tagOldId1 = "old-tag-1",
+            tagOldId2 = "old-tag-2",
+            folderNames = "A" to "B",
+            tagNames = "A" to "B",
+            assignChildren = true,
+            stamp = 200L,
+        )
+
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, KeryxDatabase.Schema.version, MergeSql.all)
+
+        val (_, verifyDriver, verifyDb) = reopen(localFile)
+        try {
+            val canonical = minOf(IdGenerator.folderId("A"), IdGenerator.folderId("B"), IdGenerator.folderId("C"))
+            val folder = verifyDb.foldersQueries.watchAll().executeAsList().single()
+            assertEquals(canonical, folder.id)
+            assertTrue(folder.v2_id in setOf(oldFolderId1, oldFolderId2))
+            // The cloud assigned f1 (stamp 200, main had none): it follows the canonical id.
+            assertEquals(canonical, verifyDb.feedsQueries.getById("f1").executeAsOne().folder_id)
+        } finally {
+            verifyDriver.close()
+        }
+    }
+
+    /**
+     * Same as [blockedChainFolderReconciliationSkipsMoveWhenFinalTargetIsOccupiedByUnrelatedRow]
+     * for tags and their feed_tag links: one tag at the smallest id, linked to f1.
+     */
+    @Test
+    fun blockedChainTagReconciliationSkipsMoveWhenFinalTargetIsOccupiedByUnrelatedRow() {
+        val oldTagId1 = "old-tag-1"
+        val oldTagId2 = "old-tag-2"
+        val oldFolderId1 = "old-folder-1"
+        val oldFolderId2 = "old-folder-2"
+        val localFile = migratedBlockedChainDevice(
+            "local-", oldFolderId1, oldFolderId2,
+            tagOldId1 = oldTagId1,
+            tagOldId2 = oldTagId2,
+            folderNames = "B" to "C",
+            tagNames = "B" to "C",
+            assignChildren = false,
+            stamp = 100L,
+        )
+        val cloudFile = migratedBlockedChainDevice(
+            "cloud-", oldFolderId1, oldFolderId2,
+            tagOldId1 = oldTagId1,
+            tagOldId2 = oldTagId2,
+            folderNames = "A" to "B",
+            tagNames = "A" to "B",
+            assignChildren = true,
+            stamp = 200L,
+        )
+
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, KeryxDatabase.Schema.version, MergeSql.all)
+
+        val (_, verifyDriver, verifyDb) = reopen(localFile)
+        try {
+            val canonical = minOf(IdGenerator.tagId("A"), IdGenerator.tagId("B"), IdGenerator.tagId("C"))
+            val tag = verifyDb.tagsQueries.watchAll().executeAsList().single()
+            assertEquals(canonical, tag.id)
+            assertTrue(tag.v2_id in setOf(oldTagId1, oldTagId2))
+            assertEquals(listOf(canonical), verifyDb.feed_tagsQueries.watchTagIdsForFeed("f1").executeAsList())
+        } finally {
+            verifyDriver.close()
+        }
+    }
+
+    /**
+     * Builds a v2 database with two tags and two folders sharing the given old ids, renames them
+     * according to [tagNames] / [folderNames], then migrates it to v3. When [assignChildren] is true,
+     * feed f1 is placed in the first folder and linked to the first tag.
+     */
+    private fun migratedSwappedDevice(
+        prefix: String,
+        oldTagId1: String,
+        oldTagId2: String,
+        oldFolderId1: String = oldTagId1.replace("tag", "folder"),
+        oldFolderId2: String = oldTagId2.replace("tag", "folder"),
+        tagNames: Pair<String, String>,
+        folderNames: Pair<String, String>,
+        assignChildren: Boolean,
+        stamp: Long = 200L,
+    ): File {
+        val file = File.createTempFile(prefix, ".db").apply { deleteOnExit() }
+        JdbcSqliteDriver("jdbc:sqlite:${file.absolutePath}").use { driver ->
+            driver.createSchemaV2()
+            driver.execute(null, """
+                INSERT INTO feeds (id, url, title, etag, updated_at, created_at)
+                VALUES ('f1', 'https://a', 'Feed', '"e"', 100, 1)
+            """.trimIndent(), 0)
+            driver.execute(null, """
+                INSERT INTO tags (id, name, color, sort_order, updated_at, created_at)
+                VALUES ('$oldTagId1', '${tagNames.first}', '#f00', 0, $stamp, 1)
+            """.trimIndent(), 0)
+            driver.execute(null, """
+                INSERT INTO tags (id, name, color, sort_order, updated_at, created_at)
+                VALUES ('$oldTagId2', '${tagNames.second}', '#0f0', 0, $stamp, 1)
+            """.trimIndent(), 0)
+            driver.execute(null, """
+                INSERT INTO folders (id, name, sort_order, updated_at, created_at)
+                VALUES ('$oldFolderId1', '${folderNames.first}', 0, $stamp, 1)
+            """.trimIndent(), 0)
+            driver.execute(null, """
+                INSERT INTO folders (id, name, sort_order, updated_at, created_at)
+                VALUES ('$oldFolderId2', '${folderNames.second}', 0, $stamp, 1)
+            """.trimIndent(), 0)
+            if (assignChildren) {
+                driver.execute(null, """
+                    INSERT INTO feed_tags (feed_id, tag_id, updated_at)
+                    VALUES ('f1', '$oldTagId1', $stamp)
+                """.trimIndent(), 0)
+                driver.execute(null, """
+                    UPDATE feeds SET folder_id = '$oldFolderId1', folder_updated_at = $stamp WHERE id = 'f1'
+                """.trimIndent(), 0)
+            }
+        }
+        JdbcSqliteDriver("jdbc:sqlite:${file.absolutePath}").use { driver ->
+            KeryxDatabase.Schema.migrate(driver, 2, KeryxDatabase.Schema.version, *KERYX_SCHEMA_CALLBACKS)
+            driver.execute(null, "PRAGMA user_version=${KeryxDatabase.Schema.version}", 0)
+        }
+        return file
     }
 
     @Test
@@ -1415,15 +2100,6 @@ class SyncMergerTest {
     )
 
     @Test
-    fun tieOnFolderByNameIsDecidedByValue() = mergeThenVerify(
-        local = { it.insertFolder("d-local", "IT", now = 100, sortOrder = 1L) },
-        cloud = { it.insertFolder("d-cloud", "IT", now = 100, sortOrder = 5L) },
-        verify = {
-            assertEquals(5L, it.foldersQueries.getById("d-local").executeAsOne().sort_order)
-        },
-    )
-
-    @Test
     fun tieOnFeedContentRowIsDecidedByValue() = mergeThenVerify(
         local = { it.insertFeed("f1", now = 100, url = "https://local/feed") },
         cloud = { it.insertFeed("f1", now = 100, url = "https://cloud/feed") },
@@ -1440,15 +2116,6 @@ class SyncMergerTest {
             val tag = it.tagsQueries.getById("t1").executeAsOne()
             assertEquals("Local name", tag.name)
             assertEquals(5L, tag.sort_order)
-        },
-    )
-
-    @Test
-    fun tieOnTagByNameIsDecidedByValue() = mergeThenVerify(
-        local = { it.insertTag("t-local", "News", now = 100, sortOrder = 1L) },
-        cloud = { it.insertTag("t-cloud", "News", now = 100, sortOrder = 5L) },
-        verify = {
-            assertEquals(5L, it.tagsQueries.getById("t-local").executeAsOne().sort_order)
         },
     )
 
@@ -1486,13 +2153,13 @@ class SyncMergerTest {
             it.insertFolder("d1", "One", now = 100)
             it.insertFolder("d2", "Two", now = 100)
             it.insertFeed("f1", now = 500)
-            it.feedsQueries.updateFolder("d1", 500L, 100L, "f1")
+            it.feedsQueries.updateFolder(folderId = "d1", updatedAt = 500L, folderUpdatedAt = 100L, id = "f1")
         },
         cloud = {
             it.insertFolder("d1", "One", now = 100)
             it.insertFolder("d2", "Two", now = 100)
             it.insertFeed("f1", now = 400)
-            it.feedsQueries.updateFolder("d2", 400L, 100L, "f1")
+            it.feedsQueries.updateFolder(folderId = "d2", updatedAt = 400L, folderUpdatedAt = 100L, id = "f1")
         },
         verify = { assertEquals("d2", it.feedsQueries.getById("f1").executeAsOne().folder_id) },
     )
@@ -1672,6 +2339,8 @@ class SyncMergerTest {
         }
         // An older folder stamp for the second one: its assignment must not be adopted.
         cloudDriver.execute(null, "UPDATE feeds SET folder_updated_at = 50 WHERE id = 'f-orphan-old'", 0)
+        // The schema resolves a missing folder to NULL, so the dangling references are written directly.
+        cloudDriver.execute(null, "UPDATE feeds SET folder_id = 'gone-folder' WHERE id IN ('f-orphan-new', 'f-valid')", 0)
         cloudDb.insertFeed("f-ok", now = 100)
         // The local orphan articles' ids, newer read / star / deleted stamps; one with a valid feed in cloud.
         insertArticle(cloudDb, "a-orphan", "f-ok", "g1", isRead = 1, readAt = 500, updatedAt = 500, isStarred = 1, starredAt = 500)
@@ -1690,6 +2359,9 @@ class SyncMergerTest {
         localDb.insertFeed("f-orphan-new", now = 100, folderId = "gone-folder")
         localDb.insertFeed("f-orphan-old", now = 100, folderId = "gone-folder")
         localDriver.execute(null, "UPDATE feeds SET folder_updated_at = 400 WHERE id = 'f-orphan-old'", 0)
+        // A pre-existing orphan written behind the resolution's back (the schema resolves a missing
+        // folder to NULL, as data written before foreign keys were enforced would not be).
+        localDriver.execute(null, "UPDATE feeds SET folder_id = 'gone-folder' WHERE id IN ('f-orphan-new', 'f-orphan-old')", 0)
         // A valid assignment: copying the cloud's dangling folder_id here would add a violation.
         localDb.insertFeed("f-valid", now = 100, folderId = "folder-ok")
         insertArticle(localDb, "a-orphan", "gone-feed", "g1", isRead = 0, readAt = 100, updatedAt = 100)
@@ -1825,9 +2497,9 @@ class SyncMergerTest {
             it.insertFolder("d1", "One", now = 100)
             it.insertFolder("d2", "Two", now = 100)
             it.insertFeed("f1", now = 100)
-            it.feedsQueries.updateFolder("d1", 500L, 500L, "f1")
+            it.feedsQueries.updateFolder(folderId = "d1", updatedAt = 500L, folderUpdatedAt = 500L, id = "f1")
         },
-        write = { it.feedsQueries.updateFolder("d2", 500L, 500L, "f1") },
+        write = { it.feedsQueries.updateFolder(folderId = "d2", updatedAt = 500L, folderUpdatedAt = 500L, id = "f1") },
         afterWrite = { db, _ -> assertEquals(501L, db.feedsQueries.getById("f1").executeAsOne().folder_updated_at) },
         verify = { db, _ ->
             val feed = db.feedsQueries.getById("f1").executeAsOne()
@@ -1857,9 +2529,9 @@ class SyncMergerTest {
             it.insertFolder("d1", "One", now = 100)
             it.insertFolder("d2", "Two", now = 100)
             it.insertFeed("f1", now = 100)
-            it.feedsQueries.updateFolderAndSortOrder("d1", 5L, 500L, 500L, 500L, "f1")
+            it.feedsQueries.updateFolderAndSortOrder(folderId = "d1", sortOrder = 5L, updatedAt = 500L, folderUpdatedAt = 500L, sortOrderUpdatedAt = 500L, id = "f1")
         },
-        write = { it.feedsQueries.updateFolderAndSortOrder("d2", 9L, 500L, 500L, 500L, "f1") },
+        write = { it.feedsQueries.updateFolderAndSortOrder(folderId = "d2", sortOrder = 9L, updatedAt = 500L, folderUpdatedAt = 500L, sortOrderUpdatedAt = 500L, id = "f1") },
         afterWrite = { db, _ ->
             val feed = db.feedsQueries.getById("f1").executeAsOne()
             assertEquals(501L, feed.folder_updated_at)

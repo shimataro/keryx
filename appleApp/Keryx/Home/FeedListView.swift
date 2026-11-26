@@ -90,11 +90,10 @@ struct FeedListView: View {
         // Ends an in-place rename whose row stopped being rendered — deleted, removed by a sync
         // merge, or a tag/folder collapsed over it — otherwise confirming would write to a row that
         // is no longer there. Mirrors Compose's own auto-cancel (`FeedListPane.kt:402-413`).
-        .onChange(of: sidebar.orderedRowKeys) { _, keys in
-            if let key = dialogs.renamingRowKey, !keys.contains(key) {
-                dialogs.renamingRowKey = nil
-            }
-        }
+        // The row is matched through the re-key map (`SidebarIdRemap`): a merge moving the renamed tag or
+        // folder onto another id gives its row another key, and that is the same row, not a vanished one.
+        .onChange(of: sidebar.orderedRowKeys) { _, keys in endRenameIfRowGone(keys: keys) }
+        .onChange(of: home.idRemap) { _, _ in endRenameIfRowGone(keys: sidebar.orderedRowKeys) }
         .modifier(SidebarDeleteAlerts(home: home, dialogs: dialogs))
         #if os(iOS)
         .modifier(SidebarRenameSheet(home: home, dialogs: dialogs))
@@ -125,7 +124,13 @@ struct FeedListView: View {
                 // Only when the selection actually moved off-screen (arrow-key navigation, a
                 // restored selection) — mirrors the article list's own scroll-to-selection
                 // effect (`ArticleListView.body`) and Compose's `FeedListPane.kt:370-373`.
-                .onChange(of: selectedRowKey, initial: false) { _, key in
+                //
+                // Keyed on the selection's generation, not on the row's key: a merge re-keying the
+                // selected tag or folder changes the key without the user selecting anything, and must
+                // not scroll a list they had moved away from the row. The key is read from the
+                // ViewModel's own current value, which the generation's change follows.
+                .onChange(of: home.selectedRowGeneration, initial: false) { _, _ in
+                    let key = feedListRowSelectionKey(home.viewModel.selectedRowInstance.value)
                     guard !appearedRowKeys.contains(key) else { return }
                     proxy.scrollTo(key)
                 }
@@ -150,6 +155,28 @@ struct FeedListView: View {
     }
 
     var orderedRows: [FeedListRowSelection] { sidebar.orderedRows }
+
+    private func endRenameIfRowGone(keys: [String]) {
+        guard let key = dialogs.renamingRowKey, !home.idRemap.contains(keys, row: key) else { return }
+        // The lists can reach here ahead of the re-key map (a merge publishes it only after it
+        // commits, and another write in between re-runs the tag/folder queries over the re-keyed
+        // rows), so the row is not declared gone while the map might be stale: it is first caught up
+        // from the committed database — the ViewModel's one shared implementation, as in Compose's
+        // `FeedListPane` — and only an absence that survives that ends the edit. The absence is
+        // judged on `keys`, the keys this catch-up was started for, which the map it read is newer
+        // than; keys delivered during the catch-up can show a later re-key that map missed, so they
+        // are not judged here — their own `onChange` (in `body`) runs its own catch-up and decides.
+        // A catch-up that failed decides nothing: the edit stays open, and the next change of the
+        // lists or of the map asks again.
+        Task { @MainActor in
+            let caughtUp = (try? await home.viewModel.catchUpIdRemapFromDb())?.boolValue ?? false
+            guard caughtUp, dialogs.renamingRowKey == key else { return }
+            let remap = SidebarIdRemap(home.viewModel.tagFolderIdRemap.value)
+            let decision = remap.renameRowDecision(
+                key: key, keysAtCatchUp: keys, currentKeys: sidebar.orderedRowKeys)
+            if decision == .end { dialogs.endRename() }
+        }
+    }
 
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
@@ -250,17 +277,19 @@ struct FeedListView: View {
     ) -> InlineRenameField? {
         // Checked for every row on every evaluation, so the common case — nothing being renamed —
         // skips deriving the row's key.
-        guard let renamingKey = dialogs.renamingRowKey, renamingKey == feedListRowSelectionKey(instance) else { return nil }
+        guard dialogs.renamingRowKey != nil, dialogs.isRenaming(feedListRowSelectionKey(instance), remap: home.idRemap) else { return nil }
         return InlineRenameField(
             initialName: initialName,
+            draft: dialogs.renamingDraft,
+            onDraftChange: { dialogs.renamingDraft = $0 },
             placeholder: placeholder,
             allowBlank: allowBlank,
             blockingError: blockingError,
             onCommit: { name in
-                dialogs.renamingRowKey = nil
+                dialogs.endRename()
                 commit(name)
             },
-            onCancel: { dialogs.renamingRowKey = nil },
+            onCancel: { dialogs.endRename() },
             focusedPane: focusedPane
         )
     }
@@ -281,8 +310,8 @@ struct FeedListView: View {
             for: FeedListRowSelectionTag(tagId: tag.id),
             initialName: tag.name,
             blockingError: { NameValidationKt.isDuplicateTagName(name: $0, tags: home.tags, excludeId: tag.id) ? L("home_tag_name_duplicate") : nil },
-            // The tag's color is kept as it is — it has its own menu item and dot popover.
-            commit: { home.viewModel.updateTag(id: tag.id, name: $0, color: tag.color) }
+            // Only the name is written — the color has its own menu item and dot popover.
+            commit: { home.viewModel.renameTag(id: tag.id, name: $0) }
         )
     }
 
@@ -459,7 +488,7 @@ private struct SidebarDeleteAlerts: ViewModifier {
         // Cancel.
         content
             .confirmationDialog(
-                dialogs.deletingFolder.map { LF("home_delete_folder_confirm", $0.name) } ?? "",
+                dialogs.deletingFolder.map { LF("home_delete_folder_confirm", home.labels.name(of: $0)) } ?? "",
                 isPresented: isPresentedBinding($dialogs.deletingFolder),
                 titleVisibility: .visible,
                 presenting: dialogs.deletingFolder
@@ -468,7 +497,7 @@ private struct SidebarDeleteAlerts: ViewModifier {
                 Button(L("common_cancel"), role: .cancel) {}
             }
             .confirmationDialog(
-                dialogs.deletingTag.map { LF("home_delete_tag_confirm", $0.name) } ?? "",
+                dialogs.deletingTag.map { LF("home_delete_tag_confirm", home.labels.name(of: $0)) } ?? "",
                 isPresented: isPresentedBinding($dialogs.deletingTag),
                 titleVisibility: .visible,
                 presenting: dialogs.deletingTag
@@ -490,7 +519,7 @@ private struct SidebarDeleteAlerts: ViewModifier {
         #else
         content
             .alert(
-                dialogs.deletingFolder.map { LF("home_delete_folder_confirm", $0.name) } ?? "",
+                dialogs.deletingFolder.map { LF("home_delete_folder_confirm", home.labels.name(of: $0)) } ?? "",
                 isPresented: isPresentedBinding($dialogs.deletingFolder),
                 presenting: dialogs.deletingFolder
             ) { folder in
@@ -498,7 +527,7 @@ private struct SidebarDeleteAlerts: ViewModifier {
                 Button(L("common_cancel"), role: .cancel) {}
             }
             .alert(
-                dialogs.deletingTag.map { LF("home_delete_tag_confirm", $0.name) } ?? "",
+                dialogs.deletingTag.map { LF("home_delete_tag_confirm", home.labels.name(of: $0)) } ?? "",
                 isPresented: isPresentedBinding($dialogs.deletingTag),
                 presenting: dialogs.deletingTag
             ) { tag in
@@ -526,39 +555,55 @@ private struct SidebarDeleteAlerts: ViewModifier {
 #if os(iOS)
 /// iOS renames a folder, tag or feed in the form sheet that creates one (`NamePromptSheet`), not in
 /// the row itself — a row-sized keyboard editor with an Escape key does not suit touch. It is shown
-/// for as long as `dialogs.renamingRowKey` names a row that still exists; a row removed underneath it
-/// (see the auto-cancel in `FeedListView.body`) closes the sheet.
+/// for as long as `dialogs.renamingRowKey` is set: only the user closing it or a row confirmed gone
+/// (the auto-cancel in `FeedListView.body`) ends the edit. While a re-key has reached the lists ahead
+/// of its map the row resolves to nothing, and the sheet keeps editing the target it last resolved
+/// (`SidebarDialogState.renamingTarget`) — with what has been typed into it — instead of closing.
 private struct SidebarRenameSheet: ViewModifier {
     let home: HomeObservable
     @Bindable var dialogs: SidebarDialogState
 
-    private var target: SidebarRenameTarget? {
-        guard let key = dialogs.renamingRowKey, let instance = home.sidebar.orderedRowsByKey[key] else { return nil }
+    /// What the edited row resolves to in the current lists and re-key map, or `nil` while it cannot
+    /// be resolved.
+    private func resolvedTarget() -> SidebarRenameTarget? {
+        guard let key = dialogs.renamingRowKey,
+              let current = home.idRemap.match(in: home.sidebar.orderedRowKeys, for: key),
+              let instance = home.sidebar.orderedRowsByKey[current] else { return nil }
         return SidebarRenameTarget.resolve(
             SidebarItemID(instance), folders: home.folders, tags: home.tags, feedsById: home.feedsById
         )
     }
 
+    private func updateTarget() { dialogs.updateRenamingTarget(resolvedTarget()) }
+
     func body(content: Content) -> some View {
-        content.sheet(isPresented: Binding(
-            get: { target != nil },
-            set: { if !$0 { dialogs.renamingRowKey = nil } }
-        )) {
-            if let target {
-                NamePromptSheet(
-                    titleKey: "home_rename_feed",
-                    placeholderKey: placeholderKey(for: target),
-                    placeholderText: target.placeholder,
-                    duplicateMessageKey: target.duplicateMessageKey ?? "",
-                    confirmTitleKey: "common_save",
-                    allowBlank: target.allowBlank,
-                    initialName: target.initialName,
-                    isDuplicate: { isDuplicate($0, for: target) },
-                    onConfirm: { name, _ in commit(name, for: target) },
-                    isPresented: Binding(get: { dialogs.renamingRowKey != nil }, set: { if !$0 { dialogs.renamingRowKey = nil } })
-                )
+        content
+            .onChange(of: dialogs.renamingRowKey, initial: true) { _, _ in updateTarget() }
+            .onChange(of: home.sidebar.orderedRowKeys) { _, _ in updateTarget() }
+            .onChange(of: home.idRemap) { _, _ in updateTarget() }
+            .sheet(isPresented: Binding(
+                get: { dialogs.renamingRowKey != nil },
+                set: { if !$0 { dialogs.endRename() } }
+            )) {
+                // Before the first `updateTarget` has run for a new edit, the row is resolved here
+                // (a read only), so the sheet never opens empty.
+                if let target = dialogs.renamingTarget ?? resolvedTarget() {
+                    NamePromptSheet(
+                        titleKey: "home_rename_feed",
+                        placeholderKey: placeholderKey(for: target),
+                        placeholderText: target.placeholder,
+                        duplicateMessageKey: target.duplicateMessageKey ?? "",
+                        confirmTitleKey: "common_save",
+                        allowBlank: target.allowBlank,
+                        initialName: target.initialName,
+                        isDuplicate: { isDuplicate($0, for: target) },
+                        // Committed under the id the target last resolved to: a stale one is resolved
+                        // by the write statement itself (`docs/db-schema.md`, "tags / feed_tags").
+                        onConfirm: { name, _ in commit(name, for: target) },
+                        isPresented: Binding(get: { dialogs.renamingRowKey != nil }, set: { if !$0 { dialogs.endRename() } })
+                    )
+                }
             }
-        }
     }
 
     /// The hint shown in an empty folder or tag field; a feed shows its own title instead.
@@ -583,8 +628,8 @@ private struct SidebarRenameSheet: ViewModifier {
         case .folder(let id):
             home.viewModel.updateFolder(id: id, name: name)
         case .tag(let id):
-            // The tag's color is kept as it is — it has its own menu palette.
-            home.viewModel.updateTag(id: id, name: name, color: home.tags.first { $0.id == id }?.color)
+            // Only the name is written — the color has its own menu palette.
+            home.viewModel.renameTag(id: id, name: name)
         case .feed(let id):
             home.viewModel.renameFeed(id: id, title: name)
         }

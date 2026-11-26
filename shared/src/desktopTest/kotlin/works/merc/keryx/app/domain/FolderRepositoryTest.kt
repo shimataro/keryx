@@ -24,9 +24,11 @@ import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
 import works.merc.keryx.app.insertFolder
+import works.merc.keryx.app.rekeyFolderForTest
 import works.merc.keryx.app.ftsManagerIndexed
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -82,6 +84,47 @@ class FolderRepositoryTest {
             assertEquals("Kotlin", row.name)
             assertNull(row.deleted_at)
             assertEquals(1, scheduler.callCount)
+        } finally {
+            driver.close()
+        }
+    }
+
+    /** A new folder's id is the one its name derives from, so devices converge on the same row. */
+    @Test
+    fun createFolderAssignsTheNameDerivedId() {
+        val (driver, db) = inMemoryDb()
+        try {
+            val repo = newRepo(db, driver, clock = Clock { 100L })
+
+            val id = repo.createFolder("Kotlin")
+
+            assertEquals(IdGenerator.folderId("Kotlin"), id)
+            assertEquals(listOf(id), db.foldersQueries.watchAll().executeAsList().map { it.id })
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
+     * When the derived id is already held — a row renamed off the name keeps its id — the creation
+     * falls back to the id source instead of colliding with that row.
+     */
+    @Test
+    fun createFolderFallsBackToTheIdSourceWhenTheDerivedIdIsTaken() {
+        val (driver, db) = inMemoryDb()
+        try {
+            // A row renamed off the name keeps its id: it holds the id "Kotlin" would derive.
+            db.foldersQueries.upsert(
+                id = IdGenerator.folderId("Kotlin"), name = "Renamed away", sort_order = 0L,
+                deleted_at = null, updated_at = 20L, created_at = 10L,
+            )
+            val repo = newRepo(db, driver, clock = Clock { 100L })
+
+            val id = repo.createFolder("Kotlin")
+
+            assertNotEquals(IdGenerator.folderId("Kotlin"), id, "the derived id is held by the renamed row")
+            assertEquals("Kotlin", db.foldersQueries.getById(id).executeAsOne().name)
+            assertEquals("Renamed away", db.foldersQueries.getById(IdGenerator.folderId("Kotlin")).executeAsOne().name)
         } finally {
             driver.close()
         }
@@ -308,6 +351,83 @@ class FolderRepositoryTest {
         }
     }
 
+    /**
+     * Re-keys the folder [oldId] onto [newId] (as a merge does, [rekeyFolderForTest]) right after the
+     * first query that reads the reorder state (`orderForReorder`) has run — the interval between
+     * [FolderRepository.reorderFolders]'s read and its transaction, where a merge can commit.
+     */
+    private class RekeyAfterReorderReadDriver(
+        private val delegate: SqlDriver,
+        private val oldId: String,
+        private val newId: String,
+    ) : SqlDriver by delegate {
+        var fired = false
+            private set
+
+        override fun <R> executeQuery(
+            identifier: Int?,
+            sql: String,
+            mapper: (app.cash.sqldelight.db.SqlCursor) -> app.cash.sqldelight.db.QueryResult<R>,
+            parameters: Int,
+            binders: (app.cash.sqldelight.db.SqlPreparedStatement.() -> Unit)?,
+        ): app.cash.sqldelight.db.QueryResult<R> {
+            val result = delegate.executeQuery(identifier, sql, mapper, parameters, binders)
+            if (!fired && sql.contains("AS is_dragged")) {
+                fired = true
+                delegate.rekeyFolderForTest(oldId, newId)
+            }
+            return result
+        }
+    }
+
+    private fun reorderAcrossARekey(oldId: String, newId: String, dragged: String, target: String?): List<String> {
+        val (base, _) = inMemoryDb()
+        try {
+            val seed = KeryxDatabase(base)
+            seed.insertFolder("d1", "A", sortOrder = 0L)
+            seed.insertFolder("d2", "B", sortOrder = 1L)
+            seed.insertFolder("d3", "C", sortOrder = 2L)
+            val driver = RekeyAfterReorderReadDriver(base, oldId, newId)
+            val db = KeryxDatabase(driver)
+
+            newRepo(db, driver, clock = Clock { 500L }).reorderFolders(dragged, target)
+
+            assertTrue(driver.fired)
+            return db.foldersQueries.watchAll().executeAsList().map { it.id }
+        } finally {
+            base.close()
+        }
+    }
+
+    @Test
+    fun reorderFoldersMovesADraggedFolderReKeyedAfterTheReadOntoItsNewId() {
+        assertEquals(listOf("d3-new", "d1", "d2"), reorderAcrossARekey("d3", "d3-new", dragged = "d3", target = "d1"))
+    }
+
+    @Test
+    fun reorderFoldersPlacesBeforeATargetReKeyedAfterTheRead() {
+        assertEquals(listOf("d3", "d1-new", "d2"), reorderAcrossARekey("d1", "d1-new", dragged = "d3", target = "d1"))
+    }
+
+    /** A dragged folder that is not live is skipped rather than failing the whole reorder. */
+    @Test
+    fun reorderFoldersWithADraggedFolderThatIsNotLiveLeavesTheOrderAlone() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFolder("d1", "A", sortOrder = 0L)
+            db.insertFolder("d2", "B", sortOrder = 1L)
+            db.insertFolder("gone", "G", sortOrder = 2L, deletedAt = 1L)
+
+            newRepo(db, driver, clock = Clock { 500L }).reorderFolders(draggedFolderId = "gone", targetFolderId = "d1")
+
+            assertEquals(listOf("d1", "d2"), db.foldersQueries.watchAll().executeAsList().map { it.id })
+            assertEquals(0L, db.foldersQueries.getById("d1").executeAsOne().updated_at)
+            assertEquals(0L, db.foldersQueries.getById("d2").executeAsOne().updated_at)
+        } finally {
+            driver.close()
+        }
+    }
+
     @Test
     fun updateFolderUpdatesNameAndPersists() {
         val (driver, db) = inMemoryDb()
@@ -435,7 +555,7 @@ class FolderRepositoryTest {
 
             val delete = launch(start = CoroutineStart.UNDISPATCHED) { repo.deleteFolder("d1") }
             // A move commits while the delete waits for the lock.
-            db.feedsQueries.updateFolder("d1", 600L, 600L, "f1")
+            db.feedsQueries.updateFolder(folderId = "d1", updatedAt = 600L, folderUpdatedAt = 600L, id = "f1")
             now = 900L
             placement.unlock()
             delete.join()
@@ -586,6 +706,99 @@ class FolderRepositoryTest {
         }
     }
 
+    // --- Names are not unique: the canonical row is reused, and a rename may cross any name ---
+
+    @Test
+    fun createFolderReusesTheEarliestCreatedAliveRowOfTheName() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFolder("d-late", "Kotlin", now = 20L)
+            db.insertFolder("d-early", "Kotlin", now = 10L)
+            val repo = newRepo(db, driver, clock = Clock { 100L })
+
+            val id = repo.createFolder("Kotlin")
+
+            assertEquals("d-early", id)
+            assertEquals(2, db.foldersQueries.watchAll().executeAsList().size)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun createFolderPrefersAnAliveSameNamedRowOverAnEarlierDeletedOne() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFolder("d-deleted", "Kotlin", now = 5L, deletedAt = 6L)
+            db.insertFolder("d-alive", "Kotlin", now = 10L)
+            val repo = newRepo(db, driver, clock = Clock { 100L })
+
+            val id = repo.createFolder("Kotlin")
+
+            assertEquals("d-alive", id)
+            // The earlier deleted twin stays deleted; no row was created.
+            assertNotNull(db.foldersQueries.getById("d-deleted").executeAsOne().deleted_at)
+            assertEquals(listOf("d-alive"), db.foldersQueries.watchAll().executeAsList().map { it.id })
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun createFolderOnOnlyDeletedSameNamedRowsReactivatesTheEarliest() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFolder("d-late", "Kotlin", now = 20L, deletedAt = 21L)
+            db.insertFolder("d-early", "Kotlin", now = 10L, deletedAt = 11L)
+            val repo = newRepo(db, driver, clock = Clock { 100L })
+
+            val id = repo.createFolder("Kotlin")
+
+            assertEquals("d-early", id)
+            assertNull(db.foldersQueries.getById("d-early").executeAsOneOrNull()?.deleted_at)
+            // The later twin stays deleted.
+            assertNotNull(db.foldersQueries.getById("d-late").executeAsOne().deleted_at)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun updateFolderMayRenameOntoANameAnAliveRowHolds() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFolder("d1", "Old", now = 10L)
+            db.insertFolder("d2", "New", now = 10L)
+            val repo = newRepo(db, driver, clock = Clock { 200L })
+
+            repo.updateFolder("d1", "New")
+
+            // No UNIQUE(name) blocks it: both rows keep their ids under the shared name, and the UI
+            // numbers them.
+            assertEquals("New", db.foldersQueries.getById("d1").executeAsOne().name)
+            assertEquals("New", db.foldersQueries.getById("d2").executeAsOne().name)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun updateFolderMayRenameOntoANameADeletedRowHolds() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFolder("d1", "Old", now = 10L)
+            db.insertFolder("d2", "New", now = 10L, deletedAt = 20L)
+            val repo = newRepo(db, driver, clock = Clock { 200L })
+
+            repo.updateFolder("d1", "New")
+
+            assertEquals("New", db.foldersQueries.getById("d1").executeAsOne().name)
+            assertNotNull(db.foldersQueries.getById("d2").executeAsOne().deleted_at)
+        } finally {
+            driver.close()
+        }
+    }
+
     // --- A same-named folder another writer inserts mid-call (a sync merge, a concurrent create) ---
 
     @Test
@@ -662,7 +875,58 @@ class FolderRepositoryTest {
             val id = repo.createFolderAndMoveFeed("Kotlin", "f1")
 
             assertEquals("d1", id)
+            // The reactivation re-resolved f0 from its raw assignment, so f1 is appended after it.
+            assertEquals("d1", db.feedsQueries.getById("f0").executeAsOne().folder_id)
             assertEquals(1L, db.feedsQueries.getById("f1").executeAsOne().sort_order)
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
+     * A feed whose raw assignment still names a folder that is deleted here (a sync from another
+     * device can leave it so) shows as "no folder"; recreating the folder by name reactivates it, and
+     * the feed is back in it — in the same transaction, with its raw assignment and stamp unchanged.
+     */
+    @Test
+    fun reactivatingAFolderRestoresTheFeedsStillAssignedToIt() = runTest {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFolder("d1", "Kotlin", now = 10L)
+            db.insertFeed("f1", now = 50L, folderId = "d1")
+            db.foldersQueries.softDelete(20L, 20L, "d1")
+            assertNull(db.feedsQueries.getById("f1").executeAsOne().folder_id)
+            val repo = newRepo(db, driver, clock = Clock { 100L })
+
+            assertEquals("d1", repo.createFolder("Kotlin"))
+
+            val feed = db.feedsQueries.getById("f1").executeAsOne()
+            assertEquals("d1", feed.folder_id)
+            assertEquals(50L, feed.folder_updated_at)
+            val raw = db.sync_bookkeepingQueries.feedFolderRawAll().executeAsList().single()
+            assertEquals("d1", raw.folder_id)
+            assertEquals(50L, raw.folder_updated_at)
+        } finally {
+            driver.close()
+        }
+    }
+
+    /** Deleting a folder moves its feeds out: their raw assignment becomes "no folder", stamped by the delete. */
+    @Test
+    fun deleteFolderWritesTheMovedFeedsRawAssignment() = runTest {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFolder("d1", "Kotlin", now = 10L)
+            db.insertFeed("f1", now = 50L, folderId = "d1")
+            val repo = newRepo(db, driver, clock = Clock { 100L })
+
+            repo.deleteFolder("d1")
+
+            val raw = db.sync_bookkeepingQueries.feedFolderRawAll().executeAsList().single()
+            assertNull(raw.folder_id)
+            assertEquals(100L, raw.folder_updated_at)
+            assertNull(db.feedsQueries.getById("f1").executeAsOne().folder_id)
+            assertEquals(100L, db.feedsQueries.getById("f1").executeAsOne().folder_updated_at)
         } finally {
             driver.close()
         }

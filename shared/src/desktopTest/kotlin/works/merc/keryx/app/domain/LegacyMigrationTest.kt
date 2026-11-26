@@ -16,6 +16,8 @@ import works.merc.keryx.app.core.cloudBackupPath
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.fileDb
 import works.merc.keryx.app.insertFeed
+import works.merc.keryx.app.insertFolder
+import works.merc.keryx.app.insertTag
 import works.merc.keryx.app.platform.DatabaseMerger
 import java.io.File
 import kotlin.random.Random
@@ -117,10 +119,17 @@ class LegacyMigrationTest {
 
         a.syncOk()
 
-        // Everything in keryx.db.gz is merged, search text included.
+        // Everything in keryx.db.gz is merged, search text included; the tag and folder rows arrive
+        // re-keyed onto their name-derived ids, so the feed's references move with them.
         assertTrue(a.db.hasFeed("lf1"))
-        assertEquals(listOf(listOf("lfolder", "1", "ancient wisdom")), a.rows("SELECT f.folder_id, ar.is_read, ar.search_text FROM feeds f JOIN articles ar ON ar.feed_id = f.id WHERE f.id = 'lf1'"))
-        assertEquals(listOf(listOf("ltag", null, null)), a.rows("SELECT tag_id FROM feed_tags WHERE feed_id = 'lf1' AND deleted_at IS NULL"))
+        assertEquals(
+            listOf(listOf(IdGenerator.folderId("Legacy folder"), "1", "ancient wisdom")),
+            a.rows("SELECT f.folder_id, ar.is_read, ar.search_text FROM feeds f JOIN articles ar ON ar.feed_id = f.id WHERE f.id = 'lf1'"),
+        )
+        assertEquals(
+            listOf(listOf(IdGenerator.tagId("Legacy tag"), null, null)),
+            a.rows("SELECT tag_id FROM feed_tags WHERE feed_id = 'lf1' AND deleted_at IS NULL"),
+        )
         assertEquals(listOf(listOf("45", null, null)), a.rows("SELECT value FROM global_settings WHERE key = 'read_timeout_seconds'"))
         assertTrue(a.rows("SELECT rowid FROM ks_search_pending").isEmpty())
         // The first base carries both the pre-delta rows and the device's own, and the pointer names it.
@@ -148,6 +157,32 @@ class LegacyMigrationTest {
         assertEquals(generationOf(cloud), b.state(works.merc.keryx.app.core.SYNC_STATE_KS_GENERATION))
         assertMigrated(cloud, original, a, b)
         assertEquals(1, PreDeltaFiles.backups(cloud).size, "only the migrating device archives")
+    }
+
+    /**
+     * The migration re-keys the pre-delta file's tags and folders onto their name-derived ids, so a
+     * row this device created under the same name — the same derived id — is the SAME row: one tag,
+     * one folder, the feed's link and folder assignment intact.
+     */
+    @Test
+    fun aPreDeltaRowsSameNamedLocalCounterpartIsMetById() = slowTest {
+        val (cloud, _) = legacyCloud()
+        val a = device("a", cloud)
+        a.db.insertTag(IdGenerator.tagId("Legacy tag"), "Legacy tag", now = 1)
+        a.db.insertFolder(IdGenerator.folderId("Legacy folder"), "Legacy folder", now = 1)
+
+        a.syncOk()
+
+        assertEquals(1, a.db.tagsQueries.watchAll().executeAsList().size, "one tag")
+        assertEquals(1, a.db.foldersQueries.watchAll().executeAsList().size, "one folder")
+        assertEquals(
+            listOf(listOf(IdGenerator.tagId("Legacy tag"), null, null)),
+            a.rows("SELECT tag_id FROM feed_tags WHERE feed_id = 'lf1' AND deleted_at IS NULL"),
+        )
+        assertEquals(
+            listOf(listOf(IdGenerator.folderId("Legacy folder"), null, null)),
+            a.rows("SELECT folder_id FROM feeds WHERE id = 'lf1'"),
+        )
     }
 
     @Test

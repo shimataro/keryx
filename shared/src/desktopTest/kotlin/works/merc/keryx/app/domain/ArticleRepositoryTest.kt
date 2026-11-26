@@ -2,6 +2,7 @@ package works.merc.keryx.app.domain
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.Clock
@@ -14,6 +15,8 @@ import works.merc.keryx.app.insertFeed
 import works.merc.keryx.app.insertFeedTag
 import works.merc.keryx.app.insertFolder
 import works.merc.keryx.app.insertTag
+import works.merc.keryx.app.rekeyFolderForTest
+import works.merc.keryx.app.rekeyTagForTest
 import works.merc.keryx.app.stampArticleDeleted
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -1130,6 +1133,90 @@ class ArticleRepositoryTest {
 
             db.insertArticle("a2", "f1")
             assertEquals(2L, repo.watchArticleChanges().first())
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
+     * The by-tag / by-folder list queries depend on `ks_id_remap` but not on `tags` / `folders`:
+     * renaming a folder or tag cannot change the articles listed, so it must not re-emit the list.
+     */
+    @Test
+    fun renamingAFolderOrTagDoesNotReEmitItsArticleList() = runTest {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFolder("d1", "Work")
+            db.insertTag("t1", "News")
+            db.insertFeed("f1", folderId = "d1")
+            db.insertFeedTag("f1", "t1")
+            db.insertArticle("a1", "f1")
+            val repo = newRepo(db, driver)
+            val folderEmissions = mutableListOf<List<String>>()
+            val tagEmissions = mutableListOf<List<String>>()
+            val jobs = listOf(
+                launch(Dispatchers.Unconfined) { repo.watchArticles(ArticleFilter.Folder("d1")).collect { folderEmissions += it.map { r -> r.id } } },
+                launch(Dispatchers.Unconfined) { repo.watchArticles(ArticleFilter.Tag("t1")).collect { tagEmissions += it.map { r -> r.id } } },
+            )
+            assertEquals(1, folderEmissions.size)
+            assertEquals(1, tagEmissions.size)
+
+            db.foldersQueries.updateName(name = "Renamed", now = 5L, id = "d1")
+            db.tagsQueries.updateName(name = "Renamed", now = 5L, id = "t1")
+
+            assertEquals(1, folderEmissions.size, "a rename re-emitted the folder's list")
+            assertEquals(1, tagEmissions.size, "a rename re-emitted the tag's list")
+            jobs.forEach { it.cancel() }
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
+     * After a re-key, the query asked with the old id lists the same articles, re-runs when the re-key's
+     * notification arrives, and keeps following later changes.
+     */
+    @Test
+    fun afterAReKeyTheOldIdStillListsTheSameArticles() = runTest {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFolder("d-old", "Work")
+            db.insertTag("t-old", "News")
+            db.insertFeed("f1", folderId = "d-old")
+            db.insertFeedTag("f1", "t-old")
+            db.insertArticle("a1", "f1")
+            val repo = newRepo(db, driver)
+            val folderEmissions = mutableListOf<List<String>>()
+            val tagEmissions = mutableListOf<List<String>>()
+            val jobs = listOf(
+                launch(Dispatchers.Unconfined) { repo.watchArticles(ArticleFilter.Folder("d-old")).collect { folderEmissions += it.map { r -> r.id } } },
+                launch(Dispatchers.Unconfined) { repo.watchArticles(ArticleFilter.Tag("t-old")).collect { tagEmissions += it.map { r -> r.id } } },
+            )
+
+            val folderEmissionsBefore = folderEmissions.size
+            val tagEmissionsBefore = tagEmissions.size
+
+            driver.rekeyFolderForTest("d-old", "d-new")
+            driver.rekeyTagForTest("t-old", "t-new")
+            // A merge writes through its own connection and then notifies these tables.
+            driver.notifyListeners("folders", "feeds", "tags", "feed_tags", "articles", "global_settings")
+
+            assertTrue(folderEmissions.size > folderEmissionsBefore, "the old folder id's query re-ran")
+            assertTrue(tagEmissions.size > tagEmissionsBefore, "the old tag id's query re-ran")
+            assertEquals(listOf("a1"), folderEmissions.last())
+            assertEquals(listOf("a1"), tagEmissions.last())
+            assertEquals(listOf("a1"), repo.watchArticles(ArticleFilter.Folder("d-new")).first().map { it.id })
+            assertEquals(listOf("a1"), repo.watchArticles(ArticleFilter.Tag("t-new")).first().map { it.id })
+
+            // The original subscriptions keep following the re-keyed rows: a new article of the feed
+            // reaches both, in the list's own order (newest first).
+            db.insertArticle("a2", "f1", publishedAt = 2L)
+
+            assertEquals(listOf("a2", "a1"), folderEmissions.last())
+            assertEquals(listOf("a2", "a1"), tagEmissions.last())
+            assertEquals(folderEmissions.last(), repo.watchArticles(ArticleFilter.Folder("d-new")).first().map { it.id })
+            assertEquals(tagEmissions.last(), repo.watchArticles(ArticleFilter.Tag("t-new")).first().map { it.id })
+            jobs.forEach { it.cancel() }
         } finally {
             driver.close()
         }

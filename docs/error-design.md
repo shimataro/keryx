@@ -56,6 +56,35 @@ and lose more than the access itself is worth. The accesses that are, today:
   whole `busy_timeout`. A failure is treated as "not live": the pending selection
   fallback stays pending and the next list value decides it. Propagating it would end the app on Android and
   Apple.
+  A tag or folder that a list no longer shows is not believed gone while the published re-key map might be
+  stale (a merge publishes it only after it commits, and another write in between re-runs the lists over the
+  re-keyed rows): the map is first re-read from `ks_id_remap` (`HomeViewModel.catchUpIdRemapFromDb`), and only an
+  absence that survives that falls back. That absence is judged on the list value the re-read was made for, never
+  on a newer one delivered meanwhile, which can show a later re-key the re-read missed; such a newer value gets a
+  re-read of its own. A failed re-read is treated the same way — undecided, the next list value
+  asks again. The Compose and SwiftUI inline renames use the same catch-up before ending an edit whose row
+  vanished.
+- The `ks_id_remap` read that publishes a merge's tag/folder re-keys (`DeltaSync.publishIdRemapsAfterCommit` →
+  `TagFolderIdRemaps.publishFromDb`). It runs right after the merge has committed, so it can wait out the whole
+  `busy_timeout` behind another write lock, and what it feeds is only ids held outside the database (selection,
+  expansion, `local_settings.json`). A failure is logged and carried on from: every write that takes a tag or
+  folder id resolves a stale one itself in the same statement, and the next merge's publish or the next launch's
+  read catches the holders up. Propagating it would turn a merge that committed into a failed sync (and a
+  reset offer for a local fault).
+  The same read also runs once at startup, in the background (`TagFolderIdRemaps`'s initial load, which takes
+  the same lock as a publish): it must not run in the constructor, which the UI thread reaches. A failure there is
+  logged, and the map stays empty with its `loaded` gate opened anyway, so nothing waits on it for good — a
+  restored tag or folder selection saved under a since-moved id then falls back to All Feeds, the same as one
+  whose item is gone, and the next publish or launch catches the holders up. Propagating it would end the app
+  on Android and Apple for a read the holders can live without.
+- Saving `local_settings.json` (`SettingsRepository.saveLoggingFailure`, the background writer behind
+  `saveLocalSettings` / `mutateLocalSettings`, and the write of a re-key's rewrite). It is a file, not the
+  database, and nothing waits on it: the in-memory value that the UI and `getLocalSettings` read is already
+  updated, so the app behaves correctly with it, and the next save writes the latest value again. A failure is
+  logged and the writer carries on — letting it escape would end the writer's loop, after which no save would
+  ever reach the disk. What a failure costs is a change the next save does not overwrite, lost only if the
+  process ends before any save succeeds. `SettingsRepository.flush`, which setup completion and the shutdown hook
+  call because durability matters there, is not best-effort: its failure reaches its caller.
 
 Any other DB access propagates as before; a new best-effort one is added to this list, with its reason. (An
 operation the user started — an OPML import or export — that fails is not an exception to this: it is reported

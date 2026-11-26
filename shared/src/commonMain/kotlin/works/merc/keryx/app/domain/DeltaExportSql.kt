@@ -8,8 +8,9 @@ package works.merc.keryx.app.domain
  * ([works.merc.keryx.app.platform.TransportFiles.createEmpty]) with the source database — the live
  * database for a delta, a `VACUUM INTO` copy of it for a full send — attached as [SOURCE] and, for a
  * full send, the file to leave out attached as [EXCEPT]. Only the transport columns
- * ([TransportSchema.SYNCED_TABLES_V1]) are copied, listed explicitly, so `search_text`, the fetch
- * state and the bookkeeping never leave the device.
+ * ([TransportSchema.SYNCED_TABLES]) are copied, listed explicitly, so `search_text`, the fetch
+ * state and the bookkeeping never leave the device. A feed's `folder_id` / `folder_updated_at` are
+ * the one exception to "as stored": they are taken from its raw assignment (see [source]).
  *
  * Both kinds end with [closureStatements]: every row a written row references (a feed's folder, an
  * article's feed, a `feed_tags` row's feed and tag) is written too, so the file passes "Validating
@@ -25,7 +26,7 @@ object DeltaExportSql {
     /** The alias a full send's except-file is attached under. */
     const val EXCEPT = "ex"
 
-    private val tables: Map<String, TableSpec> = TransportSchema.SYNCED_TABLES_V1.associateBy { it.name }
+    private val tables: Map<String, TableSpec> = TransportSchema.SYNCED_TABLES.associateBy { it.name }
 
     private fun table(name: String): TableSpec = tables.getValue(name)
 
@@ -47,17 +48,50 @@ object DeltaExportSql {
      */
     const val HIGH_WATER_MARK_QUERY: String = "SELECT MAX(seq) FROM $SOURCE.sync_outbox"
 
+    /**
+     * The tables whose rows count towards a file's row counts: the synced tables, then the identity
+     * edge tables — so a full send that carries only edges is not taken for an empty one (and left
+     * unsent) while its synced rows are all identical to the except file's.
+     */
+    private val countedTables: List<String> = (TransportSchema.SYNCED_TABLES + TransportSchema.EDGE_TABLES).map { it.name }
+
     /** The row count of [table] in the transport file. */
     fun countQuery(table: String): String {
-        require(table in tables) { "Not a synced table: $table" }
+        require(table in countedTables) { "Not a synced or edge table: $table" }
         return "SELECT COUNT(*) FROM main.$table"
     }
 
-    /** The synced tables, in the order [countQuery] is reported. */
-    val tableNames: List<String> = TransportSchema.SYNCED_TABLES_V1.map { it.name }
+    /** The synced tables, then the identity edge tables, in the order [countQuery] is reported. */
+    val tableNames: List<String> = countedTables
 
     private fun columns(table: TableSpec, alias: String? = null): String =
         table.columnNames.joinToString(", ") { if (alias == null) it else "$alias.$it" }
+
+    /** A feed's folder columns, which a file carries from the feed's raw assignment. */
+    private val FEED_FOLDER_COLUMNS = setOf("folder_id", "folder_updated_at")
+
+    /** `(ks_v2_edge.kind, transport edge table)` of the two kinds of identity edge. */
+    private val EDGE_KIND_TABLES = listOf(
+        ID_REMAP_KIND_FOLDER to "folder_v2_edges",
+        ID_REMAP_KIND_TAG to "tag_v2_edges",
+    )
+
+    /**
+     * Where [name]'s rows are read from in the source, as a `FROM` item named [name]. For `feeds`, the
+     * folder assignment comes from the raw row (`ks_feed_folder_raw`) exactly as stored — the source of
+     * truth, possibly naming a folder that is soft-deleted here, or an alias of a folder identity this
+     * device holds no row for ([closureStatements]) — not from the resolved `feeds.folder_id`, which is
+     * NULL whenever that folder is not alive: a receiver ranks the version it gets against its own
+     * raw one ([MergeSql]), and [ReduceSql] folds raw versions, so a file must carry the raw value.
+     * Every other table is read as it is stored.
+     */
+    private fun source(name: String): String {
+        if (name != "feeds") return "$SOURCE.$name"
+        val selected = table(name).columnNames.joinToString(", ") {
+            if (it in FEED_FOLDER_COLUMNS) "r.$it AS $it" else "f.$it AS $it"
+        }
+        return "(SELECT $selected FROM $SOURCE.feeds f LEFT JOIN $SOURCE.ks_feed_folder_raw r ON r.feed_id = f.id) AS feeds"
+    }
 
     /** The keys of [tbl]'s outbox entries up to [s] (`pk`; [column] picks `pk2` for `feed_tags`' tag). */
     private fun outboxKeys(tbl: String, s: Long, column: String = "pk"): String =
@@ -80,7 +114,7 @@ object DeltaExportSql {
                 val spec = table(name)
                 add(
                     "INSERT INTO main.$name (${columns(spec)}) " +
-                        "SELECT ${columns(spec)} FROM $SOURCE.$name WHERE id IN (${outboxKeys(name, s)})",
+                        "SELECT ${columns(spec)} FROM ${source(name)} WHERE id IN (${outboxKeys(name, s)})",
                 )
             }
             add(deltaArticles(s))
@@ -97,7 +131,18 @@ object DeltaExportSql {
                     "SELECT ${columns(settings)} FROM $SOURCE.global_settings WHERE key IN (${outboxKeys("global_settings", s)})",
             )
             addAll(closureStatements)
+            addAll(capturedEdgeStatements(s))
         }
+    }
+
+    /**
+     * The identity edges recorded in the outbox up to [s] (`tbl` `folder_v2_edges` / `tag_v2_edges`, `pk` the
+     * pre-upgrade id and `pk2` the row id — see `ks_capture_v2_edge_insert`), written into the edge tables of an
+     * ordinary delta. `OR IGNORE`: [closureStatements] may already have written the same edge.
+     */
+    private fun capturedEdgeStatements(s: Long): List<String> = EDGE_KIND_TABLES.map { (_, edgeTable) ->
+        "INSERT OR IGNORE INTO main.$edgeTable (v2_id, id) " +
+            "SELECT pk, pk2 FROM $SOURCE.sync_outbox WHERE tbl = '$edgeTable' AND seq <= $s"
     }
 
     private fun deltaArticles(s: Long): String {
@@ -117,29 +162,58 @@ object DeltaExportSql {
     }
 
     /**
-     * A full send: every synced row of the source, with bodies, then [closureStatements]. With
-     * [withExcept], a row identical on every transport column to the [EXCEPT] file's is left out
-     * (`EXCEPT` compares NULLs as equal) — the receivers already get it from that file.
+     * A full send: every synced row of the source, with bodies, then [closureStatements], then the
+     * identity edges ([edgeStatements]). With [withExcept], a synced row identical on every transport
+     * column to the [EXCEPT] file's, and an edge that file already carries, is left out (`EXCEPT`
+     * compares NULLs as equal) — the receivers already get it from that file.
      */
     fun fullStatements(withExcept: Boolean): List<String> = buildList {
-        for (spec in TransportSchema.SYNCED_TABLES_V1) {
+        for (spec in TransportSchema.SYNCED_TABLES) {
             val except = if (withExcept) " EXCEPT SELECT ${columns(spec)} FROM $EXCEPT.${spec.name}" else ""
-            add("INSERT INTO main.${spec.name} (${columns(spec)}) SELECT ${columns(spec)} FROM $SOURCE.${spec.name}$except")
+            add("INSERT INTO main.${spec.name} (${columns(spec)}) SELECT ${columns(spec)} FROM ${source(spec.name)}$except")
         }
         addAll(closureStatements)
+        addAll(edgeStatements(withExcept))
+    }
+
+    /**
+     * Every identity edge of the source's `ks_v2_edge`, split by kind into `folder_v2_edges` /
+     * `tag_v2_edges` — less, with [withExcept], those the [EXCEPT] file carries. Written in full by full
+     * sends (and so by the bases uploaded from one). The v2→v3 re-key creates its edges while capture is
+     * still off, and every device makes a full send when it joins, so those reach the cloud that way. An
+     * edge a pre-delta merge adds to a device that has already joined is recorded in the outbox
+     * (`ks_capture_v2_edge_insert`) and rides in the next ordinary delta ([capturedEdgeStatements]); a
+     * transport merge's edges come from a file the other devices receive too. An ordinary delta otherwise
+     * carries only the edges its folder references need ([closureStatements]).
+     */
+    fun edgeStatements(withExcept: Boolean): List<String> = EDGE_KIND_TABLES.map { (kind, edgeTable) ->
+        val except = if (withExcept) " EXCEPT SELECT v2_id, id FROM $EXCEPT.$edgeTable" else ""
+        // OR IGNORE: the closure may already have written some of them (a folder reference's identity).
+        "INSERT OR IGNORE INTO main.$edgeTable (v2_id, id) SELECT v2_id, id FROM $SOURCE.ks_v2_edge WHERE kind = '$kind'$except"
     }
 
     /**
      * Writes every row the written rows reference and the file does not hold yet: feeds (of the
      * articles and `feed_tags` rows), tags (of the `feed_tags` rows), then folders (of the feeds,
-     * including those just added) — in that order, since a feed added here can bring its folder.
+     * including those just added) — in that order, since a feed added here can bring its folder. A
+     * feed's folder is its raw one ([source]), so a folder soft-deleted here that a feed is still
+     * assigned to is carried too.
+     *
+     * A raw assignment is kept as the file it came from wrote it, so it can name an id this device holds
+     * no row for: an alias of a folder identity that a merge moved onto its canonical id
+     * ([V2IdentitySql]), or one only another device's file used. For such a reference the file also
+     * carries the reference's identity — every folder edge of `ks_v2_edge` in its connected component —
+     * and the folder rows this device holds in that component, so the receiver can resolve it (check 9
+     * accepts a reference that reaches a folder row of the file through the file's edges). The edges
+     * first: the rows written after them would otherwise hide which references needed them. None of
+     * this is subject to a full send's except file, as no closure row is.
      */
     val closureStatements: List<String> = run {
         val feeds = table("feeds")
         val tags = table("tags")
         val folders = table("folders")
         listOf(
-            "INSERT INTO main.feeds (${columns(feeds)}) SELECT ${columns(feeds)} FROM $SOURCE.feeds " +
+            "INSERT INTO main.feeds (${columns(feeds)}) SELECT ${columns(feeds)} FROM ${source("feeds")} " +
                 "WHERE id IN (SELECT feed_id FROM main.articles UNION SELECT feed_id FROM main.feed_tags) " +
                 "AND id NOT IN (SELECT id FROM main.feeds)",
             "INSERT INTO main.tags (${columns(tags)}) SELECT ${columns(tags)} FROM $SOURCE.tags " +
@@ -147,8 +221,26 @@ object DeltaExportSql {
             "INSERT INTO main.folders (${columns(folders)}) SELECT ${columns(folders)} FROM $SOURCE.folders " +
                 "WHERE id IN (SELECT folder_id FROM main.feeds WHERE folder_id IS NOT NULL) " +
                 "AND id NOT IN (SELECT id FROM main.folders)",
+            "$UNRESOLVED_FOLDER_IDENTITY INSERT OR IGNORE INTO main.folder_v2_edges (v2_id, id) " +
+                "SELECT v2_id, id FROM $SOURCE.ks_v2_edge " +
+                "WHERE kind = '$ID_REMAP_KIND_FOLDER' AND (id IN (SELECT node FROM ks_component) OR v2_id IN (SELECT node FROM ks_component))",
+            "$UNRESOLVED_FOLDER_IDENTITY INSERT INTO main.folders (${columns(folders)}) SELECT ${columns(folders)} FROM $SOURCE.folders " +
+                "WHERE id IN (SELECT node FROM ks_component) AND id NOT IN (SELECT id FROM main.folders)",
         )
     }
+
+    /**
+     * The connected component (`ks_component(node)`), over the source's folder edges, of every folder
+     * id a written feed references and the file holds no row for — see [closureStatements].
+     */
+    // A getter, not an initialized property: closureStatements, initialized above, reads it.
+    private val UNRESOLVED_FOLDER_IDENTITY: String get() =
+        "WITH RECURSIVE ks_adj(a, b) AS (" +
+            "SELECT v2_id, id FROM $SOURCE.ks_v2_edge WHERE kind = '$ID_REMAP_KIND_FOLDER' " +
+            "UNION SELECT id, v2_id FROM $SOURCE.ks_v2_edge WHERE kind = '$ID_REMAP_KIND_FOLDER'), " +
+            "ks_component(node) AS (" +
+            "SELECT folder_id FROM main.feeds WHERE folder_id IS NOT NULL AND folder_id NOT IN (SELECT id FROM main.folders) " +
+            "UNION SELECT j.b FROM ks_component c JOIN ks_adj j ON j.a = c.node)"
 
     /**
      * Run last: tables a platform's connection adds to every file it opens for writing — requery's
@@ -162,12 +254,12 @@ object DeltaExportSql {
      * a dangling reference left after [closureStatements] means the source holds a reference to a
      * row it does not have, and receivers would reject the file as corrupt.
      */
-    val closureChecks: List<SyncValidationSql.ClosureCheck> = SyncValidationSql.closureChecks.map { check ->
+    val closureChecks: List<SyncValidationSql.ClosureCheck> = SyncValidationSql.transportClosureChecks.map { check ->
         check.copy(query = qualifyMain(check.query))
     }
 
     private fun qualifyMain(query: String): String =
-        listOf("feeds", "folders", "articles", "feed_tags", "tags").fold(query) { sql, name ->
+        listOf("feeds", "folders", "articles", "feed_tags", "tags", "folder_v2_edges").fold(query) { sql, name ->
             sql.replace(Regex("\\bFROM $name\\b"), "FROM main.$name")
         }
 }

@@ -15,18 +15,19 @@ import works.merc.keryx.app.domain.ColumnKind.TEXT
 object MergeSchema {
 
     /**
-     * Schema version 3's synced tables: transport version 1's tables plus `articles.search_text`.
-     * The device-local bookkeeping tables are not listed: transport files never carry them
-     * ([DeltaExportSql] copies the synced tables only). Keep in sync with [MergeSql] and the `.sq` schema files (a test compares
-     * this with a freshly created database).
+     * Schema version 3's synced tables: the current transport version's tables plus
+     * `articles.search_text`. The device-local bookkeeping tables are not listed: transport files
+     * never carry them ([DeltaExportSql] copies the synced tables only). Keep in sync with
+     * [MergeSql] and the `.sq` schema files (a test compares this with a freshly created database).
      */
-    private val EXPECTED_TABLES_V3: List<TableSpec> = TransportSchema.SYNCED_TABLES_V1.map { table ->
+    private val EXPECTED_TABLES_V3: List<TableSpec> = TransportSchema.SYNCED_TABLES.map { table ->
         if (table.name == "articles") table.withColumnAfter("cached_at", req("search_text", TEXT)) else table
     }
 
     /**
      * Schema version 2: `feeds` still carries its fetch state, `tags` / `folders` have no per-field
-     * stamps yet, and `articles` has no `body_updated_at`.
+     * stamps and no `v2_id` yet (`2.sqm` adds all of them), and `articles` has no
+     * `body_updated_at`.
      */
     private val EXPECTED_TABLES_V2: List<TableSpec> = EXPECTED_TABLES_V3.map { table ->
         when (table.name) {
@@ -34,8 +35,8 @@ object MergeSchema {
                 .withColumnAfter("etag", opt("last_modified", TEXT))
                 .withColumnAfter("last_modified", req("error_count", INTEGER))
                 .withColumnAfter("error_count", opt("last_error", TEXT))
-            "tags" -> table.without("name_updated_at", "color_updated_at", "sort_order_updated_at")
-            "folders" -> table.without("name_updated_at", "sort_order_updated_at")
+            "tags" -> table.without("name_updated_at", "color_updated_at", "sort_order_updated_at", "v2_id")
+            "folders" -> table.without("name_updated_at", "sort_order_updated_at", "v2_id")
             "articles" -> table.without("body_updated_at")
             else -> table
         }

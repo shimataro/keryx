@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.dp
 import org.jetbrains.compose.resources.stringResource
 import works.merc.keryx.app.data.local.db.Tags
 import works.merc.keryx.app.platform.NativeMenuItem
+import works.merc.keryx.app.presentation.home.OrdinalName
 import works.merc.keryx.app.platform.nativeContextMenu
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.home_change_tag_color_menu
@@ -54,6 +55,10 @@ import works.merc.keryx.app.ui.common.KeryxIcons
  * pointer, and it keeps the ghost identical no matter what is underneath it.
  *
  * @param tag The tag represented by the row.
+ * @param label The tag's display name with its ordinal among the tags sharing its name
+ *   ([works.merc.keryx.app.presentation.home.TagFolderLabels]) — a `null` ordinal (the bare name)
+ *   for a uniquely named tag. Applied to the displayed label only; the rename field's initial
+ *   value stays the tag's own name.
  * @param count The number of unread articles associated with the tag.
  * @param expanded Whether attached feeds are displayed.
  * @param selected Whether the tag is the active filter.
@@ -76,6 +81,7 @@ import works.merc.keryx.app.ui.common.KeryxIcons
 @Composable
 internal fun TagRow(
     tag: Tags,
+    label: OrdinalName,
     count: Long,
     expanded: Boolean,
     selected: Boolean,
@@ -195,7 +201,7 @@ internal fun TagRow(
                 // the right never move when editing starts or ends.
                 EditableRowName(
                     editing = editingName,
-                    label = tag.name,
+                    label = nameWithOrdinal(label),
                     editValue = tag.name,
                     onCommit = onRenameCommit,
                     onCancel = onRenameCancel,

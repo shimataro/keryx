@@ -6,7 +6,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
@@ -160,5 +163,46 @@ class EditableRowNameTest {
         onNodeWithTag(INLINE_RENAME_FIELD_TEST_TAG).performKeyInput { pressKey(Key.Enter) }
         waitForIdle()
         assertEquals(emptyList(), committed)
+    }
+
+    @Test
+    fun aValueTheUserHasNotChangedShowsNoErrorEvenWhenItIsRejected() = runDesktopComposeUiTest {
+        setContent {
+            MaterialTheme {
+                Row {
+                    EditableRowName(
+                        editing = true, label = "Work", editValue = "Work", onCommit = {}, onCancel = {},
+                        blockingError = { if (it == "Work") "A tag with this name already exists" else null },
+                    )
+                }
+            }
+        }
+        waitForIdle()
+        // A row whose own name is already shared opens on that name: no red frame, no error reason.
+        onNodeWithTag(INLINE_RENAME_FIELD_TEST_TAG).assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.Error))
+    }
+
+    @Test
+    fun aRejectedEditExposesItsReasonThroughTheFieldSemantics() = runDesktopComposeUiTest {
+        setContent {
+            MaterialTheme {
+                Row {
+                    EditableRowName(
+                        editing = true, label = "Work", editValue = "Work", onCommit = {}, onCancel = {},
+                        blockingError = { if (it == "Job") "A tag with this name already exists" else null },
+                    )
+                }
+            }
+        }
+        waitForIdle()
+        onNodeWithTag(INLINE_RENAME_FIELD_TEST_TAG).performTextReplacement("Job")
+        waitForIdle()
+        onNodeWithTag(INLINE_RENAME_FIELD_TEST_TAG).assert(
+            SemanticsMatcher.expectValue(SemanticsProperties.Error, "A tag with this name already exists"),
+        )
+        // And the reason goes again once the value is acceptable.
+        onNodeWithTag(INLINE_RENAME_FIELD_TEST_TAG).performTextReplacement("Home")
+        waitForIdle()
+        onNodeWithTag(INLINE_RENAME_FIELD_TEST_TAG).assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.Error))
     }
 }

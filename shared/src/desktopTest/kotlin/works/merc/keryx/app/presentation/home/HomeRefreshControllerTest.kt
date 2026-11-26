@@ -24,6 +24,10 @@ import works.merc.keryx.app.domain.RefreshOutcome
 import works.merc.keryx.app.domain.SyncTrigger
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
+import works.merc.keryx.app.insertFeedTag
+import works.merc.keryx.app.insertFolder
+import works.merc.keryx.app.insertTag
+import works.merc.keryx.app.domain.TagFolderIdRemap
 import works.merc.keryx.app.platform.AppDirs
 import works.merc.keryx.app.platform.FileIO
 import works.merc.keryx.app.testThreadDispatcher
@@ -442,6 +446,89 @@ class HomeRefreshControllerTest {
             syncGate.complete(Unit)
             automatic.await()
             h.settle()
+        }
+    }
+
+    // ---- remapPulls: a merge re-keyed the tag or folder a pull was started on ----
+
+    @Test
+    fun aPendingPullFollowsItsTagsReKeyAndIsReleasedByItsOwnEnd() {
+        val gate = CompletableDeferred<Unit>()
+        withController(fetchGate = gate) { h, _, db ->
+            db.insertTag("t-old", "News")
+            db.insertFeedTag("f1", "t-old")
+            h.controller.pullToRefresh(ArticleFilter.Tag("t-old"))
+            h.fixture.awaitFeedRefreshing()
+            assertEquals(setOf<ArticleFilter>(ArticleFilter.Tag("t-old")), h.controller.pullRefreshingFilters.value)
+
+            h.controller.remapPulls(TagFolderIdRemap(tagIds = mapOf("t-old" to "t-new"), folderIds = emptyMap()))
+
+            assertEquals(setOf<ArticleFilter>(ArticleFilter.Tag("t-new")), h.controller.pullRefreshingFilters.value)
+
+            gate.complete(Unit)
+            h.settle()
+
+            assertTrue(h.controller.pullRefreshingFilters.value.isEmpty(), "the pull's end released it under its new id")
+        }
+    }
+
+    @Test
+    fun aPendingFolderPullFollowsItsReKeyAndOtherPullsAreLeftAlone() {
+        val gate = CompletableDeferred<Unit>()
+        withController(fetchGate = gate) { h, _, db ->
+            db.insertFolder("d-old", "Work")
+            db.insertFeed("f3", url = "https://ex.com/f3", folderId = "d-old")
+            h.controller.pullToRefresh(ArticleFilter.Folder("d-old"))
+            h.fixture.awaitFeedRefreshing()
+            h.controller.pullToRefresh(ArticleFilter.Feed("f1"))
+
+            h.controller.remapPulls(TagFolderIdRemap(tagIds = emptyMap(), folderIds = mapOf("d-old" to "d-new")))
+
+            assertEquals(
+                setOf<ArticleFilter>(ArticleFilter.Folder("d-new"), ArticleFilter.Feed("f1")),
+                h.controller.pullRefreshingFilters.value,
+            )
+
+            gate.complete(Unit)
+            h.settle()
+            assertTrue(h.controller.pullRefreshingFilters.value.isEmpty())
+        }
+    }
+
+    @Test
+    fun aRemapThatMovesNothingLeavesThePullsAsTheyAre() {
+        val gate = CompletableDeferred<Unit>()
+        withController(fetchGate = gate) { h, _, _ ->
+            h.controller.pullToRefresh(ArticleFilter.All)
+            h.fixture.awaitFeedRefreshing()
+
+            h.controller.remapPulls(TagFolderIdRemap(tagIds = mapOf("x" to "y"), folderIds = mapOf("p" to "q")))
+            h.controller.remapPulls(TagFolderIdRemap.EMPTY)
+
+            assertEquals(setOf<ArticleFilter>(ArticleFilter.All), h.controller.pullRefreshingFilters.value)
+            gate.complete(Unit)
+            h.settle()
+        }
+    }
+
+    /** A pull started again on the new id while the re-keyed one is still pending is the same list: ignored. */
+    @Test
+    fun aRepeatedPullOnTheNewIdAfterTheReKeyIsIgnored() {
+        val gate = CompletableDeferred<Unit>()
+        withController(fetchGate = gate) { h, _, db ->
+            db.insertTag("t-old", "News")
+            db.insertFeedTag("f1", "t-old")
+            h.controller.pullToRefresh(ArticleFilter.Tag("t-old"))
+            h.fixture.awaitFeedRefreshing()
+            h.controller.remapPulls(TagFolderIdRemap(tagIds = mapOf("t-old" to "t-new"), folderIds = emptyMap()))
+
+            val launched = h.job.children.count()
+            h.controller.pullToRefresh(ArticleFilter.Tag("t-new"))
+
+            assertEquals(launched, h.job.children.count(), "the repeated pull launched nothing")
+            gate.complete(Unit)
+            h.settle()
+            assertTrue(h.controller.pullRefreshingFilters.value.isEmpty())
         }
     }
 }

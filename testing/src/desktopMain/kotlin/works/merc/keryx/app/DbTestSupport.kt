@@ -179,7 +179,7 @@ fun KeryxDatabase.insertFeed(
         sort_order = sortOrder,
     )
     if (folderId != null) {
-        feedsQueries.updateFolder(folderId, now, now, id)
+        feedsQueries.updateFolder(folderId = folderId, updatedAt = now, folderUpdatedAt = now, id = id)
     }
     // A deleted fixture carries its subscription-state timestamp (deleted_updated_at), matching
     // what unsubscribeFeed does, so merge tests resolve deleted_at by that field.
@@ -259,9 +259,9 @@ fun SqlDriver.stampArticleDeleted(id: String, deletedAt: Long?, deletedUpdatedAt
 /**
  * Plays another writer — a sync merge, or a create running elsewhere — that inserts a row named
  * [name] into [table] (`folders` or `tags`) under [otherId] right after the first lookup by name on
- * that table this driver runs. The insert carries `MergeSql`'s own guard (nothing is inserted while a
- * row of that name exists), so it only lands when the lookup came before the caller's own write:
- * exactly the window a create that looks the name up and then writes would race.
+ * that table this driver runs. The insert carries its own guard (nothing is inserted while a row of
+ * that name exists), so it only lands when the lookup came before the caller's own write: exactly the
+ * window a create that looks the name up and then writes would race.
  */
 class SameNameInsertingDriver(
     private val delegate: SqlDriver,
@@ -297,4 +297,70 @@ class SameNameInsertingDriver(
         }
         return result
     }
+}
+
+/**
+ * Re-keys the tag [oldId] onto [newId] the way a sync merge does when it moves a row onto another id
+ * of the same identity: the row is copied under [newId], its `feed_tags` links move with it, the move
+ * is recorded in `ks_id_remap` ([IdRemapSql.record], chains folded), and the old row is deleted —
+ * one transaction, foreign keys satisfied throughout. For tests of what holds a tag id across such a
+ * re-key; [newId] must not exist yet. [beforeNotify] runs after the commit and before the observing
+ * queries are re-run — where a merge publishes the re-key.
+ */
+fun SqlDriver.rekeyTagForTest(oldId: String, newId: String, beforeNotify: () -> Unit = {}) = rekeyForTest(
+    table = "tags",
+    kind = "tag",
+    columns = "name, color, sort_order, deleted_at, updated_at, created_at, name_updated_at, color_updated_at, sort_order_updated_at, v2_id",
+    moveChildren = listOf("UPDATE feed_tags SET tag_id = ? WHERE tag_id = ?"),
+    oldId = oldId,
+    newId = newId,
+    beforeNotify = beforeNotify,
+)
+
+/**
+ * As [rekeyTagForTest], for the folder [oldId]. As in a merge, its feeds' raw assignments
+ * (`ks_feed_folder_raw.folder_id`) are left on [oldId]: the remap is recorded before the old row is
+ * deleted, and the remap triggers resolve `feeds.folder_id` onto [newId] — so nothing references the
+ * old row by the time it goes.
+ */
+fun SqlDriver.rekeyFolderForTest(oldId: String, newId: String, beforeNotify: () -> Unit = {}) = rekeyForTest(
+    table = "folders",
+    kind = "folder",
+    columns = "name, sort_order, deleted_at, updated_at, created_at, name_updated_at, sort_order_updated_at, v2_id",
+    moveChildren = emptyList(),
+    oldId = oldId,
+    newId = newId,
+    beforeNotify = beforeNotify,
+)
+
+private fun SqlDriver.rekeyForTest(
+    table: String,
+    kind: String,
+    columns: String,
+    moveChildren: List<String>,
+    oldId: String,
+    newId: String,
+    beforeNotify: () -> Unit,
+) {
+    object : app.cash.sqldelight.TransacterImpl(this) {}.transaction {
+        execute(null, "INSERT INTO $table (id, $columns) SELECT ?, $columns FROM $table WHERE id = ?", 2) {
+            bindString(0, newId)
+            bindString(1, oldId)
+        }
+        for (sql in moveChildren) {
+            execute(null, sql, 2) {
+                bindString(0, newId)
+                bindString(1, oldId)
+            }
+        }
+        // Recorded before the delete, as the merge's `recordMoves` precedes its delete: a folder's
+        // remap triggers move the resolved `feeds.folder_id` off the old row first.
+        works.merc.keryx.app.domain.IdRemapSql.record(this@rekeyForTest, kind, oldId, newId)
+        execute(null, "DELETE FROM $table WHERE id = ?", 1) { bindString(0, oldId) }
+    }
+    // The raw statements bypass SQLDelight's query notifications; re-run the observing queries as a
+    // merge's commit would — after [beforeNotify], as a merge publishes the re-keys (`DeltaSync`)
+    // before it notifies, so a test can play that order.
+    beforeNotify()
+    notifyListeners(table, "feed_tags", "feeds", "articles")
 }

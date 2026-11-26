@@ -126,7 +126,7 @@ fun feedsForTag(feeds: List<Feeds>, feedTagMap: Map<String, Set<String>>, tagId:
     feeds.filter { tagId in (feedTagMap[it.id] ?: emptySet()) }
 
 /**
- * The display title for the article list pane's current [filter] — shown in its top bar only when
+ * The display name for the article list pane's current [filter] — shown in its top bar only when
  * the pane is rendered at a narrow [PaneLayout] (see `ArticleListTopBar`'s `onNavigateUp`/
  * `title` parameters), since the feed list pane's own selection already conveys this at
  * [PaneLayout.Triple]. Falls back to [allLabel] for a feed/tag/folder id that no
@@ -134,23 +134,26 @@ fun feedsForTag(feeds: List<Feeds>, feedTagMap: Map<String, Set<String>>, tagId:
  * `groupFeedsByFolder`'s own defensive "no folder" treatment. The SwiftUI app shows the same
  * title in the iOS article list's heading, at every width (`HomeObservable.articleListTitle`).
  *
+ * Returns the name together with the ordinal [labels] gave the selected tag/folder
+ * ([HomeViewModel.tagFolderLabels]) — an [OrdinalName] the caller renders through its UI's one
+ * ordinal formatter, since the "name (n)" pattern is localized per UI.
+ *
  * Search has no title of its own here — its own query field replaces this title row entirely
  * while it's expanded (see `ArticleListPane`'s own KDoc) — so [filter] alone (never displaced by
  * search) is what this always reflects.
  */
-fun articleListTitle(
+fun articleListOrdinalName(
     filter: ArticleFilter,
     feeds: List<Feeds>,
-    folders: List<Folders>,
-    tags: List<Tags>,
+    labels: TagFolderLabels,
     allLabel: String,
     starredLabel: String,
-): String = when (filter) {
-    ArticleFilter.All -> allLabel
-    ArticleFilter.Starred -> starredLabel
-    is ArticleFilter.Feed -> feeds.find { it.id == filter.feedId }?.displayTitle() ?: allLabel
-    is ArticleFilter.Folder -> folders.find { it.id == filter.folderId }?.name ?: allLabel
-    is ArticleFilter.Tag -> tags.find { it.id == filter.tagId }?.name ?: allLabel
+): OrdinalName = when (filter) {
+    ArticleFilter.All -> OrdinalName(allLabel, null)
+    ArticleFilter.Starred -> OrdinalName(starredLabel, null)
+    is ArticleFilter.Feed -> OrdinalName(feeds.find { it.id == filter.feedId }?.displayTitle() ?: allLabel, null)
+    is ArticleFilter.Folder -> labels.folders[filter.folderId] ?: OrdinalName(allLabel, null)
+    is ArticleFilter.Tag -> labels.tags[filter.tagId] ?: OrdinalName(allLabel, null)
 }
 
 /**

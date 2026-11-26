@@ -115,6 +115,12 @@ class SyncRepository(
     private val compactionAllowedFlow: () -> Flow<Boolean> = { flowOf(true) },
     /** Issues generation and device ids; [IdGenerator.newId] in production, deterministic in tests. */
     newId: () -> String = IdGenerator::newId,
+    /**
+     * Republishes the tag/folder id re-keys after a merge commits ([TagFolderIdRemaps.publishFromDb]);
+     * the app's one [TagFolderIdRemaps] in production. A lambda, like [cloudProvider], so resolving it
+     * stays lazy. The default (nothing) is for tests that do not observe re-keys.
+     */
+    publishIdRemaps: suspend () -> Unit = {},
 ) : SyncScheduler {
 
     private val mutex = Mutex()
@@ -131,6 +137,7 @@ class SyncRepository(
         newId = newId,
         compactionAllowed = { compactionAllowedFlow().first() },
         setPhase = { _syncPhase.value = it },
+        publishIdRemaps = publishIdRemaps,
     )
 
     /** Interrupts or observes a sync at a [SyncHookPoint]; for tests only. */
@@ -278,10 +285,9 @@ class SyncRepository(
      * Disconnect" in sync-architecture.md) — when the connection is being torn down, so a
      * subsequently-connected provider does not inherit any of it. Its first sync joins afresh.
      *
-     * `ks_feed_folder_raw` goes too: the merge ranks an incoming folder version against the raw
-     * version recorded there, so a row left from the old provider's files could reject the next
-     * provider's version at an equal stamp. With it gone, the next merge reseeds each row from the
-     * feed's own folder.
+     * The feeds' raw folder assignments (`ks_feed_folder_raw`) are kept: they are this device's
+     * data — what `feeds.folder_id` is resolved from and what a send carries — not a record of the
+     * old provider's files.
      *
      * Runs under [mutex], the same lock [sync] holds: without it, a sync already past its commit
      * could re-write the bookkeeping *after* this cleared it, handing the next connection the old

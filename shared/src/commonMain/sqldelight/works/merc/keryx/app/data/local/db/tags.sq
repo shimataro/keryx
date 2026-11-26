@@ -1,8 +1,14 @@
 -- Tags for organizing feeds. Soft-deleted (deleted_at). Timestamp-last-wins sync.
+-- name is not UNIQUE: same-named tags are allowed (a rename on one device can cross a same-named
+-- creation on another), and the UI tells them apart with an ordinal (NameOrdinals). A tag's id is
+-- the UUIDv5 its creation-time name derives from (IdGenerator.tagId), so independently created
+-- same-named tags share an id and converge in the merge; rows can still share a name once a rename
+-- crosses a creation, and every path that resolves a tag by name (creation, reactivation) reuses
+-- one canonical row (see getByName).
 
 CREATE TABLE tags (
     id         TEXT    NOT NULL PRIMARY KEY,
-    name       TEXT    NOT NULL UNIQUE,
+    name       TEXT    NOT NULL,
     color      TEXT,
     sort_order INTEGER NOT NULL DEFAULT 0,
     deleted_at INTEGER,
@@ -10,8 +16,24 @@ CREATE TABLE tags (
     created_at INTEGER NOT NULL,
     name_updated_at       INTEGER,
     color_updated_at      INTEGER,
-    sort_order_updated_at INTEGER
+    sort_order_updated_at INTEGER,
+    -- The id this row carried before the v2->v3 migration re-keyed it (TagFolderIdRekey). NULL for
+    -- a row created after the migration. The sync merge links rows sharing it into one identity
+    -- through its edge in ks_v2_edge (V2IdentitySql); the column itself decides nothing, and a merge
+    -- keeps the greatest non-NULL value of the rows it folds together (see docs/db-schema.md).
+    v2_id                 TEXT
 );
+
+CREATE INDEX tags_name ON tags(name);
+
+-- A write that takes a tag id resolves it first (ks_id_remap, see sync_bookkeeping.sq): an id whose
+-- row is gone because a merge re-keyed it names the row it became, so a write the UI issued with
+-- the id it held before the re-key (an open rename field, a queued feed-list write, a drag) lands on
+-- that row instead of matching nothing. The resolution is an expression inside the write statement
+-- itself, so no write is preceded by a read of its own and nothing can re-key the id in between:
+--   COALESCE((SELECT id FROM tags WHERE id = :id),
+--            (SELECT new_id FROM ks_id_remap WHERE kind = 'tag' AND old_id = :id), :id)
+-- An existing row's id resolves to itself. 'tag' is ID_REMAP_KIND_TAG (TagFolderIdRekey.kt).
 
 watchAll:
 SELECT * FROM tags WHERE deleted_at IS NULL ORDER BY sort_order ASC, name COLLATE NOCASE ASC;
@@ -19,8 +41,17 @@ SELECT * FROM tags WHERE deleted_at IS NULL ORDER BY sort_order ASC, name COLLAT
 getById:
 SELECT * FROM tags WHERE id = ?;
 
+-- The id a tag id given to a write resolves to (see the note above): the id itself while a row has
+-- it, else the id ks_id_remap maps it to, else the id unchanged.
+resolveId:
+SELECT COALESCE((SELECT id FROM tags WHERE id = :id), (SELECT new_id FROM ks_id_remap WHERE kind = 'tag' AND old_id = :id), :id);
+
+-- The canonical tag of :name: an alive row over a deleted one, then the earliest created_at, then
+-- the smallest id. Same-named rows may exist, so every by-name lookup (creation, reactivation and
+-- the sync merge's name resolution) must land on this same row — keep the order in step with
+-- reactivateByName below.
 getByName:
-SELECT * FROM tags WHERE name = ?;
+SELECT * FROM tags WHERE name = ? ORDER BY deleted_at IS NOT NULL, created_at ASC, id ASC LIMIT 1;
 
 -- Every local write to a tag row stamps updated_at as MAX(now, previous + 1): never at or before the
 -- stamp the row already has. A delete and a recreation within one millisecond already move it ahead
@@ -59,24 +90,78 @@ ON CONFLICT(id) DO UPDATE SET
     sort_order_updated_at = CASE WHEN sort_order IS NOT excluded.sort_order
         THEN MAX(excluded.updated_at, COALESCE(sort_order_updated_at, 0) + 1) ELSE sort_order_updated_at END;
 
--- Creates the tag named :name, or reactivates the existing one of that name in place (same id,
--- sort_order and created_at kept; a null :color keeps its color). The name conflict is resolved by
--- the statement itself rather than by a lookup before it, so a row of the same name that another
--- writer (a sync merge, a concurrent create) inserted in between is reused instead of failing
--- UNIQUE(name). :id is used only when no row has the name. A reactivation's updated_at moves forward
--- like every local write (see upsert). A new row stamps every per-field stamp with :now; a
+-- The two halves of a create-by-name (the repository runs them in one transaction, reactivate first):
+--
+-- reactivateByName reactivates the canonical tag named :name in place (same id, sort_order and
+-- created_at kept; a null :color keeps its color) when one exists, alive or soft-deleted — with no
+-- UNIQUE(name) there may be several same-named rows, and this UPDATE lands on exactly the one
+-- getByName returns. It matches nothing when no row has the name.
+--
+-- insertIfNameAbsent then inserts a new tag when no row of the name exists at all. The guard is in
+-- the statement rather than in a lookup before it, so a same-named row another writer (a sync merge,
+-- a concurrent create) inserted before this statement in the same transaction is reused rather than
+-- doubled. A new tag's id is the one its name derives from (IdGenerator.tagId) — so two devices that
+-- create the same name independently converge on one row in the sync merge — unless that id is
+-- already held (a row renamed off the name keeps its id), in which case :randomId is used; the
+-- choice sits in the statement, not in a lookup before it, so no concurrent write can slip between
+-- the check and the insert. :randomId is only ever reached when :nameDerivedId is held, so exactly
+-- one of the two is inserted. An id ks_id_remap maps elsewhere counts as held too: a merge re-keyed
+-- the row that had it onto another id, and a write resolving a stale id (see the note above) would
+-- otherwise land on that other row instead of this new one — so no row ever carries an id
+-- ks_id_remap maps.
+--
+-- Exactly one of the two writes: a row of the name exists -> reactivateByName (whose updated_at
+-- always moves forward, so it always writes) and insertIfNameAbsent no-ops; none exists ->
+-- reactivateByName matches nothing and insertIfNameAbsent writes. The transaction therefore always
+-- writes before the repository reads the id back. A reactivation's updated_at moves forward like
+-- every local write (see upsert); a new row stamps every per-field stamp with :now, and a
 -- reactivation moves color_updated_at only when it actually changes the color (see upsert).
-upsertByName:
+reactivateByName:
+UPDATE tags SET
+    deleted_at = NULL,
+    updated_at = MAX(:now, updated_at + 1),
+    color = COALESCE(:color, color),
+    color_updated_at = CASE WHEN color IS NOT COALESCE(:color, color)
+        THEN MAX(:now, COALESCE(color_updated_at, 0) + 1) ELSE color_updated_at END
+WHERE id = (
+    SELECT id FROM tags WHERE name = :name
+    ORDER BY deleted_at IS NOT NULL, created_at ASC, id ASC
+    LIMIT 1
+);
+
+insertIfNameAbsent:
 INSERT INTO tags (
     id, name, color, sort_order, deleted_at, updated_at, created_at,
     name_updated_at, color_updated_at, sort_order_updated_at
 )
-VALUES (:id, :name, :color, 0, NULL, :now, :now, :now, :now, :now)
-ON CONFLICT(name) DO UPDATE SET
-    color = COALESCE(excluded.color, color), deleted_at = NULL, updated_at = MAX(excluded.updated_at, updated_at + 1),
-    color_updated_at = CASE WHEN color IS NOT COALESCE(excluded.color, color)
-        THEN MAX(excluded.updated_at, COALESCE(color_updated_at, 0) + 1) ELSE color_updated_at END;
+SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM tags WHERE id = :nameDerivedId)
+        AND NOT EXISTS (SELECT 1 FROM ks_id_remap WHERE kind = 'tag' AND old_id = :nameDerivedId)
+        THEN :nameDerivedId ELSE :randomId END,
+    :name, :color, 0, NULL, :now, :now, :now, :now, :now
+WHERE NOT EXISTS (SELECT 1 FROM tags WHERE name = :name);
 
--- updated_at moves forward like every local write (see upsert).
+-- A rename of an existing tag (TagRepository.renameTag) writes the name alone, and a recolor
+-- (TagRepository.setTagColor) the color alone, so neither writes back a value the caller read
+-- before another writer (a sync merge) changed it — the other field, the sort order, the deletion.
+-- Every SET expression reads the row's values from before the update, so the field's stamp moves
+-- (forward, as in upsert) only when the field changes. :id is resolved (see the note above).
+updateName:
+UPDATE tags SET
+    name_updated_at = CASE WHEN name IS NOT :name
+        THEN MAX(:now, COALESCE(name_updated_at, 0) + 1) ELSE name_updated_at END,
+    name = :name,
+    updated_at = MAX(:now, updated_at + 1)
+WHERE id = COALESCE((SELECT id FROM tags WHERE id = :id), (SELECT new_id FROM ks_id_remap WHERE kind = 'tag' AND old_id = :id), :id);
+
+updateColor:
+UPDATE tags SET
+    color_updated_at = CASE WHEN color IS NOT :color
+        THEN MAX(:now, COALESCE(color_updated_at, 0) + 1) ELSE color_updated_at END,
+    color = :color,
+    updated_at = MAX(:now, updated_at + 1)
+WHERE id = COALESCE((SELECT id FROM tags WHERE id = :id), (SELECT new_id FROM ks_id_remap WHERE kind = 'tag' AND old_id = :id), :id);
+
+-- updated_at moves forward like every local write (see upsert). :id is resolved (see the note above).
 softDelete:
-UPDATE tags SET deleted_at = ?, updated_at = MAX(?, updated_at + 1) WHERE id = ?;
+UPDATE tags SET deleted_at = :deleted_at, updated_at = MAX(:updated_at, updated_at + 1)
+WHERE id = COALESCE((SELECT id FROM tags WHERE id = :id), (SELECT new_id FROM ks_id_remap WHERE kind = 'tag' AND old_id = :id), :id);

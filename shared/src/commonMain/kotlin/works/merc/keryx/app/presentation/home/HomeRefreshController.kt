@@ -18,6 +18,8 @@ import works.merc.keryx.app.domain.RefreshCycleRunner
 import works.merc.keryx.app.domain.RefreshOutcome
 import works.merc.keryx.app.domain.RefreshCycleRunner.CycleOutcome
 import works.merc.keryx.app.domain.SyncTrigger
+import works.merc.keryx.app.domain.TagFolderIdRemap
+import works.merc.keryx.app.presentation.derived
 
 /**
  * The refresh actions of [HomeViewModel] — toolbar and menu "refresh all", pull-to-refresh, and a
@@ -44,7 +46,10 @@ internal class HomeRefreshController(
     private val currentFilter: () -> ArticleFilter,
     private val retrimPins: () -> Unit,
 ) {
-    private val _pullRefreshingFilters = MutableStateFlow<Set<ArticleFilter>>(emptySet())
+    // Each pull still pending, by a token of its own, under the filter it is shown for. Keyed by token
+    // rather than by filter so a pull whose tag or folder a merge re-keys meanwhile ([remapPulls]) is
+    // still released by its own end, under whatever id it is shown by then.
+    private val pulls = MutableStateFlow<Map<Long, ArticleFilter>>(emptyMap())
 
     /**
      * The selections whose pull-to-refresh ([pullToRefresh]) is still refreshing — until the refresh
@@ -57,7 +62,19 @@ internal class HomeRefreshController(
      * Deliberately not derived from the [ActivityCenter] state: that would show the indicator on
      * every background refresh the user never asked for.
      */
-    val pullRefreshingFilters: StateFlow<Set<ArticleFilter>> = _pullRefreshingFilters.asStateFlow()
+    val pullRefreshingFilters: StateFlow<Set<ArticleFilter>> = pulls.derived { it.values.toSet() }
+
+    /**
+     * Moves every pending pull's filter onto the id its tag or folder has now — after a merge re-keyed
+     * it ([works.merc.keryx.app.domain.TagFolderIdRemaps]), so the list it was started on, now under
+     * the new id, keeps showing it. Each pull still ends by its own token.
+     */
+    fun remapPulls(remap: TagFolderIdRemap) {
+        pulls.update { current ->
+            val moved = current.mapValues { (_, filter) -> remap.filter(filter) }
+            if (moved == current) current else moved
+        }
+    }
 
     private val _manualRefreshStatus = MutableStateFlow<ManualRefreshStatus>(ManualRefreshStatus.Idle)
 
@@ -116,12 +133,20 @@ internal class HomeRefreshController(
      * ([ArticleFilter.All]). The pull is tracked under [filter] in [pullRefreshingFilters].
      */
     fun pullToRefresh(filter: ArticleFilter) {
-        var added = false
-        _pullRefreshingFilters.update { current ->
-            added = filter !in current
-            current + filter
+        var token: Long? = null
+        pulls.update { current ->
+            if (filter in current.values) {
+                token = null
+                current
+            } else {
+                // One past the greatest pending token: unique among the pending pulls, which is all
+                // a token has to be, and computed from the value the update applies to.
+                val next = (current.keys.maxOrNull() ?: 0L) + 1
+                token = next
+                current + (next to filter)
+            }
         }
-        if (!added) return
+        val pull = token ?: return
         scope.launch {
             // Released once: when a started cycle's refresh stage ends (it then goes on to sync), or
             // otherwise once runCycle and the wait below have returned.
@@ -129,7 +154,7 @@ internal class HomeRefreshController(
             fun release() {
                 if (released) return
                 released = true
-                _pullRefreshingFilters.update { it - filter }
+                pulls.update { it - pull }
             }
             try {
                 val outcome = runCycle(filter) { refreshEnded ->

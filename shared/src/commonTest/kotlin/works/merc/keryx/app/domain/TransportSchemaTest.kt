@@ -95,8 +95,9 @@ class TransportSchemaTest {
         assertNull(TransportSchema.migrationPath(0, 3, steps))
         assertNull(TransportSchema.migrationPath(4, 3, steps))
         assertNull(TransportSchema.migrationPath(1, 3, steps.take(1)))
-        // The current registry: version 1 needs nothing, and nothing leads to it.
+        // The current registry: version 2 needs nothing, version 1 migrates up to 2.
         assertEquals(emptyList(), TransportSchema.migrationPath(TransportSchema.VERSION))
+        assertEquals(TransportSchema.MIGRATIONS, TransportSchema.migrationPath(1))
         assertNull(TransportSchema.migrationPath(0))
     }
 
@@ -129,7 +130,7 @@ class TransportSchemaTest {
 
     @Test
     fun transportArticlesHaveNoSearchTextButTheLocalSchemaDoes() {
-        val transport = TransportSchema.SYNCED_TABLES_V1.first { it.name == "articles" }.columnNames
+        val transport = TransportSchema.SYNCED_TABLES.first { it.name == "articles" }.columnNames
         val local = MergeSchema.EXPECTED_TABLES.getValue(3L).first { it.name == "articles" }.columnNames
         assertTrue("search_text" !in transport)
         assertEquals(local - "search_text", transport)

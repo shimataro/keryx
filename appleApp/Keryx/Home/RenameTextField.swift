@@ -77,7 +77,15 @@ struct RenameTextField: NSViewRepresentable {
         }
 
         func controlTextDidEndEditing(_ notification: Notification) {
-            parent.onFocusLost()
+            // Taking the field out of its window ends its editing too, from inside the removal — its
+            // row rebuilt under a re-keyed id, say — and that is no focus loss by the user: committing
+            // there would write the half-typed text and end an edit that moves on. A real focus loss
+            // (a click on another row) leaves the field in its window, so it is judged one turn later.
+            guard let field = notification.object as? NSTextField else { return }
+            DispatchQueue.main.async { [weak self, weak field] in
+                guard let self, let field, field.window != nil else { return }
+                self.parent.onFocusLost()
+            }
         }
     }
 }

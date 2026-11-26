@@ -7,6 +7,7 @@ import works.merc.keryx.app.data.local.LocalSettingsStore
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SyncScheduler
+import works.merc.keryx.app.domain.TagFolderIdRemap
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
 import works.merc.keryx.app.insertFolder
@@ -168,5 +169,26 @@ class FeedListExpansionTest {
         assertEquals(emptySet(), expansion.expandedTagIds.value)
         assertEquals(emptySet(), persisted().collapsedFolderIds)
         assertEquals(emptySet(), persisted().expandedTagIds)
+    }
+
+    /** A re-key moves a collapsed folder and an expanded tag onto their new ids, persisted; again, nothing. */
+    @Test
+    fun remapMovesTheIdsAndPersistsOnlyAChange() {
+        settingsRepository().mutateLocalSettings {
+            it.copy(collapsedFolderIds = setOf("d-old", "d-kept"), expandedTagIds = setOf("t-old"))
+        }
+        val expansion = FeedListExpansion(settingsRepository())
+        val remap = TagFolderIdRemap(tagIds = mapOf("t-old" to "t-new"), folderIds = mapOf("d-old" to "d-new"))
+
+        expansion.remap(remap)
+
+        assertEquals(setOf("d-new", "d-kept"), expansion.collapsedFolderIds.value)
+        assertEquals(setOf("t-new"), expansion.expandedTagIds.value)
+        assertEquals(setOf("d-new", "d-kept"), persisted().collapsedFolderIds)
+        assertEquals(setOf("t-new"), persisted().expandedTagIds)
+
+        val before = expansion.collapsedFolderIds.value
+        expansion.remap(remap)
+        assertTrue(before === expansion.collapsedFolderIds.value, "an idempotent re-application sets nothing")
     }
 }

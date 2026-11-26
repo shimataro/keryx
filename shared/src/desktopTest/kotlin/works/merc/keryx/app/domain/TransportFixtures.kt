@@ -48,7 +48,7 @@ internal object TransportFixtures {
     fun connect(file: File): Connection = DriverManager.getConnection("jdbc:sqlite:${file.absolutePath}")
 
     /**
-     * Merges the transport file [cloud] into the local database [local] with [MergeSql.all] on one
+     * Merges the transport file [cloud] into the local database [local] with [MergeSql.transport] on one
      * connection, in one transaction, foreign keys on — the statements as `DatabaseMerger.merge`
      * runs them, without its pre-delta migration step (which does not apply to a transport file).
      */
@@ -59,7 +59,7 @@ internal object TransportFixtures {
                 st.execute("ATTACH DATABASE '${cloud.absolutePath.replace("'", "''")}' AS cloud")
             }
             conn.autoCommit = false
-            conn.createStatement().use { st -> MergeSql.all.forEach(st::execute) }
+            conn.createStatement().use { st -> MergeSql.transport.forEach(st::execute) }
             conn.commit()
             conn.autoCommit = true
             conn.createStatement().use { it.execute("DETACH DATABASE cloud") }
@@ -73,7 +73,7 @@ internal object TransportFixtures {
     /**
      * Every synced column of every synced table (plus the coverage tables when [coverage]), ordered by
      * key. With [local] (a local database only), also the merge's own state that later merges read:
-     * `ks_feed_folder_raw`, the raw folder version each feed's resolved folder came from.
+     * `ks_feed_folder_raw`, each feed's raw folder assignment (what its resolved folder comes from).
      */
     fun dump(file: File, coverage: Boolean = false, local: Boolean = false): Map<String, List<String>> = connect(file).use { conn ->
         fun rows(sql: String, columnCount: Int): List<String> = conn.createStatement().use { st ->
@@ -83,7 +83,7 @@ internal object TransportFixtures {
                 }
             }
         }
-        val tables = TransportSchema.SYNCED_TABLES_V1 + if (coverage) TransportSchema.META_TABLES.filter { it.name != "ks_meta" } else emptyList()
+        val tables = TransportSchema.SYNCED_TABLES + if (coverage) TransportSchema.META_TABLES.filter { it.name != "ks_meta" } else emptyList()
         val synced = tables.associate { table ->
             val sql = "SELECT ${table.columnNames.joinToString(", ")} FROM ${table.name} ORDER BY ${table.primaryKey.joinToString(", ")}"
             table.name to rows(sql, table.columnNames.size)
@@ -112,24 +112,25 @@ internal object TransportFixtures {
 
     fun folder(
         id: String, name: String, updatedAt: Long = 100, createdAt: Long = 100, deletedAt: Long? = null,
-        nameAt: Long? = updatedAt, sortOrder: Long = 0, sortAt: Long? = updatedAt,
+        nameAt: Long? = updatedAt, sortOrder: Long = 0, sortAt: Long? = updatedAt, v2Id: String? = null,
     ) = insert(
         "folders",
         mapOf(
             "id" to id, "name" to name, "sort_order" to sortOrder, "deleted_at" to deletedAt, "updated_at" to updatedAt,
-            "created_at" to createdAt, "name_updated_at" to nameAt, "sort_order_updated_at" to sortAt,
+            "created_at" to createdAt, "name_updated_at" to nameAt, "sort_order_updated_at" to sortAt, "v2_id" to v2Id,
         ),
     )
 
     fun tag(
         id: String, name: String, updatedAt: Long = 100, createdAt: Long = 100, deletedAt: Long? = null,
-        nameAt: Long? = updatedAt, color: String? = null, colorAt: Long? = updatedAt, sortOrder: Long = 0, sortAt: Long? = updatedAt,
+        nameAt: Long? = updatedAt, color: String? = null, colorAt: Long? = updatedAt, sortOrder: Long = 0,
+        sortAt: Long? = updatedAt, v2Id: String? = null,
     ) = insert(
         "tags",
         mapOf(
             "id" to id, "name" to name, "color" to color, "sort_order" to sortOrder, "deleted_at" to deletedAt,
             "updated_at" to updatedAt, "created_at" to createdAt, "name_updated_at" to nameAt,
-            "color_updated_at" to colorAt, "sort_order_updated_at" to sortAt,
+            "color_updated_at" to colorAt, "sort_order_updated_at" to sortAt, "v2_id" to v2Id,
         ),
     )
 

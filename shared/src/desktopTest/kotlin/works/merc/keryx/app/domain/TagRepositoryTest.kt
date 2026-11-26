@@ -10,8 +10,10 @@ import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
 import works.merc.keryx.app.insertFeedTag
 import works.merc.keryx.app.insertTag
+import works.merc.keryx.app.rekeyTagForTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -47,6 +49,48 @@ class TagRepositoryTest {
             assertEquals("#ff0000", row.color)
             assertNull(row.deleted_at)
             assertEquals(1, scheduler.callCount)
+        } finally {
+            driver.close()
+        }
+    }
+
+    /** A new tag's id is the one its name derives from, so devices converge on the same row. */
+    @Test
+    fun createTagAssignsTheNameDerivedId() {
+        val (driver, db) = inMemoryDb()
+        try {
+            val repo = newRepo(db, clock = Clock { 100L })
+
+            val id = repo.createTag("Kotlin", "#ff0000")
+
+            assertEquals(IdGenerator.tagId("Kotlin"), id)
+            assertEquals(listOf(id), db.tagsQueries.watchAll().executeAsList().map { it.id })
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
+     * When the derived id is already held — a row renamed off the name keeps its id — the creation
+     * falls back to the id source instead of colliding with that row.
+     */
+    @Test
+    fun createTagFallsBackToTheIdSourceWhenTheDerivedIdIsTaken() {
+        val (driver, db) = inMemoryDb()
+        try {
+            // A row renamed off the name keeps its id: it holds the id "Kotlin" would derive.
+            db.tagsQueries.upsert(
+                id = IdGenerator.tagId("Kotlin"), name = "Renamed away", color = null, sort_order = 0L,
+                deleted_at = null, updated_at = 20L, created_at = 10L,
+            )
+            val repo = newRepo(db, clock = Clock { 100L })
+
+            val id = repo.createTag("Kotlin", "#ff0000")
+
+            assertNotEquals(IdGenerator.tagId("Kotlin"), id, "the derived id is held by the renamed row")
+            assertEquals(listOf(id, IdGenerator.tagId("Kotlin")).sorted(), db.tagsQueries.watchAll().executeAsList().map { it.id }.sorted())
+            assertEquals("Kotlin", db.tagsQueries.getById(id).executeAsOne().name)
+            assertEquals("Renamed away", db.tagsQueries.getById(IdGenerator.tagId("Kotlin")).executeAsOne().name)
         } finally {
             driver.close()
         }
@@ -95,7 +139,7 @@ class TagRepositoryTest {
             val recreated = db.tagsQueries.getById(id).executeAsOne().updated_at
 
             now = 101L
-            repo.updateTag(id, "Kotlin", "#00ff00")
+            repo.setTagColor(id, "#00ff00")
 
             val row = db.tagsQueries.getById(id).executeAsOne()
             assertTrue(row.updated_at > recreated)
@@ -114,7 +158,7 @@ class TagRepositoryTest {
             val id = repo.createTag("Kotlin")
 
             now = 5_000L
-            repo.updateTag(id, "Renamed", null)
+            repo.renameTag(id, "Renamed")
 
             assertEquals(5_000L, db.tagsQueries.getById(id).executeAsOne().updated_at)
         } finally {
@@ -189,18 +233,20 @@ class TagRepositoryTest {
     }
 
     @Test
-    fun updateTagUpdatesNameAndColorAndPersists() {
+    fun renameTagUpdatesTheNameOnlyAndPersists() {
         val (driver, db) = inMemoryDb()
         try {
-            db.insertTag("t1", "Old", now = 10L)
+            db.insertTag("t1", "Old", now = 10L, color = "#111111")
             val scheduler = TagCountingSyncScheduler()
             val repo = newRepo(db, syncScheduler = scheduler, clock = Clock { 200L })
 
-            repo.updateTag("t1", "New", "#00ff00")
+            repo.renameTag("t1", "New")
 
             val row = db.tagsQueries.getById("t1").executeAsOne()
             assertEquals("New", row.name)
-            assertEquals("#00ff00", row.color)
+            assertEquals(200L, row.name_updated_at)
+            assertEquals("#111111", row.color, "a rename leaves the color alone")
+            assertEquals(10L, row.color_updated_at, "a rename leaves the color stamp alone")
             assertEquals(200L, row.updated_at)
             assertEquals(1, scheduler.callCount)
         } finally {
@@ -209,16 +255,116 @@ class TagRepositoryTest {
     }
 
     @Test
-    fun updateTagOnMissingTagIsNoOp() {
+    fun setTagColorUpdatesTheColorOnlyAndPersists() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertTag("t1", "Old", now = 10L)
+            val scheduler = TagCountingSyncScheduler()
+            val repo = newRepo(db, syncScheduler = scheduler, clock = Clock { 200L })
+
+            repo.setTagColor("t1", "#00ff00")
+
+            var row = db.tagsQueries.getById("t1").executeAsOne()
+            assertEquals("#00ff00", row.color)
+            assertEquals(200L, row.color_updated_at)
+            assertEquals("Old", row.name, "a recolor leaves the name alone")
+            assertEquals(10L, row.name_updated_at, "a recolor leaves the name stamp alone")
+            assertEquals(200L, row.updated_at)
+            assertEquals(1, scheduler.callCount)
+
+            repo.setTagColor("t1", null)
+
+            row = db.tagsQueries.getById("t1").executeAsOne()
+            assertNull(row.color, "a null color clears it")
+            assertEquals(201L, row.color_updated_at)
+            assertEquals(2, scheduler.callCount)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun renamingOrRecoloringAMissingTagIsNoOp() {
         val (driver, db) = inMemoryDb()
         try {
             val scheduler = TagCountingSyncScheduler()
             val repo = newRepo(db, syncScheduler = scheduler)
 
-            repo.updateTag("missing", "New", null)
+            repo.renameTag("missing", "New")
+            repo.setTagColor("missing", "#00ff00")
 
             assertEquals(0, scheduler.callCount)
             assertNull(db.tagsQueries.getById("missing").executeAsOneOrNull())
+            assertTrue(db.tagsQueries.watchAll().executeAsList().isEmpty())
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
+     * A rename issued with the id a merge has since re-keyed (an open rename sheet) lands on the
+     * canonical tag and leaves its color and color stamp alone — the caller, holding only the stale
+     * id, could not have read that color back to write it.
+     */
+    @Test
+    fun renamingByAStaleIdKeepsTheCanonicalTagsColor() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertTag("t-old", "Work", now = 10L, color = "#111111")
+            driver.rekeyTagForTest("t-old", "t-new")
+            val repo = newRepo(db, clock = Clock { 200L })
+
+            repo.renameTag("t-old", "Office")
+
+            val row = db.tagsQueries.getById("t-new").executeAsOne()
+            assertEquals("Office", row.name)
+            assertEquals("#111111", row.color)
+            assertEquals(10L, row.color_updated_at)
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
+     * A merge that changes the color after the caller read the tag (and before its rename lands) is
+     * not undone by the rename, and a merge that changes the name is not undone by a recolor.
+     */
+    @Test
+    fun aRenameNeverWritesBackAColorAMergeChangedMeanwhile() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertTag("t1", "Work", now = 10L, color = "#111111")
+            val repo = newRepo(db, clock = Clock { 200L })
+            // The caller reads the tag (#111111), then a merge brings another device's color in.
+            db.tagsQueries.getById("t1").executeAsOne()
+            driver.execute(null, "UPDATE tags SET color = '#222222', color_updated_at = 150 WHERE id = 't1'", 0)
+
+            repo.renameTag("t1", "Office")
+
+            val row = db.tagsQueries.getById("t1").executeAsOne()
+            assertEquals("Office", row.name)
+            assertEquals("#222222", row.color)
+            assertEquals(150L, row.color_updated_at)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun aRecolorNeverWritesBackANameAMergeChangedMeanwhile() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertTag("t1", "Work", now = 10L, color = "#111111")
+            val repo = newRepo(db, clock = Clock { 200L })
+            db.tagsQueries.getById("t1").executeAsOne()
+            driver.execute(null, "UPDATE tags SET name = 'Office', name_updated_at = 150 WHERE id = 't1'", 0)
+
+            repo.setTagColor("t1", "#333333")
+
+            val row = db.tagsQueries.getById("t1").executeAsOne()
+            assertEquals("Office", row.name)
+            assertEquals(150L, row.name_updated_at)
+            assertEquals("#333333", row.color)
         } finally {
             driver.close()
         }
@@ -443,6 +589,99 @@ class TagRepositoryTest {
         }
     }
 
+    // --- Names are not unique: the canonical row is reused, and a rename may cross any name ---
+
+    @Test
+    fun createTagReusesTheEarliestCreatedAliveRowOfTheName() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertTag("t-late", "Kotlin", now = 20L)
+            db.insertTag("t-early", "Kotlin", now = 10L)
+            val repo = newRepo(db, clock = Clock { 100L })
+
+            val id = repo.createTag("Kotlin")
+
+            assertEquals("t-early", id)
+            assertEquals(2, db.tagsQueries.watchAll().executeAsList().size)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun createTagPrefersAnAliveSameNamedRowOverAnEarlierDeletedOne() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertTag("t-deleted", "Kotlin", now = 5L, deletedAt = 6L)
+            db.insertTag("t-alive", "Kotlin", now = 10L)
+            val repo = newRepo(db, clock = Clock { 100L })
+
+            val id = repo.createTag("Kotlin")
+
+            assertEquals("t-alive", id)
+            // The earlier deleted twin stays deleted; no row was created.
+            assertNotNull(db.tagsQueries.getById("t-deleted").executeAsOne().deleted_at)
+            assertEquals(listOf("t-alive"), db.tagsQueries.watchAll().executeAsList().map { it.id })
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun createTagOnOnlyDeletedSameNamedRowsReactivatesTheEarliest() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertTag("t-late", "Kotlin", now = 20L, deletedAt = 21L)
+            db.insertTag("t-early", "Kotlin", now = 10L, deletedAt = 11L)
+            val repo = newRepo(db, clock = Clock { 100L })
+
+            val id = repo.createTag("Kotlin")
+
+            assertEquals("t-early", id)
+            assertNull(db.tagsQueries.getById("t-early").executeAsOneOrNull()?.deleted_at)
+            // The later twin stays deleted.
+            assertNotNull(db.tagsQueries.getById("t-late").executeAsOne().deleted_at)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun renameTagMayRenameOntoANameAnAliveRowHolds() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertTag("t1", "Old", now = 10L)
+            db.insertTag("t2", "New", now = 10L)
+            val repo = newRepo(db, clock = Clock { 200L })
+
+            repo.renameTag("t1", "New")
+
+            // No UNIQUE(name) blocks it: both rows keep their ids under the shared name, and the UI
+            // numbers them.
+            assertEquals("New", db.tagsQueries.getById("t1").executeAsOne().name)
+            assertEquals("New", db.tagsQueries.getById("t2").executeAsOne().name)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun renameTagMayRenameOntoANameADeletedRowHolds() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertTag("t1", "Old", now = 10L)
+            db.insertTag("t2", "New", now = 10L, deletedAt = 20L)
+            val repo = newRepo(db, clock = Clock { 200L })
+
+            repo.renameTag("t1", "New")
+
+            assertEquals("New", db.tagsQueries.getById("t1").executeAsOne().name)
+            assertNotNull(db.tagsQueries.getById("t2").executeAsOne().deleted_at)
+        } finally {
+            driver.close()
+        }
+    }
+
     // --- A same-named tag another writer inserts mid-call (a sync merge, a concurrent create) ---
 
     @Test
@@ -550,17 +789,18 @@ class TagRepositoryTest {
             val id = repo.createTag("Kotlin", "#ff0000")
 
             now = 200L
-            repo.updateTag(id, "Kotlin 2", "#ff0000") // name only
+            repo.renameTag(id, "Kotlin 2") // name only
             var row = db.tagsQueries.getById(id).executeAsOne()
             assertEquals(listOf<Long?>(200L, 100L, 100L), listOf(row.name_updated_at, row.color_updated_at, row.sort_order_updated_at))
 
             now = 300L
-            repo.updateTag(id, "Kotlin 2", null) // color only
+            repo.setTagColor(id, null) // color only
             row = db.tagsQueries.getById(id).executeAsOne()
             assertEquals(listOf<Long?>(200L, 300L, 100L), listOf(row.name_updated_at, row.color_updated_at, row.sort_order_updated_at))
 
             now = 400L
-            repo.updateTag(id, "Kotlin 2", null) // nothing changes: no field stamp moves
+            repo.renameTag(id, "Kotlin 2") // nothing changes: no field stamp moves
+            repo.setTagColor(id, null)
             row = db.tagsQueries.getById(id).executeAsOne()
             assertEquals(listOf<Long?>(200L, 300L, 100L), listOf(row.name_updated_at, row.color_updated_at, row.sort_order_updated_at))
             assertTrue(row.updated_at >= 400L)
@@ -579,7 +819,7 @@ class TagRepositoryTest {
             val id = repo.createTag("Kotlin", null)
 
             now = 100L
-            repo.updateTag(id, "Renamed", null)
+            repo.renameTag(id, "Renamed")
 
             assertEquals(501L, db.tagsQueries.getById(id).executeAsOne().name_updated_at)
         } finally {

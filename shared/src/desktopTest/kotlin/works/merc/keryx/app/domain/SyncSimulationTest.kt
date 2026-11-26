@@ -13,7 +13,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
+import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import works.merc.keryx.app.InMemoryFaviconMissStore
+import works.merc.keryx.app.createSchemaV2
+import works.merc.keryx.app.data.local.db.KeryxDatabase
+import java.io.File
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.CloudStorageException
@@ -74,6 +78,18 @@ class SyncSimulationTest {
         var interleavings = 0
         var syncs = 0
 
+        /** The small pool the shared-name create/rename operations pick from, so names collide. */
+        val sharedNames = listOf("Shared-A", "Shared-B", "Shared-C")
+
+        /**
+         * The shared-name choices come from their own stream, so colliding names ride along with the
+         * main operation stream instead of reshuffling every other decision.
+         */
+        val sharedRandom = Random(seed * 31 + 11)
+
+        /** How many operations picked from [sharedNames] (the run must have exercised collisions). */
+        var sharedNameOps = 0
+
         /** field group key -> (stamp, value): the newest write anyone made. */
         val oracle = mutableMapOf<String, Pair<Long, String>>()
 
@@ -121,6 +137,171 @@ class SyncSimulationTest {
     @Test
     fun devicesConvergeFromAPreDeltaCloudWithAnOlderBuildStillWriting() {
         runSimulation(53, operations = 300, legacyStart = true)
+    }
+
+    /**
+     * Devices that shared v2-era tag and folder rows and each renamed them differently before
+     * upgrading (every derived id differs, the pre-upgrade id is shared): whatever order they sync in,
+     * every device ends on the same single tag and folder — the smallest derived id — with the same
+     * link, folder assignment and values.
+     */
+    @Test
+    fun devicesThatRenamedSharedV2RowsDifferentlyConvergeOnTheSmallestIdInEveryOrder() = runBlocking {
+        val tagNames = listOf("Alpha", "Beta", "Gamma")
+        val folderNames = listOf("AlphaDir", "BetaDir", "GammaDir")
+        val tagId = tagNames.minOf { IdGenerator.tagId(it) }
+        val folderId = folderNames.minOf { IdGenerator.folderId(it) }
+        // Which devices sync first, and in what order: every permutation of the three, then a round of all.
+        val orders = listOf(listOf(0, 1, 2), listOf(0, 2, 1), listOf(1, 0, 2), listOf(1, 2, 0), listOf(2, 0, 1), listOf(2, 1, 0))
+        for (order in orders) {
+            val sim = Sim(61)
+            val devices = (0 until 3).map { i ->
+                SyncDevice("v2-$i", sim.cloud, sim.clock, sim.scope, sim.ids, existingDbFile = migratedV2Device(tagNames[i], folderNames[i], stamp = 100L * (i + 1)))
+            }
+            try {
+                for (i in order) {
+                    sim.tick(1_000)
+                    val result = devices[i].repo.sync()
+                    if (result is Result.Err) fail("order $order: device $i: ${result.exception}")
+                }
+                // Everyone syncs until a whole round changes nothing in the cloud.
+                var quiet = 0
+                repeat(10) {
+                    if (quiet == 2) return@repeat
+                    val before = sim.cloud.written.size + sim.cloud.deleteCount
+                    for (device in devices) {
+                        sim.tick(1_000)
+                        val result = device.repo.sync()
+                        if (result is Result.Err) fail("order $order: ${device.label}: ${result.exception}")
+                    }
+                    quiet = if (sim.cloud.written.size + sim.cloud.deleteCount == before) quiet + 1 else 0
+                }
+                val dumps = devices.map { TransportFixtures.dump(it.file, local = true) }
+                for (i in 1 until dumps.size) assertEquals(dumps[0], dumps[i], "order $order: device 0 and $i differ")
+                for (device in devices) {
+                    assertEquals(listOf(tagId), device.db.tagsQueries.watchAll().executeAsList().map { it.id }, "order $order: ${device.label}")
+                    assertEquals(listOf(folderId), device.db.foldersQueries.watchAll().executeAsList().map { it.id }, "order $order: ${device.label}")
+                    assertEquals(listOf(tagId), device.db.feed_tagsQueries.watchTagIdsForFeed("f1").executeAsList(), "order $order: ${device.label}")
+                    assertEquals(folderId, device.db.feedsQueries.getById("f1").executeAsOne().folder_id, "order $order: ${device.label}")
+                    // The newest rename (device 2's, stamp 300) is the one every device shows.
+                    assertEquals("Gamma", device.db.tagsQueries.getById(tagId).executeAsOne().name, "order $order: ${device.label}")
+                    assertTrue(device.outbox().isEmpty(), "order $order: ${device.label} has unsent changes")
+                }
+            } finally {
+                devices.forEach { it.close() }
+                sim.scope.cancel()
+                sim.client.close()
+                sim.failingClient.close()
+            }
+        }
+    }
+
+    /**
+     * The same shared v2 folder renamed differently on three devices (three aliases), and each device
+     * moves the one feed within the same millisecond — two into their own alias, one into a folder of
+     * its own. The assignments tie on their stamp, and the aliases are re-keyed onto the smallest id
+     * while they sync, so a tie settled on mapped ids would depend on the history. The folder of its
+     * own sorts between the canonical id and the greater alias written, so a tie settled on mapped ids
+     * would pick it, while one settled on the raw values picks that alias. Whatever order the devices
+     * sync in, every device stores the greatest raw value written (that alias, as written), resolves it
+     * to the canonical folder, and holds the same folders and remaining synced state.
+     */
+    @Test
+    fun sameStampFolderMovesIntoV2AliasesConvergeInEveryOrder() = runBlocking {
+        val tagNames = listOf("Alpha", "Beta", "Gamma")
+        val folderNames = listOf("AlphaDir", "BetaDir", "GammaDir")
+        val canonical = folderNames.minOf { IdGenerator.folderId(it) }
+        // Between the canonical id and the greater of the aliases devices 0 and 1 write.
+        val ownFolder = "$canonical~own"
+        // What each device writes as the feed's raw folder, all at one stamp.
+        val written = folderNames.mapIndexed { i, name -> if (i == 2) ownFolder else IdGenerator.folderId(name) }.toSet()
+        val greatestAlias = written.filter { it != ownFolder }.max()
+        assertTrue(canonical < ownFolder && ownFolder < greatestAlias, "precondition: the own folder sorts between them")
+        val orders = listOf(listOf(0, 1, 2), listOf(0, 2, 1), listOf(1, 0, 2), listOf(1, 2, 0), listOf(2, 0, 1), listOf(2, 1, 0))
+        for (order in orders) {
+            val sim = Sim(67)
+            val devices = (0 until 3).map { i ->
+                SyncDevice("same-stamp-$i", sim.cloud, sim.clock, sim.scope, sim.ids, existingDbFile = migratedV2Device(tagNames[i], folderNames[i], stamp = 100L * (i + 1)))
+            }
+            try {
+                // The same-millisecond moves, before any device has synced (capture is still off, so the
+                // first sync sends each device's whole state).
+                devices.forEachIndexed { i, device ->
+                    if (i == 2) {
+                        device.driver.execute(
+                            null,
+                            "INSERT INTO folders (id, name, sort_order, updated_at, created_at, name_updated_at, sort_order_updated_at) " +
+                                "VALUES ('$ownFolder', 'Own', 9, 400, 400, 400, 400)",
+                            0,
+                        )
+                    }
+                    val target = if (i == 2) ownFolder else IdGenerator.folderId(folderNames[i])
+                    device.driver.execute(
+                        null,
+                        "UPDATE ks_feed_folder_raw SET folder_id = '$target', folder_updated_at = 500 WHERE feed_id = 'f1'",
+                        0,
+                    )
+                }
+                for (i in order) {
+                    sim.tick(1_000)
+                    val result = devices[i].repo.sync()
+                    if (result is Result.Err) fail("order $order: device $i: ${result.exception}")
+                }
+                var quiet = 0
+                repeat(10) {
+                    if (quiet == 2) return@repeat
+                    val before = sim.cloud.written.size + sim.cloud.deleteCount
+                    for (device in devices) {
+                        sim.tick(1_000)
+                        val result = device.repo.sync()
+                        if (result is Result.Err) fail("order $order: ${device.label}: ${result.exception}")
+                    }
+                    quiet = if (sim.cloud.written.size + sim.cloud.deleteCount == before) quiet + 1 else 0
+                }
+                val dumps = devices.map { TransportFixtures.dump(it.file, local = true) }
+                for (i in 1 until dumps.size) assertEquals(dumps[0], dumps[i], "order $order: device 0 and $i differ")
+                val raw = devices.map { it.rawFolders() }
+                for (i in 1 until raw.size) assertEquals(raw[0], raw[i], "order $order: raw assignments of device 0 and $i differ")
+                val rawFolder = raw[0].single().split("|")
+                assertEquals("500", rawFolder[1], "order $order")
+                assertEquals(greatestAlias, rawFolder[2], "order $order: the tie goes to the greatest raw value")
+                for (device in devices) {
+                    assertEquals(setOf(canonical, ownFolder), device.db.foldersQueries.watchAll().executeAsList().map { it.id }.toSet(), "order $order: ${device.label}")
+                    val resolved = device.db.feedsQueries.getById("f1").executeAsOne().folder_id
+                    assertEquals(canonical, resolved, "order $order: ${device.label}")
+                    assertTrue(device.outbox().isEmpty(), "order $order: ${device.label} has unsent changes")
+                }
+            } finally {
+                devices.forEach { it.close() }
+                sim.scope.cancel()
+                sim.client.close()
+                sim.failingClient.close()
+            }
+        }
+    }
+
+    /**
+     * A version-2 database holding the shared pre-upgrade tag "old-tag" and folder "old-folder", renamed
+     * to [tagName] / [folderName] at [stamp], with feed f1 in the folder and linked to the tag — migrated
+     * to the current schema, which re-keys both onto the ids their names derive and keeps the old id as `v2_id`.
+     */
+    private fun migratedV2Device(tagName: String, folderName: String, stamp: Long): File {
+        val file = File.createTempFile("v2sim", ".db").apply { deleteOnExit() }
+        JdbcSqliteDriver("jdbc:sqlite:${file.absolutePath}").use { driver ->
+            driver.createSchemaV2()
+            listOf(
+                "INSERT INTO folders (id, name, sort_order, updated_at, created_at) VALUES ('old-folder', '$folderName', 0, $stamp, 1)",
+                "INSERT INTO tags (id, name, color, sort_order, updated_at, created_at) VALUES ('old-tag', '$tagName', NULL, 0, $stamp, 1)",
+                "INSERT INTO feeds (id, url, title, etag, folder_id, folder_updated_at, updated_at, created_at) " +
+                    "VALUES ('f1', 'https://feeds.example/v2.xml', 'Feed', 'e', 'old-folder', 50, 100, 1)",
+                "INSERT INTO feed_tags (feed_id, tag_id, updated_at) VALUES ('f1', 'old-tag', 50)",
+            ).forEach { driver.execute(null, it, 0) }
+        }
+        JdbcSqliteDriver("jdbc:sqlite:${file.absolutePath}").use { driver ->
+            KeryxDatabase.Schema.migrate(driver, 2, KeryxDatabase.Schema.version, *KERYX_SCHEMA_CALLBACKS)
+            driver.execute(null, "PRAGMA user_version=${KeryxDatabase.Schema.version}", 0)
+        }
+        return file
     }
 
     private fun runSimulation(seed: Int, operations: Int, legacyStart: Boolean = false) = runBlocking {
@@ -173,6 +354,7 @@ class SyncSimulationTest {
                 "deletes=${sim.cloud.deleteCount} generations=${written.map { it.generation }.distinct().size}"
             assertTrue(sim.crashes > 0 && sim.interleavings > 0, "seed $seed: $stats")
             assertTrue(written.count { it.kind == TransportFileKind.BASE } > 3 && sim.cloud.deleteCount > 0, "seed $seed: $stats")
+            assertTrue(sim.sharedNameOps > 0, "seed $seed: no shared-name operation ran ($stats)")
             assertEquals(2, written.map { it.generation }.distinct().size, "seed $seed: $stats")
             if (legacyStart) assertTrue(oldBuildWrites > 0, "seed $seed: no older build wrote")
             quiesce(sim, devices, seed)
@@ -283,16 +465,24 @@ class SyncSimulationTest {
             QueryResult.Value(buildList { while (c.next().value) add(c.getString(0)!!) })
         }, 0).value
         fun name(kind: String) = "$kind-${device.sync.label}-${sim.nameCounter++}"
+        // Half the tag/folder creations and renames pick from the small shared pool, so devices
+        // collide on names: same-named creations (the same name-derived id), renames crossing
+        // creations, and same-named rows that cannot fold into one. Every device must still converge.
+        fun sharedName(): String {
+            sim.sharedNameOps++
+            return sim.sharedNames[sim.sharedRandom.nextInt(sim.sharedNames.size)]
+        }
+        fun sharedOrUnique(kind: String): String = if (sim.sharedRandom.nextBoolean()) sharedName() else name(kind)
         when (r.nextInt(100)) {
             in 0..11 -> device.feeds.subscribeFeed(sim.urls[r.nextInt(sim.urls.size)])
             in 12..15 -> aliveFeeds.randomOrNull(r)?.let { device.feeds.unsubscribeFeed(it.id) }
             in 16..20 -> aliveFeeds.randomOrNull(r)?.let { device.feeds.renameFeed(it.id, if (r.nextBoolean()) name("title") else null) }
-            in 21..24 -> device.folders.createFolder(name("folder"))
-            in 25..27 -> aliveFolders.randomOrNull(r)?.let { device.folders.updateFolder(it.id, name("folder")) }
+            in 21..24 -> device.folders.createFolder(sharedOrUnique("folder"))
+            in 25..27 -> aliveFolders.randomOrNull(r)?.let { device.folders.updateFolder(it.id, sharedOrUnique("folder")) }
             in 28..29 -> aliveFolders.randomOrNull(r)?.let { device.folders.deleteFolder(it.id) }
             in 30..34 -> aliveFeeds.randomOrNull(r)?.let { feed -> device.feeds.moveFeed(feed.id, aliveFolders.randomOrNull(r)?.id) }
-            in 35..37 -> device.tags.createTag(name("tag"), if (r.nextBoolean()) "#ff0000" else null)
-            in 38..39 -> aliveTags.randomOrNull(r)?.let { device.tags.updateTag(it.id, name("tag"), "#00ff00") }
+            in 35..37 -> device.tags.createTag(sharedOrUnique("tag"), if (r.nextBoolean()) "#ff0000" else null)
+            in 38..39 -> aliveTags.randomOrNull(r)?.let { device.tags.renameTag(it.id, sharedOrUnique("tag")); device.tags.setTagColor(it.id, "#00ff00") }
             in 40..41 -> aliveTags.randomOrNull(r)?.let { device.tags.deleteTag(it.id) }
             in 42..49 -> {
                 val feed = aliveFeeds.randomOrNull(r)
@@ -320,17 +510,24 @@ class SyncSimulationTest {
 
     private fun checkOracle(sim: Sim, device: Device, seed: Int) {
         val current = groups(device).associate { (key, stamp, value) -> key to (stamp to value) }
-        // A feed's folder is what the feed list shows: the folder while it is alive, else none. (A merge
-        // may null a reference to a folder deleted elsewhere without a stamp of its own.)
-        fun effectiveFolder(folderId: String): String =
-            if (folderId != "null" && sim.oracle["folder $folderId alive"]?.second == "1") folderId else "null"
+        // A feed's folder group is its raw assignment (ks_feed_folder_raw), compared exactly: the newest
+        // write survives whatever happened to the folder since.
         for ((key, expected) in sim.oracle) {
             val actual = current[key]
-            val isFolder = key.endsWith(" folder")
-            val want = expected.first to (if (isFolder) effectiveFolder(expected.second) else expected.second)
-            val got = actual?.let { (it.first ?: -1L) to (if (isFolder) effectiveFolder(it.second) else it.second) }
-            assertEquals(want, got, "seed $seed: ${device.sync.label}: $key lost its newest write")
+            val got = actual?.let { (it.first ?: -1L) to it.second }
+            assertEquals(expected, got, "seed $seed: ${device.sync.label}: $key lost its newest write")
         }
+        // feeds.folder_id is the cache resolved from it: the raw folder while that folder is alive, else
+        // none — for every feed, each of which has exactly one raw row.
+        val driver = device.sync.driver
+        val mismatches = driver.executeQuery(
+            null,
+            "SELECT COUNT(*) FROM feeds f LEFT JOIN ks_feed_folder_resolved v ON v.feed_id = f.id " +
+                "WHERE v.feed_id IS NULL OR f.folder_id IS NOT v.folder_id OR f.folder_updated_at IS NOT v.folder_updated_at",
+            { c -> c.next(); QueryResult.Value(c.getLong(0)!!) },
+            0,
+        ).value
+        assertEquals(0L, mismatches, "seed $seed: ${device.sync.label}: a feed's folder disagrees with its raw assignment")
     }
 
     private data class Group(val key: String, val stamp: Long?, val value: String)
@@ -341,7 +538,12 @@ class SyncSimulationTest {
         fun rows(sql: String): List<List<String?>> = driver.executeQuery(null, sql, { c ->
             QueryResult.Value(buildList { while (c.next().value) add((0 until COLUMNS).map { i -> runCatching { c.getString(i) }.getOrNull() }) })
         }, 0).value
-        for (r in rows("SELECT id, deleted_updated_at, deleted_at IS NULL, custom_title_updated_at, custom_title, folder_updated_at, folder_id FROM feeds")) {
+        for (
+            r in rows(
+                "SELECT f.id, f.deleted_updated_at, f.deleted_at IS NULL, f.custom_title_updated_at, f.custom_title, " +
+                    "r.folder_updated_at, r.folder_id FROM feeds f JOIN ks_feed_folder_raw r ON r.feed_id = f.id",
+            )
+        ) {
             add(Group("feed ${r[0]} deleted", r[1]?.toLong(), r[2]!!))
             add(Group("feed ${r[0]} title", r[3]?.toLong(), r[4].toString()))
             add(Group("feed ${r[0]} folder", r[5]?.toLong(), r[6].toString()))
@@ -383,6 +585,12 @@ class SyncSimulationTest {
             "feeds" to rows(
                 "SELECT f.id, f.url, f.title, f.custom_title, f.deleted_at IS NULL, f.sort_order, " +
                     "(SELECT d.name FROM folders d WHERE d.id = f.folder_id AND d.deleted_at IS NULL) FROM feeds f",
+            ),
+            // The stored folder assignment, raw and resolved, compared exactly (not just as the folder name a
+            // user sees), so a device storing or sending a different value than another is caught.
+            "feed_folders" to rows(
+                "SELECT f.id, f.folder_id, f.folder_updated_at, r.folder_id, r.folder_updated_at " +
+                    "FROM feeds f JOIN ks_feed_folder_raw r ON r.feed_id = f.id",
             ),
             "folders" to rows("SELECT id, name, sort_order, deleted_at IS NULL FROM folders"),
             "tags" to rows("SELECT id, name, color, sort_order, deleted_at IS NULL FROM tags"),

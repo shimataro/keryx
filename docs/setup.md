@@ -343,6 +343,14 @@ the one being pushed. Debug variants pin a fixed `versionCode` (see [build.md](b
 "Android (APK / AAB)"), so this error on a debug install means a non-debug APK — built with a higher
 `versionCode` — is the one currently on the device.
 
+### A `keryx.db` from an earlier development build is not migrated
+
+A `keryx.db` created by an earlier development build of this branch — one that already reached
+`user_version` 3 before `2.sqm` took its current form — is not migrated: the v2→v3 upgrade, including
+the tag/folder re-key, runs only when crossing version 2. Delete the local `keryx.db` (under the data
+directory, see "Data Directory"), reset or disconnect the cloud sync data if one was connected, and let
+the app recreate the database.
+
 ### `UnsupportedClassVersionError` (at runtime)
 
 The JVM that launched `./gradlew` is older than 25. Set `JAVA_HOME` to JDK 25+.

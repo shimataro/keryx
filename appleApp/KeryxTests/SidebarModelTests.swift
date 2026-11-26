@@ -17,14 +17,14 @@ struct SidebarModelTests {
     private func folder(_ id: String, sortOrder: Int64) -> Folders {
         Folders(
             id: id, name: id, sort_order: sortOrder, deleted_at: nil, updated_at: 0, created_at: 0,
-            name_updated_at: nil, sort_order_updated_at: nil
+            name_updated_at: nil, sort_order_updated_at: nil, v2_id: nil
         )
     }
 
     private func tag(_ id: String, sortOrder: Int64) -> Tags {
         Tags(
             id: id, name: id, color: nil, sort_order: sortOrder, deleted_at: nil, updated_at: 0, created_at: 0,
-            name_updated_at: nil, color_updated_at: nil, sort_order_updated_at: nil
+            name_updated_at: nil, color_updated_at: nil, sort_order_updated_at: nil, v2_id: nil
         )
     }
 
@@ -34,11 +34,12 @@ struct SidebarModelTests {
         tags: [Tags] = [],
         feedTagMap: [String: Set<String>] = [:],
         collapsedFolderIds: Set<String> = [],
-        expandedTagIds: Set<String> = []
+        expandedTagIds: Set<String> = [],
+        labels: TagFolderLabelSet = .empty
     ) -> SidebarModel {
         SidebarModel(
             feeds: feeds, folders: folders, tags: tags, feedTagMap: feedTagMap,
-            collapsedFolderIds: collapsedFolderIds, expandedTagIds: expandedTagIds
+            collapsedFolderIds: collapsedFolderIds, expandedTagIds: expandedTagIds, labels: labels
         )
     }
 

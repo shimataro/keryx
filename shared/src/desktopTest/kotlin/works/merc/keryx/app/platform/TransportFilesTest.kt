@@ -73,7 +73,7 @@ class TransportFilesTest {
     @Test
     fun transportSyncedColumnsAreTheLocalSchemasSyncedColumnsWithoutSearchText() {
         val local = TransportFixtures.localDb()
-        for (table in TransportSchema.SYNCED_TABLES_V1) {
+        for (table in TransportSchema.SYNCED_TABLES) {
             val localInfo = tableInfo(local, table.name)
             val expected = localInfo.filterKeys { it != "search_text" }
             // Same names, types and NOT NULL; the local primary keys match too.
@@ -122,6 +122,59 @@ class TransportFilesTest {
         val file = validFile(base)
         exec(file, "INSERT INTO ks_vector (device, seq) VALUES ('$DEV_A', 4)", "INSERT INTO ks_covered (name) VALUES ('${deltaName(DEV_A, 4).fileName}')")
         assertEquals(TransportValidation.Valid, validate(file, base))
+    }
+
+    /** A file of version 1, as an earlier build wrote it: no `v2_id` columns and no identity edge tables. */
+    private fun versionOneFile(name: TransportFileName = delta): File = validFile(name).also { file ->
+        exec(
+            file,
+            "DROP TABLE folder_v2_edges",
+            "DROP TABLE tag_v2_edges",
+            "ALTER TABLE folders DROP COLUMN v2_id",
+            "ALTER TABLE tags DROP COLUMN v2_id",
+            "PRAGMA user_version = 1",
+        )
+    }
+
+    @Test
+    fun aVersionOneFileIsValidAndMigratedToTheCurrentSchema() {
+        val file = versionOneFile()
+        assertEquals(TransportValidation.Valid, validate(file))
+        // Validation migrated it in place: every table of the current version, the edge tables included.
+        for (table in TransportSchema.EXPECTED_TABLES.getValue(TransportSchema.VERSION)) {
+            assertEquals(expectedInfo(table), tableInfo(file, table.name), table.name)
+        }
+        assertEquals(true, TransportFiles.schemaMatches(file.absolutePath))
+    }
+
+    @Test
+    fun prepareForMergeCreatesTheIdentityEdgeTablesOfAVersionOneFile() {
+        val file = versionOneFile()
+        TransportFiles.prepareForMerge(file.absolutePath)
+        for (table in TransportSchema.EDGE_TABLES) {
+            assertEquals(expectedInfo(table), tableInfo(file, table.name), table.name)
+        }
+        assertEquals(true, TransportFiles.schemaMatches(file.absolutePath))
+    }
+
+    @Test
+    fun aFileWithIdentityEdgesIsValidAndOneWithoutTheTablesIsCorrupt() {
+        val file = validFile()
+        exec(
+            file,
+            "INSERT INTO folder_v2_edges (v2_id, id) VALUES ('p', 'd1')",
+            // An edge needs no row of its id: it is not a reference.
+            "INSERT INTO tag_v2_edges (v2_id, id) VALUES ('q', 't-elsewhere')",
+        )
+        assertEquals(TransportValidation.Valid, validate(file))
+
+        val missing = validFile()
+        exec(missing, "DROP TABLE tag_v2_edges")
+        assertCorrupt(validate(missing), "tag_v2_edges")
+
+        val emptyId = validFile()
+        exec(emptyId, "INSERT INTO folder_v2_edges (v2_id, id) VALUES ('p', '')")
+        assertCorrupt(validate(emptyId), "folder_v2_edges.id")
     }
 
     @Test
@@ -260,6 +313,49 @@ class TransportFilesTest {
             exec(file, sql)
             assertCorrupt(validate(file), description)
         }
+    }
+
+    /**
+     * A transport file's feed folder reference is satisfied by a folder row of the file or one reached
+     * from it through the file's identity edges (either direction, transitively). A reference no row
+     * and no edge path reaches is a dangling reference.
+     */
+    @Test
+    fun aFeedFolderReferenceIsSatisfiedByAFolderRowReachedThroughEdges() {
+        fun file(folderId: String, vararg extra: String) = transportFile(
+            delta, folder("d-a", "A"), feed("f1", folderId = folderId, folderAt = 100), *extra,
+        )
+        fun edge(table: String, v2Id: String, id: String) = "INSERT INTO $table (v2_id, id) VALUES ('$v2Id', '$id')"
+        // No row, no edge: dangling.
+        assertCorrupt(validate(file("X")), "feeds.folder_id")
+        // Edges that reach no row of the file: still dangling.
+        assertCorrupt(validate(file("X", edge("folder_v2_edges", "p", "X"), edge("folder_v2_edges", "p", "Y"))), "feeds.folder_id")
+        // Reaching the row directly.
+        assertEquals(
+            TransportValidation.Valid,
+            validate(file("X", edge("folder_v2_edges", "p", "X"), edge("folder_v2_edges", "p", "d-a"))),
+        )
+        // Transitively: X - p - Y - q - d-a.
+        assertEquals(
+            TransportValidation.Valid,
+            validate(
+                file(
+                    "X",
+                    edge("folder_v2_edges", "p", "X"), edge("folder_v2_edges", "p", "Y"),
+                    edge("folder_v2_edges", "q", "Y"), edge("folder_v2_edges", "q", "d-a"),
+                ),
+            ),
+        )
+        // The row's id referenced from the other end: the reference is the canonical id's alias row.
+        assertEquals(
+            TransportValidation.Valid,
+            validate(file("d-a", edge("folder_v2_edges", "p", "d-a"))),
+        )
+        // A tag's edges do not stand in for a folder's.
+        assertCorrupt(
+            validate(file("X", edge("tag_v2_edges", "p", "X"), edge("tag_v2_edges", "p", "d-a"))),
+            "feeds.folder_id",
+        )
     }
 
     @Test
@@ -416,6 +512,42 @@ class TransportFilesTest {
         val input = transportFile(delta)
         exec(input, "PRAGMA user_version = 0")
         assertFailsWith<IllegalStateException> { TransportFiles.fold(acc.absolutePath, input.absolutePath, delta) }
+    }
+
+    @Test
+    fun foldingKeepsNonNullV2IdForFoldersRegardlessOfInputOrder() {
+        val id = "d1"
+        val withV2 = transportFile(delta, folder(id = id, name = "Work", v2Id = "legacy-1"))
+        val withoutV2 = transportFile(deltaName(DEV_B, 1), folder(id = id, name = "Work"))
+
+        fun v2Id(file: File): String? = TransportFixtures.connect(file).use { conn ->
+            conn.createStatement().use { st ->
+                st.executeQuery("SELECT v2_id FROM folders WHERE id = '$id'").use { rs ->
+                    if (rs.next()) rs.getString(1) else null
+                }
+            }
+        }
+
+        assertEquals("legacy-1", v2Id(TransportFixtures.fold(withV2 to delta, withoutV2 to deltaName(DEV_B, 1))))
+        assertEquals("legacy-1", v2Id(TransportFixtures.fold(withoutV2 to deltaName(DEV_B, 1), withV2 to delta)))
+    }
+
+    @Test
+    fun foldingKeepsNonNullV2IdForTagsRegardlessOfInputOrder() {
+        val id = "t1"
+        val withV2 = transportFile(delta, tag(id = id, name = "news", v2Id = "legacy-1"))
+        val withoutV2 = transportFile(deltaName(DEV_B, 1), tag(id = id, name = "news"))
+
+        fun v2Id(file: File): String? = TransportFixtures.connect(file).use { conn ->
+            conn.createStatement().use { st ->
+                st.executeQuery("SELECT v2_id FROM tags WHERE id = '$id'").use { rs ->
+                    if (rs.next()) rs.getString(1) else null
+                }
+            }
+        }
+
+        assertEquals("legacy-1", v2Id(TransportFixtures.fold(withV2 to delta, withoutV2 to deltaName(DEV_B, 1))))
+        assertEquals("legacy-1", v2Id(TransportFixtures.fold(withoutV2 to deltaName(DEV_B, 1), withV2 to delta)))
     }
 
     @Test

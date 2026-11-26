@@ -4,6 +4,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.domain.FeedRepository
 import works.merc.keryx.app.domain.FolderRepository
+import works.merc.keryx.app.domain.TagFolderIdRemap
 import works.merc.keryx.app.domain.TagRepository
 
 /**
@@ -31,6 +32,12 @@ import works.merc.keryx.app.domain.TagRepository
  *   expansion exactly as they were. Creating an item and placing a feed in it is one write
  *   ([TagRepository.createTagAndAttach], [FolderRepository.createFolderAndMoveFeed]), so a failure
  *   leaves neither half behind; no action shows anything ahead of its write.
+ * @param currentIdRemap The current tag/folder id re-keys (`TagFolderIdRemaps.current`), with the
+ *   ViewModel's own state — [currentFilter], [selectedRowInstance], [expansion] — already brought up
+ *   to date on them when it returns, so an id it maps is compared with state in the same id space.
+ *   A delete's fallback runs later, possibly after a merge has re-keyed the deleted item, so it
+ *   compares and forgets the id the item has *then*; a toggle resolves the id the UI passed, which
+ *   may predate a re-key.
  * @param fallBackOnceHidden Runs the fallback it is given once the feed list stops showing the
  *   deleted target — in production the ViewModel's [DeletedItemFallback]s. A delete's write lands
  *   before the list flow delivers it, so the feed list still shows the deleted item, and the user can
@@ -48,13 +55,15 @@ internal class FeedListActions(
     private val selectFilter: (ArticleFilter) -> Unit,
     private val launchWrite: (write: suspend () -> Unit, afterWrite: (() -> Unit)?) -> Unit,
     private val fallBackOnceHidden: (target: DeletedTarget, fallback: () -> Unit) -> Unit,
+    private val currentIdRemap: () -> TagFolderIdRemap,
 ) {
     /** See `HomeViewModel.toggleTagExpanded`. */
     fun toggleTagExpanded(tagId: String) {
-        val expanded = expansion.toggleTag(tagId)
+        val current = currentIdRemap().tag(tagId)
+        val expanded = expansion.toggleTag(current)
         // A collapsed tag no longer renders its nested feed rows, so a selection on one of them
         // falls back to that feed's canonical row.
-        if (!expanded) fallBackFromTagRow(tagId)
+        if (!expanded) fallBackFromTagRow(current)
     }
 
     // --- Tag actions ---
@@ -72,11 +81,16 @@ internal class FeedListActions(
         }, null)
     }
 
-    /** See `HomeViewModel.updateTag`. Blank names are ignored. */
-    fun updateTag(id: String, name: String, color: String?) {
+    /** See `HomeViewModel.renameTag`. Blank names are ignored. */
+    fun renameTag(id: String, name: String) {
         if (name.isBlank()) return
         val trimmed = name.trim()
-        launchWrite({ tagRepository.updateTag(id, trimmed, color) }, null)
+        launchWrite({ tagRepository.renameTag(id, trimmed) }, null)
+    }
+
+    /** See `HomeViewModel.setTagColor`. */
+    fun setTagColor(id: String, color: String?) {
+        launchWrite({ tagRepository.setTagColor(id, color) }, null)
     }
 
     /**
@@ -91,7 +105,8 @@ internal class FeedListActions(
         }
     }
 
-    private fun fallBackFromDeletedTag(id: String) {
+    private fun fallBackFromDeletedTag(deletedId: String) {
+        val id = currentIdRemap().tag(deletedId)
         if (currentFilter() == ArticleFilter.Tag(id)) selectFilter(ArticleFilter.All)
         // A deleted tag no longer renders its nested feed rows, so a selection on one of them
         // falls back to that feed's canonical row (a no-op if the branch above already reset it).
@@ -144,7 +159,8 @@ internal class FeedListActions(
         }
     }
 
-    private fun fallBackFromDeletedFolder(id: String) {
+    private fun fallBackFromDeletedFolder(deletedId: String) {
+        val id = currentIdRemap().folder(deletedId)
         if (currentFilter() == ArticleFilter.Folder(id)) selectFilter(ArticleFilter.All)
         expansion.forgetFolder(id)
     }

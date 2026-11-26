@@ -1,13 +1,37 @@
+-- Folders for organizing feeds (1 feed = at most 1 folder). Soft-deleted (deleted_at).
+-- name is not UNIQUE: same-named folders are allowed (a rename on one device can cross a same-named
+-- creation on another), and the UI tells them apart with an ordinal (NameOrdinals). A folder's id is
+-- the UUIDv5 its creation-time name derives from (IdGenerator.folderId), so independently created
+-- same-named folders share an id and converge in the merge; rows can still share a name once a
+-- rename crosses a creation, and every path that resolves a folder by name (creation, reactivation)
+-- reuses one canonical row (see getByName).
+
 CREATE TABLE folders (
     id         TEXT    NOT NULL PRIMARY KEY,
-    name       TEXT    NOT NULL UNIQUE,
+    name       TEXT    NOT NULL,
     sort_order INTEGER NOT NULL DEFAULT 0,
     deleted_at INTEGER,
     updated_at INTEGER NOT NULL,
     created_at INTEGER NOT NULL,
     name_updated_at       INTEGER,
-    sort_order_updated_at INTEGER
+    sort_order_updated_at INTEGER,
+    -- The id this row carried before the v2->v3 migration re-keyed it (TagFolderIdRekey). NULL for
+    -- a row created after the migration. The sync merge links rows sharing it into one identity
+    -- through its edge in ks_v2_edge (V2IdentitySql); the column itself decides nothing, and a merge
+    -- keeps the greatest non-NULL value of the rows it folds together (see docs/db-schema.md).
+    v2_id                 TEXT
 );
+
+CREATE INDEX folders_name ON folders(name);
+
+-- A write that takes a folder id resolves it first (ks_id_remap, see sync_bookkeeping.sq): an id whose
+-- row is gone because a merge re-keyed it names the row it became, so a write the UI issued with
+-- the id it held before the re-key (an open rename field, a queued feed-list write, a drag) lands on
+-- that row instead of matching nothing. The resolution is an expression inside the write statement
+-- itself, so no write is preceded by a read of its own and nothing can re-key the id in between:
+--   COALESCE((SELECT id FROM folders WHERE id = :id),
+--            (SELECT new_id FROM ks_id_remap WHERE kind = 'folder' AND old_id = :id), :id)
+-- An existing row's id resolves to itself. 'folder' is ID_REMAP_KIND_FOLDER (TagFolderIdRekey.kt).
 
 watchAll:
 SELECT * FROM folders WHERE deleted_at IS NULL ORDER BY sort_order ASC, name COLLATE NOCASE ASC;
@@ -15,8 +39,30 @@ SELECT * FROM folders WHERE deleted_at IS NULL ORDER BY sort_order ASC, name COL
 getById:
 SELECT * FROM folders WHERE id = ?;
 
+-- The live folders in display order (as watchAll), each flagged whether it is the folder :dragged
+-- resolves to and whether it is the one :target resolves to (see the note above; a NULL :target flags
+-- none). One statement, so the order and both resolutions are read from the same folder state: a
+-- re-key that commits around it is either wholly before it or wholly after it
+-- (FolderRepository.reorderFolders).
+orderForReorder:
+SELECT id, sort_order,
+    CAST(id = COALESCE((SELECT f.id FROM folders f WHERE f.id = :dragged), (SELECT m.new_id FROM ks_id_remap m WHERE m.kind = 'folder' AND m.old_id = :dragged), :dragged) AS INTEGER) AS is_dragged,
+    CAST(CASE WHEN :target IS NULL THEN 0
+        ELSE id = COALESCE((SELECT f.id FROM folders f WHERE f.id = :target), (SELECT m.new_id FROM ks_id_remap m WHERE m.kind = 'folder' AND m.old_id = :target), :target)
+    END AS INTEGER) AS is_target
+FROM folders WHERE deleted_at IS NULL ORDER BY sort_order ASC, name COLLATE NOCASE ASC;
+
+-- The id a folder id given to a write resolves to (see the note above): the id itself while a row
+-- has it, else the id ks_id_remap maps it to, else the id unchanged.
+resolveId:
+SELECT COALESCE((SELECT id FROM folders WHERE id = :id), (SELECT new_id FROM ks_id_remap WHERE kind = 'folder' AND old_id = :id), :id);
+
+-- The canonical folder of :name: an alive row over a deleted one, then the earliest created_at, then
+-- the smallest id. Same-named rows may exist, so every by-name lookup (creation, reactivation and
+-- the sync merge's name resolution) must land on this same row — keep the order in step with
+-- reactivateByName below.
 getByName:
-SELECT * FROM folders WHERE name = ?;
+SELECT * FROM folders WHERE name = ? ORDER BY deleted_at IS NOT NULL, created_at ASC, id ASC LIMIT 1;
 
 -- Every local write to a folder row stamps updated_at as MAX(now, previous + 1): never at or before
 -- the stamp the row already has. A delete and a recreation within one millisecond already move it
@@ -42,34 +88,81 @@ ON CONFLICT(id) DO UPDATE SET
     sort_order_updated_at = CASE WHEN sort_order IS NOT excluded.sort_order
         THEN MAX(excluded.updated_at, COALESCE(sort_order_updated_at, 0) + 1) ELSE sort_order_updated_at END;
 
--- Creates the folder named :name, or reactivates the existing one of that name in place (same id,
--- created_at kept), appending it to the end of the active folders either way. The name conflict is
--- resolved by the statement itself rather than by a lookup before it, so a row of the same name
--- that another writer (a sync merge, a concurrent create) inserted in between is reused instead of
--- failing UNIQUE(name). :id is used only when no row has the name. A reactivation's updated_at moves
--- forward like every local write (see upsert). A new row stamps both per-field stamps with :now;
--- the re-appended sort_order of an existing row moves sort_order_updated_at when it changes.
-upsertByName:
-INSERT INTO folders (id, name, sort_order, deleted_at, updated_at, created_at, name_updated_at, sort_order_updated_at)
-VALUES (:id, :name, (SELECT COALESCE(MAX(sort_order), -1) + 1 FROM folders WHERE deleted_at IS NULL), NULL, :now, :now, :now, :now)
-ON CONFLICT(name) DO UPDATE SET
-    sort_order = excluded.sort_order, deleted_at = NULL, updated_at = MAX(excluded.updated_at, updated_at + 1),
-    sort_order_updated_at = CASE WHEN sort_order IS NOT excluded.sort_order
-        THEN MAX(excluded.updated_at, COALESCE(sort_order_updated_at, 0) + 1) ELSE sort_order_updated_at END;
+-- The two halves of a create-by-name (the repository runs them in one transaction, reactivate first):
+--
+-- reactivateByName reactivates the canonical folder named :name in place (same id and created_at
+-- kept), appending it to the end of the active folders, when one exists, alive or soft-deleted —
+-- with no UNIQUE(name) there may be several same-named rows, and this UPDATE lands on exactly the
+-- one getByName returns. It matches nothing when no row has the name.
+--
+-- insertIfNameAbsent then inserts a new folder, appended to the end of the active folders, when no
+-- row of the name exists at all. The guard is in the statement rather than in a lookup before it,
+-- so a same-named row another writer (a sync merge, a concurrent create) inserted before this
+-- statement in the same transaction is reused rather than doubled. A new folder's id is the one its
+-- name derives from (IdGenerator.folderId) — so two devices that create the same name independently
+-- converge on one row in the sync merge — unless that id is already held (a row renamed off the
+-- name keeps its id), in which case :randomId is used; the choice sits in the statement, not in a
+-- lookup before it, so no concurrent write can slip between the check and the insert. :randomId is
+-- only ever reached when :nameDerivedId is held, so exactly one of the two is inserted. An id
+-- ks_id_remap maps elsewhere counts as held too (see tags.sq's insertIfNameAbsent), so no row ever
+-- carries an id ks_id_remap maps.
+--
+-- Exactly one of the two writes: a row of the name exists -> reactivateByName (whose updated_at
+-- always moves forward, so it always writes) and insertIfNameAbsent no-ops; none exists ->
+-- reactivateByName matches nothing and insertIfNameAbsent writes. The transaction therefore always
+-- writes before the repository reads the id back. Both new folders and reactivated (previously
+-- soft-deleted) ones are appended to the end — a soft-deleted folder's old position isn't meaningful
+-- anymore since other folders may have been reordered while it was gone. A reactivation's updated_at
+-- moves forward like every local write (see upsert); a new row stamps both per-field stamps with
+-- :now, and the re-appended sort_order of an existing row moves sort_order_updated_at when it
+-- changes.
+reactivateByName:
+UPDATE folders SET
+    sort_order = (SELECT COALESCE(MAX(sort_order), -1) + 1 FROM folders WHERE deleted_at IS NULL),
+    deleted_at = NULL,
+    updated_at = MAX(:now, updated_at + 1),
+    sort_order_updated_at = CASE WHEN sort_order IS NOT (SELECT COALESCE(MAX(sort_order), -1) + 1 FROM folders WHERE deleted_at IS NULL)
+        THEN MAX(:now, COALESCE(sort_order_updated_at, 0) + 1) ELSE sort_order_updated_at END
+WHERE id = (
+    SELECT id FROM folders WHERE name = :name
+    ORDER BY deleted_at IS NOT NULL, created_at ASC, id ASC
+    LIMIT 1
+);
 
--- updated_at moves forward like every local write (see upsert).
+insertIfNameAbsent:
+INSERT INTO folders (id, name, sort_order, deleted_at, updated_at, created_at, name_updated_at, sort_order_updated_at)
+SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM folders WHERE id = :nameDerivedId)
+        AND NOT EXISTS (SELECT 1 FROM ks_id_remap WHERE kind = 'folder' AND old_id = :nameDerivedId)
+        THEN :nameDerivedId ELSE :randomId END,
+    :name, (SELECT COALESCE(MAX(sort_order), -1) + 1 FROM folders WHERE deleted_at IS NULL), NULL, :now, :now, :now, :now
+WHERE NOT EXISTS (SELECT 1 FROM folders WHERE name = :name);
+
+-- A rename of an existing folder (FolderRepository.updateFolder): the one write, so a value another
+-- writer (a sync merge) changed in the meantime — the sort order, the deletion — is never written back
+-- from a stale read. name_updated_at moves (forward, as in upsert) only when the name changes. :id is
+-- resolved (see the note above).
+updateName:
+UPDATE folders SET
+    name_updated_at = CASE WHEN name IS NOT :name
+        THEN MAX(:now, COALESCE(name_updated_at, 0) + 1) ELSE name_updated_at END,
+    name = :name,
+    updated_at = MAX(:now, updated_at + 1)
+WHERE id = COALESCE((SELECT id FROM folders WHERE id = :id), (SELECT new_id FROM ks_id_remap WHERE kind = 'folder' AND old_id = :id), :id);
+
+-- updated_at moves forward like every local write (see upsert). :id is resolved (see the note above).
 softDelete:
-UPDATE folders SET deleted_at = ?, updated_at = MAX(?, updated_at + 1) WHERE id = ?;
+UPDATE folders SET deleted_at = :deleted_at, updated_at = MAX(:updated_at, updated_at + 1)
+WHERE id = COALESCE((SELECT id FROM folders WHERE id = :id), (SELECT new_id FROM ks_id_remap WHERE kind = 'folder' AND old_id = :id), :id);
 
 -- updated_at moves forward like every local write (see upsert), and so does sort_order_updated_at
--- when the order actually changes.
+-- when the order actually changes. :id is resolved (see the note above).
 updateSortOrder:
 UPDATE folders SET
     sort_order_updated_at = CASE WHEN sort_order IS NOT :sort_order
         THEN MAX(:now, COALESCE(sort_order_updated_at, 0) + 1) ELSE sort_order_updated_at END,
     sort_order = :sort_order,
     updated_at = MAX(:now, updated_at + 1)
-WHERE id = :id;
+WHERE id = COALESCE((SELECT id FROM folders WHERE id = :id), (SELECT new_id FROM ks_id_remap WHERE kind = 'folder' AND old_id = :id), :id);
 
 nextSortOrder:
 SELECT COALESCE(MAX(sort_order), -1) + 1 FROM folders WHERE deleted_at IS NULL;

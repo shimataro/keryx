@@ -17,6 +17,19 @@ final class SidebarDialogState {
     /// `InlineEditTarget.Feed(feedId, tagId)`). Not a sheet, so `isPresenting` ignores it; it is
     /// `isEditingInline` that stands the bare Return/Delete accelerators down.
     var renamingRowKey: String?
+    /// What has been typed into the open inline editor, or `nil` while it has not been typed into.
+    /// Held here rather than by the editor field, because a merge re-keying the renamed tag or folder
+    /// gives its row another key and the field is then built afresh: it carries on from this instead
+    /// of from the row's own name. Dropped whenever the edit starts or ends (`startRename`,
+    /// `endRename`), so an edit never begins from a previous edit's text.
+    var renamingDraft: String?
+    /// What the iOS rename sheet edits (`SidebarRenameSheet`): the entity the edited row resolved to
+    /// the last time the lists and the re-key map could resolve it. Held rather than recomputed from
+    /// `renamingRowKey`, because the lists can show a re-keyed tag or folder ahead of the map that
+    /// joins its old id to the new one: while they disagree the row resolves to nothing, and the
+    /// sheet — with what has been typed into it — must stay open on the previous target instead of
+    /// closing. Only `endRename` (the user closing the sheet, or the row confirmed gone) ends the edit.
+    var renamingTarget: SidebarRenameTarget?
     var deletingFolder: Folders?
     var deletingTag: Tags?
     var unsubscribingFeed: Feeds?
@@ -32,8 +45,34 @@ final class SidebarDialogState {
     func startRename(_ instance: FeedListRowSelection) {
         switch onEnum(of: instance) {
         case .all, .starred: return
-        case .folder, .tag, .feedInFolderGroup, .feedInTag: renamingRowKey = feedListRowSelectionKey(instance)
+        case .folder, .tag, .feedInFolderGroup, .feedInTag:
+            renamingRowKey = feedListRowSelectionKey(instance)
+            renamingDraft = nil
+            renamingTarget = nil
         }
+    }
+
+    /// Ends the in-place edit, whether it was committed, cancelled or lost its row.
+    func endRename() {
+        renamingRowKey = nil
+        renamingDraft = nil
+        renamingTarget = nil
+    }
+
+    /// Brings `renamingTarget` up to date with `resolved` — what the current lists and re-key map
+    /// resolve the edited row to — so a re-key that has resolved moves the edit onto the new id. A
+    /// row that does not resolve (`nil`: the lists are ahead of the map) keeps the previous target,
+    /// and with no edit open nothing is recorded.
+    func updateRenamingTarget(_ resolved: SidebarRenameTarget?) {
+        guard renamingRowKey != nil, let resolved else { return }
+        renamingTarget = resolved
+    }
+
+    /// Whether the row keyed `key` is the one being edited — a key taken before a re-key and the one
+    /// the row has now name the same row (`SidebarIdRemap`).
+    func isRenaming(_ key: String, remap: SidebarIdRemap) -> Bool {
+        guard let renamingRowKey else { return false }
+        return remap.sameRow(renamingRowKey, key)
     }
 
     /// Whether a row's name is being edited in place — the field holds keyboard focus, so bare

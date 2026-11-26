@@ -41,11 +41,11 @@
                   CloudFileTransfer, SecretStoreTokenStorage
     data/cloud/nextcloud/  NextcloudStorage（WebDAV）, NextcloudLoginFlow（Login Flow v2）, NextcloudServerProbe（status.php）, normalizeNextcloudUrl, revokeNextcloudAppPassword — sync-architecture.ja.md の「Nextcloud（Login Flow v2）」参照
     data/opml/    OpmlCodec
-    domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport（interface + CustomUri）, AuthorizationLauncher（interface + schemeOf。`OAuthConnectFlow` が認可 URL をどう開くか——デスクトップ/Android は既定でシステムのブラウザ、Apple アプリは Swift に委ねる。下記「KeryxSdk」参照）, LoginPageLauncher（インターフェース + BrowserLoginPageLauncher — Nextcloud の Login Flow v2 がサインインページを表示し、そこから戻る方法）, OAuthCallbackParams, OAuthUriParser（parseOAuthUri。すべての `keryx://`・ループバックのリダイレクト処理が共有）, StartupMaintenanceTasks（runStartupMaintenance/checkForUpdateAndNotify/maybeRebuildFtsIndex）, BackgroundRefreshLoop（backgroundUpdateLoop——デスクトップ版自身のポーリングループ。Apple 版の `KeryxSdk.startMaintenance()` も使う。Android は `WorkManager` でスケジュールするため、これに相当するものはない）, RefreshCycleRunner（すべての更新経路が共有する 更新 → 通知 → 同期 のサイクル）, NetworkUsagePolicy（現在の回線でどの自動通信を許可するか——sync-architecture.ja.md の「ネットワークゲート」参照）, UpdateChecker/UpdateRepository/UpdateAsset/UpdateInstallPolicy/UpdateInstaller（expect 相当の interface）/AvailableUpdate/UpdateState（アプリ内アップデート——下記「アプリ内アップデート」参照）
+    domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, V2IdentitySql（同期マージの同一性ステップ: 同一のタグ/フォルダーの行をすべて正準 id へ移す）, TagFolderIdRekey（`KERYX_SCHEMA_CALLBACKS`: v2→v3 でタグ/フォルダーを名前から導かれる id へ振り直す。各プラットフォームのデータベースドライバーと `DatabaseMerger` が実行する）, IdRemapSql/TagFolderIdRemaps（タグ/フォルダー id の振り直し——後述の「タグ/フォルダー id の振り直し」を参照）, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport（interface + CustomUri）, AuthorizationLauncher（interface + schemeOf。`OAuthConnectFlow` が認可 URL をどう開くか——デスクトップ/Android は既定でシステムのブラウザ、Apple アプリは Swift に委ねる。下記「KeryxSdk」参照）, LoginPageLauncher（インターフェース + BrowserLoginPageLauncher — Nextcloud の Login Flow v2 がサインインページを表示し、そこから戻る方法）, OAuthCallbackParams, OAuthUriParser（parseOAuthUri。すべての `keryx://`・ループバックのリダイレクト処理が共有）, StartupMaintenanceTasks（runStartupMaintenance/checkForUpdateAndNotify/maybeRebuildFtsIndex）, BackgroundRefreshLoop（backgroundUpdateLoop——デスクトップ版自身のポーリングループ。Apple 版の `KeryxSdk.startMaintenance()` も使う。Android は `WorkManager` でスケジュールするため、これに相当するものはない）, RefreshCycleRunner（すべての更新経路が共有する 更新 → 通知 → 同期 のサイクル）, NetworkUsagePolicy（現在の回線でどの自動通信を許可するか——sync-architecture.ja.md の「ネットワークゲート」参照）, UpdateChecker/UpdateRepository/UpdateAsset/UpdateInstallPolicy/UpdateInstaller（expect 相当の interface）/AvailableUpdate/UpdateState（アプリ内アップデート——下記「アプリ内アップデート」参照）
     di/           SharedModule（sharedModule + updateModule + presentationModule）と HttpClientFactory［:shared］、AppModule（+ expect platformModule）と ImageLoaderSetup［:composeApp］
     presentation/ ［:shared］すべての UI が共有する、UI フレームワーク非依存の画面状態：home/（HomeViewModel——ホーム画面の
                   フィルタ・選択・記事リスト・検索・未読のみ・新着の状態と操作。ArticleContentCache、HomeRefreshController、
-                  NewArticleTracking。FeedListExpansion——フォルダ・タグの開閉状態（端末ローカルに永続化）。
+                  NewArticleTracking。FeedListExpansion——フォルダ・タグの開閉状態（端末ローカルに永続化）。NameOrdinals——同名のタグ/フォルダーを見分ける「(2)」の序数（`tagFolderLabels`）。両 UI のために 1 か所で決める。TagFolderIdRemapping——マージが振り直したタグ/フォルダー id へ、`HomeViewModel` が保持するすべての id を移す。
                   SelectionReadIntents——選択した記事の本文の読み込み中に行った、既読・未読の明示的な操作の記録（その選択の
                   暗黙の既読より優先させるため）。FeedListModel——FeedListRowSelection とフィードリストの並び・グループ化の規則。
                   ArticleListModel。ReaderPaging——リーダーのページャのページ／選択の規則。ReaderContent——単一（非ページャ）のリーダーが表示するもの
@@ -1103,6 +1103,73 @@ JVM ドライバがステートメントごとに開く接続で読むため、�
 消える。ヘッダー表示中に新しい選択が行われると、リーダーを前に読み込んだ記事へ戻して猶予期間を待つのではなく、
 そのままヘッダーを新しい記事のものに切り替える。Compose の単体リーダーと macOS の SwiftUI リーダーがこれを
 描画する。iOS の pager は描画しない（本文がまだないページは従来どおりリーダーの背景だけを表示する）。
+
+### タグ/フォルダー id の振り直し
+
+**レイヤリングの例外: `DatabaseDriverFactory` の actual は `domain/` に依存する。** 各プラットフォームの
+`DatabaseDriverFactory` の actual（`data/local/`）は `KERYX_SCHEMA_CALLBACKS` を組み込み、その `TagFolderIdRekey`
+（`domain/`）が `IdGenerator` と `IdRemapSql` を使うため、`data/local/` が通常とは逆向きに `domain/` へ届く。
+これは意図したもので、そのままにしてある。`IdGenerator` は名前から導かれる id の唯一の出どころで、タグとフォルダーを
+作るリポジトリと共有している。移行は、ずれていく恐れのあるコピーではなく、そのコードそのものを呼ばなければならない。
+また `TagFolderIdRekey` は、`DatabaseMerger` がダウンロードしたファイルの移行でも実行し、`V2IdentitySql` と多くの
+テストも使っている。これと `IdGenerator` / `IdRemapSql` を `data/local/` へ移しても、逆向きになる層が入れ替わるだけで、
+広いパッケージ名の変更という代償だけが残る。
+
+タグやフォルダーの id は変わりうる。v2→v3 移行はすべての行を名前由来の id へ振り直し、同期マージは行をその同一性の
+正規の id へ移す（`domain/V2IdentitySql.kt`。[sync-architecture.ja.md](sync-architecture.ja.md) の「タグとフォルダーの
+同一性」）。移動はすべて `domain/IdRemapSql.kt` を通して `ks_id_remap` に記録され、連鎖を畳むので、
+旧 id はその行が今持つ id へ 1 回で写る（[db-schema.ja.md](db-schema.ja.md) を参照）。データベースの外でそうした id を
+保持しているものはこれに追従するので、振り直しによって選択やユーザーの書き込みが宙に浮くことはない:
+
+- **公開。** `domain/TagFolderIdRemaps`（Koin の single）は、畳んだ表全体を `StateFlow` として保持する
+  （`TagFolderIdRemap`: 種類ごとの旧 → 新）。`DeltaSync` は、すべてのマージ（受信のものと差分同期以前からの移行のもの）のコミット後——その中ではなく——に
+  `publishFromDb()` を呼ぶ。失敗はログに残すだけで同期を失敗させない。次のマージか起動時に追いつき、どの書き込みも
+  古い id を自分で解決するため。
+  バッチの流れではなく対応表全体の `StateFlow` にしたのは意図的である: 遅れて収集を始めた保持側もそれまでの振り直しを
+  すべて受け取り、置き換えられた値は新しい値に含まれ、同じ値を再適用しても何も変わらない（表は畳んであり、旧 id を
+  持つ生きた行はない）ので、取りこぼしも二重適用もない。
+- **ローカル設定。** `SettingsRepository` は、構築時（表そのものを読む）と、公開された値ごとに、`lastFilter`・
+  `collapsedFolderIds`・`expandedTagIds` にこの表を適用する。書き換えは両者で 1 つで、何かが変わったときだけ保存する。
+- **`HomeViewModel`。** 公開された値ごとに、選択中のフィルタと行（`filterSelection`、`_selectedRowInstance`。振り直された
+  タグの下に入れ子になったフィード行も含む）を新しい id へ移す——`selectFilter` を通さず直接移すので、選択が
+  「すべてのフィード」に戻ることはなく、記事・ピン・カーソルもそのまま残る（外部仕様 §9「Least surprise」）——。
+  進行中のプルのフィルタも一緒に移す（`HomeRefreshController.remapPulls`。プルはそれぞれのトークンで追うので、
+  プルの終わりは今も自分を取り除く）。
+  さらに `FeedListExpansion` の折りたたみ/展開の集合を書き換え、保留中の削除フォールバック
+  （`DeletedItemFallback.remapPending`）を削除対象が今持つ id へ移す。そのフォールバックは、その id で比較し、忘れる。
+  振り直し前にフィードリストが描画した行は古い id のままクリックされうるので、`selectFilter`、フォルダー/タグの
+  開閉、`revealFeedListRow` も、受け取った id を現在の値で解決する。
+- **書き込み。** タグ/フォルダー id を受け取るリポジトリの書き込みはすべて、書き込み文そのものの中で id を解決する
+  （`tags.sq` / `folders.sq` / `feeds.sq` / `feed_tags.sq` / `articles.sq`）。そのため、開いたままのリネーム欄、
+  `SerialWriteQueue` に積まれた項目、振り直し前に始まったドラッグも、移った先の行に適用され、何にも当たらずに
+  終わることも外部キー違反（ローカル書き込みの失敗になる）になることもない。解決は文の一部なので、トランザクションの
+  最初の書き込みより前の読み取りは増えない。`FolderRepository.reorderFolders` は、新しい並びを計算する前に
+  2 つの id も解決する（従来どおりトランザクションの外で）。
+- **選択に基づく読み取り。** 記事一覧のタグ・フォルダーのクエリ（`articles.sq` の `watchByTag` / `watchByFolder`）、
+  検索の範囲（`FtsSearch` の `articleScopeSql`）、プルが対象とするフィード（`feed_tags.sq` の `watchFeedIdsForTag`、
+  `feeds.sq` の `getByFolder`）も同じ方法で id を解決する。マージのコミットは、`publishFromDb()` が選択を移すより
+  前に一覧を再実行するので、これが無いと一覧は古い id のもとで一瞬空になり、新着ピルの件数とスクロール位置を
+  失う——2 つの処理のどちらが先に走っても。
+
+- **記事一覧はそのまま。** 選択中のフィルタは、ユーザーの選択の世代とともに運ばれる（`presentation/home/HomeListScopes.kt`
+  の `FilterSelection`、`HomeViewModel.filterSelection`）: `selectFilter` は新しい世代を始め、振り直しは世代を保つ。
+  別の一覧への切り替えに応じる処理はすべて、フィルタの値ではなく世代で判断する——ピルの裏の新着の追跡を作り直すのは
+  新しい世代のときだけ（`filteredArticles`）、Compose の `ArticleListPane` が先頭へ戻すのは別のフィルタへの新しい世代の
+  ときだけ（自分の世代を保存していたプロセスが復元されたときも切り替えではない）、SwiftUI の一覧の
+  `ArticleListTopReset` と macOS の表のリセットは `HomeObservable.filterGeneration` で判断し、iOS のプルの待ちを
+  終えるのも新しい世代だけ。そのため、選択中のタグやフォルダーが振り直されても、スクロール位置、ピル、プルの
+  表示は保たれる。
+- **フィードリストもそのまま。** `HomeViewModel.selectedRowGeneration` はユーザーが行を選んだ回数を数える。フィード
+  リストのスクロール追従（Compose の `FeedListPane`、macOS の `FeedListView`）は、振り直しで id が置き換わる
+  `selectedRowInstance` ではなく、これで判断する。インラインリネームは、始めたときの id で行を指し続け、行との
+  比較は `HomeViewModel.tagFolderIdRemap` を通して行う（一覧と表は別の flow で UI に届き、順序は不定）。そこまでに
+  入力した文字はペイン側（`InlineEditState`、`SidebarDialogState.renamingDraft`）が持つので、新しい id で作り直された行は
+  その続きから始まる。振り直しで composition から外れたエディタはフォーカスを失ったことにならず、何も確定しない。
+  タグとフォルダーの名前は `HomeViewModel.tagFolderLabels`——各行の名前とその序数を 1 つにした flow——からだけ描画する
+  ので、名前と序数が別々のスナップショットから来ることはない。
+
+Apple アプリは、`HomeViewModel` から読むものと一時的な UI 状態（インラインリネームの行キー、削除確認中の行、
+ドラッグ）以外に、タグやフォルダーの id を独自に保持しない。一時的な状態からの操作は、上の解決付きの書き込みを通る。
 
 ## ナビゲーション
 

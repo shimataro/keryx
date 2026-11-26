@@ -43,7 +43,7 @@ enum SidebarContextMenus {
                     .withTintColor(UIColor(colorFromHex(hex)), renderingMode: .alwaysOriginal),
                 state: tag.color == hex ? .on : .off
             ) { _ in
-                home.viewModel.updateTag(id: tag.id, name: tag.name, color: hex)
+                home.viewModel.setTagColor(id: tag.id, color: hex)
             }
         }
         return UIMenu(title: L("home_change_tag_color_menu"), image: UIImage(systemName: "paintpalette"), children: [
@@ -65,7 +65,7 @@ enum SidebarContextMenus {
                 home.viewModel.moveFeed(feedId: feed.id, folderId: nil, targetFeedId: nil)
             },
         ] + home.sidebar.sortedFolders.map { folder in
-            UIAction(title: folder.name, state: feed.folder_id == folder.id ? .on : .off) { _ in
+            UIAction(title: home.labels.name(of: folder), state: feed.folder_id == folder.id ? .on : .off) { _ in
                 home.viewModel.moveFeed(feedId: feed.id, folderId: folder.id, targetFeedId: nil)
             }
         } + [
@@ -74,7 +74,7 @@ enum SidebarContextMenus {
         let attachedTagIds = home.feedTagMap[feed.id] ?? []
         let assignTags = UIMenu(title: L("home_assign_tags"), image: UIImage(systemName: "tag"), children: home.sidebar.sortedTags.map { tag in
             let attached = attachedTagIds.contains(tag.id)
-            return UIAction(title: tag.name, state: attached ? .on : .off) { _ in
+            return UIAction(title: home.labels.name(of: tag), state: attached ? .on : .off) { _ in
                 home.viewModel.setFeedTag(feedId: feed.id, tagId: tag.id, attached: !attached)
             }
         } + [

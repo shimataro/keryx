@@ -105,6 +105,12 @@ internal class DeltaSync(
     /** Whether folding may run now ([NetworkUsagePolicy.compactionAllowed]). */
     private val compactionAllowed: suspend () -> Boolean,
     private val setPhase: (SyncPhase) -> Unit,
+    /**
+     * Republishes `ks_id_remap` to the ids held outside the database ([TagFolderIdRemaps.publishFromDb])
+     * after a merge has committed — a merge may have moved tags or folders onto their canonical ids
+     * ([V2IdentitySql]). Never called inside the merge's transaction.
+     */
+    private val publishIdRemaps: suspend () -> Unit = {},
 ) {
     /** Called at each [SyncHookPoint] with the file name concerned; for tests only. */
     var testHook: (suspend (SyncHookPoint, String) -> Unit)? = null
@@ -290,10 +296,11 @@ internal class DeltaSync(
 
     /**
      * Disconnect / switch: recording off, and everything tied to the connection gone — the `ks_*` keys,
-     * the outbox, `sync_applied`, the cursors, the raw folder versions (`ks_feed_folder_raw`, which
-     * describe the old connection's files) and every saved send file ([sweepPendingFiles] — including
+     * the outbox, `sync_applied`, the cursors and every saved send file ([sweepPendingFiles] — including
      * one a commit left behind, which no record names any more). `ks_search_pending` stays (it belongs
-     * to the local search index).
+     * to the local search index), and so do the feeds' raw folder assignments (`ks_feed_folder_raw`):
+     * they are this device's data — the source of truth `feeds.folder_id` is resolved from — not a
+     * record of the connection's files.
      */
     fun clearConnectionState() {
         db.transaction {
@@ -301,7 +308,6 @@ internal class DeltaSync(
             db.sync_bookkeepingQueries.clearOutbox()
             db.sync_bookkeepingQueries.clearApplied()
             db.sync_bookkeepingQueries.clearCursors()
-            db.sync_bookkeepingQueries.clearFeedFolderRaw()
             db.sync_bookkeepingQueries.setCapture(enabled = 0, fullPending = 0)
         }
         sweepPendingFiles()
@@ -365,8 +371,7 @@ internal class DeltaSync(
 
     /**
      * Joins [generation] ("Joining"): a new sync identity, and — in the same transaction — the cursors,
-     * `sync_applied`, the raw folder versions (`ks_feed_folder_raw`, which describe the files merged
-     * before), the outbox, the base cache and a pending send cleared, recording on and a full send
+     * `sync_applied`, the outbox, the base cache and a pending send cleared, recording on and a full send
      * due, so every write from then on is recorded and everything before it is in the full send. Every
      * saved send file goes afterwards ([sweepPendingFiles]), orphans included.
      */
@@ -382,7 +387,6 @@ internal class DeltaSync(
             deleteState(SYNC_STATE_KS_BASES)
             db.sync_bookkeepingQueries.clearCursors()
             db.sync_bookkeepingQueries.clearApplied()
-            db.sync_bookkeepingQueries.clearFeedFolderRaw()
             db.sync_bookkeepingQueries.clearOutbox()
             db.sync_bookkeepingQueries.setCapture(enabled = 1, fullPending = 1)
         }
@@ -721,7 +725,7 @@ internal class DeltaSync(
     private suspend fun mergeFolded(accumulator: String, merged: List<String>, cursorUpdates: Map<String, Long>): Result<Unit> {
         val statements = buildList {
             add("INSERT INTO main.sync_merging (flag) VALUES (1)")
-            addAll(MergeSql.all)
+            addAll(MergeSql.transport)
             for (name in merged.distinct()) {
                 // Only names that parsed (lowercase hex, digits, '-' and '.') reach SQL.
                 checkNotNull(TransportFileName.parse(name)) { "Malformed name" }
@@ -768,10 +772,38 @@ internal class DeltaSync(
             Log.error(TAG, "Merge failed", e)
             return Result.Err(CloudStorageException("Merge failed: ${e.message}"))
         }
-        // Committed. The merge wrote through its own connection, bypassing SQLDelight's listeners, so
-        // the UI is told at once — whatever happens to the indexing after it.
-        driver.notifyListeners(*SYNCED_TABLES)
+        // Committed. Ids held outside the database are brought onto any re-key first, so a list query
+        // that the notification below re-runs is never delivered to a holder (the feed list's delete
+        // fallback, say) that still knows the old ids. The holders also read the published map at each
+        // decision, so this order is a reinforcement, not the only guard.
+        try {
+            publishIdRemapsAfterCommit()
+        } finally {
+            // The merge wrote through its own connection, bypassing SQLDelight's listeners, so the UI is
+            // told at once — whatever happens to the indexing after it, and even when the sync is
+            // cancelled while publishing (waiting for the re-key map's lock, say): the changes are
+            // committed, so they are always announced. The cancellation still propagates.
+            driver.notifyListeners(*SYNCED_TABLES)
+        }
         return finishIndexing()
+    }
+
+    /**
+     * Brings the ids held outside the database (the selection, the feed list's expansion, the local
+     * settings) onto any canonical ids the committed merge moved tags or folders to. A failure is
+     * logged, not returned: the merge is committed and the database is the source of truth — every
+     * write resolves a stale id itself (tags.sq / folders.sq), the next merge publishes again, and the
+     * next launch re-reads the table — so failing the sync for it would only report a fault that
+     * leaves nothing wrong behind.
+     */
+    private suspend fun publishIdRemapsAfterCommit() {
+        try {
+            publishIdRemaps()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            Log.warn(TAG, "Publishing tag/folder id re-keys failed; the next merge or launch catches up: ${e.message}")
+        }
     }
 
     /**

@@ -64,6 +64,7 @@ import works.merc.keryx.app.ui.common.FlatTooltipContent
 import works.merc.keryx.app.ui.common.KeryxIcon
 import works.merc.keryx.app.ui.common.KeryxIcons
 import works.merc.keryx.app.presentation.home.DropBoundary
+import works.merc.keryx.app.presentation.home.OrdinalName
 
 /** How long a dragged feed must be held over a collapsed folder header before the folder opens by
  * itself, so the feeds inside it become reachable drop targets without letting go of the drag
@@ -89,6 +90,10 @@ internal const val NO_FOLDER_HEADER_TEST_TAG = "no-folder-row"
  * insertion indicators, and automatic expansion while a dragged feed hovers over a collapsed folder.
  *
  * @param folder The folder represented by the header.
+ * @param label The folder's display name with its ordinal among the folders sharing its name
+ *   ([works.merc.keryx.app.presentation.home.TagFolderLabels]) — a `null` ordinal (the bare name)
+ *   for a uniquely named folder. Applied to the displayed label only; the rename field's initial
+ *   value stays the row's own name.
  * @param count The number of feeds in the folder.
  * @param collapsed Whether the folder's feed list is collapsed.
  * @param selected Whether the folder is selected.
@@ -123,6 +128,7 @@ internal const val NO_FOLDER_HEADER_TEST_TAG = "no-folder-row"
 @Composable
 internal fun FolderGroupHeader(
     folder: Folders,
+    label: OrdinalName,
     count: Long,
     collapsed: Boolean,
     selected: Boolean,
@@ -246,7 +252,7 @@ internal fun FolderGroupHeader(
                 // count badge on the right never move when editing starts or ends.
                 EditableRowName(
                     editing = editingName,
-                    label = folder.name,
+                    label = nameWithOrdinal(label),
                     editValue = folder.name,
                     onCommit = onRenameCommit,
                     onCancel = onRenameCancel,
@@ -344,6 +350,10 @@ internal fun NoFolderHeader(
  * @param isTouchPrimary Whether this platform's reorder gesture starts from the row's own
  *   [DragHandle] — which is then also given its assistive-technology counterpart, see
  *   [reorderAccessibilityActions]. Overridable for tests only, like `FeedListPane`'s own parameter.
+ * @param tagLabels Every tag's display name with its ordinal applied, by tag id — labels the "Assign
+ *   tags" submenu's items, so a second same-named tag is offered as "X (2)". Built once by the pane
+ *   (resolved in composition, since the context menu's items lambda runs outside it).
+ * @param folderLabels The same for every folder, by folder id — labels the "Move to folder" submenu.
  * @param onMoveUp Moves this feed one position up among the feeds of its own group, or `null` when
  *   it is already the first one there (see [reorderTargetWithinScope]).
  * @param onMoveDown Moves this feed one position down in the same group, or `null` when it is
@@ -377,6 +387,8 @@ internal fun FeedRow(
     onCopyFeedUrl: () -> Unit,
     onCopySiteUrl: () -> Unit,
     onOpenSite: () -> Unit,
+    tagLabels: Map<String, String>,
+    folderLabels: Map<String, String>,
     isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
     onMoveUp: (() -> Unit)? = null,
     onMoveDown: (() -> Unit)? = null,
@@ -429,7 +441,7 @@ internal fun FeedRow(
                         NativeSubMenu(
                             label = assignTagsLabel,
                             items = tags.map { tag ->
-                                NativeCheckMenuItem(tag.name, checked = tag.id in attachedTagIds) {
+                                NativeCheckMenuItem(tagLabels.getValue(tag.id), checked = tag.id in attachedTagIds) {
                                     onToggleFeedTag(tag.id, tag.id !in attachedTagIds)
                                 }
                             } + listOf(
@@ -446,7 +458,7 @@ internal fun FeedRow(
                                 )
                                 folders.forEach { folder ->
                                     add(
-                                        NativeCheckMenuItem(folder.name, checked = feed.folder_id == folder.id) {
+                                        NativeCheckMenuItem(folderLabels.getValue(folder.id), checked = feed.folder_id == folder.id) {
                                             onMoveFeedToFolder(folder.id)
                                         },
                                     )

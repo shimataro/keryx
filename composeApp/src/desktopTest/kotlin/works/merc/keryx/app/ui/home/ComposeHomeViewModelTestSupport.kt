@@ -10,6 +10,7 @@ import works.merc.keryx.app.data.cloud.TokenStorage
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.domain.ActivityCenter
 import works.merc.keryx.app.domain.SyncScheduler
+import works.merc.keryx.app.domain.TagFolderIdRemaps
 import works.merc.keryx.app.presentation.home.HomeViewModel
 import works.merc.keryx.app.presentation.home.HomeViewModelFixture
 import works.merc.keryx.app.presentation.home.HomeViewModelFixtureTokenStorage
@@ -24,6 +25,11 @@ import works.merc.keryx.app.presentation.ManualSync
  * This is the only supported way to get a [HomeViewModel] in a Compose UI test: teardown cannot be
  * forgotten, cannot be placed outside the Compose test (where [ComposeUiTest.waitForIdle] isn't
  * available), and cannot be ordered wrongly.
+ *
+ * Several fixtures over one driver (a process restart modelled over the same database) nest calls
+ * with [ownsDriver] `false`: each then only stops its fixture ([HomeViewModelFixture.stop]), and the
+ * caller closes the driver once, after the outermost call has returned — so no fixture's queued DB
+ * continuation resumes against a driver another one already closed.
  */
 @OptIn(ExperimentalTestApi::class)
 internal suspend fun <T> ComposeUiTest.useHomeViewModel(
@@ -38,17 +44,25 @@ internal suspend fun <T> ComposeUiTest.useHomeViewModel(
     manualSync: ManualSync? = null,
     // See newHomeViewModel's own parameter: lets a test hold a selection's body lookup.
     dispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
+    // See newHomeViewModel's own parameter: lets a test publish a tag/folder id re-key.
+    idRemaps: TagFolderIdRemaps = TagFolderIdRemaps(db, Dispatchers.Unconfined),
+    // See newHomeViewModel's own parameter: models a process restart over the same saved settings.
+    settingsDir: String? = null,
+    // Whether teardown closes [driver] too ([HomeViewModelFixture.close]) or only stops the fixture
+    // ([HomeViewModelFixture.stop]) — see the KDoc on nesting.
+    ownsDriver: Boolean = true,
     block: suspend (HomeViewModelFixture) -> T,
 ): T {
     val fixture = newHomeViewModel(
         driver, db, syncScheduler, clock, activityCenter, tokenStorage, appKey, manualSync = manualSync, dispatcher = dispatcher,
+        idRemaps = idRemaps, settingsDir = settingsDir,
     )
     return try {
         // waitForIdle only on the success path: it rethrows Compose's own uncaught exceptions, and
         // doing that from a `finally` would mask the assertion failure that actually ended [block].
         block(fixture).also { waitForIdle() }
     } finally {
-        fixture.close()
+        if (ownsDriver) fixture.close() else fixture.stop()
     }
 }
 

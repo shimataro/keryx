@@ -22,6 +22,7 @@ import works.merc.keryx.app.domain.FeedRepository
 import works.merc.keryx.app.domain.FolderRepository
 import works.merc.keryx.app.domain.NotificationCenter
 import works.merc.keryx.app.domain.SettingsRepository
+import works.merc.keryx.app.domain.TagFolderIdRemap
 import works.merc.keryx.app.domain.SyncScheduler
 import works.merc.keryx.app.domain.TagRepository
 import works.merc.keryx.app.ftsManagerIndexed
@@ -107,6 +108,8 @@ class FeedListActionsTest {
             },
             // No feed-list flow here to wait on: falls back as soon as the write has landed.
             fallBackOnceHidden = { _, fallback -> fallback() },
+            // Nothing is re-keyed in these tests.
+            currentIdRemap = { TagFolderIdRemap.EMPTY },
         )
     }
 
@@ -131,14 +134,29 @@ class FeedListActionsTest {
     }
 
     @Test
-    fun updateTagIgnoresBlankNamesAndTrimsValidOnes() {
-        db.insertTag("t1", "Old")
+    fun renameTagIgnoresBlankNamesAndTrimsValidOnes() {
+        db.insertTag("t1", "Old", color = "#111111")
 
-        actions.updateTag("t1", "  ", null)
+        actions.renameTag("t1", "  ")
         assertEquals("Old", db.tagsQueries.getById("t1").executeAsOne().name)
 
-        actions.updateTag("t1", " New ", null)
-        assertEquals("New", db.tagsQueries.getById("t1").executeAsOne().name)
+        actions.renameTag("t1", " New ")
+        val row = db.tagsQueries.getById("t1").executeAsOne()
+        assertEquals("New", row.name)
+        assertEquals("#111111", row.color, "a rename leaves the color alone")
+    }
+
+    @Test
+    fun setTagColorSetsAndClearsTheColorWithoutTouchingTheName() {
+        db.insertTag("t1", "Old")
+
+        actions.setTagColor("t1", "#222222")
+        assertEquals("#222222", db.tagsQueries.getById("t1").executeAsOne().color)
+
+        actions.setTagColor("t1", null)
+        val row = db.tagsQueries.getById("t1").executeAsOne()
+        assertNull(row.color)
+        assertEquals("Old", row.name)
     }
 
     @Test
@@ -438,7 +456,7 @@ class FeedListActionsTest {
         holdWrites = true
 
         actions.createTag("New", null, attachToFeedId = "f2")
-        actions.updateTag("t1", "Renamed tag", null)
+        actions.renameTag("t1", "Renamed tag")
         actions.deleteTag("t2")
         actions.setFeedTag("f1", "t1", attached = true)
         actions.createFolder("Fresh", moveFeedId = "f1")

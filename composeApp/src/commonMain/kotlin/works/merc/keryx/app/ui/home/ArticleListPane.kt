@@ -79,7 +79,7 @@ import works.merc.keryx.app.presentation.home.ArticleSwipeAction
 import works.merc.keryx.app.presentation.home.listModeChecked
 import works.merc.keryx.app.presentation.home.HomeViewModel
 import works.merc.keryx.app.presentation.home.articleListCatchingUp
-import works.merc.keryx.app.presentation.home.articleListTitle
+import works.merc.keryx.app.presentation.home.articleListOrdinalName
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.common_back
 import works.merc.keryx.app.resources.home_all_feeds
@@ -195,17 +195,16 @@ fun ArticleListPane(
 ) {
     val filter by vm.filter.collectAsState()
     val feeds by vm.structuralFeeds.collectAsState()
-    val folders by vm.folders.collectAsState()
-    val tags by vm.tags.collectAsState()
+    val labels by vm.tagFolderLabels.collectAsState()
     val title = onOpenDrawer?.let {
-        articleListTitle(
+        val resolved = articleListOrdinalName(
             filter = filter,
             feeds = feeds,
-            folders = folders,
-            tags = tags,
+            labels = labels,
             allLabel = stringResource(Res.string.home_all_feeds),
             starredLabel = stringResource(Res.string.home_starred),
         )
+        nameWithOrdinal(resolved)
     }
     val feedTitles = remember(feeds) { feeds.associate { it.id to it.displayTitle() } }
     val feedFavicons = remember(feeds) { feeds.associate { it.id to it.favicon_url } }
@@ -228,17 +227,52 @@ fun ArticleListPane(
     // between them (typing/clearing a query) never disposes either one's scroll position — see
     // this file's own module KDoc. Reset to the top when the user switches feed/tag/folder/scope,
     // so a new list never opens scrolled to the previous one's offset; only fires on an actual
-    // filter change (not the first composition), so a restored last-selected article's
-    // scroll-into-view isn't clobbered.
+    // switch (not the first composition), so a restored last-selected article's
+    // scroll-into-view isn't clobbered. A switch is a new selection generation
+    // (HomeViewModel.filterSelection) to a different filter: a merge re-keying the selected tag or
+    // folder changes the filter but keeps the generation, so the list stays where it is; and the
+    // saved generation of a previous process (rememberSaveable outlives the ViewModel, whose
+    // generation restarts at 0) is compared only under the same ViewModel's token: with another
+    // token (a restored process) the generations are not comparable, so the saved filter alone
+    // decides — the same list is no switch, a different one is, even when both generations are 0.
     val baseListState = rememberLazyListState()
     val searchListState = rememberLazyListState()
-    var lastFilter by rememberSaveable { mutableStateOf(filter.encode()) }
-    LaunchedEffect(filter) {
-        val encoded = filter.encode()
-        if (encoded != lastFilter) {
-            baseListState.scrollToItem(0)
-            searchListState.scrollToItem(0)
-            lastFilter = encoded
+    val filterSelection by vm.filterSelection.collectAsState()
+    var lastFilter by rememberSaveable { mutableStateOf(filterSelection.filter.encode()) }
+    var lastGeneration by rememberSaveable { mutableStateOf(filterSelection.generation) }
+    var lastToken by rememberSaveable { mutableStateOf(vm.instanceToken) }
+    // A switch whose scroll to the top has not completed yet, per list. scrollToItem suspends until its
+    // list is measured — the search list's, while no search is showing, until one is — so a run of the
+    // effect below can be cancelled by the next selection value (a re-key arriving after the user's
+    // switch, say) before it has scrolled; that next run still owes the scroll, and only that one.
+    var baseTopResetPending by rememberSaveable { mutableStateOf(false) }
+    var searchTopResetPending by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(filterSelection) {
+        val encoded = filterSelection.filter.encode()
+        // A generation saved under another ViewModel's token is not comparable: only the filter says
+        // whether the list changed.
+        val generationMoved = lastToken != vm.instanceToken || filterSelection.generation != lastGeneration
+        if (generationMoved && encoded != lastFilter) {
+            baseTopResetPending = true
+            searchTopResetPending = true
+        }
+        // Recorded before scrolling, for the same reason: a cancelled run must not leave this value
+        // unrecorded, or the next one would be compared against a stale generation and a re-key taken
+        // for a switch.
+        lastFilter = encoded
+        lastGeneration = filterSelection.generation
+        lastToken = vm.instanceToken
+        if (baseTopResetPending) {
+            launch {
+                baseListState.scrollToItem(0)
+                baseTopResetPending = false
+            }
+        }
+        if (searchTopResetPending) {
+            launch {
+                searchListState.scrollToItem(0)
+                searchTopResetPending = false
+            }
         }
     }
     // The search results list goes back to the top when the user changes the query, as it does for a

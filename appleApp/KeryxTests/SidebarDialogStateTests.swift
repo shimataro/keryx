@@ -95,4 +95,76 @@ struct SidebarDialogStateTests {
         state.renamingRowKey = nil
         #expect(!state.isEditingInline)
     }
+
+    @Test
+    func theDraftBelongsToTheEditAndIsDroppedWhenAnEditStartsOrEnds() {
+        let state = SidebarDialogState()
+        state.startRename(FeedListRowSelectionTag(tagId: "t1"))
+        state.renamingDraft = "Half typed"
+        // Another edit never begins from the previous one's text.
+        state.startRename(FeedListRowSelectionFolder(folderId: "d1"))
+        #expect(state.renamingDraft == nil)
+
+        state.renamingDraft = "Typed"
+        state.endRename()
+        #expect(state.renamingRowKey == nil)
+        #expect(state.renamingDraft == nil)
+        #expect(!state.isEditingInline)
+    }
+
+    /// A merge moving the tag onto another id gives its row another key: the edit is still on that row.
+    @Test
+    func theEditedRowIsRecognisedThroughAReKey() {
+        let state = SidebarDialogState()
+        state.startRename(FeedListRowSelectionTag(tagId: "t-old"))
+        let remap = SidebarIdRemap(tags: ["t-old": "t-new"], folders: [:])
+
+        #expect(state.isRenaming("tag:t-new", remap: remap))
+        #expect(state.isRenaming("tag:t-old", remap: remap))
+        #expect(!state.isRenaming("tag:other", remap: remap))
+        #expect(!state.isRenaming("tag:t-new", remap: .empty))
+    }
+
+    private func tagTarget(_ id: String, name: String = "Tag") -> SidebarRenameTarget {
+        SidebarRenameTarget(
+            kind: .tag(id: id), initialName: name, placeholder: nil, allowBlank: false,
+            duplicateMessageKey: "home_tag_name_duplicate"
+        )
+    }
+
+    /// While the lists show a re-keyed tag ahead of the map that joins its ids, the edited row resolves
+    /// to nothing: the iOS sheet keeps its previous target rather than closing, and moves onto the new
+    /// id once the re-key resolves.
+    @Test
+    func theRenameTargetIsKeptWhileTheRowCannotBeResolvedAndFollowsAResolvedReKey() {
+        let state = SidebarDialogState()
+        state.startRename(FeedListRowSelectionTag(tagId: "t-old"))
+        state.updateRenamingTarget(tagTarget("t-old"))
+        #expect(state.renamingTarget == tagTarget("t-old"))
+
+        state.updateRenamingTarget(nil)
+        #expect(state.renamingTarget == tagTarget("t-old"))
+        #expect(state.renamingRowKey != nil)
+
+        state.updateRenamingTarget(tagTarget("t-new"))
+        #expect(state.renamingTarget == tagTarget("t-new"))
+    }
+
+    @Test
+    func theRenameTargetBelongsToTheEdit() {
+        let state = SidebarDialogState()
+        // No edit open: nothing is recorded.
+        state.updateRenamingTarget(tagTarget("t1"))
+        #expect(state.renamingTarget == nil)
+
+        state.startRename(FeedListRowSelectionTag(tagId: "t1"))
+        state.updateRenamingTarget(tagTarget("t1"))
+        // Another edit never starts from the previous one's target.
+        state.startRename(FeedListRowSelectionFolder(folderId: "d1"))
+        #expect(state.renamingTarget == nil)
+
+        state.updateRenamingTarget(tagTarget("t1"))
+        state.endRename()
+        #expect(state.renamingTarget == nil)
+    }
 }

@@ -11,7 +11,7 @@ import works.merc.keryx.app.platform.FileIO
  *
  * [dirOverride] lets tests point at a temp directory.
  */
-class LocalSettingsStore(
+open class LocalSettingsStore(
     private val dirOverride: String? = null,
     private val json: Json = Json {
         ignoreUnknownKeys = true
@@ -22,12 +22,12 @@ class LocalSettingsStore(
     private val path: String
         get() = FileIO.join(dirOverride ?: AppDirs.appDataDir(), LOCAL_SETTINGS_FILE_NAME)
 
-    fun load(): LocalSettings {
+    open fun load(): LocalSettings {
         val text = FileIO.readText(path) ?: return LocalSettings()
         return runCatching { json.decodeFromString<LocalSettings>(text) }.getOrDefault(LocalSettings())
     }
 
-    fun save(settings: LocalSettings) {
+    open fun save(settings: LocalSettings) {
         FileIO.writeText(path, json.encodeToString(settings))
     }
 

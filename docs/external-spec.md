@@ -98,6 +98,9 @@ initial sync.
   macOS/iOS. However it is started (the Settings ▸ Data buttons, the File menu, or an opened file),
   an import or export runs in Settings ▸ Data, which shows its progress and result inline; an
   `.opml` opened during first-run Setup is imported once Setup is done
+- Tags and folders that share a name are numbered on screen — "Work", "Work (2)" — so they stay
+  tellable apart; the numbers follow each row's creation order and are the same on every device.
+  A rename field's initial value and an OPML export keep the row's own name
 - With no feeds subscribed yet, the article list shows an empty-state message with an "Add feed"
   button rather than the ordinary "no articles" message; on Android's narrower widths, the
   navigation drawer holding the feed list's own "+" button can auto-open here as well (§9's

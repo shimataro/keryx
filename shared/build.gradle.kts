@@ -373,6 +373,8 @@ kotlin {
         }
 
         getByName("androidDeviceTest") {
+            // The version-2 schema fixture (:testing has no Android target to depend on).
+            kotlin.srcDir("../testing/src/legacySchemaFixture/kotlin")
             dependencies {
                 implementation(libs.kotlin.test)
                 implementation(libs.kotlinx.coroutines.test)

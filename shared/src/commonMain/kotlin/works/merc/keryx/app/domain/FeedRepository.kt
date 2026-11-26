@@ -424,6 +424,12 @@ class FeedRepository(
     /**
      * Moves a feed to a folder and positions it before the specified target feed.
      *
+     * [folderId] is resolved by every statement that takes it (`getByFolder`,
+     * `updateFolderAndSortOrder`; see feeds.sq / folders.sq): a folder a merge has re-keyed since the
+     * caller read the id (a queued write, a drag) is the one the feed lands in, ordered among that
+     * folder's feeds. Each statement resolves on its own, so the group is still read outside the
+     * transaction (below) and the transaction still starts with a write.
+     *
      * @param feedId The ID of the feed to move.
      * @param folderId The destination folder ID, or `null` for no folder.
      * @param targetFeedId The ID of the feed to place the moved feed before, or `null` to place it last.
@@ -440,7 +446,7 @@ class FeedRepository(
             val now = clock.nowMillis()
             db.transaction {
                 applyReorderUpdates(newOrder, sortOrderOf, feedId, now, feeds) { index ->
-                    feeds.updateFolderAndSortOrder(folderId, index.toLong(), now, now, now, feedId)
+                    feeds.updateFolderAndSortOrder(folderId = folderId, sortOrder = index.toLong(), updatedAt = now, folderUpdatedAt = now, sortOrderUpdatedAt = now, id = feedId)
                 }
             }
         }
@@ -464,7 +470,7 @@ class FeedRepository(
         val startOrder = feeds.nextSortOrderInGroup(null).executeAsOne()
         db.transaction {
             feedsInFolder.forEachIndexed { index, feed ->
-                feeds.updateFolderAndSortOrder(null, startOrder + index, now, now, now, feed.id)
+                feeds.updateFolderAndSortOrder(folderId = null, sortOrder = startOrder + index, updatedAt = now, folderUpdatedAt = now, sortOrderUpdatedAt = now, id = feed.id)
             }
         }
     }
@@ -566,7 +572,7 @@ class FeedRepository(
             // Files a brand-new feed into the folder selected in the feed list at add time. A
             // re-subscribed feed (current != null) keeps its prior folder instead — upsert never
             // touches folder_id, so there's nothing to do for that case.
-            if (current == null && folderId != null) feeds.updateFolder(folderId, now, now, feedId)
+            if (current == null && folderId != null) feeds.updateFolder(folderId = folderId, updatedAt = now, folderUpdatedAt = now, id = feedId)
             // Re-subscribing (feed was soft-deleted) is a subscription-state change: stamp its
             // last-wins timestamp so it propagates over another device's refresh on the next sync.
             if (current?.deleted_at != null) {

@@ -487,41 +487,6 @@ Classification" in [sync-architecture.md](sync-architecture.md) — including th
 in-transaction checks — and the FTS rule that the merge is followed by the `search_text` recomputation and
 `indexMissing()`.
 
-## A tag or folder rename blocked by a name another row holds is lost
-
-**Status**: not fixed — closing it needs device-local merge state and a swap-safe rename pass, a redesign
-outside the scope of the change that found it (see "What a real fix would need"). It breaks the merge's
-commutativity (see "Design Philosophy" in [sync-architecture.md](sync-architecture.md)) for tag and folder
-names only.
-
-### Symptom
-
-Main holds tags `a` = "Old" and `b` = "Taken". One file renames `a` to "Taken", another renames `b` to "Free",
-both with newer name stamps, and they arrive in separate syncs. Merged in that order, `a` stays "Old" for
-good; merged in the other order, both renames apply. Two devices that received the files in different orders
-keep different names. Folders behave the same way.
-
-### Diagnosis
-
-`MergeSql.perFieldStatements` applies a name change only while no other main row holds that name
-(`NOT EXISTS … m2.name = c.name AND m2.id <> …`), so a merge can never violate `UNIQUE(name)`. A winning
-version that guard rejects is kept nowhere: the file is recorded as applied, and no later merge or local
-write looks at it again. The fold (`ReduceSql`) has no such guard, so a base built from both files holds
-both renames, and a device joining from it ends up with the order-independent result the other devices miss.
-
-### What a real fix would need
-
-- A device-local table holding, per row, the name version that wins last-write-wins whenever main could not
-  apply it yet.
-- A rename pass, run at the end of every merge and inside every local rename's transaction, that applies
-  every pending name whose target is free or freed by another pending name — through a placeholder name
-  first, so swaps and longer cycles apply too.
-- Local name stamps that rise above the pending stamp, so a user's rename outranks a pending winner it has
-  already seen instead of being reverted by it later.
-
-Even then, two devices renaming different rows to the same name at once leave one rename pending, and which
-one depends on the order; it resolves as soon as the row holding the name is renamed.
-
 ## Feeds sharing one URL under different ids keep whichever arrived first
 
 **Status**: not fixed — closing it needs re-keying a feed and everything that references it onto a canonical id,
@@ -545,12 +510,6 @@ URL under different ids. The merge's guard (`NOT EXISTS … l2.url = c.url AND l
 whose URL main already holds under another id, and `winnerAmong` picks among cloud duplicates by `updated_at`,
 which differs between the files and main — so the survivor depends on the order.
 
-The same cause — an identity taken from content that can change — makes matching tags and folders by name
-non-associative: a cloud row merged into a main row because they share a name is ignored once the fold also
-holds that main row's id, and is no longer matched after its name changes. `feedTags`' and
-`mergeFeedFolderId`'s lookups by name are affected the same way (see also "Same-name folders keep different ids
-per device, so folder assignments can diverge").
-
 ### What a real fix would need
 
 - A canonical id per URL that does not depend on the order: the id equal to `IdGenerator.feedId(url)` if one
@@ -565,42 +524,91 @@ per device, so folder assignments can diverge").
 Even then, a loser whose URL changes again after the re-key comes back as a separate feed, and a pre-delta cloud
 file cannot be rewritten, so devices can still diverge in those cases.
 
-## Same-name folders keep different ids per device, so folder assignments can diverge
+## Home reads the database on the main thread while it is constructed
 
-**Status**: not fixed — closing it needs folder ids that converge across devices, a redesign outside the scope
-of the change that found it (see "What a real fix would need"). It breaks the merge's commutativity (see
-"Design Philosophy" in [sync-architecture.md](sync-architecture.md)) for feeds' folder assignments.
+**Status**: not fixed — moving the first database open and the first reads off the main thread needs the
+whole startup flow redesigned, which is outside the scope of the change that found it (see "What a real fix
+would need"). The tag/folder re-key map's own load (`TagFolderIdRemaps`) was moved to the background; the
+reads below remain.
 
 ### Symptom
 
-Two devices settle on different folders for the same feed when two folder moves carry the same
-`folder_updated_at`. For example, device A holds the move to cloud folder `dz` (resolved to its own folder `da`
-of the same name) and device B holds the move to `dm`; after each merges the other's upload, A keeps `da` and B
-keeps `dm`.
+`HomeViewModel`'s construction runs on the main thread (`koinViewModel` during the first composition) and
+reads the database synchronously: the restored selected article (`restoredArticle`, the
+`ArticleRepository.getArticleById` of `lastArticleId`) and, for a feed filter or a tag/folder filter whose
+re-key map has already loaded, the filter's target (`validateFilterTarget`). On Android the driver opens the
+file, and runs its schema migration, lazily on the first query, so a first launch after an update can do that
+work on the main thread, where a long migration shows as a frozen start or an ANR.
 
 ### Diagnosis
 
-Two devices that create a folder of the same name independently give it different ids, and the merge matches a
-cloud folder to a local one by name, keeping the local id (the name-based matching also noted under "Feeds sharing
-one URL under different ids keep whichever arrived first"). A feed's `folder_id` therefore holds a **resolved**
-id. `MergeSql` keeps the raw winning version beside it (`ks_feed_folder_raw`) so one device's merges rank raw
-against raw, but the upload — a snapshot of the local database — carries only the resolved id, which the receiver
-then ranks as if it were raw. Shipping the raw id instead would not help on its own: the folder it names may not
-exist on the sender, so a receiver could not resolve it.
-
-The same cause leaves a feed pointing at a deleted folder. `mergeFeedFolderId` resolves a feed's folder only when
-an incoming raw assignment strictly wins, so a later file that deletes the folder but carries the same assignment
-never re-resolves it. With folder `d` live and feed `f` assigned to `d` at stamp 500, merging a file with `d` live
-and then one with `d` deleted (both still assigning `f` to `d` at 500) leaves `f.folder_id = d`; the other order
-leaves NULL. The UI already shows a deleted folder as "no folder", but the stored and uploaded values differ.
-Re-resolving under the final folder state would need the raw folder's name, since its id may not exist locally,
-and a rule that also stays order-independent across a folder's deletion and revival.
+Found while tracing the re-key map's load (`App.kt` → `koinInject<SettingsRepository>()` →
+`TagFolderIdRemaps`), which read `ks_id_remap` in its constructor on the same thread. The reads in
+`HomeViewModel` are older than the re-key work. Nothing on the path switches dispatchers before the first
+query. The ViewModel needs the restored filter and article at construction because `filterRestoredOnLaunch`,
+`articleRestoredOnLaunch` and `initialHomePane` are fixed from them, and the article list's first emission
+pins the restored article (see `restoredArticle`).
 
 ### What a real fix would need
 
-Folder ids that converge across devices — for instance, re-keying a folder matched by name onto a canonical id on
-every device, with the feeds that reference it — so that a feed's folder id means the same folder everywhere and
-no resolution is needed.
+The first database open, and with it the schema migration, run before the UI is shown (on a background
+dispatcher, behind a splash or the existing startup-failure view), so every later read — these included —
+finds an open, migrated database and is fast. Restoring the filter and the article would then either wait on
+that step or become asynchronous, with `initialHomePane` decided once they have landed; the second is a change
+to what Home shows on its first frame, so it needs the layout's own handling of a not-yet-restored selection.
+
+## `tags.v2_id` / `folders.v2_id` are temporary and must be removed eventually
+
+**Status**: not fixed — a deliberate transitional column. It is needed only while devices that ran schema
+version 2 are upgrading, and removing it needs the steps under "What a real fix would need".
+
+### Why it exists
+
+Before version 3 a tag's or folder's id was a random UUIDv4; the v2→v3 migration re-keyed each row onto the id its
+creation-time name derives from and kept the pre-upgrade id in `v2_id`. Two devices that shared that v2 id still
+recognise each other's row even if one renamed it before the rename reached the other, which would otherwise derive
+a different name-derived id on each device: the pair `(v2_id, id)` is an identity edge (`ks_v2_edge`), and every merge
+moves all rows of one identity onto its canonical id, the smallest row id of the identity — never a pre-upgrade id (see "Identities of tags
+and folders" in [sync-architecture.md](sync-architecture.md)). The column travels in transport files, as do the edge
+tables in full sends and bases, and is NULL on a row created after the migration.
+
+### Why it cannot simply be dropped once every device has upgraded
+
+A device converges on the canonical id only once it has seen every edge of the identity — in practice, once every
+device that shared the v2 row has synced its full send (or a base containing it) and every other device has merged
+it. Until then two devices can still hold the identity under different ids, and the edges (from the column and from
+`ks_v2_edge`) are what lets the next merge move them together. Dropping the column, or the edges, before that would
+let a merge import the other device's row under a second id: both rows share the name (same-named rows are allowed)
+and are numbered by the UI — one logical tag or folder split in two.
+
+### What a real fix would need
+
+`v2_id` may be removed only when the following conditions hold:
+
+- **Every device has converged on the canonical ids.** Every device that ran schema version 2 has joined with a full
+  send (which carries its edges), and every device has merged a state containing all of them — so no two devices hold
+  one identity under different ids, and no cloud file still carries a row at a non-canonical id. This is an
+  operational assumption about which devices still exist and how old the cloud data is, not something one device can
+  verify; a version that drops the column should, for example, first ship a release that keeps the edges for a long
+  enough period, or reset the cloud data once (a new generation, which every device rejoins with a full send from its
+  converged state).
+- **SQLite `DROP COLUMN` is supported on every targeted platform.** `ALTER TABLE … DROP COLUMN` needs SQLite ≥ 3.35. Check the bundled versions in `gradle/libs.versions.toml` (desktop sqlite-jdbc) and `.claude/rules/android-sqlite-bundling.md` (Android) rather than trusting a number written here, and on Apple (which uses the OS's own SQLite) confirm on a real device of the oldest supported OS before relying on it.
+
+The removal must be performed by a schema migration after version 3 (i.e., version 4 or later) and must follow this order:
+
+1. **Move any remaining row onto its canonical id before dropping anything**, by the same rule as the merge's identity
+   step (`V2IdentitySql`: smallest row id of each identity in `ks_v2_edge`), moving `feed_tags.tag_id`, unsent
+   `sync_outbox` entries and — through `ks_id_remap` — `local_settings` references, and **ensure `ks_id_remap` maps
+   every non-canonical id of every identity in `ks_v2_edge` onto its canonical id** — including ids only another
+   device used, and pre-upgrade ids. `ks_feed_folder_raw.folder_id` is **not** rewritten: a raw assignment is never
+   changed by canonicalization (it is what ties between assignments are settled on), so an alias stays there, and the
+   remap triggers re-resolve `feeds.folder_id` through `ks_id_remap` — which is why every alias must have its entry
+   before the edges that would otherwise reveal it are dropped.
+2. **Drop `v2_id` from `tags` and `folders`, and drop `ks_v2_edge`.**
+3. **Remove the identity step and the edges from the sync code and transport format:** `V2IdentitySql`, the edge
+   recording in `MergeSql`, `TransportSchema` (`v2_id` and `folder_v2_edges` / `tag_v2_edges`, with a transport
+   migration), `ReduceSql`'s edge fold, `DeltaExportSql`, `MergeSchema`, and the re-key logic itself. `ks_id_remap`
+   stays (stale ids held outside the database still resolve through it).
 
 ## Google Drive: an upload can overwrite another device's upload unnoticed
 

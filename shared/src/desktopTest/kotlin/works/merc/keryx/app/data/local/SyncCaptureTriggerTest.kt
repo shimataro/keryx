@@ -229,6 +229,45 @@ class SyncCaptureTriggerTest {
         )
     }
 
+    /**
+     * A feed's folder is sent as its raw assignment (ks_feed_folder_raw), so a local move — which
+     * writes the raw row — is recorded once as the feed's own entry, while a re-resolution caused by a
+     * folder's deletion or revival records only the folder: nothing a send carries for the feed
+     * changed.
+     */
+    @Test
+    fun aMoveIsRecordedAsTheFeedAndAReResolutionAloneIsNot() {
+        db.insertFolder("d1", "D", now = 1)
+        db.insertFeed("f1", now = 1)
+        enableCapture()
+
+        db.feedsQueries.updateFolder(folderId = "d1", updatedAt = 10, folderUpdatedAt = 10, id = "f1")
+        assertEquals(listOf(listOf<Any?>("feeds", "f1", null, 0L)), recorded())
+
+        bookkeeping.clearOutbox()
+        db.foldersQueries.softDelete(20, 20, "d1")
+        assertEquals(null, db.feedsQueries.getById("f1").executeAsOne().folder_id)
+        exec("UPDATE folders SET deleted_at = NULL, updated_at = 30 WHERE id = 'd1'")
+        assertEquals("d1", db.feedsQueries.getById("f1").executeAsOne().folder_id)
+        assertEquals(listOf(listOf<Any?>("folders", "d1", null, 0L), listOf<Any?>("folders", "d1", null, 0L)), recorded())
+    }
+
+    /** A raw change written while merging (a transport merge) is not recorded; one outside it is. */
+    @Test
+    fun aRawFolderChangeIsRecordedOnlyOutsideAMerge() {
+        db.insertFolder("d1", "D", now = 1)
+        db.insertFeed("f1", now = 1)
+        enableCapture()
+
+        bookkeeping.beginMerging()
+        exec("UPDATE ks_feed_folder_raw SET folder_id = 'd1', folder_updated_at = 5 WHERE feed_id = 'f1'")
+        bookkeeping.endMerging()
+        assertEquals(emptyList(), outbox())
+
+        exec("UPDATE ks_feed_folder_raw SET folder_updated_at = 6 WHERE feed_id = 'f1'")
+        assertEquals(listOf(listOf<Any?>("feeds", "f1", null, 0L)), recorded())
+    }
+
     private companion object {
         const val DAY = 86_400_000L
     }

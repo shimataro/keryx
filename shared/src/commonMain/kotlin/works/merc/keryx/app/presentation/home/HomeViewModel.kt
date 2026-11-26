@@ -64,6 +64,8 @@ import works.merc.keryx.app.domain.RefreshCycleRunner
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SubscribeOutcome
 import works.merc.keryx.app.domain.SyncRepository
+import works.merc.keryx.app.domain.TagFolderIdRemap
+import works.merc.keryx.app.domain.TagFolderIdRemaps
 import works.merc.keryx.app.domain.TagRepository
 import works.merc.keryx.app.presentation.DerivedStateFlow
 import works.merc.keryx.app.presentation.ManualSync
@@ -108,6 +110,9 @@ class HomeViewModel(
     // Reports a read/star or feed-list write that failed off the UI thread (its optimistic state is
     // then undone here — see [revertFailedArticleWrite]). The app's one instance in production.
     private val localWriteFailureReporter: LocalWriteFailureReporter,
+    // The tag/folder id re-keys a merge publishes (see [TagFolderIdRemapping]). The app's one instance in
+    // production; by default the one [settingsRepository] observes, so both always agree.
+    private val idRemaps: TagFolderIdRemaps = settingsRepository.idRemaps,
 ) : ViewModel() {
 
     // Eagerly (not WhileSubscribed) so these start populating as soon as the ViewModel is
@@ -185,6 +190,16 @@ class HomeViewModel(
     val unreadByFolder: StateFlow<Map<String, Long>> =
         articleRepository.watchUnreadCountsByFolder().stateIn(viewModelScope, started, emptyMap())
 
+    /**
+     * Every tag's and folder's display name with its ordinal among the rows sharing its name
+     * ([tagFolderLabels] over [tags] and [folders]) — so both UIs render two same-named tags as
+     * "X" and "X (2)". One flow, one value: a name and its ordinal always come from the same
+     * snapshot of both lists, and the UIs subscribe to nothing else for labels.
+     */
+    val tagFolderLabels: StateFlow<TagFolderLabels> =
+        combine(tags, folders) { t, f -> tagFolderLabels(t, f) }
+            .stateIn(viewModelScope, started, TagFolderLabels.EMPTY)
+
     val totalUnread: StateFlow<Long> =
         articleRepository.watchUnreadCount().stateIn(viewModelScope, started, 0L)
 
@@ -192,16 +207,53 @@ class HomeViewModel(
         articleRepository.watchStarredUnreadCount().stateIn(viewModelScope, started, 0L)
 
     /**
+     * What [restoreFilter] decided: the [filter] to start on, whether the saved one was actually
+     * [reproduced], and whether its target was [validated] (read from the database) yet.
+     */
+    private data class RestoredFilter(val filter: ArticleFilter, val reproduced: Boolean, val validated: Boolean = true)
+
+    /**
      * Restores the last-selected filter from local settings, falling back to
      * [ArticleFilter.All] if it's missing, undecodable, or points at a feed/tag/folder that
-     * was deleted while the app was closed. The second value says whether the saved filter was
-     * actually reproduced (false for any of those fallbacks).
+     * was deleted while the app was closed. A tag or folder id a merge or the v2->v3 migration has
+     * re-keyed is brought up to date first ([TagFolderIdRemaps]); [RestoredFilter.reproduced] says
+     * whether the saved filter was actually reproduced (false for any of those fallbacks).
+     *
+     * The re-key map loads in the background ([TagFolderIdRemaps.loaded]), and this runs on the UI
+     * thread, which must not wait for it. A tag or folder filter restored before the map has loaded
+     * is therefore taken as is, unvalidated ([RestoredFilter.validated] false): validating it now
+     * would read a re-keyed id as a deleted row and fall back to All. [validateRestoredFilterOnceRemapLoaded]
+     * finishes the job once the map is in.
      */
-    private fun restoreFilter(): Pair<ArticleFilter, Boolean> {
-        val encoded = settingsRepository.getLocalSettings().lastFilter ?: return ArticleFilter.All to false
-        val decoded = decodeArticleFilter(encoded) ?: return ArticleFilter.All to false
-        val validated = validateFilterTarget(decoded)
-        return validated to (validated == decoded)
+    private fun restoreFilter(): RestoredFilter {
+        val encoded = settingsRepository.getLocalSettings().lastFilter ?: return RestoredFilter(ArticleFilter.All, reproduced = false)
+        val decoded = decodeArticleFilter(encoded) ?: return RestoredFilter(ArticleFilter.All, reproduced = false)
+        // `loaded` first: it is set after the map, so a true here means the map read next is the loaded one.
+        val remapLoaded = idRemaps.loaded.value
+        val remapped = idRemaps.current.value.filter(decoded)
+        if (!remapLoaded && (remapped is ArticleFilter.Tag || remapped is ArticleFilter.Folder)) {
+            return RestoredFilter(remapped, reproduced = true, validated = false)
+        }
+        val validated = validateFilterTarget(remapped)
+        return RestoredFilter(validated, reproduced = validated == remapped)
+    }
+
+    /**
+     * Finishes [restoreFilter] for a tag or folder filter restored before the re-key map had loaded:
+     * waits for it (off the UI thread), brings the selection up to date, then validates its target as
+     * [restoreFilter] would have, falling back to All Feeds when it is gone. Does nothing once the
+     * user has selected anything else in the meantime — their choice stands.
+     */
+    private fun validateRestoredFilterOnceRemapLoaded() {
+        val restored = _filterSelection.value
+        viewModelScope.launch {
+            idRemaps.awaitLoaded()
+            catchUpIdRemap()
+            val current = _filterSelection.value
+            if (current.generation != restored.generation) return@launch
+            val validated = withContext(dispatcher) { validateFilterTarget(current.filter) }
+            if (validated != current.filter && _filterSelection.value == current) selectFilter(validated)
+        }
     }
 
     /**
@@ -233,9 +285,26 @@ class HomeViewModel(
     private val launchFilter = restoreFilter()
 
     /** Whether the previous session's filter was restored at launch — see [initialHomePane]. */
-    val filterRestoredOnLaunch: Boolean = launchFilter.second
+    val filterRestoredOnLaunch: Boolean = launchFilter.reproduced
 
-    private val _filter = MutableStateFlow<ArticleFilter>(launchFilter.first)
+    /**
+     * Identifies this ViewModel instance: unique per instance, and never the same in two processes.
+     * [FilterSelection.generation] restarts at 0 in every ViewModel, so a generation a UI saved
+     * across process death is comparable only with this token — saved alongside it, a generation
+     * whose token differs belongs to another ViewModel and says nothing about this one.
+     */
+    val instanceToken: String = works.merc.keryx.app.domain.IdGenerator.newId()
+
+    private val _filterSelection = MutableStateFlow(FilterSelection(launchFilter.filter, generation = 0L))
+
+    /**
+     * The selected filter together with its selection's generation — see [FilterSelection]. One flow,
+     * so a UI reads the two in step: what tells a user's switch to another list (scroll back to the
+     * top, end a pull's wait) from a merge re-keying the selected tag or folder (keep both).
+     */
+    val filterSelection: StateFlow<FilterSelection> = _filterSelection.asStateFlow()
+
+    private val _filter: StateFlow<ArticleFilter> = _filterSelection.derived { it.filter }
     val filter: StateFlow<ArticleFilter> = _filter
 
     // Which *rendered row* of the feed list the selection is on — a feed renders once under its
@@ -245,6 +314,23 @@ class HomeViewModel(
     // starts at that filter's canonical (folder-group) row, matching pre-instance behavior.
     private val _selectedRowInstance = MutableStateFlow(FeedListRowSelection.canonicalFor(_filter.value))
     val selectedRowInstance: StateFlow<FeedListRowSelection> = _selectedRowInstance
+
+    // Counts the user's selections of a row — a click, a key, a notification's "show feed" — and
+    // nothing else. [selectedRowInstance] also changes when a merge re-keys the selected tag or
+    // folder onto another id, which is the same row under a new id and not a selection: a UI that
+    // scrolls the feed list to the selected row keys on this counter, so a re-key never moves a list
+    // the user had scrolled away (external-spec §9, "Least surprise"). Each increment follows the
+    // write of [selectedRowInstance], so reading the instance once this has changed gives the new row.
+    private val _selectedRowGeneration = MutableStateFlow(0L)
+    val selectedRowGeneration: StateFlow<Long> = _selectedRowGeneration.asStateFlow()
+
+    /**
+     * The tag/folder id re-keys a sync merge has published ([TagFolderIdRemaps.current]), for a UI
+     * that holds a tag or folder id of its own — an inline rename's target — to bring up to date.
+     * Published before the lists a merge changes are, so a UI that sees a list under a new id reads
+     * a map that already holds the move.
+     */
+    val tagFolderIdRemap: StateFlow<TagFolderIdRemap> get() = idRemaps.current
 
     // --- Search ---
     //
@@ -365,17 +451,31 @@ class HomeViewModel(
     // null at that point (Kotlin initializes properties in declaration order).
     private val _newArticleTracking = MutableStateFlow(NewArticleTracking())
 
+    // The filter-selection generation [_newArticleTracking] was last reset for; -1 so the first list
+    // resets it. Read and written only in [filteredArticles]' onStart, which its one collector runs
+    // sequentially.
+    private var trackedGeneration = -1L
+
     // Only the filter keys the DB query: switching filters must switch queries, but the unread-only,
     // sort and pinned inputs are pure display transforms over whatever that query returned. Keeping
     // them in the flatMapLatest key made every article selection (which pins the article it marks
     // read) cancel and re-execute the whole unbounded list query.
     private val filteredArticles: Flow<Pair<ArticleFilter, List<ArticleListRow>>> =
-        _filter.flatMapLatest { filter ->
+        _filterSelection.flatMapLatest { (filter, generation) ->
             articleRepository.watchArticles(filter)
                 // A filter change re-keys flatMapLatest, so this runs before the new filter's first
-                // emission and resets tracking to a fresh, unseeded instance — otherwise the new
-                // filter's own existing articles would look "new" against the old filter's id set.
-                .onStart { resetNewArticleTracking() }
+                // emission. A user's switch to another list (a new generation) resets tracking to a
+                // fresh, unseeded instance — otherwise the new filter's own existing articles would
+                // look "new" against the old filter's id set. A merge re-keying the selected tag or
+                // folder keeps the generation: the list is the same one under its new id, so its
+                // tracking (and the pill) carries on; an article the re-key brings in is not new by
+                // insertion, so it is not counted.
+                .onStart {
+                    if (generation != trackedGeneration) {
+                        trackedGeneration = generation
+                        resetNewArticleTracking()
+                    }
+                }
                 .onEach { list ->
                     val ids = list.mapTo(HashSet(list.size)) { it.id }
                     // Only an id not seen before under this filter *and* inserted after the
@@ -838,18 +938,23 @@ class HomeViewModel(
         structuralFeeds,
         dispatcher,
         isLive = { id -> feedRepository.getFeedById(id).let { it != null && it.deleted_at == null } },
+        currentRemap = { { it } },
     ) { it.id }
     private val deletedTagFallback = DeletedItemFallback(
         viewModelScope,
         tags,
         dispatcher,
         isLive = { id -> tagRepository.getTagById(id).let { it != null && it.deleted_at == null } },
+        currentRemap = { idRemaps.current.value::tag },
+        catchUp = ::loadIdRemapFromDb,
     ) { it.id }
     private val deletedFolderFallback = DeletedItemFallback(
         viewModelScope,
         folders,
         dispatcher,
         isLive = { id -> folderRepository.getFolderById(id).let { it != null && it.deleted_at == null } },
+        currentRemap = { idRemaps.current.value::folder },
+        catchUp = ::loadIdRemapFromDb,
     ) { it.id }
 
     /** Runs [fallback] once the feed list stops showing [target] — see [DeletedItemFallback]. */
@@ -870,6 +975,9 @@ class HomeViewModel(
         selectFilter = { selectFilter(it) },
         launchWrite = { write, afterWrite -> feedListWrites.enqueue(write, afterWrite) },
         fallBackOnceHidden = ::fallBackOnceHidden,
+        // Caught up, not just read: a fallback compares the selection and expansion with the id the
+        // map gives, so they must already be in the same id space (see [catchUpAndGetIdRemap]).
+        currentIdRemap = { catchUpAndGetIdRemap() },
     )
 
     /** The feed list's collapsed folders — see [FeedListExpansion.collapsedFolderIds]. */
@@ -883,14 +991,23 @@ class HomeViewModel(
      *
      * @param folderId The identifier of the folder to toggle.
      */
-    fun toggleFolderCollapsed(folderId: String) = expansion.toggleFolder(folderId)
+    fun toggleFolderCollapsed(folderId: String) {
+        // The expansion state is caught up on the current re-keys first, so a stale id and the state
+        // holding it are toggled in the same id space (see [catchUpAndGetIdRemap]).
+        expansion.toggleFolder(catchUpAndGetIdRemap().folder(folderId))
+    }
 
     /**
      * Toggles whether a tag's attached-feed list is expanded and persists the updated state.
      *
      * @param tagId The identifier of the tag to toggle.
      */
-    fun toggleTagExpanded(tagId: String) = feedListActions.toggleTagExpanded(tagId)
+    fun toggleTagExpanded(tagId: String) {
+        // Caught up first, as for toggleFolderCollapsed: FeedListActions resolves [tagId] against the
+        // same map the expansion state now holds.
+        catchUpIdRemap()
+        feedListActions.toggleTagExpanded(tagId)
+    }
 
     /**
      * Expands whatever collapsed folder or tag hides the exact row [instance] (see
@@ -898,7 +1015,8 @@ class HomeViewModel(
      * inline rename starts on the selection (F2/Return, the Feed menu), whose editor needs a
      * rendered row.
      */
-    fun revealFeedListRow(instance: FeedListRowSelection) = expansion.reveal(instance, feeds.value)
+    fun revealFeedListRow(instance: FeedListRowSelection) =
+        expansion.reveal(instance.remappedBy(catchUpAndGetIdRemap()), feeds.value)
 
     /** Whether the previous session's selected article was restored at launch — see [initialHomePane]. */
     val articleRestoredOnLaunch: Boolean
@@ -940,6 +1058,8 @@ class HomeViewModel(
      * filter (see this class's own "Search" section), so switching feeds/folders/tags while
      * actively searching keeps the query and simply re-scopes the search to the new filter.
      *
+     * A tag or folder id a merge has re-keyed is brought up to date first ([TagFolderIdRemaps]).
+     *
      * @param filter The article filter to select.
      * @param instance Which rendered feed-list row was selected — defaults to [filter]'s canonical
      *   (folder-group) row for callers with no specific row in mind (notification actions).
@@ -951,12 +1071,22 @@ class HomeViewModel(
         filter: ArticleFilter,
         instance: FeedListRowSelection = FeedListRowSelection.canonicalFor(filter),
     ) {
-        if (filter == _filter.value) {
-            _selectedRowInstance.value = instance
+        // A row the feed list rendered before a merge re-keyed its tag or folder still carries the old
+        // id; select the row it became (see [TagFolderIdRemapping]). The selection itself is caught up first,
+        // so both sides of the comparison below are in the same id space.
+        val remap = catchUpAndGetIdRemap()
+        val current = remap.filter(filter)
+        val currentInstance = instance.remappedBy(remap)
+        if (current == _filter.value) {
+            if (_selectedRowInstance.value != currentInstance) {
+                _selectedRowInstance.value = currentInstance
+                _selectedRowGeneration.update { it + 1 }
+            }
             return
         }
-        _filter.value = filter
-        _selectedRowInstance.value = instance
+        _filterSelection.update { FilterSelection(current, it.generation + 1) }
+        _selectedRowInstance.value = currentInstance
+        _selectedRowGeneration.update { it + 1 }
         _selectedArticle.value = null
         _pendingSelectedRow.value = null
         _headerArticleId.value = null
@@ -969,7 +1099,7 @@ class HomeViewModel(
         // non-null id straight back — so the epoch records the switch itself.
         selectionCursorId = null
         browsingEpoch++
-        settingsRepository.mutateLocalSettings { it.copy(lastFilter = filter.encode(), lastArticleId = null) }
+        settingsRepository.mutateLocalSettings { it.copy(lastFilter = current.encode(), lastArticleId = null) }
     }
 
     private val articleContentCache = ArticleContentCache(
@@ -1444,7 +1574,9 @@ class HomeViewModel(
      * Acts once the rows on screen belong to the current filter and mode ([ListScope]): right after
      * a switch they can still be the previous list's, and marking (or pinning) those would reach
      * articles the current list does not show. If the selection moves on again before the list
-     * catches up, nothing is marked — the list the action was made for is gone.
+     * catches up, nothing is marked — the list the action was made for is gone. A merge moving the
+     * requested tag or folder onto another id meanwhile is not such a move: the scopes are compared
+     * with the current re-keys applied to both.
      */
     fun markAllRead() {
         val requested = currentScope()
@@ -1461,7 +1593,11 @@ class HomeViewModel(
             ) { shown, filter, unread, unreadStarred, starred ->
                 shown == scopeOf(filter, unread, unreadStarred, starred)
             }.first { it }
-            if (currentScope() == requested) markShownRead()
+            // A merge may have re-keyed the requested tag or folder while this waited: compare both
+            // scopes in the current id space, so the selection following the re-key is not mistaken
+            // for the user switching away (which still cancels the action).
+            val remap = catchUpAndGetIdRemap()
+            if (currentScope().remappedBy(remap) == requested.remappedBy(remap)) markShownRead()
         }.invokeOnCompletion { pendingLocalWrites.end() }
     }
 
@@ -2083,15 +2219,23 @@ class HomeViewModel(
         feedListActions.createTag(name, color, attachToFeedId)
 
     /**
-     * Updates a tag with the specified name and color.
+     * Renames a tag, leaving its color alone. Every rename route (inline field, sheet, context menu)
+     * calls this.
      *
      * Blank names are ignored.
      *
-     * @param id The identifier of the tag to update.
+     * @param id The identifier of the tag to rename.
      * @param name The tag's new name.
+     */
+    fun renameTag(id: String, name: String) = feedListActions.renameTag(id, name)
+
+    /**
+     * Sets a tag's color, leaving its name alone. Every color-picking route calls this.
+     *
+     * @param id The identifier of the tag to recolor.
      * @param color The tag's new color, or `null` to remove the color.
      */
-    fun updateTag(id: String, name: String, color: String?) = feedListActions.updateTag(id, name, color)
+    fun setTagColor(id: String, color: String?) = feedListActions.setTagColor(id, color)
 
     /**
      * Deletes a tag and resets the active filter if it references the deleted tag — once the queued
@@ -2155,5 +2299,47 @@ class HomeViewModel(
      */
     fun reorderFolders(draggedFolderId: String, targetFolderId: String?) =
         feedListActions.reorderFolders(draggedFolderId, targetFolderId)
-}
 
+    // Applies the tag/folder id re-keys a merge publishes to the state held here (see
+    // [TagFolderIdRemapping]). Declared after every property it touches.
+    private val idRemapping = TagFolderIdRemapping(
+        idRemaps, _filterSelection, _selectedRowInstance, expansion, refreshController,
+        deletedTagFallback, deletedFolderFallback,
+    )
+
+    /** See [TagFolderIdRemapping.catchUp]: the ViewModel's state is in the current re-key map's id space. */
+    private fun catchUpIdRemap() = idRemapping.catchUp()
+
+    /** See [TagFolderIdRemapping.catchUpAndGet]: [catchUpIdRemap], then the map an id is resolved by. */
+    private fun catchUpAndGetIdRemap(): TagFolderIdRemap = idRemapping.catchUpAndGet()
+
+    /**
+     * Re-reads the committed `ks_id_remap` and publishes it ([TagFolderIdRemaps.publishFromDb], under its
+     * lock), off the main thread. A merge publishes the map only after it commits, so a list that was
+     * re-run by another write in between already shows a re-keyed row while the published map is stale;
+     * a decision that an item "disappeared" must first catch the map up from here. Throws on a failed read.
+     */
+    private suspend fun loadIdRemapFromDb() = withContext(dispatcher) { idRemaps.publishFromDb() }
+
+    /**
+     * Catches the published re-key map up with the committed database, then applies it to the state held
+     * here — the one implementation both UIs call before concluding that a row they hold (an inline
+     * rename's) disappeared from the list, since the lists can reach them ahead of the map (see
+     * [loadIdRemapFromDb]). Returns whether the read succeeded; a failure is logged (best effort,
+     * docs/error-design.md), and the caller then leaves the row undecided rather than concluding it
+     * disappeared — the next list value asks again.
+     */
+    suspend fun catchUpIdRemapFromDb(): Boolean {
+        val caughtUp = runCatchingUnlessCancelled { loadIdRemapFromDb() }.onFailure { e ->
+            Log.warn(TAG, "Catching up the tag/folder re-keys failed", e)
+        }.isSuccess
+        if (caughtUp) catchUpIdRemap()
+        return caughtUp
+    }
+
+    // Last in the class body: every property the re-key collector touches is initialized by now.
+    init {
+        idRemapping.collectIn(viewModelScope)
+        if (!launchFilter.validated) validateRestoredFilterOnceRemapLoaded()
+    }
+}

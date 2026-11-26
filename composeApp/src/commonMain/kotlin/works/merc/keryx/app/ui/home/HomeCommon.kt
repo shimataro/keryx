@@ -8,7 +8,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Stable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -22,6 +26,7 @@ import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.data.local.db.Folders
 import works.merc.keryx.app.data.local.db.Tags
 import works.merc.keryx.app.domain.ArticleListRow
+import works.merc.keryx.app.domain.TagFolderIdRemap
 import works.merc.keryx.app.platform.BrowserOpener
 import works.merc.keryx.app.platform.NativeMenuShortcut
 import works.merc.keryx.app.platform.isMacOs
@@ -252,6 +257,78 @@ internal sealed interface InlineEditTarget {
         override val rowInstance: FeedListRowSelection get() = FeedListRowSelection.Tag(id)
     }
 }
+
+/**
+ * This target with its tag or folder id brought up to date by [remap] — the row the edit is on
+ * after a merge re-keyed it — and the same instance when nothing changes. A feed's id is never
+ * re-keyed, but the tag its tag-nested row sits under can be.
+ */
+internal fun InlineEditTarget.remappedBy(remap: TagFolderIdRemap): InlineEditTarget = when (this) {
+    is InlineEditTarget.Folder -> remap.folder(id).let { if (it == id) this else InlineEditTarget.Folder(it) }
+    is InlineEditTarget.Tag -> remap.tag(id).let { if (it == id) this else InlineEditTarget.Tag(it) }
+    is InlineEditTarget.Feed -> tagId?.let { remap.tag(it) }.let { if (it == tagId) this else copy(tagId = it) }
+}
+
+/**
+ * This target under the id the given [folders] / [tags] actually carry for its row, or null when they
+ * hold no such row (it was deleted, or has not arrived yet).
+ *
+ * A row matches the way `FeedListPane`'s `isEditing` matches it: both the row's id and this target's
+ * id are brought up to date by the same [remap] before they are compared. The lists and the map reach
+ * composition separately, so the lists can still show an id the map has already moved on from — even
+ * an intermediate one (`a → b → c` while the lists show `b` and the map already says `a → c`,
+ * `b → c`) — which neither the target's own id nor its remapped id would find. A feed's id is never
+ * re-keyed, so a feed's folder-group row is returned as is; its tag-nested row is resolved through
+ * the tag it sits under. Whether the resolved row is actually rendered (a collapsed folder, a tag not
+ * expanded) is left to `feedListRowIndex`.
+ */
+internal fun InlineEditTarget.resolvedIn(
+    folders: List<Folders>,
+    tags: List<Tags>,
+    remap: TagFolderIdRemap,
+): InlineEditTarget? = when (this) {
+    is InlineEditTarget.Folder -> remap.folder(id).let { current ->
+        folders.firstOrNull { remap.folder(it.id) == current }?.let { if (it.id == id) this else InlineEditTarget.Folder(it.id) }
+    }
+    is InlineEditTarget.Tag -> remap.tag(id).let { current ->
+        tags.firstOrNull { remap.tag(it.id) == current }?.let { if (it.id == id) this else InlineEditTarget.Tag(it.id) }
+    }
+    is InlineEditTarget.Feed -> if (tagId == null) {
+        this
+    } else {
+        remap.tag(tagId).let { current ->
+            tags.firstOrNull { remap.tag(it.id) == current }?.let { if (it.id == tagId) this else copy(tagId = it.id) }
+        }
+    }
+}
+
+/**
+ * The feed list's one in-progress inline edit: the [target] row, and the [draft] the user has typed
+ * so far. Held by `FeedListPane` rather than by the editor field because a re-key moves the row onto
+ * another id, which gives it another list key: the field is then composed afresh under the new id,
+ * and the draft is what lets it carry on with what was typed. Changing [target] — starting an edit,
+ * ending it, moving to another row — drops the draft, so an edit never begins from a previous edit's
+ * text; a re-key does not change it, since the pane compares the target with rows through the re-key map.
+ */
+@Stable
+internal class InlineEditState {
+    private var targetState by mutableStateOf<InlineEditTarget?>(null)
+
+    /** The row being edited, or `null`. Assigning another value starts a fresh edit (no draft). */
+    var target: InlineEditTarget?
+        get() = targetState
+        set(value) {
+            if (value == targetState) return
+            targetState = value
+            draft = null
+        }
+
+    /** What the editor holds, or `null` while it has not been typed into (the field starts from the row's own name). */
+    var draft: String? by mutableStateOf(null)
+}
+
+/** The [InlineEditState] the inline editors under this composition report their draft to (see [InlineRenameField]). */
+internal val LocalInlineEditState = staticCompositionLocalOf<InlineEditState?> { null }
 
 /** The inline-edit target for a selection resolved by [resolveFeedListSelectionTarget] — the bridge
  * between "what is selected" (keyboard shortcut / menu command) and "what row is being edited".
