@@ -154,8 +154,23 @@ UPDATE feeds SET site_url = ?, title = ?, description = ?, updated_at = ? WHERE 
 -- which the capture trigger does not watch) never moves without a captured change sent with it: a
 -- refresh reads its feed from a snapshot, and a sync merge may have brought the same url meanwhile.
 -- A stamp moved without being sent would beat a peer's later content change here and lose to it there.
+-- Also writes nothing while another feed holds :url (UNIQUE(url) would fail the statement): a redirect
+-- onto another feed's URL that is not merged with it (FeedRepository.applyFetch) leaves the URL alone,
+-- so the refresh still succeeds instead of failing on the constraint every cycle.
 updateUrl:
-UPDATE feeds SET url = :url, updated_at = :updated_at WHERE id = COALESCE((SELECT id FROM feeds WHERE id = :id), (SELECT new_id FROM ks_id_remap WHERE kind = 'feed' AND old_id = :id), :id) AND url IS NOT :url;
+UPDATE feeds SET url = :url, updated_at = :updated_at WHERE id = COALESCE((SELECT id FROM feeds WHERE id = :id), (SELECT new_id FROM ks_id_remap WHERE kind = 'feed' AND old_id = :id), :id) AND url IS NOT :url
+  AND NOT EXISTS (SELECT 1 FROM feeds AS holder WHERE holder.url = :url AND holder.id <> feeds.id);
+
+-- A redirect of the feed :own onto :target, which another feed may hold: records the two feeds' identity
+-- edge (a < b) when it does, and nothing otherwise — the detection and the record in one statement. A
+-- write, so a transaction it opens holds the write lock from its first statement and the reads after it
+-- (the holder, the merge) see no other connection's commit in between (FeedRepository.applyFetch).
+-- :own is resolved like every feed id a write takes. Inserting an edge already there inserts nothing.
+recordRedirectEdge:
+INSERT OR IGNORE INTO ks_feed_edge (a, b)
+SELECT MIN(f.id, own.id), MAX(f.id, own.id)
+FROM feeds AS f, (SELECT COALESCE((SELECT id FROM feeds WHERE id = :own), (SELECT new_id FROM ks_id_remap WHERE kind = 'feed' AND old_id = :own), :own) AS id) AS own
+WHERE f.url = :target AND f.id <> own.id;
 
 -- A folder move writes the feed's raw assignment (ks_feed_folder_raw, the source of truth — see
 -- sync_bookkeeping.sq); the resolution trigger then derives feeds.folder_id / folder_updated_at from

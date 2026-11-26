@@ -242,6 +242,57 @@ private class FaultInjectingDriver(private val delegate: app.cash.sqldelight.db.
 }
 
 /**
+ * Passes every statement through to [delegate], running test hooks around it: [before] (throw from it
+ * to fail the statement), [after], and [afterFirstStatementOfNextTransaction] — once, right after the
+ * first statement of the next outermost transaction opened, with that statement's SQL — so a test can
+ * act at an exact point of a transaction without timing.
+ */
+private class StatementHookDriver(private val delegate: SqlDriver) : SqlDriver by delegate {
+    @Volatile var before: (String) -> Unit = {}
+    @Volatile var after: (String) -> Unit = {}
+    @Volatile var afterFirstStatementOfNextTransaction: ((String) -> Unit)? = null
+    private var awaitingFirstStatement = false
+
+    override fun newTransaction(): QueryResult<app.cash.sqldelight.Transacter.Transaction> {
+        if (afterFirstStatementOfNextTransaction != null && delegate.currentTransaction() == null) {
+            awaitingFirstStatement = true
+        }
+        return delegate.newTransaction()
+    }
+
+    private fun ran(sql: String) {
+        after(sql)
+        if (awaitingFirstStatement) {
+            awaitingFirstStatement = false
+            val hook = afterFirstStatementOfNextTransaction
+            afterFirstStatementOfNextTransaction = null
+            hook?.invoke(sql)
+        }
+    }
+
+    override fun execute(
+        identifier: Int?,
+        sql: String,
+        parameters: Int,
+        binders: (app.cash.sqldelight.db.SqlPreparedStatement.() -> Unit)?,
+    ): QueryResult<Long> {
+        before(sql)
+        return delegate.execute(identifier, sql, parameters, binders).also { ran(sql) }
+    }
+
+    override fun <R> executeQuery(
+        identifier: Int?,
+        sql: String,
+        mapper: (app.cash.sqldelight.db.SqlCursor) -> QueryResult<R>,
+        parameters: Int,
+        binders: (app.cash.sqldelight.db.SqlPreparedStatement.() -> Unit)?,
+    ): QueryResult<R> {
+        before(sql)
+        return delegate.executeQuery(identifier, sql, mapper, parameters, binders).also { ran(sql) }
+    }
+}
+
+/**
  * A [Mutex] that counts how many times a caller asked for it ([lock] or [tryLock]), whether or not
  * the request had to wait. `withLock` goes through [lock], so [attempts] rises as soon as a caller is
  * queued behind the current holder — the observable point a test can wait for instead of sleeping.
@@ -305,6 +356,7 @@ class FeedRepositoryTest {
         messages: NotificationMessages = FakeNotificationMessages(),
         clock: Clock = Clock { 1000L },
         feedPlacementMutex: Mutex = Mutex(),
+        publishIdRemaps: suspend () -> Unit = {},
     ): FeedRepository {
         val articleRepository = ArticleRepository(db, FtsSearch(driver), syncScheduler, clock, Dispatchers.Unconfined)
         // Mirror startup: ensureIndexed() creates articles_fts so the refresh path's indexMissing() works.
@@ -315,6 +367,7 @@ class FeedRepositoryTest {
             faviconMisses = InMemoryFaviconMissStore(),
             feedPlacementMutex = feedPlacementMutex,
             driver = driver,
+            publishIdRemaps = publishIdRemaps,
         )
     }
 
@@ -3194,7 +3247,9 @@ class FeedRepositoryTest {
             assertEquals(listOf("f-p|f-q"), driver.rows("SELECT a, b FROM ks_feed_edge"))
             // The edge is sent (capture on) so the other devices merge the same rows; the re-key itself is not.
             assertEquals(listOf("feed_edges|f-p|f-q"), driver.rows("SELECT tbl, pk, pk2 FROM sync_outbox WHERE tbl = 'feed_edges'"))
-            assertEquals(emptyList(), driver.rows("SELECT tbl, pk, pk2 FROM sync_outbox WHERE tbl IN ('feed_tags') AND pk = 'f-q'"))
+            // Nothing in the whole outbox names the id that moved, and the merge's marker is gone.
+            assertEquals(emptyList(), driver.rows("SELECT tbl, pk, pk2 FROM sync_outbox WHERE pk = 'f-q'"))
+            assertEquals(listOf("0"), driver.rows("SELECT COUNT(*) FROM sync_merging"))
             assertEquals(emptyList(), driver.rows("PRAGMA foreign_key_check"))
             // The notification names the feed the user now has.
             val notification = center.items.value.single()
@@ -3241,10 +3296,10 @@ class FeedRepositoryTest {
     }
 
     /**
-     * Reproduces a defect in `applyFetch`'s merge branch: when the merged feed already holds the redirect
-     * target as its URL, `feeds.updateUrl` still moves `updated_at` (the content group's stamp), which no
-     * capture trigger sends — a stamp only this device holds, which can beat a peer's later edit locally
-     * while the peer keeps it. `updateUrl` is skipped when the merged feed already holds the target.
+     * A redirect merge whose merged feed already holds the target (its content group came from the
+     * holder) writes no URL: `updateUrl` is guarded on the url changing, so it never moves `updated_at` —
+     * the content group's stamp, which no capture trigger sends. A stamp only this device held could
+     * beat a peer's later edit here while the peer keeps it.
      */
     @Test
     fun aRedirectMergeWhoseHolderContentWinsDoesNotMoveTheContentStampWithoutSendingIt(): Unit = runBlocking {
@@ -3257,13 +3312,236 @@ class FeedRepositoryTest {
             driver.execute(null, "UPDATE sync_capture SET enabled = 1", 0)
             driver.execute(null, "DELETE FROM sync_outbox", 0)
             val repo = newRepo(db, driver, redirectOldToNew())
-            repo.refreshFeed(db.feedsQueries.getById("f-q").executeAsOne())
-            val sent = driver.rows("SELECT pk FROM sync_outbox WHERE tbl = 'feeds'")
-            val stamp = driver.rows("SELECT updated_at FROM feeds WHERE id = 'f-p'").single().toLong()
-            // A stamp the local row holds but no send carries would let a later peer edit lose to it.
-            assertTrue(sent.isNotEmpty() || stamp <= 200L, "updated_at=$stamp moved with nothing in the outbox")
+            assertIs<Result.Ok<Int>>(repo.refreshFeed(db.feedsQueries.getById("f-q").executeAsOne()))
+            assertEquals(listOf("200"), driver.rows("SELECT updated_at FROM feeds WHERE id = 'f-p'"))
         } finally {
             driver.close()
+        }
+    }
+
+    /**
+     * The control case: the merged feed's content group came from the refreshed feed, still at the old
+     * URL, so the URL is written — moving the content stamp together with a captured change that sends it.
+     */
+    @Test
+    fun aRedirectMergeWhoseRefreshedContentWinsWritesTheUrlAndSendsTheFeed(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f-p", now = 100, url = "https://ex.com/new")
+            db.insertFeed("f-q", now = 300, url = "https://ex.com/old")
+            driver.execute(null, "UPDATE feeds SET title = 'Feed', site_url = 'https://ex.com'", 0)
+            driver.execute(null, "UPDATE sync_capture SET enabled = 1", 0)
+            driver.execute(null, "DELETE FROM sync_outbox", 0)
+            val repo = newRepo(db, driver, redirectOldToNew())
+            assertIs<Result.Ok<Int>>(repo.refreshFeed(db.feedsQueries.getById("f-q").executeAsOne()))
+            assertEquals(listOf("f-p|https://ex.com/new|1000"), driver.rows("SELECT id, url, updated_at FROM feeds"))
+            assertEquals(listOf("f-p"), driver.rows("SELECT pk FROM sync_outbox WHERE tbl = 'feeds'").distinct())
+        } finally {
+            driver.close()
+        }
+    }
+
+    /** `[from]` redirects permanently to `[to]`, which answers [status] with [body]. */
+    private fun redirectFetcher(
+        from: String,
+        to: String,
+        status: HttpStatusCode = HttpStatusCode.OK,
+        body: String = rssG1G2G5,
+    ): FeedFetcher = fetcherWith { request ->
+        if (request.url.toString() == from) {
+            respond("", HttpStatusCode.MovedPermanently, headersOf(HttpHeaders.Location, to))
+        } else {
+            respond(body, status)
+        }
+    }
+
+    /**
+     * A redirect to another host onto a URL another feed holds is no proof the two are one feed: nothing
+     * is merged, the refreshed feed keeps its URL (UNIQUE(url) would otherwise fail this and every later
+     * refresh), the refresh succeeds, and no URL change is announced.
+     */
+    @Test
+    fun aRedirectToAnotherHostOntoAHeldUrlMergesNothingAndLeavesTheUrl(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f-p", now = 100, url = "https://other.example/new")
+            db.insertFeed("f-q", now = 100, url = "https://ex.com/old")
+            // The stored content already equals what the refresh fetches, so a URL write would be the only feed change.
+            driver.execute(null, "UPDATE feeds SET title = 'Feed', site_url = 'https://ex.com'", 0)
+            driver.execute(null, "UPDATE sync_capture SET enabled = 1", 0)
+            driver.execute(null, "DELETE FROM sync_outbox", 0)
+            val center = NotificationCenter()
+            var published = 0
+            val repo = newRepo(
+                db, driver, redirectFetcher("https://ex.com/old", "https://other.example/new"),
+                notificationCenter = center, publishIdRemaps = { published++ },
+            )
+            val row = db.feedsQueries.getById("f-q").executeAsOne()
+
+            assertEquals(Result.Ok(3), repo.refreshFeed(row))
+            assertEquals(Result.Ok(0), repo.refreshFeed(row), "a later refresh does not fail either")
+
+            assertEquals(
+                listOf("f-p|https://other.example/new", "f-q|https://ex.com/old"),
+                driver.rows("SELECT id, url FROM feeds ORDER BY id"),
+            )
+            assertEquals(listOf("f-q|3"), driver.rows("SELECT feed_id, COUNT(*) FROM articles GROUP BY feed_id"))
+            assertEquals(emptyList(), driver.rows("SELECT a, b FROM ks_feed_edge"))
+            assertEquals(emptyList(), driver.rows("SELECT kind, old_id FROM ks_id_remap"))
+            assertEquals(emptyList(), driver.rows("SELECT tbl, pk FROM sync_outbox WHERE tbl IN ('feeds', 'feed_edges')"))
+            assertEquals(emptyList(), center.items.value)
+            assertEquals(0, published)
+        } finally {
+            driver.close()
+        }
+    }
+
+    /** A redirect to the same host — here http to https — onto a URL another feed holds merges the two. */
+    @Test
+    fun aSameHostRedirectFromHttpToHttpsOntoAHeldUrlMergesTheTwo(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f-p", now = 100, url = "https://EX.com/feed")
+            db.insertFeed("f-q", now = 100, url = "http://ex.com:8080/feed")
+            db.seedArticle("aq9", "f-q", "g9")
+            val center = NotificationCenter()
+            val repo = newRepo(
+                db, driver, redirectFetcher("http://ex.com:8080/feed", "https://EX.com/feed"), notificationCenter = center,
+            )
+
+            assertIs<Result.Ok<Int>>(repo.refreshFeed(db.feedsQueries.getById("f-q").executeAsOne()))
+
+            assertEquals(listOf("f-p|https://EX.com/feed"), driver.rows("SELECT id, url FROM feeds"))
+            assertEquals(listOf("f-p|4"), driver.rows("SELECT feed_id, COUNT(*) FROM articles GROUP BY feed_id"))
+            assertEquals(listOf("f-p|f-q"), driver.rows("SELECT a, b FROM ks_feed_edge"))
+            assertEquals(AppNotificationAction.ShowFeedDetail("f-p"), center.items.value.single().action)
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
+     * A redirected refresh's transaction opens with a write, so it holds the write lock before it reads
+     * anything. Forced interleaving: right after the transaction's first statement, another connection
+     * tries to start a write. Had that first statement been a read (a 301 answered by a 304, with no error
+     * to clear: every other write of the apply phase is skipped), the other connection would get the
+     * write lock, and the refresh's own first write would then fail with SQLITE_BUSY — which
+     * `busy_timeout` does not cover, since the reader holding its snapshot cannot wait for that writer.
+     */
+    @Test
+    fun aRedirectedRefreshAnsweredNotModifiedTakesTheWriteLockWithItsFirstStatement(): Unit = runBlocking {
+        val (file, rawDriver, _) = fileDb()
+        val driver = StatementHookDriver(rawDriver)
+        val other = java.sql.DriverManager.getConnection(
+            "jdbc:sqlite:${file.absolutePath}",
+            java.util.Properties().apply { setProperty("busy_timeout", "0") },
+        )
+        try {
+            val db = works.merc.keryx.app.data.local.db.KeryxDatabase(driver)
+            db.insertFeed("f-q", now = 100, url = "https://ex.com/old")
+            val repo = newRepo(
+                db, driver, redirectFetcher("https://ex.com/old", "https://ex.com/new", status = HttpStatusCode.NotModified),
+            )
+            var firstStatement: String? = null
+            var otherGotTheWriteLock = false
+            driver.afterFirstStatementOfNextTransaction = { sql ->
+                firstStatement = sql
+                otherGotTheWriteLock = try {
+                    other.createStatement().use { it.execute("BEGIN IMMEDIATE") }
+                    other.createStatement().use { it.execute("INSERT INTO sync_state (key, value) VALUES ('probe', '1')") }
+                    true
+                } catch (e: java.sql.SQLException) {
+                    false
+                }
+            }
+
+            val result = repo.refreshFeed(db.feedsQueries.getById("f-q").executeAsOne())
+
+            assertEquals(Result.Ok(0), result)
+            assertFalse(otherGotTheWriteLock, "the refresh held the write lock from its first statement")
+            assertTrue(
+                firstStatement.orEmpty().startsWith("INSERT OR IGNORE INTO ks_feed_edge"),
+                "first statement: $firstStatement",
+            )
+            assertEquals("https://ex.com/new", db.feedsQueries.getById("f-q").executeAsOne().url)
+        } finally {
+            runCatching { other.createStatement().use { it.execute("ROLLBACK") } }
+            other.close()
+            rawDriver.close()
+        }
+    }
+
+    /**
+     * A redirect merge that fails part-way rolls the whole apply phase back: both feeds, their URLs, the
+     * identity edge and the re-key are as they were, and nothing is left in the outbox or `sync_merging`.
+     */
+    @Test
+    fun aRedirectMergeFailingPartWayRollsBackEverything(): Unit = runBlocking {
+        val (rawDriver, _) = inMemoryDb()
+        val driver = StatementHookDriver(rawDriver)
+        try {
+            val db = works.merc.keryx.app.data.local.db.KeryxDatabase(driver)
+            db.insertFeed("f-p", now = 100, url = "https://ex.com/new")
+            db.insertFeed("f-q", now = 100, url = "https://ex.com/old")
+            db.seedArticle("aq9", "f-q", "g9")
+            driver.execute(null, "UPDATE sync_capture SET enabled = 1", 0)
+            driver.execute(null, "DELETE FROM sync_outbox", 0)
+            val repo = newRepo(db, driver, redirectOldToNew())
+            // The merge's last statement: everything before it in the transaction has run.
+            driver.before = { sql -> if (sql == "DELETE FROM main.sync_merging") error("simulated merge failure") }
+
+            val failure = runCatching { repo.refreshFeed(db.feedsQueries.getById("f-q").executeAsOne()) }
+
+            driver.before = {}
+            assertTrue(failure.isFailure, "the failure propagates")
+            assertEquals(
+                listOf("f-p|https://ex.com/new", "f-q|https://ex.com/old"),
+                driver.rows("SELECT id, url FROM feeds ORDER BY id"),
+            )
+            assertEquals(listOf("aq9|f-q"), driver.rows("SELECT id, feed_id FROM articles"))
+            assertEquals(emptyList(), driver.rows("SELECT a, b FROM ks_feed_edge"))
+            assertEquals(emptyList(), driver.rows("SELECT kind, old_id FROM ks_id_remap"))
+            assertEquals(listOf("0"), driver.rows("SELECT COUNT(*) FROM sync_merging"))
+            assertEquals(emptyList(), driver.rows("SELECT tbl, pk FROM sync_outbox"))
+        } finally {
+            rawDriver.close()
+        }
+    }
+
+    /**
+     * The local merge folds two articles of the same key, and the survivor (the larger rowid, on the
+     * canonical feed) takes the other one's newer body: its rowid is registered in `ks_search_pending`
+     * by the merge, so the refresh's index catch-up recomputes its `search_text` from the new body.
+     */
+    @Test
+    fun aRedirectMergeRegistersTheSurvivorWhoseBodyChangedForSearchRecompute(): Unit = runBlocking {
+        val (rawDriver, _) = inMemoryDb()
+        val driver = StatementHookDriver(rawDriver)
+        try {
+            val db = works.merc.keryx.app.data.local.db.KeryxDatabase(driver)
+            db.insertFeed("f-p", now = 100, url = "https://ex.com/new")
+            db.insertFeed("f-q", now = 100, url = "https://ex.com/old")
+            // Inserted first (smaller rowid) with the newer body; the canonical feed's copy is the survivor.
+            db.seedArticle("aq7", "f-q", "g7")
+            driver.execute(null, "UPDATE articles SET content = 'fresh words', body_updated_at = 500 WHERE id = 'aq7'", 0)
+            db.seedArticle("ap7", "f-p", "g7")
+            val survivorRowid = driver.rows("SELECT rowid FROM articles WHERE id = 'ap7'").single()
+            var pendingAfterMerge: List<String>? = null
+            driver.after = { sql ->
+                if (sql == "DELETE FROM main.sync_merging") pendingAfterMerge = rawDriver.rows("SELECT rowid FROM ks_search_pending")
+            }
+            val repo = newRepo(db, driver, redirectOldToNew())
+
+            assertIs<Result.Ok<Int>>(repo.refreshFeed(db.feedsQueries.getById("f-q").executeAsOne()))
+
+            assertEquals(listOf(survivorRowid), pendingAfterMerge)
+            assertEquals(
+                listOf("$survivorRowid|f-p|fresh words|fresh words"),
+                driver.rows("SELECT rowid, feed_id, content, search_text FROM articles WHERE guid = 'g7'"),
+            )
+            assertEquals(emptyList(), driver.rows("SELECT rowid FROM ks_search_pending"))
+        } finally {
+            rawDriver.close()
         }
     }
 

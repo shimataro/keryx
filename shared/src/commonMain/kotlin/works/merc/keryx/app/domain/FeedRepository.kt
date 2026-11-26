@@ -3,6 +3,7 @@ package works.merc.keryx.app.domain
 import app.cash.sqldelight.coroutines.asFlow
 import app.cash.sqldelight.coroutines.mapToList
 import app.cash.sqldelight.db.SqlDriver
+import io.ktor.http.Url
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
@@ -789,9 +790,12 @@ class FeedRepository(
         // Each write is additionally guarded on the value actually changing, so a refresh that
         // changed nothing writes nothing at all and notifies no one. The fetch state lives in its
         // own device-local table, so its writes never move the feed row's sync stamps.
-        // `mergedInto` is the feed id this feed was merged into when its redirect target was held by
-        // another feed (see below), else null.
-        val (newCount, mergedInto) = db.transactionWithResult {
+        // A redirect's handling opens the transaction with a write (see [redirectFirstWrite]), and the
+        // rest of the apply phase keeps its order after it.
+        val sameHostRedirect = redirectTarget != null && isSameHost(feed.url, redirectTarget)
+        val applied = db.transactionWithResult {
+            if (redirectTarget != null) redirectFirstWrite(feed.id, redirectTarget, sameHostRedirect, now)
+
             if (state != null && (state.error_count != 0L || state.last_error != null)) {
                 fetchStates.resetErrorCount(feed.id)
             }
@@ -823,45 +827,15 @@ class FeedRepository(
                 }
             }
 
-            // The redirect target may already be another feed's URL — that feed subscribed at the new
-            // URL here or merged in from another device — and rewriting this feed's URL would then
-            // violate UNIQUE(url) on every refresh from now on. The two are one feed: their edge is
-            // recorded and both are merged onto the identity's canonical id in this transaction
-            // (FeedIdentitySql), which then takes the target URL; the edge reaches the other devices
-            // with the next send, so they merge the same rows. The fetched articles land in the
-            // canonical feed (insert resolves the feed id through ks_id_remap and conflicts on
-            // (feed_id, guid)), so the new-article count read before the merge is recounted against it.
-            var toInsert = prepared
-            var merged: String? = null
-            if (redirectTarget != null) {
-                val ownId = feeds.resolveId(feed.id).executeAsOne()
-                val holder = feeds.getByUrl(redirectTarget).executeAsOneOrNull()
-                if (holder != null && holder.id != ownId) {
-                    // Read before the merge: whether the user still had either feed.
-                    val anyAlive = holder.deleted_at == null ||
-                        feeds.getById(ownId).executeAsOneOrNull()?.deleted_at == null
-                    FeedIdentitySql.mergeLocally(driver, ownId, holder.id)
-                    val canonicalId = feeds.resolveId(ownId).executeAsOne()
-                    // The merge's subscription state is plain last-write-wins, so a tombstone holding
-                    // the target can unsubscribe the merged feed. A redirect must never silently
-                    // unsubscribe a feed the user still has: that case is a re-subscribe, stamped above
-                    // every folded stamp so it also wins on the other devices. Two tombstones stay deleted.
-                    if (anyAlive) feeds.reviveAfterMerge(now, canonicalId)
-                    // Writes only when the merged feed does not hold the target yet (its content group came
-                    // from this feed): updateUrl is guarded on the url changing, so it never moves
-                    // updated_at — a stamp the capture trigger does not watch — without a captured change.
-                    feeds.updateUrl(redirectTarget, now, canonicalId)
-                    toInsert = articleRepository.recountPrepared(prepared, canonicalId)
-                    merged = canonicalId
-                } else {
-                    // A no-op when the row already has the target (a merge brought it since the snapshot).
-                    feeds.updateUrl(redirectTarget, now, feed.id)
-                }
-            }
-
-            articleRepository.insertPrepared(toInsert) to merged
+            // Read only after the redirect's first write, never in a transaction without one.
+            val redirect = redirectTarget?.let { completeRedirect(feed.id, it, sameHostRedirect, now, prepared) }
+            AppliedFetch(
+                newCount = articleRepository.insertPrepared(redirect?.merge?.recounted ?: prepared),
+                mergedInto = redirect?.merge?.canonicalId,
+                urlMoved = redirect?.urlMoved == true,
+            )
         }
-        if (mergedInto != null) {
+        if (applied.mergedInto != null) {
             // The merge's raw statements bypass SQLDelight's listeners (feed_tags and the fetch state
             // are not written by any generated statement here), so the lists are told after the commit;
             // ids held outside the database follow first, as after a sync merge.
@@ -871,19 +845,108 @@ class FeedRepository(
 
         // Notifications are emitted after the commit, so a listener never observes a half-applied
         // feed. `notify` is declared `suspend` so it cannot be called from inside the transaction
-        // block by mistake.
-        if (redirectTarget != null) {
+        // block by mistake. A redirect whose target another feed holds on another host left the URL
+        // alone, so nothing changed to announce.
+        if (applied.urlMoved) {
             notify(
                 NotificationText.FeedUrlChanged(feed.displayTitle()),
                 AppNotificationLevel.WARNING,
-                action = AppNotificationAction.ShowFeedDetail(mergedInto ?: feed.id),
+                action = AppNotificationAction.ShowFeedDetail(applied.mergedInto ?: feed.id),
             )
         }
         // No sync is scheduled here: a refresh of many feeds would otherwise arm the debounce once
         // per feed and could fire a whole-DB upload mid-refresh. RefreshCycleRunner covers the batch
         // (it syncs right after, or schedules one when the cycle synced first); the single-feed
         // refreshFeed() schedules its own.
-        return RefreshOutcome(Result.Ok(newCount), fetched.articles.isNotEmpty())
+        return RefreshOutcome(Result.Ok(applied.newCount), fetched.articles.isNotEmpty())
+    }
+
+    /** What [applyFetch]'s transaction did: the new-article count, the merge's canonical id, whether the URL moved. */
+    private data class AppliedFetch(val newCount: Int, val mergedInto: String?, val urlMoved: Boolean)
+
+    /** A redirect merge's outcome: the identity's canonical id, and the fetched articles recounted against it. */
+    private data class RedirectMerge(val canonicalId: String, val recounted: ArticleRepository.PreparedArticles)
+
+    /**
+     * The first statement of a redirected refresh's transaction — always a write. SQLite's deferred
+     * BEGIN takes the write lock only at the first write, and a transaction whose first statement is a
+     * read can then fail that upgrade with a non-retryable SQLITE_BUSY when another connection
+     * committed in between, without waiting out `busy_timeout`. Opening with a write makes every read
+     * after it (the holder, the merge) run under the write lock.
+     *
+     * - Same host: records the identity edge with the feed holding [target], if any
+     *   (`recordRedirectEdge`); the merge follows once the rest of the apply phase has run.
+     * - Another host: never merged — a redirect to another site is no proof the two feeds are one.
+     *   The URL write is guarded on no other feed holding [target], so it leaves the URL alone then,
+     *   rather than failing UNIQUE(url) on this and every later refresh.
+     */
+    /** Whether [from] and [to] name the same host — case-insensitive, scheme and port ignored. */
+    private fun isSameHost(from: String, to: String): Boolean {
+        val fromHost = runCatching { Url(from).host }.getOrNull() ?: return false
+        val toHost = runCatching { Url(to).host }.getOrNull() ?: return false
+        return fromHost.isNotEmpty() && fromHost.equals(toHost, ignoreCase = true)
+    }
+
+    private fun redirectFirstWrite(feedId: String, target: String, sameHost: Boolean, now: Long) {
+        if (sameHost) feeds.recordRedirectEdge(own = feedId, target = target)
+        // With a holder this writes nothing: on the same host the merge moves the URL; on another host
+        // it stays. A no-op too when the row already has the target (a merge brought it since the snapshot).
+        feeds.updateUrl(target, now, feedId)
+    }
+
+    /** A redirect's outcome: the merge, when there was one, and whether the feed now holds the target. */
+    private data class RedirectOutcome(val merge: RedirectMerge?, val urlMoved: Boolean)
+
+    /**
+     * The rest of a redirect after [redirectFirstWrite] and the apply phase's other writes. A same-host
+     * redirect onto another feed's URL means the two are one feed (that feed subscribed at the moved URL
+     * here, or merged in from another device): they are merged ([mergeRedirectCollision]). Otherwise
+     * the guarded URL write already ran; the URL has moved when the feed now holds [target] (a merge may
+     * have brought it since the snapshot), and not when another feed holds it.
+     */
+    private fun completeRedirect(
+        feedId: String,
+        target: String,
+        sameHost: Boolean,
+        now: Long,
+        prepared: ArticleRepository.PreparedArticles,
+    ): RedirectOutcome {
+        val ownId = feeds.resolveId(feedId).executeAsOne()
+        val holder = if (sameHost) feeds.getByUrl(target).executeAsOneOrNull() else null
+        if (holder != null && holder.id != ownId) {
+            return RedirectOutcome(mergeRedirectCollision(ownId, holder, target, now, prepared), urlMoved = true)
+        }
+        return RedirectOutcome(merge = null, urlMoved = feeds.getById(ownId).executeAsOneOrNull()?.url == target)
+    }
+
+    /**
+     * Merges the feed [ownId] with [holder], which holds the redirect [target], onto their identity's
+     * canonical id inside the caller's transaction ([FeedIdentitySql.mergeLocally]); the edge then
+     * reaches the other devices with the next send, so they merge the same rows. The fetched articles
+     * land in the canonical feed (the insert resolves the feed id through ks_id_remap and conflicts on
+     * (feed_id, guid)), so the new-article count read before the merge is recounted against it.
+     */
+    private fun mergeRedirectCollision(
+        ownId: String,
+        holder: Feeds,
+        target: String,
+        now: Long,
+        prepared: ArticleRepository.PreparedArticles,
+    ): RedirectMerge {
+        // Read before the merge: whether the user still had either feed.
+        val anyAlive = holder.deleted_at == null || feeds.getById(ownId).executeAsOneOrNull()?.deleted_at == null
+        FeedIdentitySql.mergeLocally(driver, ownId, holder.id)
+        val canonicalId = feeds.resolveId(ownId).executeAsOne()
+        // The merge's subscription state is plain last-write-wins, so a tombstone holding the target can
+        // unsubscribe the merged feed. A redirect must never silently unsubscribe a feed the user still
+        // has: that case is a re-subscribe, stamped above every folded stamp so it also wins on the other
+        // devices. Two tombstones stay deleted.
+        if (anyAlive) feeds.reviveAfterMerge(now, canonicalId)
+        // Writes only when the merged feed does not hold the target yet (its content group came from this
+        // feed): updateUrl is guarded on the url changing, so it never moves updated_at — a stamp the
+        // capture trigger does not watch — without a captured change.
+        feeds.updateUrl(target, now, canonicalId)
+        return RedirectMerge(canonicalId, articleRepository.recountPrepared(prepared, canonicalId))
     }
 
     /**
