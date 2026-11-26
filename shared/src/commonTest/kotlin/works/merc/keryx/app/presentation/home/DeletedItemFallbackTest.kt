@@ -8,6 +8,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
@@ -542,6 +543,143 @@ class DeletedItemFallbackTest {
         assertEquals(1, fellBack)
         shown.value = listOf(Row("other", "Again"))
         assertEquals(1, fellBack, "decided once")
+        h.scope.cancel()
+    }
+
+    // --- a list delivered during the catch-up: the decision stays on the list that was caught up for ---
+
+    /**
+     * The fallback's coroutines run on a [StandardTestDispatcher], so a value of [shown] set by the test
+     * waits for the collector until the scheduler runs it, while the catch-up and the liveness check run
+     * unconfined on the check dispatcher. That forces the interleaving the gate alone cannot: the
+     * catch-up's continuation is queued ahead of the collector's delivery of a newer list, and so sees
+     * that list in [shown] first. [catchUp] reads [committed] when it starts, as the database read does,
+     * so a re-key committed while it waits is not in the map it publishes.
+     */
+    private class QueuedCatchUpHarness(testScope: TestScope, val shown: MutableStateFlow<List<Row>>) {
+        var published: Map<String, String> = emptyMap()
+        var committed: Map<String, String> = emptyMap()
+        var catchUps = 0
+        var gate: CompletableDeferred<Unit>? = null
+        var live: Set<String> = emptySet()
+        val scope = CoroutineScope(SupervisorJob() + StandardTestDispatcher(testScope.testScheduler))
+        val fallback = DeletedItemFallback(
+            scope, shown, UnconfinedTestDispatcher(testScope.testScheduler),
+            isLive = { id -> id in live },
+            currentRemap = { { id -> published[id] ?: id } },
+            catchUp = {
+                catchUps++
+                val snapshot = committed
+                gate?.await()
+                published = snapshot
+            },
+        ) { it.id }
+    }
+
+    /**
+     * Two re-keys in a row: t-old -> t-mid, then t-mid -> t-new. The list showing t-mid starts a
+     * catch-up, which reads the first re-key only; the second commits, and a list showing t-new is set,
+     * before the catch-up returns. Judged against the map the catch-up read, that newer list lacks the
+     * item — but it is decided afresh, with a second catch-up that reads the second re-key, so the item
+     * is found under t-new and nothing falls back.
+     */
+    @Test
+    fun aListNewerThanTheCaughtUpMapIsNotTakenForADeletion() = runTest {
+        val shown = MutableStateFlow(listOf(Row("t-old", "News"), Row("other", "Other")))
+        val h = QueuedCatchUpHarness(this, shown)
+        h.live = setOf("t-new")
+        var fellBack = 0
+        testScheduler.runCurrent()
+        h.fallback.fallBackOnceHidden("t-old") { fellBack++ }
+        testScheduler.runCurrent()
+
+        h.committed = mapOf("t-old" to "t-mid")
+        h.gate = CompletableDeferred()
+        shown.value = listOf(Row("t-mid", "News"), Row("other", "Other"))
+        testScheduler.runCurrent()
+        assertEquals(1, h.catchUps, "the list showing t-mid is confirmed against the committed map")
+
+        // The second re-key commits while the catch-up is in flight; the catch-up returns first, then
+        // the list showing t-new is set, so the continuation runs before the collector delivers it.
+        h.committed = mapOf("t-old" to "t-new", "t-mid" to "t-new")
+        h.gate!!.complete(Unit)
+        shown.value = listOf(Row("t-new", "News"), Row("other", "Other"))
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(0, fellBack)
+        assertEquals(2, h.catchUps, "the newer list is confirmed with a catch-up of its own")
+        assertEquals(mapOf("t-old" to "t-new", "t-mid" to "t-new"), h.published)
+
+        // What the ViewModel's re-key collector does: the request follows the row onto t-new, which is
+        // live, so it is dropped and a later deletion moves nothing.
+        h.fallback.remapPending { h.published[it] ?: it }
+        testScheduler.advanceUntilIdle()
+        shown.value = listOf(Row("other", "Other"))
+        testScheduler.advanceUntilIdle()
+        assertEquals(0, fellBack)
+        h.scope.cancel()
+    }
+
+    /** The same interleaving when the newer list really lacks the item: it falls back once, after its own catch-up. */
+    @Test
+    fun aRealDeletionDeliveredDuringTheCatchUpFallsBackOnce() = runTest {
+        val shown = MutableStateFlow(listOf(Row("t-old", "News"), Row("other", "Other")))
+        val h = QueuedCatchUpHarness(this, shown)
+        var fellBack = 0
+        testScheduler.runCurrent()
+        h.fallback.fallBackOnceHidden("t-old") { fellBack++ }
+        testScheduler.runCurrent()
+
+        h.committed = mapOf("t-old" to "t-mid")
+        h.gate = CompletableDeferred()
+        shown.value = listOf(Row("t-mid", "News"), Row("other", "Other"))
+        testScheduler.runCurrent()
+
+        h.gate!!.complete(Unit)
+        shown.value = listOf(Row("other", "Other"))
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(1, fellBack)
+        assertEquals(2, h.catchUps)
+        shown.value = listOf(Row("other", "Again"))
+        testScheduler.advanceUntilIdle()
+        assertEquals(1, fellBack, "decided once")
+        assertEquals(2, h.catchUps)
+        h.scope.cancel()
+    }
+
+    /**
+     * [shown] moves on during the catch-up and then back to a list equal to the one caught up for. The
+     * collector skips a value equal to the one it last delivered, so nothing but the continuation would
+     * ever look at it: it is decided there, the item is found and its liveness checked, so the request
+     * is dropped as live and a later deletion moves nothing.
+     */
+    @Test
+    fun aListThatChangesAndChangesBackDuringTheCatchUpIsStillDecided() = runTest {
+        val shown = MutableStateFlow(listOf(Row("t-old", "News"), Row("other", "Other")))
+        val h = QueuedCatchUpHarness(this, shown)
+        var fellBack = 0
+        testScheduler.runCurrent()
+        h.fallback.fallBackOnceHidden("t-old") { fellBack++ }
+        // At the request the item is shown and not live, so the request stays pending.
+        testScheduler.runCurrent()
+
+        h.committed = mapOf("t-old" to "t-mid")
+        h.gate = CompletableDeferred()
+        val caughtUpFor = listOf(Row("t-mid", "News"), Row("other", "Other"))
+        shown.value = caughtUpFor
+        testScheduler.runCurrent()
+
+        h.gate!!.complete(Unit)
+        shown.value = listOf(Row("other", "Other"))
+        shown.value = caughtUpFor.toList()
+        h.live = setOf("t-old")
+        testScheduler.advanceUntilIdle()
+        assertEquals(0, fellBack)
+
+        shown.value = listOf(Row("other", "Gone"))
+        testScheduler.advanceUntilIdle()
+        assertEquals(0, fellBack, "dropped as live, so a later deletion moves nothing")
         h.scope.cancel()
     }
 }

@@ -62,7 +62,11 @@ internal sealed interface DeletedTarget {
  * it re-reads `ks_id_remap` from the database, serialized by `TagFolderIdRemaps`' lock — the list was
  * read after the commit, so the read sees the re-key), and the decision is taken again with the
  * refreshed map: still absent means really gone and the fallback runs, present means the request
- * goes on as for a value that still shows the item. After one catch-up an unexplained absence is a
+ * goes on as for a value that still shows the item. The decision is taken on the very list that was
+ * caught up for, never on a newer value of [shown]: the map the catch-up read is at least as new as
+ * that list, but a list delivered during the catch-up can show a later re-key the map does not have
+ * yet. When [shown] has moved on by then, that newer value is decided afresh — with a catch-up of its
+ * own — instead. After one catch-up an unexplained absence is a
  * real disappearance, so a real deletion always falls back. A [catchUp] that fails is logged and
  * leaves the request pending (best effort, as the liveness check): the next value of [shown] decides.
  * Without [catchUp] (feeds, whose ids are never re-keyed) an absence is decided at once.
@@ -116,7 +120,7 @@ internal class DeletedItemFallback<T>(
                 return
             }
             pending += request
-            decideAbsence(request)
+            decideAbsence(request, current)
             return
         }
         pending += request
@@ -151,7 +155,7 @@ internal class DeletedItemFallback<T>(
             val predatesTheRemap = current.any { idOf(it).let { shown -> shown != moved && remap(shown) == moved } }
             if (!predatesTheRemap && current.none { idOf(it) == moved }) {
                 request.reference = current
-                decideAbsence(request)
+                decideAbsence(request, current)
             } else {
                 request.reference = current
                 checkLiveness(request)
@@ -169,23 +173,31 @@ internal class DeletedItemFallback<T>(
     private fun onShown(list: List<T>) {
         if (pending.isEmpty()) return
         // A StateFlow collector can still be handed the value a request last saw; only a newer one counts.
-        for (request in pending.filter { it.reference !== list }) {
-            if (!shows(list, request.id)) {
-                request.reference = list
-                decideAbsence(request)
-            } else {
-                request.reference = list
-                checkLiveness(request)
-            }
-        }
+        for (request in pending.filter { it.reference !== list }) decide(request, list)
+    }
+
+    /** Decides [request] on [list], a value of [shown] it has not been decided on yet. */
+    private fun decide(request: Pending, list: List<T>) {
+        request.reference = list
+        if (!shows(list, request.id)) decideAbsence(request, list) else checkLiveness(request)
     }
 
     /**
-     * [shown] lacks the item of [request]: falls back at once without a [catchUp], else confirms the
-     * absence against the committed re-key map first (see the class KDoc). Shares the request's check
-     * generation with [checkLiveness], so only the newest decision for the request is applied.
+     * [list], a value of [shown], lacks the item of [request]: falls back at once without a [catchUp],
+     * else confirms the absence against the committed re-key map first (see the class KDoc). Shares
+     * the request's check generation with [checkLiveness], so only the newest decision for the request
+     * is applied.
+     *
+     * After the catch-up the decision is taken on [list] itself: the map just read is at least as new
+     * as [list] (which was read before the catch-up started), but not necessarily as new as a value of
+     * [shown] delivered during it, which can show a later re-key under an id the map does not know yet.
+     * If [shown] has moved past [list] meanwhile, [list] is superseded and the newest value is decided
+     * here and now, with a catch-up of its own — not left to [onShown], whose collector skips a value
+     * equal to the one it last delivered, so a list that changed and changed back would never reach it.
+     * When [onShown] has already decided the request on that value, the generation check below stops
+     * this continuation first, and when it decides it later it skips the value as already seen.
      */
-    private fun decideAbsence(request: Pending) {
+    private fun decideAbsence(request: Pending, list: List<T>) {
         val catchUp = catchUp
         if (catchUp == null) {
             pending.remove(request)
@@ -202,7 +214,11 @@ internal class DeletedItemFallback<T>(
             if (request !in pending || generation != request.checkGeneration) return@launch
             // Undecided: the next value of [shown] asks again.
             if (!caughtUp) return@launch
-            val list = shown.value
+            val latest = shown.value
+            if (latest !== list) {
+                decide(request, latest)
+                return@launch
+            }
             if (shows(list, request.id)) {
                 request.reference = list
                 checkLiveness(request)
