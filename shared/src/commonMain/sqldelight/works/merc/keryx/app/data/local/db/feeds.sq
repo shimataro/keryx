@@ -70,6 +70,10 @@ isIdTaken:
 SELECT EXISTS (SELECT 1 FROM feeds WHERE id = :id)
     OR EXISTS (SELECT 1 FROM ks_id_remap WHERE kind = 'feed' AND old_id = :id);
 
+-- updated_at (the content group's last-write-wins stamp) moves on an existing row only when a column the
+-- capture trigger watches changes with it: re-subscribing a live feed whose values are unchanged writes
+-- the same row, and a stamp moved without being sent would beat a peer's later content change here and
+-- lose to it there, so the devices would never agree.
 upsert:
 INSERT INTO feeds (
     id, url, site_url, title, description, favicon_url,
@@ -82,7 +86,17 @@ ON CONFLICT(id) DO UPDATE SET
     description = excluded.description,
     favicon_url = excluded.favicon_url,
     deleted_at = excluded.deleted_at,
-    updated_at = excluded.updated_at,
+    updated_at = CASE
+        WHEN url IS NOT excluded.url
+            OR site_url IS NOT excluded.site_url
+            OR title IS NOT excluded.title
+            OR description IS NOT excluded.description
+            OR favicon_url IS NOT excluded.favicon_url
+            OR deleted_at IS NOT excluded.deleted_at
+            OR sort_order IS NOT excluded.sort_order
+        THEN excluded.updated_at
+        ELSE updated_at
+    END,
     sort_order = excluded.sort_order;
 
 -- deleted_updated_at never goes backwards or repeats on a row: MAX(now, previous + 1), so an
@@ -123,8 +137,12 @@ WHERE id = COALESCE((SELECT id FROM feeds WHERE id = :id), (SELECT new_id FROM k
 updateContent:
 UPDATE feeds SET site_url = ?, title = ?, description = ?, updated_at = ? WHERE id = COALESCE((SELECT id FROM feeds WHERE id = :id), (SELECT new_id FROM ks_id_remap WHERE kind = 'feed' AND old_id = :id), :id);
 
+-- Writes only when the url actually changes, so updated_at (the content group's last-write-wins stamp,
+-- which the capture trigger does not watch) never moves without a captured change sent with it: a
+-- refresh reads its feed from a snapshot, and a sync merge may have brought the same url meanwhile.
+-- A stamp moved without being sent would beat a peer's later content change here and lose to it there.
 updateUrl:
-UPDATE feeds SET url = ?, updated_at = ? WHERE id = COALESCE((SELECT id FROM feeds WHERE id = :id), (SELECT new_id FROM ks_id_remap WHERE kind = 'feed' AND old_id = :id), :id);
+UPDATE feeds SET url = :url, updated_at = :updated_at WHERE id = COALESCE((SELECT id FROM feeds WHERE id = :id), (SELECT new_id FROM ks_id_remap WHERE kind = 'feed' AND old_id = :id), :id) AND url IS NOT :url;
 
 -- A folder move writes the feed's raw assignment (ks_feed_folder_raw, the source of truth — see
 -- sync_bookkeeping.sq); the resolution trigger then derives feeds.folder_id / folder_updated_at from
