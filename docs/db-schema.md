@@ -165,9 +165,11 @@ Indexes: `feed_id`, `is_read`, `is_starred`, and a composite `(published_at DESC
   it is not deleted or is starred**: `(deleted_at IS NULL OR is_starred = 1)`,
   decided when it is read. Every list, unread count, search, `aliveFlagsIn` / `idsByFeeds` lookup and mark-all-read uses
   exactly that predicate (`articles.sq`; `data/local/ArticleVisibility.kt` for raw SQL and Kotlin), so a star is never
-  lost to a cleanup. A star touches only the star group (`updateStarStatus`); an unstar of a deleted row also stamps an
-  undelete (`deleted_at` NULL, `deleted_updated_at` moved forward), so an article the user unstars stays visible until
-  the next cache cleanup deletes it again. This makes the deletion propagate across
+  lost to a cleanup. A star touches only the star group (`updateStarStatus`). An unstar of a row already deleted on
+  this device also stamps an undelete (`deleted_at` NULL, `deleted_updated_at` moved forward), so the article stays
+  visible until the next cache cleanup deletes it again. An unstar of a row that is not deleted leaves the deletion
+  alone, so an older deletion from another device that arrives afterwards still applies and hides the article, now
+  unstarred — as version 2 does. This makes the deletion propagate across
   devices instead of the article being resurrected from the cloud on the next sync. Rows are
   never physically removed here (physical GC of old tombstones is future work); the row is kept so its deletion — and
   starred-article references — survive. `getByFeedAndGuid` / `getGuidsByFeed` deliberately include deleted rows (a

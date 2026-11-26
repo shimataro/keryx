@@ -280,10 +280,12 @@ UPDATE articles SET is_read = 1, read_at = MAX(:read_at, COALESCE(read_at, 0) + 
 -- Same no-op guard as updateReadStatus, for starred_at. A star touches only the star group: a starred
 -- article is visible whatever its deletion says, so a star made on an article a merge has just
 -- deleted — still on screen in the reader — keeps it, here and on every device the star reaches.
--- An unstar of a deleted row also stamps an undelete in the deletion group (deleted_at NULL,
--- deleted_updated_at moved forward like any stamp), so the article the user just unstarred stays on
--- screen until the next cache cleanup deletes it again rather than vanishing under the user. An
--- unstar of a row that is not deleted leaves the deletion group alone.
+-- An unstar of a row already deleted here also stamps an undelete in the deletion group (deleted_at
+-- NULL, deleted_updated_at moved forward like any stamp), so the article the user just unstarred stays
+-- on screen until the next cache cleanup deletes it again rather than vanishing under the user. An
+-- unstar of a row that is not deleted leaves the deletion group alone: a deletion another device made
+-- earlier and that arrives afterwards still wins its group, and the article, no longer starred, is
+-- then hidden — as version 2 does.
 updateStarStatus:
 UPDATE articles SET is_starred = :is_starred,
     starred_at = MAX(:starred_at, COALESCE(starred_at, 0) + 1),

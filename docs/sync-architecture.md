@@ -683,8 +683,10 @@ Merge SQL (`MergeSql`) key points:
   decided when it is read: an article is visible while it is not deleted or is starred**
   (`(deleted_at IS NULL OR is_starred = 1)`, the predicate every article list, count, search and mark-all-read uses —
   `articles.sq`, `data/local/ArticleVisibility.kt`). So a star is never lost to a cleanup made anywhere, in any order.
-  Locally a star touches only its own group; an unstar of a deleted article also stamps an undelete, so the article
-  stays on screen until the next cache cleanup deletes it again. Version 2 already wrote rows both starred and deleted
+  Locally a star touches only its own group; an unstar of an article already deleted here also stamps an undelete, so
+  the article stays on screen until the next cache cleanup deletes it again. An unstar of an article not deleted
+  leaves the deletion group alone, so an older deletion from another device that arrives afterwards still wins it and
+  the unstarred article is hidden, as in version 2. Version 2 already wrote rows both starred and deleted
   (a star older than another device's cleanup) and hid them; `2.sqm` records each one's star as removed at its
   deletion — for the local database and for a pre-delta cloud file the merge migrates with it alike — so they stay
   hidden after the upgrade. (Two earlier designs failed. Separate groups plus a

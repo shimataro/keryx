@@ -2726,6 +2726,40 @@ class SyncMergerTest {
         driver.close()
     }
 
+    /**
+     * Pins the unstar of a row that is not deleted: it stamps no undelete, so a deletion another
+     * device made before the unstar (300 < 500) and that arrives afterwards still wins the deletion
+     * group, and the article — unstarred, deleted — is hidden, as version 2 leaves it.
+     */
+    @Test
+    fun anOlderDeletionArrivingAfterAnUnstarOfARowNotDeletedHidesTheArticle() {
+        val (cloudFile, cloudDriver, cloudDb) = fileDb()
+        cloudDb.insertFeed("f1", now = 100)
+        insertArticle(cloudDb, "a1", "f1", "g1", isRead = 0, readAt = null, updatedAt = 100, isStarred = 1, starredAt = 100)
+        cloudDriver.stampArticleDeleted("a1", deletedAt = 300)
+        cloudDriver.close()
+
+        val (localFile, localDriver, localDb) = fileDb()
+        localDb.insertFeed("f1", now = 100)
+        insertArticle(localDb, "a1", "f1", "g1", isRead = 0, readAt = null, updatedAt = 100, isStarred = 1, starredAt = 100)
+        localDb.articlesQueries.updateStarStatus(0L, 500L, 500L, "a1")
+        localDriver.close()
+
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+
+        val (_, verifyDriver, verifyDb) = reopen(localFile)
+        try {
+            val article = verifyDb.articlesQueries.getById("a1").executeAsOne()
+            assertEquals(0L, article.is_starred)
+            assertEquals(500L, article.starred_at)
+            assertEquals(300L, article.deleted_at)
+            assertEquals(300L, article.deleted_updated_at)
+            assertEquals(emptyList(), verifyDb.articlesQueries.watchAll().executeAsList().map { it.id })
+        } finally {
+            verifyDriver.close()
+        }
+    }
+
     @Test
     fun aLocalCleanupAfterAMergedUndeleteWinsTheDeletionGroup() = localWriteThenMerge(
         // 11 articles in one feed: cleanup expires a00. Both sides hold a00 undeleted at 600 (the local
