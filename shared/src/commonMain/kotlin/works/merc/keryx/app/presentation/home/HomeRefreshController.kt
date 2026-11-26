@@ -47,7 +47,7 @@ internal class HomeRefreshController(
     private val retrimPins: () -> Unit,
 ) {
     // Each pull still pending, by a token of its own, under the filter it is shown for. Keyed by token
-    // rather than by filter so a pull whose tag or folder a merge re-keys meanwhile ([remapPulls]) is
+    // rather than by filter so a pull whose tag, folder or feed a merge re-keys meanwhile ([remapPulls]) is
     // still released by its own end, under whatever id it is shown by then.
     private val pulls = MutableStateFlow<Map<Long, ArticleFilter>>(emptyMap())
 
@@ -65,7 +65,7 @@ internal class HomeRefreshController(
     val pullRefreshingFilters: StateFlow<Set<ArticleFilter>> = pulls.derived { it.values.toSet() }
 
     /**
-     * Moves every pending pull's filter onto the id its tag or folder has now — after a merge re-keyed
+     * Moves every pending pull's filter onto the id its tag, folder or feed has now — after a merge re-keyed
      * it ([works.merc.keryx.app.domain.IdRemaps]), so the list it was started on, now under
      * the new id, keeps showing it. Each pull still ends by its own token.
      */

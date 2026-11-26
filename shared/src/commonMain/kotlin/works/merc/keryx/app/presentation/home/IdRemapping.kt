@@ -9,10 +9,10 @@ import works.merc.keryx.app.domain.IdRemap
 import works.merc.keryx.app.domain.IdRemaps
 
 /**
- * Brings every tag/folder id [HomeViewModel] holds up to date after a merge re-keyed rows onto
- * other ids ([IdRemaps]), so nothing the user had selected or open is lost to a re-key
- * (external-spec §9, "Least surprise"): the selected filter and row move to the id the tag or
- * folder has now instead of falling back to All Feeds, the feed list's expansion keeps the same
+ * Brings every tag, folder and feed id [HomeViewModel] holds up to date after a merge re-keyed rows
+ * onto other ids ([IdRemaps]), so nothing the user had selected or open is lost to a re-key
+ * (external-spec §9, "Least surprise"): the selected filter and row move to the id the tag, folder
+ * or feed has now instead of falling back to All Feeds, the feed list's expansion keeps the same
  * folders collapsed and tags expanded, a pull in progress keeps its indicator, and a delete still
  * waiting for its item to leave the feed list waits for the row it became. The local settings are
  * rewritten by `SettingsRepository` from the same value.
@@ -33,6 +33,7 @@ internal class IdRemapping(
     private val selectedRowInstance: MutableStateFlow<FeedListRowSelection>,
     private val expansion: FeedListExpansion,
     private val refreshController: HomeRefreshController,
+    private val deletedFeedFallback: DeletedItemFallback<*>,
     private val deletedTagFallback: DeletedItemFallback<*>,
     private val deletedFolderFallback: DeletedItemFallback<*>,
 ) {
@@ -61,13 +62,14 @@ internal class IdRemapping(
 
     private fun apply(remap: IdRemap) {
         if (remap.isEmpty) return
-        // The same selection under the tag's or folder's new id: the generation stays, so neither UI
+        // The same selection under the tag's, folder's or feed's new id: the generation stays, so neither UI
         // treats it as a switch (the list keeps its scroll position and its new-articles pill).
         filterSelection.update { it.remappedBy(remap) }
         refreshController.remapPulls(remap)
         val instance = selectedRowInstance.value.remappedBy(remap)
         if (instance != selectedRowInstance.value) selectedRowInstance.value = instance
         expansion.remap(remap)
+        deletedFeedFallback.remapPending(remap::feed)
         deletedTagFallback.remapPending(remap::tag)
         deletedFolderFallback.remapPending(remap::folder)
     }
@@ -75,14 +77,20 @@ internal class IdRemapping(
 
 // The id-space rewrites of the state above — see [IdRemapping.apply].
 
-/** This row with its tag or folder id brought up to date by [remap]; the same instance when nothing changes. */
+/** This row with its tag, folder or feed ids brought up to date by [remap]; the same instance when nothing changes. */
 internal fun FeedListRowSelection.remappedBy(remap: IdRemap): FeedListRowSelection = when (this) {
     is FeedListRowSelection.Folder -> remap.folder(folderId).let { if (it == folderId) this else FeedListRowSelection.Folder(it) }
     is FeedListRowSelection.Tag -> remap.tag(tagId).let { if (it == tagId) this else FeedListRowSelection.Tag(it) }
-    is FeedListRowSelection.FeedInTag -> remap.tag(tagId).let { if (it == tagId) this else copy(tagId = it) }
-    FeedListRowSelection.All, FeedListRowSelection.Starred, is FeedListRowSelection.FeedInFolderGroup -> this
+    is FeedListRowSelection.FeedInTag -> {
+        val feed = remap.feed(feedId)
+        val tag = remap.tag(tagId)
+        if (feed == feedId && tag == tagId) this else FeedListRowSelection.FeedInTag(feed, tag)
+    }
+    is FeedListRowSelection.FeedInFolderGroup ->
+        remap.feed(feedId).let { if (it == feedId) this else FeedListRowSelection.FeedInFolderGroup(it) }
+    FeedListRowSelection.All, FeedListRowSelection.Starred -> this
 }
 
-/** This selection with its filter's tag or folder id brought up to date by [remap], keeping its generation. */
+/** This selection with its filter's tag, folder or feed id brought up to date by [remap], keeping its generation. */
 internal fun FilterSelection.remappedBy(remap: IdRemap): FilterSelection =
     remap.filter(filter).let { if (it == filter) this else copy(filter = it) }

@@ -111,7 +111,7 @@ class HomeViewModel(
     // Reports a read/star or feed-list write that failed off the UI thread (its optimistic state is
     // then undone here — see [revertFailedArticleWrite]). The app's one instance in production.
     private val localWriteFailureReporter: LocalWriteFailureReporter,
-    // The tag/folder id re-keys a merge publishes (see [IdRemapping]). The app's one instance in
+    // The tag/folder/feed id re-keys a merge publishes (see [IdRemapping]). The app's one instance in
     // production; by default the one [settingsRepository] observes, so both always agree.
     private val idRemaps: IdRemaps = settingsRepository.idRemaps,
 ) : ViewModel() {
@@ -236,7 +236,8 @@ class HomeViewModel(
             return RestoredFilter(remapped, reproduced = true, validated = false)
         }
         val validated = validateFilterTarget(remapped)
-        return RestoredFilter(validated, reproduced = validated == remapped)
+        // A feed filter can come back under the id its feed has now (see validateFilterTarget).
+        return RestoredFilter(validated, reproduced = validated != ArticleFilter.All || remapped == ArticleFilter.All)
     }
 
     /**
@@ -261,11 +262,20 @@ class HomeViewModel(
      * Falls back to [ArticleFilter.All] when [filter] references a feed/tag/folder that no longer
      * exists (soft-deleted locally, or since [restoreFilter] read it). Filters with no target of
      * their own pass through unchanged.
+     *
+     * A feed id is resolved from the database first ([FeedRepository.resolveFeedId]), so a feed a
+     * merge moved onto another id is restored under that id even before the published re-key map has
+     * loaded: the merged-away row is gone, and checking the saved id alone would fall back to All.
      */
     private fun validateFilterTarget(filter: ArticleFilter): ArticleFilter = when (filter) {
         is ArticleFilter.Feed -> {
-            val feed = feedRepository.getFeedById(filter.feedId)
-            if (feed != null && feed.deleted_at == null) filter else ArticleFilter.All
+            val id = feedRepository.resolveFeedId(filter.feedId)
+            val feed = feedRepository.getFeedById(id)
+            when {
+                feed == null || feed.deleted_at != null -> ArticleFilter.All
+                id == filter.feedId -> filter
+                else -> ArticleFilter.Feed(id)
+            }
         }
         is ArticleFilter.Tag -> {
             val tag = tagRepository.getTagById(filter.tagId)
@@ -326,8 +336,8 @@ class HomeViewModel(
     val selectedRowGeneration: StateFlow<Long> = _selectedRowGeneration.asStateFlow()
 
     /**
-     * The tag/folder id re-keys a sync merge has published ([IdRemaps.current]), for a UI
-     * that holds a tag or folder id of its own — an inline rename's target — to bring up to date.
+     * The tag/folder/feed id re-keys a merge has published ([IdRemaps.current]), for a UI that
+     * holds such an id of its own — an inline rename's target — to bring up to date.
      * Published before the lists a merge changes are, so a UI that sees a list under a new id reads
      * a map that already holds the move.
      */
@@ -696,8 +706,12 @@ class HomeViewModel(
         combine(_selectionCursor, _selectedArticle, _pendingSelectedRow, _headerArticleId, ::resolveReaderContent),
     )
 
-    /** The feed [feedId] names among [feeds], if any. */
-    private fun selectedFeed(feeds: List<Feeds>, feedId: String?): Feeds? = feedId?.let { id -> feeds.find { it.id == id } }
+    /**
+     * The feed [feedId] names among [feeds], if any — under the id it has now ([remap]): the selected
+     * article's row is read once, so its `feed_id` can predate a merge that moved the feed.
+     */
+    private fun selectedFeed(feeds: List<Feeds>, feedId: String?, remap: IdRemap): Feeds? =
+        feedId?.let { remap.feed(it) }?.let { id -> feeds.find { it.id == id } }
 
     /**
      * The feed of [selectedArticleRow] — not of [selectedArticle] — so the reader's toolbar never names
@@ -713,8 +727,8 @@ class HomeViewModel(
 
     /** One field of the feed that owns the currently selected article (see [selectedFeedId]). */
     private fun <T> selectedFeedField(pick: (Feeds) -> T?): StateFlow<T?> = DerivedStateFlow(
-        { selectedFeed(structuralFeeds.value, selectedArticleRow.value?.feed_id)?.let(pick) },
-        combine(structuralFeeds, selectedFeedId) { feeds, id -> selectedFeed(feeds, id)?.let(pick) },
+        { selectedFeed(structuralFeeds.value, selectedArticleRow.value?.feed_id, idRemaps.current.value)?.let(pick) },
+        combine(structuralFeeds, selectedFeedId, idRemaps.current) { feeds, id, remap -> selectedFeed(feeds, id, remap)?.let(pick) },
     )
 
     /**
@@ -941,7 +955,8 @@ class HomeViewModel(
         structuralFeeds,
         dispatcher,
         isLive = { id -> feedRepository.getFeedById(id).let { it != null && it.deleted_at == null } },
-        currentRemap = { { it } },
+        currentRemap = { idRemaps.current.value::feed },
+        catchUp = ::loadIdRemapFromDb,
     ) { it.id }
     private val deletedTagFallback = DeletedItemFallback(
         viewModelScope,
@@ -2090,7 +2105,13 @@ class HomeViewModel(
      * @param id The identifier of the feed to unsubscribe from.
      */
     fun unsubscribeFeed(id: String) {
-        val fallBack = { if (_filter.value == ArticleFilter.Feed(id)) selectFilter(ArticleFilter.All) }
+        // Compared in the current re-key map's id space, as a tag's or folder's fallback is
+        // (FeedListActions): a merge can have moved the feed — and the selection with it — onto
+        // another id by the time the fallback runs.
+        val fallBack = {
+            val current = catchUpAndGetIdRemap().feed(id)
+            if (_filter.value == ArticleFilter.Feed(current)) selectFilter(ArticleFilter.All)
+        }
         feedListWrites.enqueue({ feedRepository.unsubscribeFeed(id) }) {
             fallBackOnceHidden(DeletedTarget.Feed(id), fallBack)
         }
@@ -2115,10 +2136,14 @@ class HomeViewModel(
 
     /**
      * The feeds whose row shows the refreshing indicator: those being refreshed by any route — see
-     * [FeedRepository.refreshingFeedIds].
+     * [FeedRepository.refreshingFeedIds] —, each under the id its feed has now: a refresh is counted
+     * under the id it started with, and a merge that moves the feed meanwhile (a sync merge, or the
+     * refresh's own redirect merge) must not take the spinner off the row the feed became.
      */
     val refreshingFeedIds: StateFlow<Set<String>> =
-        feedRepository.refreshingFeedIds.stateIn(viewModelScope, started, emptySet())
+        combine(feedRepository.refreshingFeedIds, idRemaps.current) { ids, remap -> remap.feeds(ids) }
+            .distinctUntilChanged()
+            .stateIn(viewModelScope, started, emptySet())
 
     /**
      * The collapsed folders whose row shows the refreshing indicator, since their feeds' own rows
@@ -2305,11 +2330,11 @@ class HomeViewModel(
     fun reorderFolders(draggedFolderId: String, targetFolderId: String?) =
         feedListActions.reorderFolders(draggedFolderId, targetFolderId)
 
-    // Applies the tag/folder id re-keys a merge publishes to the state held here (see
+    // Applies the tag/folder/feed id re-keys a merge publishes to the state held here (see
     // [IdRemapping]). Declared after every property it touches.
     private val idRemapping = IdRemapping(
         idRemaps, _filterSelection, _selectedRowInstance, expansion, refreshController,
-        deletedTagFallback, deletedFolderFallback,
+        deletedFeedFallback, deletedTagFallback, deletedFolderFallback,
     )
 
     /** See [IdRemapping.catchUp]: the ViewModel's state is in the current re-key map's id space. */
@@ -2336,7 +2361,7 @@ class HomeViewModel(
      */
     suspend fun catchUpIdRemapFromDb(): Boolean {
         val caughtUp = runCatchingUnlessCancelled { loadIdRemapFromDb() }.onFailure { e ->
-            Log.warn(TAG, "Catching up the tag/folder re-keys failed", e)
+            Log.warn(TAG, "Catching up the id re-keys failed", e)
         }.isSuccess
         if (caughtUp) catchUpIdRemap()
         return caughtUp

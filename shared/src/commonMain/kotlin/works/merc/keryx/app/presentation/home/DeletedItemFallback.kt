@@ -56,8 +56,10 @@ internal sealed interface DeletedTarget {
  *
  * **An absence is confirmed against the committed re-key map before it is believed.** A merge
  * publishes the map only after its transaction commits, and any other write in between (a feed
- * refresh, a user action) re-runs the tag/folder list queries, which then already read the re-keyed
- * rows while [currentRemap] still holds the old map: the item looks gone when it only moved. So when
+ * refresh, a user action) re-runs the feed, tag and folder list queries, which then already read the re-keyed
+ * rows while [currentRemap] still holds the old map: the item looks gone when it only moved. (A
+ * refresh's redirect merge is the same: its generated statements notify the lists at its commit,
+ * before it publishes the map.) So when
  * [shown] lacks the item and [catchUp] is given, it is run first (on [checkDispatcher]; in production
  * it re-reads `ks_id_remap` from the database, serialized by `IdRemaps`' lock — the list was
  * read after the commit, so the read sees the re-key), and the decision is taken again with the
@@ -69,7 +71,8 @@ internal sealed interface DeletedTarget {
  * own — instead. After one catch-up an unexplained absence is a
  * real disappearance, so a real deletion always falls back. A [catchUp] that fails is logged and
  * leaves the request pending (best effort, as the liveness check): the next value of [shown] decides.
- * Without [catchUp] (feeds, whose ids are never re-keyed) an absence is decided at once.
+ * Without [catchUp] (a list whose ids are never re-keyed) an absence is decided at once; every list
+ * `HomeViewModel` hands over — feeds, tags, folders — has one, since a merge can move any of them.
  *
  * Once dropped, a request is gone, so a deletion that arrives later from elsewhere (a sync merge)
  * never moves the selection (external-spec §9, "Least surprise").
@@ -209,7 +212,7 @@ internal class DeletedItemFallback<T>(
             val caughtUp = runCatchingUnlessCancelled {
                 withContext(checkDispatcher) { catchUp() }
             }.onFailure { e ->
-                Log.warn(TAG, "Catching up the tag/folder re-keys before a deleted item's fallback failed", e)
+                Log.warn(TAG, "Catching up the id re-keys before a deleted item's fallback failed", e)
             }.isSuccess
             if (request !in pending || generation != request.checkGeneration) return@launch
             // Undecided: the next value of [shown] asks again.

@@ -15,6 +15,7 @@ import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.domain.LocalWriteFailureReporter
 import works.merc.keryx.app.domain.NotificationCenter
+import works.merc.keryx.app.domain.FeedIdentitySql
 import works.merc.keryx.app.domain.IdRemaps
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
@@ -528,5 +529,124 @@ class HomeViewModelIdRemapTest {
         vm.selectFilter(ArticleFilter.Tag("t-new"))
 
         assertEquals(before, vm.filterSelection.value.generation)
+    }
+
+    // ---- Feed re-keys: a merge moving a feed onto its identity's canonical id ----
+
+    /**
+     * Merges f1 into f0 (the smaller id, so f0 is canonical) as a redirect merge does
+     * ([FeedIdentitySql.mergeLocally] in a transaction), publishes the re-key unless [publish] is false,
+     * then re-runs the lists as the merge's commit does.
+     */
+    private suspend fun TestScope.mergeF1IntoF0(publish: Boolean = true) {
+        db.transaction { FeedIdentitySql.mergeLocally(driver, "f1", "f0") }
+        if (publish) remaps.publishFromDb()
+        driver.notifyListeners("feeds", "articles", "feed_tags", "feed_fetch_state")
+        testScheduler.advanceUntilIdle()
+    }
+
+    @Test
+    fun aSelectedFeedAndItsRowFollowAMergeKeepingTheGeneration() = runVmTest {
+        db.insertFeed("f0")
+        val vm = newViewModel().vm
+        vm.selectFilter(ArticleFilter.Feed("f1"))
+        testScheduler.advanceUntilIdle()
+        val generation = vm.filterSelection.value.generation
+
+        mergeF1IntoF0()
+
+        assertEquals(ArticleFilter.Feed("f0"), vm.filter.value)
+        assertEquals(FeedListRowSelection.FeedInFolderGroup("f0"), vm.selectedRowInstance.value)
+        assertEquals(generation, vm.filterSelection.value.generation, "the same list under a new id is not a switch")
+    }
+
+    @Test
+    fun aFeedRowNestedUnderATagFollowsAMerge() = runVmTest {
+        db.insertFeed("f0")
+        val vm = newViewModel().vm
+        vm.toggleTagExpanded("t-old")
+        vm.selectFilter(ArticleFilter.Feed("f1"), FeedListRowSelection.FeedInTag("f1", "t-old"))
+        testScheduler.advanceUntilIdle()
+
+        mergeF1IntoF0()
+
+        assertEquals(FeedListRowSelection.FeedInTag("f0", "t-old"), vm.selectedRowInstance.value)
+    }
+
+    /** A feed row rendered before the merge still carries the old id; selecting it selects the feed it became. */
+    @Test
+    fun aStaleFeedRowSelectedAfterTheMergeSelectsTheFeedItBecame() = runVmTest {
+        db.insertFeed("f0")
+        val vm = newViewModel().vm
+        mergeF1IntoF0()
+
+        vm.selectFilter(ArticleFilter.Feed("f1"), FeedListRowSelection.FeedInFolderGroup("f1"))
+
+        assertEquals(ArticleFilter.Feed("f0"), vm.filter.value)
+        assertEquals(FeedListRowSelection.FeedInFolderGroup("f0"), vm.selectedRowInstance.value)
+    }
+
+    /**
+     * The merge has committed and the feed list already shows only the merged feed, but the map is not
+     * published yet (the redirect merge's generated statements notify at its commit, before it
+     * publishes): the catch-up from the database moves the selection instead of losing it.
+     */
+    @Test
+    fun catchingUpFromTheDatabaseMovesTheSelectedFeed() = runVmTest {
+        db.insertFeed("f0")
+        val vm = newViewModel().vm
+        vm.selectFilter(ArticleFilter.Feed("f1"))
+        testScheduler.advanceUntilIdle()
+
+        mergeF1IntoF0(publish = false)
+        assertEquals(listOf("f0"), vm.feeds.value.map { it.id }, "precondition: the list already has only the merged feed")
+        assertEquals(ArticleFilter.Feed("f1"), vm.filter.value, "precondition: the map is still stale")
+
+        assertEquals(true, vm.catchUpIdRemapFromDb())
+
+        assertEquals(mapOf("f1" to "f0"), vm.idRemap.value.feedIds)
+        assertEquals(ArticleFilter.Feed("f0"), vm.filter.value)
+    }
+
+    /**
+     * An unsubscribe lands, then a merge folds the unsubscribed feed into another one, and the merged feed
+     * comes out unsubscribed (the unsubscribe's stamp is the newest): the selection, which followed the
+     * feed onto the merged id, still falls back to All Feeds — the fallback compares it in the current
+     * map's id space, not with the id the unsubscribe was given.
+     */
+    @Test
+    fun anUnsubscribedFeedsFallbackAcrossAMergeStillFallsBack() = runVmTest {
+        db.insertFeed("f0")
+        val vm = newViewModel().vm
+        vm.selectFilter(ArticleFilter.Feed("f1"))
+        testScheduler.advanceUntilIdle()
+
+        vm.unsubscribeFeed("f1")
+        mergeF1IntoF0()
+        assertEquals(100L, db.feedsQueries.getById("f0").executeAsOne().deleted_at, "precondition: the merged feed is unsubscribed")
+
+        assertEquals(ArticleFilter.All, vm.filter.value)
+    }
+
+    /**
+     * A saved feed filter whose feed a merge moved while the app was closed is restored under the merged
+     * feed's id — read from the database, so even before the published map has loaded — instead of
+     * falling back to All Feeds because the saved id's row is gone.
+     */
+    @Test
+    fun aSavedFeedFilterIsRestoredUnderTheMergedFeedsIdBeforeTheMapLoads() = runVmTest {
+        db.insertFeed("f0")
+        db.transaction { FeedIdentitySql.mergeLocally(driver, "f1", "f0") }
+        val dir = works.merc.keryx.app.platform.FileIO.join(works.merc.keryx.app.platform.AppDirs.tempDir(), "home-vm-remap-${kotlin.random.Random.nextInt()}")
+        works.merc.keryx.app.data.local.LocalSettingsStore(dirOverride = dir)
+            .save(works.merc.keryx.app.data.local.LocalSettings(lastFilter = "feed:f1"))
+        // A map whose load never runs: the restore must not depend on it.
+        val neverLoaded = IdRemaps({ error("not loaded") }, StandardTestDispatcher(TestCoroutineScheduler()))
+
+        val vm = newHomeViewModel(driver, db, clock = Clock { 100L }, idRemaps = neverLoaded, settingsDir = dir)
+            .also { fixtures += it }.vm
+
+        assertEquals(ArticleFilter.Feed("f0"), vm.filter.value)
+        assertEquals(true, vm.filterRestoredOnLaunch)
     }
 }

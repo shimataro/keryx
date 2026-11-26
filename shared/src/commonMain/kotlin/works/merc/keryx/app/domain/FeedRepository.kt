@@ -144,6 +144,12 @@ class FeedRepository(
      */
     fun getFeedById(id: String): Feeds? = feeds.getById(id).executeAsOneOrNull()
 
+    /**
+     * The id the feed [id] has now: [id] itself while a row has it, else the id a merge moved it to
+     * (`ks_id_remap`), else [id] unchanged — for an id held from before such a merge (`feeds.resolveId`).
+     */
+    fun resolveFeedId(id: String): String = feeds.resolveId(id).executeAsOne()
+
     /** All feeds currently stored in the database. */
     fun getAllFeeds(): List<Feeds> = feeds.watchAll().executeAsList()
 
@@ -650,11 +656,14 @@ class FeedRepository(
      * the feed's current `etag` / `last_modified` rather than whatever a caller's (possibly stale)
      * copy of the row holds.
      *
+     * An id held from before a merge moved the feed onto another id (a row the feed list rendered
+     * before the merge was published) refreshes the feed it became ([resolveFeedId]).
+     *
      * @return The refresh result, or `null` when no subscribed feed has that id (it was
      *   unsubscribed in the meantime), in which case nothing is fetched.
      */
     suspend fun refreshFeedById(id: String): Result<Int>? {
-        val feed = getFeedById(id)?.takeIf { it.deleted_at == null } ?: return null
+        val feed = getFeedById(resolveFeedId(id))?.takeIf { it.deleted_at == null } ?: return null
         return refreshFeed(feed)
     }
 

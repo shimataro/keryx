@@ -1744,6 +1744,31 @@ class FeedRepositoryTest {
         }
     }
 
+    /**
+     * A feed row the feed list rendered before a merge moved the feed onto another id still carries the
+     * old id; its Refresh fetches the feed it became rather than nothing.
+     */
+    @Test
+    fun refreshFeedByIdOfAMergedAwayIdRefreshesTheFeedItBecame(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("fa", url = "https://ex.com/a")
+            db.insertFeed("fb", url = "https://ex.com/b")
+            db.transaction { FeedIdentitySql.mergeLocally(driver, "fb", "fa") }
+            assertNull(db.feedsQueries.getById("fb").executeAsOneOrNull(), "precondition: fb was merged into fa")
+            val fetched = java.util.concurrent.CopyOnWriteArrayList<String>()
+            val repo = newRepo(db, driver, fetcherWith { request -> fetched += request.url.toString(); respond(RSS, HttpStatusCode.OK) })
+
+            assertEquals("fa", repo.resolveFeedId("fb"))
+            assertNotNull(repo.refreshFeedById("fb"))
+
+            // One fetch, of the merged feed's own URL (whichever of the two its merge kept).
+            assertEquals(listOf(db.feedsQueries.getById("fa").executeAsOne().url), fetched.toList())
+        } finally {
+            driver.close()
+        }
+    }
+
     /** The guard `refreshFeed(feedId)` relies on: no fetch for a feed that is gone or was never there. */
     @Test
     fun refreshFeedByIdOfAnUnsubscribedOrUnknownFeedReturnsNullWithoutFetching(): Unit = runBlocking {
