@@ -3,9 +3,11 @@ package works.merc.keryx.app.domain
 import app.cash.sqldelight.db.SqlDriver
 
 /**
- * The one way a tag/folder re-key is recorded in `ks_id_remap`: the statements that add a batch of
- * moves `(kind, old_id, new_id)` and fold every chain they extend, so the table always maps an old id
- * straight to the id its row has now and a lookup needs one hop.
+ * The one way a re-key is recorded in `ks_id_remap`: the statements that add a batch of moves
+ * `(kind, old_id, new_id)` and fold every chain they extend, so the table always maps an old id
+ * straight to the id its row has now and a lookup needs one hop. Kinds: [ID_REMAP_KIND_TAG] and
+ * [ID_REMAP_KIND_FOLDER] ([V2IdentitySql], the v2->v3 re-key), [ID_REMAP_KIND_FEED] and
+ * [ID_REMAP_KIND_ARTICLE] ([FeedIdentitySql]); chains are folded within a kind only.
  *
  * For each move `old -> new` of a batch, in this order:
  * 1. an entry for `new` itself is dropped — `new` names a live row again, and a lookup must not move
@@ -52,7 +54,7 @@ object IdRemapSql {
     private val oneMoveStatements = foldStatements(ONE_MOVE)
 
     /**
-     * Records one move `oldId -> newId` of [kind] ([ID_REMAP_KIND_TAG] / [ID_REMAP_KIND_FOLDER]) on
+     * Records one move `oldId -> newId` of [kind] (one of the kinds in the object KDoc) on
      * [driver], folding the chains it extends (see the object KDoc). Run it inside the transaction
      * that moved the row, so the record and the move commit together.
      */

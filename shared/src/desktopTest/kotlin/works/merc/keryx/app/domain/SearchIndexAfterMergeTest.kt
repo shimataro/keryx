@@ -11,6 +11,7 @@ import works.merc.keryx.app.domain.TransportFixtures.DEV_A
 import works.merc.keryx.app.domain.TransportFixtures.DEV_B
 import works.merc.keryx.app.domain.TransportFixtures.article
 import works.merc.keryx.app.domain.TransportFixtures.deltaName
+import works.merc.keryx.app.domain.TransportFixtures.exec
 import works.merc.keryx.app.domain.TransportFixtures.feed
 import works.merc.keryx.app.domain.TransportFixtures.localDb
 import works.merc.keryx.app.domain.TransportFixtures.merge
@@ -107,6 +108,105 @@ class SearchIndexAfterMergeTest {
 
         assertFalse(driver.isAwaitingBody("a1"))
         assertEquals(listOf("a1"), FtsSearch(driver).search("pangolin", ArticleFilter.All).map { it.id })
+    }
+
+    // ---- a feed / article identity merge ----
+
+    private val url = "https://shared/feed"
+
+    private fun localWith(vararg rows: String, indexFirst: Boolean, block: (File, SqlDriver, FtsManager) -> Unit) {
+        val local = localDb(*rows)
+        // The rows were written raw: give them the search_text a refresh would have.
+        exec(local, "UPDATE articles SET search_text = COALESCE(replace(replace(content, '<p>', ''), '</p>', ''), '')")
+        val driver = JdbcSqliteDriver("jdbc:sqlite:${local.absolutePath}")
+        try {
+            val fts = FtsManager(driver).also { it.createTable() }
+            if (indexFirst) runBlocking { fts.indexMissing() }
+            block(local, driver, fts)
+        } finally {
+            driver.close()
+            local.delete()
+        }
+    }
+
+    private fun SqlDriver.hits(query: String) = FtsSearch(this).search(query, ArticleFilter.All).map { it.id }
+
+    /**
+     * Main holds feed fq and its articles, indexed; the file carries the same feed under the smaller id fp
+     * with a colliding article (newer body) and a new one. After the merge each article is found once.
+     */
+    @Test
+    fun afterACollisionMergeEachArticleIsFoundOnceAndTheDailyRebuildDropsTheOldBody() = localWith(
+        feed("fq", url = url),
+        article("aq1", "fq", guid = "g1", title = "Quokka title", content = "<p>Body pangolin</p>", bodyAt = 100),
+        article("aq2", "fq", guid = "g2", title = "Wombat title", content = "<p>Body echidna</p>"),
+        indexFirst = true,
+    ) { local, driver, fts ->
+        merge(
+            local,
+            transportFile(
+                deltaName(DEV_A, 1), feed("fp", url = url),
+                article("ap1", "fp", guid = "g1", title = "Quokka title", content = "<p>Body ocelot</p>", updatedAt = 300, bodyAt = 300),
+                article("ap3", "fp", guid = "g3", title = "Platypus title", content = "<p>Body numbat</p>"),
+            ),
+        )
+        runBlocking { fts.indexMissing() }
+
+        assertEquals(listOf("ap1"), driver.hits("Quokka"))
+        assertEquals(listOf("aq2"), driver.hits("echidna"))
+        assertEquals(listOf("ap3"), driver.hits("numbat"))
+        // The merged body is recomputed for the survivor; the rebuild indexes it and drops the old one.
+        runBlocking { fts.rebuildIndex() }
+        assertEquals(listOf("ap1"), driver.hits("ocelot"))
+        assertEquals(emptyList(), driver.hits("pangolin"))
+        assertEquals(listOf("ap1"), driver.hits("Quokka"))
+        driver.execute(null, "INSERT INTO articles_fts(articles_fts, rank) VALUES('integrity-check', 1);", 0)
+    }
+
+    private val edgeOnly get() = transportFile(deltaName(DEV_A, 2), "INSERT INTO feed_edges (a, b) VALUES ('fp', 'fq')")
+
+    private fun bothFeedsRows() = arrayOf(
+        feed("fp", url = "https://one/feed", updatedAt = 100),
+        feed("fq", url = "https://two/feed", updatedAt = 100),
+        article("ap1", "fp", guid = "g1", title = "Quokka title", content = "<p>Body pangolin</p>", updatedAt = 300, bodyAt = 300),
+        article("aq1", "fq", guid = "g1", title = "Quokka title", content = "<p>Body ocelot</p>", updatedAt = 100, bodyAt = 100),
+    )
+
+    /** Both feeds' copies of one article were indexed; the merge keeps one row, and a deleted rowid must not surface. */
+    @Test
+    fun afterTheEdgeFoldsTwoIndexedRowsIntoOneNoStaleHitSurfacesAndNewRowsDoNotReuseTheRowid() = localWith(
+        *bothFeedsRows(), indexFirst = true,
+    ) { local, driver, fts ->
+        assertEquals(setOf("ap1", "aq1"), driver.hits("Quokka").toSet())
+        merge(local, edgeOnly)
+        runBlocking { fts.indexMissing() }
+
+        assertEquals(listOf("ap1"), driver.hits("Quokka"), "the vanished row's index entry is never seen")
+        exec(local, article("ax", "fp", guid = "g9", title = "Dingo title", content = "<p>Body dingo</p>"))
+        exec(local, "UPDATE articles SET search_text = 'Body dingo' WHERE id = 'ax'")
+        runBlocking { fts.indexMissing() }
+        assertEquals(listOf("ax"), driver.hits("dingo"))
+        assertEquals(listOf("ap1"), driver.hits("Quokka"))
+        runBlocking { fts.rebuildIndex() }
+        assertEquals(listOf("ap1"), driver.hits("pangolin"))
+        assertEquals(emptyList(), driver.hits("ocelot"))
+        driver.execute(null, "INSERT INTO articles_fts(articles_fts, rank) VALUES('integrity-check', 1);", 0)
+    }
+
+    /** Neither copy was indexed yet: indexMissing after the merge indexes the survivor (with the folded body), once. */
+    @Test
+    fun indexMissingAfterTheMergeIndexesTheSurvivorOfAFoldedKey() = localWith(*bothFeedsRows(), indexFirst = false) { local, driver, fts ->
+        merge(local, edgeOnly)
+        assertTrue("ap1" in TransportFixtures.searchPendingIds(local), "the survivor's folded body is registered")
+
+        runBlocking { fts.indexMissing() }
+
+        assertTrue(driver.isIndexed("ap1"))
+        assertEquals(listOf("ap1"), driver.hits("Quokka"))
+        assertEquals(listOf("ap1"), driver.hits("pangolin"))
+        assertEquals(emptyList(), driver.hits("ocelot"))
+        assertEquals(1L, driver.countOf("SELECT COUNT(*) FROM articles_fts_docsize"))
+        driver.execute(null, "INSERT INTO articles_fts(articles_fts, rank) VALUES('integrity-check', 1);", 0)
     }
 }
 

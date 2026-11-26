@@ -92,6 +92,25 @@ internal object TransportFixtures {
         else synced + ("ks_feed_folder_raw" to rows("SELECT feed_id, folder_updated_at, folder_id FROM ks_feed_folder_raw ORDER BY feed_id", 3))
     }
 
+    /** Rows of [sql] on [file], each as its columns joined by `|` (NULL as `null`). */
+    fun rows(file: File, sql: String): List<String> = connect(file).use { conn ->
+        conn.createStatement().use { st ->
+            st.executeQuery(sql).use { rs ->
+                buildList { while (rs.next()) add((1..rs.metaData.columnCount).joinToString("|") { "${rs.getObject(it)}" }) }
+            }
+        }
+    }
+
+    /**
+     * [dump] of a local database (raw folder assignments included) plus the feed identity state a merge
+     * leaves behind: `ks_feed_edge` and `ks_id_remap`. Device-local `feed_fetch_state` is not part of it
+     * (it follows which side held a row, so it legitimately differs by history).
+     */
+    fun identityState(file: File): Map<String, List<String>> = dump(file, local = true) + mapOf(
+        "ks_feed_edge" to rows(file, "SELECT a, b FROM ks_feed_edge ORDER BY 1, 2"),
+        "ks_id_remap" to rows(file, "SELECT kind, old_id, new_id FROM ks_id_remap ORDER BY 1, 2, 3"),
+    )
+
     /** Article ids registered in `ks_search_pending` of a local database. */
     fun searchPendingIds(file: File): Set<String> = connect(file).use { conn ->
         conn.createStatement().use { st ->

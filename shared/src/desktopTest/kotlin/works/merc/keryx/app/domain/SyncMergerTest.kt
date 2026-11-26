@@ -102,7 +102,7 @@ class SyncMergerTest {
     }
 
     @Test
-    fun feedUrlCollisionGuardSkipsCloudFeed() {
+    fun feedUrlCollisionWithMainMergesOntoTheSmallerId() {
         val (cloudFile, cloudDriver, cloudDb) = fileDb()
         cloudDb.insertFeed("f-cloud", now = 200, url = "https://shared/feed")
         cloudDriver.close()
@@ -114,9 +114,9 @@ class SyncMergerTest {
         DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
-        // The cloud feed (different id, same URL) must not be imported.
-        assertNull(verifyDb.feedsQueries.getById("f-cloud").executeAsOneOrNull())
-        assertNotNull(verifyDb.feedsQueries.getById("f-local").executeAsOneOrNull())
+        // The cloud feed (different id, same URL) is the same feed: both end on the smaller id.
+        assertNotNull(verifyDb.feedsQueries.getById("f-cloud").executeAsOneOrNull())
+        assertNull(verifyDb.feedsQueries.getById("f-local").executeAsOneOrNull())
         verifyDriver.close()
     }
 
@@ -281,7 +281,7 @@ class SyncMergerTest {
     }
 
     @Test
-    fun articleGuidCollisionGuardSkipsCloudArticle() {
+    fun articleGuidCollisionMergesOntoTheSmallerId() {
         val (cloudFile, cloudDriver, cloudDb) = fileDb()
         cloudDb.insertFeed("f1", now = 100)
         insertArticle(cloudDb, "a-cloud", "f1", "g1", isRead = 0, readAt = null, updatedAt = 200)
@@ -295,8 +295,9 @@ class SyncMergerTest {
         DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
-        assertNull(verifyDb.articlesQueries.getById("a-cloud").executeAsOneOrNull())
-        assertNotNull(verifyDb.articlesQueries.getById("a-local").executeAsOneOrNull())
+        // One (feed_id, guid) under two ids is one article: main's row moves onto the smaller id.
+        assertNotNull(verifyDb.articlesQueries.getById("a-cloud").executeAsOneOrNull())
+        assertNull(verifyDb.articlesQueries.getById("a-local").executeAsOneOrNull())
         verifyDriver.close()
     }
 
@@ -977,11 +978,11 @@ class SyncMergerTest {
     }
 
     @Test
-    fun duplicateUniqueKeysInsideCloudMergeOnlyTheirWinner() {
+    fun duplicateUniqueKeysInsideCloudMergeOntoTheSmallestId() {
         // Two cloud feeds rows share a url — possible because this fixture's feeds table (unlike
-        // main's real schema) has no UNIQUE(url), as in a folded transport file. MergeSql considers
-        // only the winner among them (greatest updated_at, then greatest id: f-dup-2 at a tie), so
-        // the merge never reaches SQLite's UNIQUE check.
+        // main's real schema) has no UNIQUE(url), as in a folded transport file. The merge records the
+        // collision as a feed edge and folds both onto the smaller id (f-dup-1), so it never reaches
+        // SQLite's UNIQUE check.
         val cloudFile = java.io.File.createTempFile("dup-url", ".db")
         java.sql.DriverManager.getConnection("jdbc:sqlite:${cloudFile.absolutePath}").use { conn ->
             conn.createStatement().use { st ->
@@ -1029,8 +1030,8 @@ class SyncMergerTest {
         cloudFile.delete()
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
-        assertNotNull(verifyDb.feedsQueries.getById("f-dup-2").executeAsOneOrNull())
-        assertNull(verifyDb.feedsQueries.getById("f-dup-1").executeAsOneOrNull())
+        assertNotNull(verifyDb.feedsQueries.getById("f-dup-1").executeAsOneOrNull())
+        assertNull(verifyDb.feedsQueries.getById("f-dup-2").executeAsOneOrNull())
         verifyDriver.close()
     }
 

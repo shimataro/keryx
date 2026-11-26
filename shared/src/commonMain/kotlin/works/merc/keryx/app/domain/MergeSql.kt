@@ -22,46 +22,28 @@ package works.merc.keryx.app.domain
  * a full database of the current schema, so the same list merges deltas, bases and pre-delta files.
  * Columns are listed explicitly (avoiding `SELECT *`, which breaks on any schema drift).
  *
- * Guards keep a merge from ever aborting on main's own constraints: NOT-EXISTS guards skip rows that
- * would collide with main (a feed's URL or an article's `(feed_id, guid)` under a different id) or
- * reference a row main lacks, and **duplicates inside `cloud`** (a folded file can hold two rows with
- * the same unique key from different devices) are resolved first: a statement that matches by
- * `feeds.url` or `articles(feed_id, guid)` considers only the winner among the cloud rows sharing
- * that key — greatest `updated_at`, then greatest id ([winnerAmong]). Statements resolving a
- * reference by id (`mergeFeedFolder`, `feedTags`) still see every cloud row. Tag and folder rows
- * are matched by id only — their ids are name-derived (`IdGenerator.tagId` / `folderId`), so two
- * devices that created the same name hold the same id. Rows that are one identity under several ids
- * (a pre-upgrade row renamed differently on two devices before they upgraded, linked by the identity
- * edges in `ks_v2_edge`) are first moved onto the identity's canonical id on both sides
- * ([V2IdentitySql]), so the per-field merge converges them instead of keeping both. A tag or folder
- * name two renames landed on simply imports both rows.
+ * **Rows are matched by id only, after the identity steps.** Rows that are one identity under several
+ * ids are first moved onto the identity's canonical id on both sides — the cloud side folded into one
+ * row per canonical id, main re-keyed — so the per-field merge converges them instead of keeping both:
+ * - tags and folders ([V2IdentitySql]): ids are name-derived (`IdGenerator.tagId` / `folderId`), so two
+ *   devices that created the same name hold the same id, and a pre-upgrade row renamed differently on
+ *   two devices before they upgraded is linked through the identity edges in `ks_v2_edge`. A tag or
+ *   folder name two renames landed on simply imports both rows;
+ * - feeds and articles ([FeedIdentitySql]): two feed ids that held the same `url` are one feed (the
+ *   edges in `ks_feed_edge`, to which every URL collision between main and the file, or inside the
+ *   file, is added), and articles sharing `(canonical feed, guid)` are one article. So a feed URL or an
+ *   article key held under different ids by main and the file, or twice inside a folded file, ends
+ *   on one id whatever order files are merged or folded in.
+ *
+ * NOT-EXISTS / EXISTS guards still keep a merge from ever aborting on main's own constraints: a row
+ * that would collide with main (a feed's URL or an article's `(feed_id, guid)` under a different id —
+ * which the identity step leaves none of, so these guards are defensive) or reference a row main lacks
+ * is skipped.
  */
 object MergeSql {
 
-    /** The rank column [winnerAmong] adds; 1 marks the winner of its key. */
-    private const val RANK = "ks_rank"
-
-    /**
-     * `cloud.<table>`'s [columns] plus [RANK], 1 for the winner among the rows sharing [key]
-     * (greatest `updated_at`, then greatest id).
-     */
-    private fun winnerAmong(table: String, columns: List<String>, key: String): String =
-        "(SELECT ${columns.joinToString(", ")}, " +
-            "ROW_NUMBER() OVER (PARTITION BY $key ORDER BY updated_at DESC, id DESC) AS $RANK " +
-            "FROM cloud.$table)"
-
     private val FOLDER_COLUMNS = V2IdentitySql.FOLDER_COLUMNS
     private val TAG_COLUMNS = V2IdentitySql.TAG_COLUMNS
-    private val FEED_COLUMNS = listOf(
-        "id", "url", "site_url", "title", "description", "favicon_url", "custom_title", "folder_id",
-        "deleted_at", "updated_at", "created_at", "sort_order",
-        "folder_updated_at", "sort_order_updated_at", "custom_title_updated_at", "deleted_updated_at",
-    )
-    private val ARTICLE_COLUMNS = listOf(
-        "id", "feed_id", "guid", "url", "title", "summary", "content", "author", "published_at",
-        "thumbnail_url", "is_read", "read_at", "is_starred", "starred_at", "cached_at",
-        "updated_at", "created_at", "deleted_at", "deleted_updated_at", "body_updated_at",
-    )
 
     // ---- tags / folders: per-field last-write-wins, matched by id ----
 
@@ -143,6 +125,12 @@ object MergeSql {
     /** The canonical-id map [V2IdentitySql] builds for tags, through which `feed_tags` is read. */
     private val TAG_CANON = V2IdentitySql.canonTable(ID_REMAP_KIND_TAG)
 
+    /** The canonical-id map [FeedIdentitySql] builds for feeds, through which `feed_tags` is read. */
+    private val FEED_CANON = FeedIdentitySql.FEED_CANON
+
+    /** `cloud.feeds` folded onto canonical feed ids, raw folder assignment included ([FeedIdentitySql]). */
+    private val CLOUD_FEEDS = FeedIdentitySql.CLOUD_FEEDS
+
     private val feeds = """
         INSERT INTO main.feeds (
             id, url, site_url, title, description, favicon_url,
@@ -152,9 +140,8 @@ object MergeSql {
         SELECT c.id, c.url, c.site_url, c.title, c.description, c.favicon_url,
                c.custom_title, c.deleted_at, c.updated_at, c.created_at, c.sort_order,
                c.sort_order_updated_at, c.custom_title_updated_at, c.deleted_updated_at
-        FROM ${winnerAmong("feeds", FEED_COLUMNS, "url")} c
-        WHERE c.$RANK = 1
-          AND NOT EXISTS (SELECT 1 FROM main.feeds l2 WHERE l2.url = c.url AND l2.id <> c.id)
+        FROM $CLOUD_FEEDS c
+        WHERE NOT EXISTS (SELECT 1 FROM main.feeds l2 WHERE l2.url = c.url AND l2.id <> c.id)
         ON CONFLICT(id) DO UPDATE SET
             ${SyncLww.upsertAssignments(SyncLww.FEED_CONTENT).joinToString(",\n            ")},
             created_at = MIN(created_at, excluded.created_at)
@@ -179,43 +166,32 @@ object MergeSql {
      * raw row through `ks_id_remap` and the folder's liveness (`ks_feed_folder_resolved` in
      * `sync_bookkeeping.sq`) whenever any of them changes, so the resolved value depends only on the
      * final raw assignment, the identity map and the folder state, whatever order the files arrive in.
-     * `cloud.feeds` is keyed by id, so each feed meets at most one cloud version per merge.
+     * The cloud versions are read from [CLOUD_FEEDS], one per canonical feed id: the cloud rows of one
+     * feed identity already folded by the same rule ([FeedIdentitySql]), the raw folder id kept as
+     * written.
      *
      * With [preDelta], a reference to a folder that neither has a row in main nor an entry in
      * `ks_id_remap` is recorded as NULL: an older build's database can hold such an orphan, and a raw
      * value no send could ever carry a row or an identity edge for would fail every later send's
      * check 9. A transport file is validated to carry, for every folder it references, the row or the
      * identity edges leading to one (check 9), so its value is kept as it is. A pre-delta file's raw
-     * assignment is read from its `ks_feed_folder_raw` — the one device-local table of `cloud` the
-     * merge reads — since the migration resolved its `feeds.folder_id` to NULL for a soft-deleted
-     * folder, and recording that NULL would keep the feed out of the folder once it is revived.
+     * assignment was read from its `ks_feed_folder_raw` into [CLOUD_FEEDS] — the one device-local table
+     * of `cloud` the merge reads — since the migration resolved its `feeds.folder_id` to NULL for a
+     * soft-deleted folder, and recording that NULL would keep the feed out of the folder once it is
+     * revived.
      */
     private fun mergeFeedFolder(preDelta: Boolean): String {
-        // A pre-delta file is migrated to the current schema, whose cloud.feeds.folder_id is a cache
-        // resolved to NULL for a soft-deleted folder; its raw assignment is in cloud.ks_feed_folder_raw
-        // (filled by the migration for every feed). A feed without a raw row falls back to its feeds
-        // columns, both read from the same source.
-        val (rawFolderId, rawStamp, rawJoin) = if (preDelta) {
-            Triple(
-                "CASE WHEN cr.feed_id IS NULL THEN c.folder_id ELSE cr.folder_id END",
-                "CASE WHEN cr.feed_id IS NULL THEN c.folder_updated_at ELSE cr.folder_updated_at END",
-                "LEFT JOIN cloud.ks_feed_folder_raw cr ON cr.feed_id = c.id",
-            )
-        } else {
-            Triple("c.folder_id", "c.folder_updated_at", "")
-        }
         val folderId = if (preDelta) {
-            "CASE WHEN EXISTS (SELECT 1 FROM main.folders mf WHERE mf.id = $rawFolderId) " +
-                "OR EXISTS (SELECT 1 FROM main.ks_id_remap mr WHERE mr.kind = '$ID_REMAP_KIND_FOLDER' AND mr.old_id = $rawFolderId) " +
-                "THEN $rawFolderId END"
+            "CASE WHEN EXISTS (SELECT 1 FROM main.folders mf WHERE mf.id = c.folder_id) " +
+                "OR EXISTS (SELECT 1 FROM main.ks_id_remap mr WHERE mr.kind = '$ID_REMAP_KIND_FOLDER' AND mr.old_id = c.folder_id) " +
+                "THEN c.folder_id END"
         } else {
-            rawFolderId
+            "c.folder_id"
         }
         return """
             INSERT INTO main.ks_feed_folder_raw (feed_id, folder_updated_at, folder_id)
-            SELECT c.id, $rawStamp, $folderId
-            FROM cloud.feeds c
-            $rawJoin
+            SELECT c.id, c.folder_updated_at, $folderId
+            FROM $CLOUD_FEEDS c
             WHERE EXISTS (SELECT 1 FROM main.feeds l WHERE l.id = c.id)
             ON CONFLICT(feed_id) DO UPDATE SET
                 ${SyncLww.upsertAssignments(SyncLww.FEED_FOLDER).joinToString(",\n                ")}
@@ -227,7 +203,7 @@ object MergeSql {
     private fun mergeFeedField(group: LwwGroup): String = """
         UPDATE main.feeds
         SET ${group.columns.joinToString(", ") { "$it = c.$it" }}
-        FROM cloud.feeds c
+        FROM $CLOUD_FEEDS c
         WHERE main.feeds.id = c.id
           AND ${SyncLww.wins("c", "main.feeds", group)};
     """.trimIndent()
@@ -246,13 +222,19 @@ object MergeSql {
 
     // ---- articles ----
 
-    /** The winners among cloud articles sharing `(feed_id, guid)`, as `c`. */
-    private val cloudArticles = winnerAmong("articles", ARTICLE_COLUMNS, "feed_id, guid") + " c"
+    /**
+     * The cloud articles, as `c`: one row per canonical article id, on canonical feed ids
+     * ([FeedIdentitySql.cloudArticles]).
+     */
+    private val cloudArticles = FeedIdentitySql.cloudArticles + " c"
 
-    /** Which cloud articles the merge considers (also what the ks_search_pending statements consider). */
+    /**
+     * Which cloud articles the merge considers (also what the ks_search_pending statements consider).
+     * After the identity step no main row holds a cloud row's `(feed_id, guid)` under another id, so
+     * the NOT EXISTS guard is defensive.
+     */
     private val articleEligible = """
-        c.$RANK = 1
-          AND NOT EXISTS (
+        NOT EXISTS (
               SELECT 1 FROM main.articles l2
               WHERE l2.feed_id = c.feed_id AND l2.guid = c.guid AND l2.id <> c.id
           )
@@ -348,7 +330,7 @@ object MergeSql {
     private val registerNewBodies = """
         INSERT OR IGNORE INTO main.ks_search_pending (rowid)
         SELECT a.rowid
-        FROM cloud.articles c
+        FROM $cloudArticles
         INNER JOIN main.articles a ON a.id = c.id
         WHERE a.search_text = ''
           AND (a.content IS NOT NULL OR a.summary IS NOT NULL);
@@ -362,14 +344,15 @@ object MergeSql {
      * entirely lacks is an orphan and is skipped). A link to a tag main holds only as a tombstone is
      * imported like any other: it rides its own `updated_at`, and the ON CONFLICT against the live
      * row settles two cloud links resolving to the same pair, so the result does not depend on their
-     * order. The cloud's tag id is read through the canonical-id map ([V2IdentitySql]), so links to
-     * aliases of one identity resolve to the same pair and fold by that same rule.
+     * order. The cloud's tag id and feed id are read through the canonical-id maps ([V2IdentitySql],
+     * [FeedIdentitySql]), so links to aliases of one tag or one feed resolve to the same pair and fold
+     * by that same rule.
      */
     private val feedTags = """
         INSERT INTO main.feed_tags (feed_id, tag_id, deleted_at, updated_at)
         SELECT c.feed_id, c.tag_id, c.deleted_at, c.updated_at
         FROM (
-            SELECT ft.feed_id,
+            SELECT COALESCE((SELECT f.canonical_id FROM $FEED_CANON f WHERE f.id = ft.feed_id), ft.feed_id) AS feed_id,
                    COALESCE((SELECT m.canonical_id FROM $TAG_CANON m WHERE m.id = ft.tag_id), ft.tag_id) AS tag_id,
                    ft.deleted_at, ft.updated_at
             FROM cloud.feed_tags ft
@@ -423,7 +406,7 @@ object MergeSql {
      * (version 3 on; an older file is migrated to an empty table first), normalized `a < b` and
      * without an edge of an id with itself. A pre-delta file has no such table, so this is only in
      * [transport]. The capture trigger records each edge new to this device in the outbox even inside
-     * the merge (`ks_capture_feed_edge_insert`). Nothing in the merge reads these edges yet.
+     * the merge (`ks_capture_feed_edge_insert`). The feed identity step ([FeedIdentitySql]) reads them.
      */
     private val recordCloudFeedEdges: String =
         "INSERT OR IGNORE INTO main.ks_feed_edge (a, b) SELECT MIN(a, b), MAX(a, b) FROM cloud.feed_edges WHERE a <> b"
@@ -444,16 +427,20 @@ object MergeSql {
      * device-local table of `cloud` — except that with [preDelta] a feed's raw folder assignment is
      * read from the migrated file's `ks_feed_folder_raw`; [preDelta] also picks how a feed's folder
      * reference main cannot resolve is recorded ([mergeFeedFolder]). A pre-delta file's tags and folders carry `v2_id` from the migration as well,
-     * so their edges join the identity step like any other file's.
+     * so their edges join the identity step like any other file's. A pre-delta file has no feed edges of
+     * its own; the URL collisions the feed identity step observes still apply to it.
      *
      * Applied in FK-safe order (parents before children): the cloud rows' and main's rows' identity
-     * edges, the identity step ([V2IdentitySql]: canonical ids, the cloud rows folded onto them, main's
-     * rows moved onto them), folders, feeds, the folder merge and the other three `mergeFeed*`, tags,
+     * edges, the tag/folder identity step ([V2IdentitySql]: canonical ids, the cloud rows folded onto
+     * them, main's rows moved onto them), the feed/article identity step ([FeedIdentitySql]: URL
+     * collisions recorded as edges, then the same three parts for feeds and articles), folders, feeds,
+     * the folder merge and the other three `mergeFeed*`, tags,
      * articles (with the `ks_search_pending` / `ks_search_awaiting_body` registrations around it),
      * feed_tags, global_settings, and finally main's own rows' identity edges again.
      */
     private fun statements(preDelta: Boolean): List<String> =
-        recordCloudRowEdges + recordMainRowEdges + V2IdentitySql.statements + folders + listOf(
+        recordCloudRowEdges + recordMainRowEdges + V2IdentitySql.statements + FeedIdentitySql.statements(preDelta) +
+            folders + listOf(
             feeds, mergeFeedFolder(preDelta), mergeFeedSortOrder, mergeFeedCustomTitle, mergeFeedDeletedAt,
         ) + tags + listOf(
             registerChangedBodies, registerAwaitingBodies, articles, registerNewBodies, feedTags, globalSettings,
