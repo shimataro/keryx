@@ -41,7 +41,8 @@ class CountingSqlDriver(private val delegate: SqlDriver) : SqlDriver {
      * How many single-row `getById` fetches ran — the shape an N+1 shows up as. Matched on the
      * trailing clause, not the projection: SQLDelight expands `SELECT *` into explicit columns, so
      * a `startsWith("SELECT * ...")` sentinel would silently never match. `WHERE id = ?` separates
-     * it from `getListRowsByIds` and `aliveFlagsIn`, which both use `WHERE id IN`.
+     * it from `getListRowsByIds` and `aliveFlagsIn`, which both use `WHERE id IN`. `getByIdResolved`
+     * (the same fetch, resolving an id a feed merge moved) counts too.
      */
     var articleGetByIdExecutions = 0
         private set
@@ -64,7 +65,9 @@ class CountingSqlDriver(private val delegate: SqlDriver) : SqlDriver {
         binders: (app.cash.sqldelight.db.SqlPreparedStatement.() -> Unit)?,
     ): app.cash.sqldelight.db.QueryResult<R> {
         if (sql.contains("is_starred") && sql.contains("published_at DESC")) listQueryExecutions++
-        if (sql.endsWith("FROM articles WHERE id = ?")) articleGetByIdExecutions++
+        if (sql.endsWith("FROM articles WHERE id = ?") || sql.contains("FROM articles\nWHERE id = COALESCE((SELECT id FROM articles WHERE id = ?)")) {
+            articleGetByIdExecutions++
+        }
         return delegate.executeQuery(identifier, sql, mapper, parameters, binders)
     }
 

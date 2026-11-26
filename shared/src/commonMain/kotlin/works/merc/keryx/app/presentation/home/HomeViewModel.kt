@@ -426,7 +426,9 @@ class HomeViewModel(
     // would otherwise throw out of this constructor on every launch and Home would never open.
     private val restoredArticle: Articles? = settingsRepository.getLocalSettings().lastArticleId
         ?.let { id ->
-            runCatchingUnlessCancelled { articleRepository.getArticleById(id) }.getOrElse { e ->
+            // Resolved: a feed merge made while the app was closed can have moved the saved article onto
+            // another id (articles.getByIdResolved), and the saved id's row is then gone.
+            runCatchingUnlessCancelled { articleRepository.getArticleByIdResolved(id) }.getOrElse { e ->
                 Log.warn(TAG, "Restoring the last selected article failed", e)
                 null
             }
@@ -468,6 +470,11 @@ class HomeViewModel(
     // sequentially.
     private var trackedGeneration = -1L
 
+    // The article list's viewport as of its last markArticlesSeen report — what newArticleCount
+    // measures "the fresh side" against. null until the list first reports. Declared before
+    // filteredArticles, which carries it over a feed merge's article re-keys (see _newArticleTracking).
+    private val _visibleRange = MutableStateFlow<VisibleRange?>(null)
+
     // Only the filter keys the DB query: switching filters must switch queries, but the unread-only,
     // sort and pinned inputs are pure display transforms over whatever that query returned. Keeping
     // them in the flatMapLatest key made every article selection (which pins the article it marks
@@ -496,14 +503,23 @@ class HomeViewModel(
                     // runs only when there is a candidate at all, so the common re-emission (a read
                     // or star toggle) issues no extra query. Runs on `dispatcher` (articles'
                     // flowOn), like the list query itself.
+                    //
+                    // A candidate can also be an article the list already showed under another id: a
+                    // feed merge moved it onto its canonical id (whose row may be newly inserted). Read
+                    // from the database here, with the list — the merge's commit re-runs this query
+                    // before the re-keys are published — and carried over (withRemapped), so it is
+                    // neither counted as new nor loses its unseen state; the viewport follows it too.
                     val tracking = _newArticleTracking.value
-                    val candidates = tracking.candidatesIn(ids)
+                    val unremapped = tracking.candidatesIn(ids)
+                    val rekeys = if (unremapped.isEmpty()) emptyMap() else articleRepository.articleRekeysOnto(unremapped)
+                    val candidates = if (rekeys.isEmpty()) unremapped else tracking.withRemapped(rekeys).candidatesIn(ids)
                     val inserted = if (candidates.isEmpty()) {
                         emptySet()
                     } else {
                         articleRepository.articleIdsInsertedAfter(tracking.insertedAfterRowId, candidates)
                     }
-                    _newArticleTracking.update { it.withList(ids, inserted) }
+                    if (rekeys.isNotEmpty()) _visibleRange.update { it?.remappedBy(rekeys) }
+                    _newArticleTracking.update { it.withRemapped(rekeys).withList(ids, inserted) }
                 }
                 .map { filter to it }
         }
@@ -558,10 +574,6 @@ class HomeViewModel(
         combine(hasFeeds, articlesLoaded, ::articleListBody),
     )
 
-    // The article list's viewport as of its last markArticlesSeen report — what newArticleCount
-    // measures "the fresh side" against. null until the list first reports.
-    private val _visibleRange = MutableStateFlow<VisibleRange?>(null)
-
     /**
      * Count for the article list's "new articles" pill — ids tracked by [_newArticleTracking] that
      * are also in the currently displayed [articles] (so an unseen id hidden by unread-only doesn't
@@ -611,6 +623,17 @@ class HomeViewModel(
     }
 
     private val _selectedArticle = MutableStateFlow<Articles?>(null)
+
+    /**
+     * Every article re-key applied to the ids held here this session ([remapHeldArticleIds]): old id ->
+     * the id it has now, folded so one lookup suffices. What an operation started before a move (a
+     * hydration, a read/star write's completion or revert) translates the ids it captured through
+     * ([currentArticleId]), since what it compares them with has moved meanwhile. Main thread only.
+     */
+    private val articleIdMoves = HashMap<String, String>()
+
+    /** [id] in the id space of the article moves applied so far ([articleIdMoves]). */
+    private fun currentArticleId(id: String): String = articleIdMoves[id] ?: id
 
     /**
      * The selected article, fully loaded (body included). It catches up with [selectedArticleId] only
@@ -1249,8 +1272,10 @@ class HomeViewModel(
         // is still the newest selection, still on the cursor and still not loaded.
         val headerTimer = viewModelScope.launch {
             delay(READER_HEADER_FIRST_GRACE_MS)
-            if (token == latestSelectionToken && selectionCursorId == article.id && _selectedArticle.value?.id != article.id) {
-                _headerArticleId.value = article.id
+            // In the id space of the moves applied since the selection (see [remapHeldArticleIds]).
+            val id = currentArticleId(article.id)
+            if (token == latestSelectionToken && selectionCursorId == id && _selectedArticle.value?.id != id) {
+                _headerArticleId.value = id
             }
         }
         try {
@@ -1262,7 +1287,7 @@ class HomeViewModel(
 
     /** [hydrateSelection]'s body lookup, and the selection it applies once that returns. */
     private suspend fun applyHydratedSelection(
-        article: ArticleListRow,
+        selected: ArticleListRow,
         token: Long,
         epoch: Int,
         pinnedAtSelect: Boolean,
@@ -1279,8 +1304,14 @@ class HomeViewModel(
         // busy_timeout, say — shows this selection's header instead of the body, so the list, the toolbar
         // and the reader all stay on it and choosing it again tries again. Propagated, it would end the
         // app on Android and Apple, and leave the previous article in the reader on desktop.
+        //
+        // The lookup resolves the id (articles.getByIdResolved): a feed merge can have moved the article
+        // onto another id since the list row was read — its old row is then gone, which must not be
+        // taken for a deletion. A row that comes back under another id moves every id held for it
+        // first ([remapHeldArticleIds]); everything below then works in the id it has now.
+        var article = selected.copy(id = currentArticleId(selected.id))
         val full = runCatchingUnlessCancelled {
-            withContext(dispatcher) { articleRepository.getArticleById(article.id) }
+            withContext(dispatcher) { articleRepository.getArticleByIdResolved(article.id) }
         }.getOrElse { e ->
             Log.warn(TAG, "Loading the selected article's body failed", e)
             if (token == latestSelectionToken && selectionCursorId == article.id) {
@@ -1298,6 +1329,8 @@ class HomeViewModel(
         // resurrecting deleted content into the list (the `articles` merge re-adds any pinned id
         // missing from the query result) or restoring it on the next launch. A pin dropped by a
         // browsing-context switch since is not this hydration's to touch.
+        if (full != null && full.id != currentArticleId(article.id)) remapHeldArticleIds(mapOf(currentArticleId(article.id) to full.id))
+        article = article.copy(id = currentArticleId(article.id))
         if (full == null || !full.isVisible) {
             if (pinnedAtSelect && epoch == browsingEpoch) _pinnedReadStates.update { it - article.id }
             // Resume navigating from what is actually on screen, not from the dead article — and stop
@@ -1642,7 +1675,7 @@ class HomeViewModel(
             val landed = localWriteFailureReporter.runLocalWrite(write)
             // Back on the main thread, which owns the generations and every piece of optimistic state.
             viewModelScope.launch {
-                if (landed) generations.release(ids, pending.generation) else revertFailedArticleWrite(pending)
+                if (landed) generations.release(ids.map(::currentArticleId), pending.generation) else revertFailedArticleWrite(pending)
             }
         }.invokeOnCompletion { pendingLocalWrites.end() }
         return pending
@@ -1712,16 +1745,19 @@ class HomeViewModel(
     private suspend fun revertFailedArticleWrite(write: ArticleWrite) {
         write.awaitRegistered()
         val generations = generationsOf(write.field)
+        // In the id space of the moves applied since the write was made: its pins, intents and generations
+        // have moved with them ([remapHeldArticleIds]).
+        val writeIds = write.ids.map(::currentArticleId)
         try {
             val flags = runCatchingUnlessCancelled {
-                withContext(dbWriteDispatcher) { articleRepository.aliveArticleFlags(write.ids) }
+                withContext(dbWriteDispatcher) { articleRepository.aliveArticleFlags(writeIds) }
             }.getOrElse { e ->
                 Log.warn(TAG, "Re-reading the articles of a failed read/star write failed", e)
                 _pinnedReadStates.update { pins -> pins.withoutPinsOf(write.readPins) }
                 _pinnedUnstarredArticles.update { pins -> pins.withoutPinsOf(write.unstarredPins) }
                 return
             }
-            val ids = write.ids.filterTo(HashSet()) { generations.isLatest(it, write.generation) }
+            val ids = writeIds.filterTo(HashSet()) { generations.isLatest(it, write.generation) }
             if (ids.isEmpty()) return
             when (write.field) {
                 ArticleWriteField.READ -> revertReadState(ids, flags)
@@ -1729,7 +1765,7 @@ class HomeViewModel(
             }
             if (searchActive.value) _searchRefreshTrigger.update { it + 1 }
         } finally {
-            generations.release(write.ids, write.generation)
+            generations.release(write.ids.map(::currentArticleId), write.generation)
         }
     }
 
@@ -2002,6 +2038,20 @@ class HomeViewModel(
         // is not "same thread, so it's safe" — the two sides run on different dispatchers.
         val ids = readStateSnapshot.keys + unstarredSnapshot.keys + listOfNotNull(selectedSnapshot?.id)
         val flags = withContext(dbWriteDispatcher) { articleRepository.aliveArticleFlags(ids) }
+        // An id with no visible row is either gone or was moved onto another id by a feed merge — whose
+        // commit re-runs this before its re-keys reach anything else. Asked of the database first (the
+        // same queue, so after the same writes), and a moved one is carried over to the id it has now
+        // ([remapHeldArticleIds], on the main thread, which owns the selection) instead of being dropped;
+        // the pass then starts over on the moved state. A moved id resolves to a live row's id, which
+        // is never itself moved, so the second pass finds nothing more to move.
+        val missing = ids.filterNot { it in flags }
+        if (missing.isNotEmpty()) {
+            val moved = withContext(dbWriteDispatcher) { articleRepository.movedArticleIds(missing) }
+            if (moved.isNotEmpty()) {
+                viewModelScope.launch { remapHeldArticleIds(moved) }.join()
+                return reconcilePinnedArticlesAndSelection()
+            }
+        }
         if (readStateSnapshot.isNotEmpty()) {
             _pinnedReadStates.update { pinned ->
                 // Read inside the CAS loop, so a retry sees the selection as of that attempt.
@@ -2020,6 +2070,49 @@ class HomeViewModel(
                 _selectedArticle.update {
                     if (it?.id == selected.id) it.copy(is_read = current.isRead, is_starred = current.isStarred) else it
                 }
+            }
+        }
+    }
+
+    /**
+     * Carries every article id held here over a feed merge that moved those articles onto other ids
+     * ([moved]: old id -> the id each has now, read from `ks_id_remap` by the caller): the read-state and
+     * unstarred pins (their rows' ids, and their feed ids through the published feed re-keys), the
+     * selection, its cursor, pending row and header, the read/star intents and write generations, the
+     * new-articles tracking and its viewport, and the saved article. Article re-keys are not published
+     * as a whole (see `IdRemap`), so each holder is moved here, the moment the database shows a held id
+     * moved — before anything takes its row for deleted. The cursor moves without counting as a
+     * selection: the list does not scroll to it ([selectionRevealRequests]).
+     *
+     * Main thread only, like the selection it moves. Idempotent: an id already moved is no longer held.
+     */
+    private fun remapHeldArticleIds(moved: Map<String, String>) {
+        val applicable = moved.filter { (old, new) -> old != new }
+        if (applicable.isEmpty()) return
+        // Folded, so an id captured before an earlier move still reaches the latest one.
+        for ((key, value) in articleIdMoves) applicable[value]?.let { articleIdMoves[key] = it }
+        articleIdMoves.putAll(applicable)
+        val feedRemap = idRemaps.current.value
+        fun ArticleListRow.moved(): ArticleListRow =
+            applicable[id]?.let { copy(id = it, feed_id = feedRemap.feed(feed_id)) } ?: this
+        _pinnedReadStates.update { it.withMovedKeys(applicable) { row -> row.moved() } }
+        _pinnedUnstarredArticles.update { it.withMovedKeys(applicable) { row -> row.moved() } }
+        _selectedArticle.update { article ->
+            article?.let { a -> applicable[a.id]?.let { a.copy(id = it, feed_id = feedRemap.feed(a.feed_id)) } } ?: article
+        }
+        _pendingSelectedRow.update { row -> row?.moved() }
+        _headerArticleId.update { id -> id?.let { applicable[it] ?: it } }
+        // The backing flow directly: the setter would forget the intents counted since the selection.
+        _selectionCursor.update { id -> id?.let { applicable[it] ?: it } }
+        readIntents.remap(applicable)
+        starIntents.remap(applicable)
+        readWriteGenerations.remap(applicable)
+        starWriteGenerations.remap(applicable)
+        _visibleRange.update { it?.remappedBy(applicable) }
+        _newArticleTracking.update { it.withRemapped(applicable) }
+        if (settingsRepository.getLocalSettings().lastArticleId in applicable) {
+            settingsRepository.mutateLocalSettings { settings ->
+                settings.lastArticleId?.let { applicable[it] }?.let { settings.copy(lastArticleId = it) } ?: settings
             }
         }
     }

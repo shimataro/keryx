@@ -1248,4 +1248,44 @@ class ArticleRepositoryTest {
             driver.close()
         }
     }
+
+    // ---- Article ids a feed merge moved (ks_id_remap, kind 'article') ----
+
+    /**
+     * Two feeds holding the same article (one guid) are merged: the article moves onto the smaller id of
+     * its (feed, guid) key. An id held from before resolves to the row it became, one id at a time, and
+     * the batch reads tell a moved id from a live or unknown one in both directions.
+     */
+    @Test
+    fun anArticleIdAFeedMergeMovedResolvesToTheRowItBecame() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("fa", url = "https://ex.com/a")
+            db.insertFeed("fb", url = "https://ex.com/b")
+            for ((id, feed) in listOf("a-1" to "fa", "b-1" to "fb", "b-2" to "fb")) {
+                db.articlesQueries.insert(
+                    id = id, feed_id = feed, guid = if (id == "b-2") "other" else "same", url = "https://article/$id",
+                    title = "Title $id", summary = null, content = null, author = null, published_at = null,
+                    thumbnail_url = null, is_read = 0L, read_at = null, is_starred = 0L, starred_at = null,
+                    cached_at = 0L, search_text = "", updated_at = 0L, created_at = 0L,
+                )
+            }
+            db.transaction { FeedIdentitySql.mergeLocally(driver, "fb", "fa") }
+            val repo = newRepo(db, driver)
+
+            assertNull(repo.getArticleById("b-1"), "precondition: b-1 was folded into a-1")
+            assertEquals("a-1", repo.resolveArticleId("b-1"))
+            assertEquals("a-1", repo.getArticleByIdResolved("b-1")?.id)
+            assertEquals("b-2", repo.resolveArticleId("b-2"), "a live id resolves to itself")
+            assertEquals("missing", repo.resolveArticleId("missing"))
+            assertNull(repo.getArticleByIdResolved("missing"))
+
+            assertEquals(mapOf("b-1" to "a-1"), repo.movedArticleIds(listOf("b-1", "b-2", "a-1", "missing")))
+            assertEquals(mapOf("b-1" to "a-1"), repo.articleRekeysOnto(listOf("a-1", "b-2")))
+            assertEquals(emptyMap(), repo.movedArticleIds(emptyList()))
+            assertEquals(emptyMap(), repo.articleRekeysOnto(emptyList()))
+        } finally {
+            driver.close()
+        }
+    }
 }

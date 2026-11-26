@@ -143,7 +143,7 @@ private fun KeryxDatabase.insertArticle(
 }
 
 /**
- * Fails the article-by-id lookup (`articles.getById`, the body a selection loads) while [failGetById]
+ * Fails the article-by-id lookup (`articles.getById` / `getByIdResolved`, the body a selection loads) while [failGetById]
  * is set — standing in for a lookup whose connection waited out the whole `busy_timeout`.
  */
 private class GetByIdFailingSqlDriver(private val delegate: SqlDriver) : SqlDriver by delegate {
@@ -159,7 +159,10 @@ private class GetByIdFailingSqlDriver(private val delegate: SqlDriver) : SqlDriv
         parameters: Int,
         binders: (app.cash.sqldelight.db.SqlPreparedStatement.() -> Unit)?,
     ): app.cash.sqldelight.db.QueryResult<R> {
-        val isGetById = sql.startsWith("SELECT articles.") && sql.endsWith("FROM articles WHERE id = ?")
+        // `getById`, or `getByIdResolved` (the selection's and the restore's lookup, which resolves an id a
+        // feed merge moved).
+        val isGetById = sql.startsWith("SELECT articles.") &&
+            (sql.endsWith("FROM articles WHERE id = ?") || sql.contains("FROM articles\nWHERE id = COALESCE((SELECT id FROM articles WHERE id = ?)"))
         if (isGetById) onGetById?.invoke()
         if (failGetById && isGetById) {
             throw IllegalStateException("database is locked")

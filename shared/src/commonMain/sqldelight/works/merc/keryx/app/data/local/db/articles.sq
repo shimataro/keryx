@@ -117,6 +117,32 @@ ORDER BY a.published_at DESC, a.created_at DESC, a.id DESC;
 getById:
 SELECT * FROM articles WHERE id = ?;
 
+-- An article's id can move: a feed merge moves each article onto the smallest id of its (feed, guid)
+-- key and records the move in ks_id_remap (kind 'article'). Article re-keys are not published to the
+-- holders outside the database (IdRemaps): an article id held across time (the selection, its pins
+-- and intents, the saved article, the new-articles tracking) is resolved through these instead. 'article'
+-- is ID_REMAP_KIND_ARTICLE (TagFolderIdRekey.kt).
+--
+-- The id the article :id has now: :id itself while a row has it, else the id a re-key moved it to,
+-- else :id unchanged — the same resolution the writes below make in their statements.
+resolveId:
+SELECT COALESCE((SELECT id FROM articles WHERE id = :id), (SELECT new_id FROM ks_id_remap WHERE kind = 'article' AND old_id = :id), :id);
+
+-- The row the article :id is now (getById after resolveId, in one statement).
+getByIdResolved:
+SELECT * FROM articles
+WHERE id = COALESCE((SELECT id FROM articles WHERE id = :id), (SELECT new_id FROM ks_id_remap WHERE kind = 'article' AND old_id = :id), :id);
+
+-- Of the ids given, those a re-key moved, with the id each has now. No live row has an id that is an
+-- old_id here (IdRemapSql drops the entry of an id that is live again), so a live id never matches.
+movedIdsIn:
+SELECT old_id, new_id FROM ks_id_remap WHERE kind = 'article' AND old_id IN ?;
+
+-- Of the ids given, those a re-key moved an article onto, with the id it moved from — an article a
+-- list shows under such an id is one it already showed under the old one, not a new arrival.
+rekeysOnto:
+SELECT old_id, new_id FROM ks_id_remap WHERE kind = 'article' AND new_id IN ?;
+
 -- Batched by-id fetch of list rows (callers chunk the id list to stay under SQLite's bound-parameter
 -- limit). Used by search() to load all FTS hits in one query per chunk instead of one getById per
 -- hit. Same eight columns, and the same load-bearing order, as the list queries above.

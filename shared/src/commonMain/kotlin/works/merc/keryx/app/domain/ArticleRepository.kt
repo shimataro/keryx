@@ -191,6 +191,38 @@ class ArticleRepository(
     fun getArticleById(id: String): Articles? = articles.getById(id).executeAsOneOrNull()
 
     /**
+     * The row the article [id] is now: [getArticleById], except that an id a feed merge moved onto
+     * another article (`ks_id_remap`, kind `article`) gives the row it became — whose id then differs
+     * from [id]. For an id held from before such a merge (`articles.getByIdResolved`).
+     */
+    fun getArticleByIdResolved(id: String): Articles? = articles.getByIdResolved(id).executeAsOneOrNull()
+
+    /** The id the article [id] has now: [id] itself unless a feed merge moved it (`articles.resolveId`). */
+    fun resolveArticleId(id: String): String = articles.resolveId(id).executeAsOne()
+
+    /**
+     * Of [ids], the ones a feed merge moved onto another article, each mapped to the id it has now.
+     * Empty (without querying) when [ids] is empty; an id still live never appears.
+     */
+    fun movedArticleIds(ids: Collection<String>): Map<String, String> {
+        if (ids.isEmpty()) return emptyMap()
+        return ids.distinct().chunked(ID_FETCH_CHUNK)
+            .flatMap { chunk -> articles.movedIdsIn(chunk).executeAsList().map { it.old_id to it.new_id } }
+            .toMap()
+    }
+
+    /**
+     * Of [ids], the ones a feed merge moved an article onto, each mapped from the id it moved from
+     * (old id -> one of [ids]). Empty (without querying) when [ids] is empty.
+     */
+    fun articleRekeysOnto(ids: Collection<String>): Map<String, String> {
+        if (ids.isEmpty()) return emptyMap()
+        return ids.distinct().chunked(ID_FETCH_CHUNK)
+            .flatMap { chunk -> articles.rekeysOnto(chunk).executeAsList().map { it.old_id to it.new_id } }
+            .toMap()
+    }
+
+    /**
      * Determines which requested article IDs still refer to existing articles, and their current
      * read/starred flags. Used to revalidate an optimistic pin against the DB's current state,
      * rather than just its continued existence.

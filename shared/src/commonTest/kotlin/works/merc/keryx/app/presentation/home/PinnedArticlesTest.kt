@@ -248,4 +248,17 @@ class PinnedArticlesTest {
         assertEquals(emptyMap(), emptyMap<String, ArticleListRow>().readPins())
         assertEquals(emptyMap(), emptyMap<String, ArticleListRow>().unreadPins())
     }
+
+    /** A feed merge moving a pinned article re-keys its pin; a pin already under the new id stands. */
+    @Test
+    fun movedKeysCarryPinsOverAndKeepAPinAlreadyUnderTheNewId() {
+        val pinned = pins(row("old", isRead = 1L), row("kept"), row("old2", isRead = 1L), row("new2"))
+
+        val moved = pinned.withMovedKeys(mapOf("old" to "new", "old2" to "new2")) { it.copy(id = it.id + "-moved") }
+
+        assertEquals(setOf("kept", "new", "new2"), moved.keys)
+        assertEquals("old-moved", moved.getValue("new").id)
+        assertEquals("new2", moved.getValue("new2").id, "the pin already under the new id stands")
+        assertSame(pinned, pinned.withMovedKeys(mapOf("x" to "y")) { it })
+    }
 }

@@ -95,6 +95,29 @@ fun NewArticleTracking.withList(ids: Set<String>, inserted: Set<String>): NewArt
 }
 
 /**
+ * This tracking with each article a feed merge moved onto another id carried over to that id:
+ * [rekeys] maps an old id to the id it has now. A moved article whose old id was known is known under
+ * its new id too — it is the same article the list already showed, not a new arrival, even when its
+ * new row was inserted after the watermark — and one that was still unseen stays unseen. A move whose
+ * old id was never known changes nothing. The same instance when nothing applies.
+ */
+fun NewArticleTracking.withRemapped(rekeys: Map<String, String>): NewArticleTracking {
+    val known = knownIds
+    if (known.isNullOrEmpty() || rekeys.isEmpty()) return this
+    val applicable = rekeys.filterKeys { it in known }
+    if (applicable.isEmpty()) return this
+    val movedUnseen = applicable.filterKeys { it in unseenIds }.values
+    return copy(knownIds = known + applicable.values, unseenIds = unseenIds + movedUnseen)
+}
+
+/** This range with each end a feed merge moved onto another id ([moved]: old id -> id it has now) carried over. */
+fun VisibleRange.remappedBy(moved: Map<String, String>): VisibleRange {
+    val first = moved[firstId] ?: firstId
+    val last = moved[lastId] ?: lastId
+    return if (first == firstId && last == lastId) this else VisibleRange(first, last)
+}
+
+/**
  * Marks [ids] as already known without the user having scrolled to them — used for articles the
  * user just brought in themselves (a subscription), which were never "missed".
  *
