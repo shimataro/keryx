@@ -117,8 +117,8 @@
   違反するデータを保持できる）、バイトを改変した破損ファイル、ローカルより新しい `PRAGMA user_version`）
   に対して `merge` を直接呼び、投げられる例外の型を検証する。`UNIQUE(url)` を外した `feeds` テーブルは、もう
   違反のケースではない: 畳み込んだ転送ファイルはそうした重複を正当に持ちうるので、
-  `duplicateUniqueKeysInsideCloudMergeOntoTheSmallestId`
-  が、マージがそれらを 1 つのフィードの同一性として記録し、その最小の id へ畳むことを検証する。手作りのファイルは現行スキーマのすべての列（`articles.body_updated_at`
+  `duplicateUniqueKeysInsideCloudMergeOnlyTheirWinner`
+  が、その勝者だけがマージされることを検証する。手作りのファイルは現行スキーマのすべての列（`articles.body_updated_at`
   を含む）を持たなければならない。そうでないと、検証したいケースに届く前に、検証で破損と判定される。`SyncRepositoryTest.kt` はクラウドファイルの分類を
   `sync()` 経由でエンドツーエンドに、`DatabaseMergerTest` は転送モード（`mergeTransport`: ファイルにローカルの
   マイグレーションを行わないこと、新しい `user_version` が `SchemaVersionException` になること、転送用の表が欠けて
@@ -170,14 +170,6 @@
   カバーしていない。「現実には起きない」ほど狭い窓でも、このテストを書く（`.claude/CLAUDE.md` の「Error handling and race
   conditions」を参照）。
 - 実スレッドで DB への並行書き込みを行うテストは `inMemoryDb()` ではなく `fileDb()` を使うこと —— 前者は全呼び出し元を、同期機構を持たない 1 本の共有 JDBC コネクションに固定するため、実スレッド 2 本で SQLDelight のトランザクション管理そのものが壊れ得る。`fileDb()` を使う場合でも、テスト対象と無関係な書き込みを fixture に残さないこと: SQLite の deferred `BEGIN` により、write の前に read を行うトランザクションは、無関係な並行書き込み側のロック昇格を、`busy_timeout` では救済されないリトライ不能な `SQLITE_BUSY` で失敗させることがある —— 詳細は `known-issues.md` の「並行書き込みにより read→write トランザクションがリトライ不能な SQLITE_BUSY で失敗する」を参照。
-- **記事の表示判定。** 記事を表示するかは `(deleted_at IS NULL OR is_starred = 1)` で決まり（[db-schema.ja.md](db-schema.ja.md)
-  の「articles」参照）、その判定はすべて共通の規則を通す: `articles.sq` のクエリはこの条件をそのまま書き、Kotlin の
-  生の SQL は `articleVisibleSql` を、Kotlin のコードは `Articles.isVisible` を使う（`data/local/ArticleVisibility.kt`）。
-  機械的に守られているのは `.sq` の側だけである（`ArticleVisibilityQueriesTest` は、許可リストの外で `deleted_at IS NULL`
-  を単独で使うと失敗する）。生の SQL と Kotlin のコードには検査がない: どちらも記事の `deleted_at` と feed の
-  `deleted_at` を型で区別できないので、走査しても feed の判定ばかりを検出してしまう。そこで記事を絞り込む変更は、
-  スター付きかつ削除済みの記事を表示されるものとして扱うことをテストで確かめる——`FtsSearchTest`、
-  `ArticleContentCacheTest`、`FtsManagerTest` の `indexMissingAndTheDailyRebuildIndexAStarredDeletedArticle` が例である。
 - 新規の Android Compose UI 計装テストは `androidApp/src/androidTest/` に置く（`composeApp` は
   ライブラリモジュールなので、その計装テストはアプリケーションモジュール側に置く — 上記「構成」
   参照）。バンドルされた `requery` SQLite に依存する DB テストは
@@ -291,7 +283,7 @@ AGP の `build` ライフサイクルは `androidTest` ソースセットに対�
 - `FormatTimestampTest`（`formatTimestamp` の正確な出力を固定する。他のタイムスタンプ検証は期待値をその関数自体から導出するため、この検証はできない）
 - `LazyNativePopupTest`（最初の右クリックまでネイティブなものは何も構築されない。`LocalNativeWindow` が null になる Compose UI テストでは観測できない。あわせて、クリックは呼び出し側のその後の項目ではなく、メニューを最後に表示したときの項目で解決されること）
 - `WindowGeometryTest`（ダイアログウインドウのジオメトリ: オーナー中心配置と画面境界クランプ、自動フィットの計算 `fitWindowSize`/`sizeMatches`、`nextDialogFit` のドリフト補正ステートマシン——フィットが確定した**後**に Compose の関知しないところでサイズが適用される回帰ケースも依然として補正されること、拒否するウインドウマネージャがガードを無限に回さないための試行回数上限、フィットが着地するまでダイアログを不可視に保つ `presentable` フラグ——その上限を使い切った時点での解放を含め、ジオメトリを拒否するウインドウマネージャがダイアログを不可視のままにし続けることは決してない）
-- マージと畳み込みの代数（`SyncAlgebraTest`。`TransportFixtures` で手作りした転送ファイルを使う）：`MergeSql` と `ReduceSql` が冪等で、3 つのファイルのどの順序でも可換で、畳み込みの畳み込みについて結合的で、畳み込んだものをマージした結果が入力を 1 つずつマージした結果と等しいこと。各フィールドグループがそれぞれの勝者に従い、同着を値で決めること。記事の本文グループが `body_updated_at` で順位を付けるので、もう一方が既読やスターをどうしていても新しい本文が勝ち、軽い行が本文を消さないこと。スターと削除が独立した 2 つのグループであること——3 台の端末での削除、それより新しいスター、さらに新しいスター解除が、どのマージ順・畳み込み順でも収束し、より新しい削除の横でスターが残ること。`SyncMergerTest` はマージに対するローカルの書き込みを検証する: 同じミリ秒のスタンプ、マージした削除の後のスターがその削除を残したまま記事を表示すること、削除済みの行のスター解除が削除の取り消しを打刻すること、マージした削除の取り消しの後のキャッシュ削除が削除グループに勝つこと、`body_updated_at` が本文の列が変わったときだけ進む（既読・スター・削除では進まない）こと。`FeedIdentityMergeTest` は、一方の行のスターともう一方の行のキャッシュ削除がフィードの同一性の統合（同期・ローカル）を経ても残ることを、`ArticleVisibilityQueriesTest` は一覧・未読数・`aliveFlagsIn` / `idsByFeeds`・すべて既読にする、の各クエリがスター付きの削除済み記事を表示することを検証する——`articles.sq` で `deleted_at IS NULL` だけの絞り込みが許可リストの外にあると失敗する検査も含む（検索は `FtsSearchTest`）。`SchemaV3MigrationTest` は `2.sqm` が `body_updated_at` を `updated_at` で初期化することを、`SyncCaptureTriggerTest` は `body_updated_at` の変更が heavy として記録されることを検証する
+- マージと畳み込みの代数（`SyncAlgebraTest`。`TransportFixtures` で手作りした転送ファイルを使う）：`MergeSql` と `ReduceSql` が冪等で、3 つのファイルのどの順序でも可換で、畳み込みの畳み込みについて結合的で、畳み込んだものをマージした結果が入力を 1 つずつマージした結果と等しいこと。各フィールドグループがそれぞれの勝者に従い、同着を値で決めること。記事の本文グループが `body_updated_at` で順位を付けるので、もう一方が既読やスターをどうしていても新しい本文が勝ち、軽い行が本文を消さないこと。保持グループ（スター＋削除）が、削除、それより新しいスター、さらに新しいスター解除について、どのマージ順・畳み込み順でも最も新しい操作に収束すること。`SyncMergerTest` はマージに対するローカルの書き込みを検証する: 同じミリ秒のスタンプ、マージした削除の後のスター（またはマージしたスター解除の後のキャッシュ削除）が保持グループに勝つこと、`body_updated_at` が本文の列が変わったときだけ進む（既読・スター・削除では進まない）こと。`SchemaV3MigrationTest` は `2.sqm` が `body_updated_at` を `updated_at` で初期化することを、`SyncCaptureTriggerTest` は `body_updated_at` の変更が heavy として記録されることを検証する
 - クラウドデータの破損／非互換からの復旧（`SyncRepositoryTest.kt`／`SyncMergerTest.kt`：制約違反するクラウドデータ——NOT NULL 違反の NULL をクラウド DB 自身の（より緩い）スキーマだけが許していた——を、破損ファイルや外部スキーマと同様に `CloudDataIncompatibleException` として分類すること、`SyncMergerTest.mergeDoesNotClassifyABrokenLocalSchemaAsCloudDataIncompatible` がその逆（ローカル側の破損は誤分類しない）を担保すること、`SyncRepositoryTest.aFailureAfterTheMergeCommittedIsNeverBlamedOnTheCloud` がマージ commit 後の `FtsManager.indexMissing()` の失敗——壊れたクラウドスキーマと同じ曖昧な SQLite エラーコードを共有する——を誤って分類しないことを担保すること。`core/SqliteFileTest.kt`＝アップロード側と対称なダウンロードバイト列の SQLite ヘッダ検証）
 - プロバイダごとの `CloudStorage.rename`（`DropboxStorageTest.kt`／`GoogleDriveStorageTest.kt`／`OneDriveStorageTest.kt`。退避先の衝突・退避元の不在ケースを含む）と、差分同期以前からの移行が使う、決定的で UTC 整形された退避名の `core/CloudBackupPathTest.kt`
 - クラウド転送のファイルストリーミング（`CloudFileTransferTest.kt`：レスポンスボディが複数チャンクにまたがっても宛先ファイルへそのまま書かれること、短いペイロードが既存の宛先ファイルに追記されず置き換わること、`FileUploadContent` がファイルをストリームし——Drive の `multipart/related` 封筒を可能にする prefix/suffix で包む場合も含めて——正しい `contentLength` を報告すること。`ContentDigestTest.kt`：アップロードのスキップ判定に使うチャンク単位 SHA-256——最終チャンクの変更も検出されること、ファイルが無い場合は誤一致ではなくダイジェスト無しを返すことを含む。`SqliteFileTest.kt`：パス版のヘッダ検証が、どのバッファよりも大きなファイルでも先頭16バイトだけで判定すること）

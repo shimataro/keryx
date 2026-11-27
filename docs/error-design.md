@@ -56,33 +56,27 @@ and lose more than the access itself is worth. The accesses that are, today:
   whole `busy_timeout`. A failure is treated as "not live": the pending selection
   fallback stays pending and the next list value decides it. Propagating it would end the app on Android and
   Apple.
-  A tag, folder or feed that a list no longer shows is not believed gone while the published re-key map might be
+  A tag or folder that a list no longer shows is not believed gone while the published re-key map might be
   stale (a merge publishes it only after it commits, and another write in between re-runs the lists over the
   re-keyed rows): the map is first re-read from `ks_id_remap` (`HomeViewModel.catchUpIdRemapFromDb`), and only an
   absence that survives that falls back. That absence is judged on the list value the re-read was made for, never
   on a newer one delivered meanwhile, which can show a later re-key the re-read missed; such a newer value gets a
   re-read of its own. A failed re-read is treated the same way — undecided, the next list value
   asks again. The Compose and SwiftUI inline renames use the same catch-up before ending an edit whose row
-  vanished, and `HomeViewModel.showFeedDetail` (a notification's "show feed", for both UIs) before selecting the
-  feed. An article that no list, pin or selection finds any more is not dropped before the database is asked whether
-  a feed merge moved it onto another id (`ArticleRepository.movedArticleIds`, read behind the same write queue as the
-  check that found it missing); a moved one is carried to its new id (`HomeViewModel.remapHeldArticleIds`), since
-  article re-keys are not published as a whole.
-- The `ks_id_remap` read that publishes a merge's tag, folder and feed re-keys (`DeltaSync.publishIdRemapsAfterCommit` →
-  `IdRemaps.publishFromDb`; `FeedRepository.publishIdRemapsAfterMerge` after a refresh's redirect merge, which
-  also tells the lists in a `finally`, so a failed or cancelled publish still refreshes them). It runs right after
-  the merge has committed, so it can wait out the whole `busy_timeout` behind another write lock, and what it feeds
-  is only ids held outside the database (selection, expansion, `local_settings.json`). A failure is logged and
-  carried on from: every write that takes a tag, folder, feed or article id resolves a stale one itself in the same
-  statement, and the next merge's publish or the next launch's read catches the holders up. Propagating it would turn a merge that committed into a failed sync (and a
+  vanished.
+- The `ks_id_remap` read that publishes a merge's tag/folder re-keys (`DeltaSync.publishIdRemapsAfterCommit` →
+  `TagFolderIdRemaps.publishFromDb`). It runs right after the merge has committed, so it can wait out the whole
+  `busy_timeout` behind another write lock, and what it feeds is only ids held outside the database (selection,
+  expansion, `local_settings.json`). A failure is logged and carried on from: every write that takes a tag or
+  folder id resolves a stale one itself in the same statement, and the next merge's publish or the next launch's
+  read catches the holders up. Propagating it would turn a merge that committed into a failed sync (and a
   reset offer for a local fault).
-  The same read also runs once at startup, in the background (`IdRemaps`'s initial load, which takes
+  The same read also runs once at startup, in the background (`TagFolderIdRemaps`'s initial load, which takes
   the same lock as a publish): it must not run in the constructor, which the UI thread reaches. A failure there is
   logged, and the map stays empty with its `loaded` gate opened anyway, so nothing waits on it for good — a
   restored tag or folder selection saved under a since-moved id then falls back to All Feeds, the same as one
-  whose item is gone (a feed selection is resolved from the database instead, so it is not affected), and the
-  next publish or launch catches the holders up. Propagating it would end the app on Android and Apple for a
-  read the holders can live without.
+  whose item is gone, and the next publish or launch catches the holders up. Propagating it would end the app
+  on Android and Apple for a read the holders can live without.
 - Saving `local_settings.json` (`SettingsRepository.saveLoggingFailure`, the background writer behind
   `saveLocalSettings` / `mutateLocalSettings`, and the write of a re-key's rewrite). It is a file, not the
   database, and nothing waits on it: the in-memory value that the UI and `getLocalSettings` read is already
@@ -122,8 +116,8 @@ again — unless the user has acted on the same item since, in which case that n
 
 - **Read/star**: the article's pins, the selection and its read/star intents take the DB's values (re-read
   behind the write queue), only on articles whose latest read (or star) write is still the failed one. Pins
-  are refreshed rather than dropped, so a row does not vanish from the list; an article no longer visible (deleted
-  and not starred) loses its pins. See "Optimistic read/star pins" in [app-architecture.md](app-architecture.md).
+  are refreshed rather than dropped, so a row does not vanish from the list; a tombstoned article loses its
+  pins. See "Optimistic read/star pins" in [app-architecture.md](app-architecture.md).
 - **Feed list**: a folder or tag delete or a feed unsubscribe changes the UI — the selection falling back to
   All, the open article closing with it, a folder's or tag's collapsed/expanded state being forgotten — only
   once its write has landed and the feed list has stopped showing the item, so a failed one leaves all of it

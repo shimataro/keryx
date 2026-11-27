@@ -68,7 +68,7 @@ it covers is a destructive-action decision, not a refactor.
 `.claude/CLAUDE.md` lists it as read-on-demand). This rule is a guard rail, not the design.
 **Read `docs/sync-architecture.md` before changing sync behavior** — it is the only place the
 pointer/generation, delta and base files, validation, folding, garbage collection, the per-field
-merge groups (the independent star and deletion groups, `body_updated_at`), the pre-delta migration and legacy watch, the
+merge groups (retention group, `body_updated_at`), the pre-delta migration and legacy watch, the
 automatic-sync suspension gate, the network gate, and the reset/archive semantics are specified.
 
 See also: `docs/sync-architecture.md` ("Sync Flow", "Merge (`DatabaseMerger` + `MergeSql`)",

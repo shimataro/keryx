@@ -314,11 +314,13 @@ struct NotificationCenterRow: View {
             isShowingPopover = false
         case .showFeedDetail(let a):
             // Selects unconditionally, whether or not the feed is currently in `home.feeds` (a sync
-            // merge could still be catching up), through the one shared implementation Compose calls
-            // too (`HomeViewModel.showFeedDetail`, which follows a merge that moved the feed since the
-            // notification was raised), and focuses the article-list pane so the keyboard immediately
-            // lands where the selected feed's articles now show.
-            Task { @MainActor in await home.showFeedDetail(feedId: a.feedId) }
+            // merge could still be catching up) — matches Compose's own unconditional select
+            // (`HomeScreen.kt:755-759`), which also focuses the article-list pane so the keyboard
+            // immediately lands where the selected feed's articles now show.
+            home.selectFilter(
+                ArticleFilterFeed(feedId: a.feedId),
+                instance: FeedListRowSelectionFeedInFolderGroup(feedId: a.feedId)
+            )
             focusedPane.wrappedValue = .articleList
             isShowingPopover = false
             onShowFeed()
