@@ -237,7 +237,6 @@ internal fun FeedListPane(
     // lists do not have yet, and one that waited could name an id they no longer have; but two ids
     // the map joins are the same row, whichever of them the lists currently use.
     val idRemap by vm.idRemap.collectAsState()
-    fun isEditing(row: InlineEditTarget): Boolean = inlineEdit?.remappedBy(idRemap) == row.remappedBy(idRemap)
     var searchFieldFocused by remember { mutableStateOf(false) }
     val folderNameDuplicateError = stringResource(Res.string.home_folder_name_duplicate)
     val tagNameDuplicateError = stringResource(Res.string.home_tag_name_duplicate)
@@ -423,15 +422,25 @@ internal fun FeedListPane(
     // The rendered index of the row the in-progress edit lives on, or null while that row isn't in
     // the list — derived from the same collected state the rows render from, and recomputed only when
     // that state changes rather than on every keystroke's recomposition while the edit is open.
-    // The edit's row is looked up under the id the lists carry for it, matched the way isEditing
-    // matches a row (both ids brought up to date by idRemap — see resolvedIn): the lists and the map
+    // The edit's row is looked up under the id the lists carry for it (both ids brought up to date
+    // by idRemap — see resolvedIn): the lists and the map
     // reach composition separately, so the lists can show the id the edit was started with, the one
     // the map gives it, or one in between.
-    val editRowIndex = remember(inlineEdit, idRemap, feeds, folders, tags, collapsedFolderIds, feedTagMap, expandedTagIds) {
-        inlineEdit?.resolvedIn(feeds, folders, tags, idRemap)?.let {
+    //
+    // The edit's row is resolved once, to the single row the lists carry for it ([editTargetRendered]),
+    // and both the editor and the index below follow that one target. Matching every row against the
+    // edit instead would host an editor on each of two rows that the map joins when the lists still
+    // show both (a merge's map can reach composition before the lists drop the old row): two editors
+    // with one draft, the later one's focus making the earlier one commit.
+    val editTargetRendered = remember(inlineEdit, idRemap, feeds, folders, tags) {
+        inlineEdit?.resolvedIn(feeds, folders, tags, idRemap)
+    }
+    val editRowIndex = remember(editTargetRendered, feeds, folders, tags, collapsedFolderIds, feedTagMap, expandedTagIds) {
+        editTargetRendered?.let {
             feedListRowIndex(it.rowInstance, feeds, folders, tags, collapsedFolderIds, feedTagMap, expandedTagIds)
         }
     }
+    fun isEditing(row: InlineEditTarget): Boolean = editTargetRendered == row
 
     // An edit can be started from the menu bar (or a shortcut) while its row is scrolled out of
     // view, and an editor the user cannot see would swallow every keystroke with nothing to show.

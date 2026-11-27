@@ -13,6 +13,7 @@ import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.onAllNodesWithTag
@@ -680,6 +681,62 @@ class FeedListInlineRenameTest {
             editor().assertTextContains("Half typed")
             pressEnter()
             assertEquals("Half typed", db.customTitleOf("f-new"), "the commit lands on the feed it became")
+        }
+    }
+
+    /**
+     * The map reaches composition while the lists still show both ids it joins (the old row has not
+     * been dropped yet): exactly one row hosts the editor, whichever kind of row it is, and the typed
+     * text is kept.
+     */
+    private suspend fun ComposeUiTest.assertOneEditorWhileTheMapJoinsTwoListedRows(
+        kind: String,
+        oldId: String,
+        newId: String,
+        filter: ArticleFilter,
+        seed: KeryxDatabase.() -> Unit,
+    ) {
+        val (driver, db) = inMemoryDb()
+        db.seed()
+        val remaps = IdRemaps(db, Dispatchers.Unconfined)
+        useHomeViewModel(driver, db, idRemaps = remaps) { fixture ->
+            val vm = fixture.vm
+            setInlineRenameContent(vm)
+            startInlineRename(vm, filter)
+            typeName("Half typed")
+
+            driver.execute(null, "INSERT INTO ks_id_remap (kind, old_id, new_id) VALUES ('$kind', '$oldId', '$newId')", 0)
+            runBlocking { remaps.publishFromDb() }
+            waitForIdle()
+            mainClock.advanceTimeByFrame()
+            waitForIdle()
+
+            onAllNodesWithTag(INLINE_RENAME_FIELD_TEST_TAG, useUnmergedTree = true).assertCountEquals(1)
+            editor().assertTextContains("Half typed")
+        }
+    }
+
+    @Test
+    fun aMapJoiningTwoListedFeedRowsHostsOneEditor() = runDesktopComposeUiTest {
+        assertOneEditorWhileTheMapJoinsTwoListedRows("feed", "f-old", "f-new", ArticleFilter.Feed("f-old")) {
+            insertFeed("f-new", sortOrder = 0L)
+            insertFeed("f-old", sortOrder = 1L)
+        }
+    }
+
+    @Test
+    fun aMapJoiningTwoListedFolderRowsHostsOneEditor() = runDesktopComposeUiTest {
+        assertOneEditorWhileTheMapJoinsTwoListedRows("folder", "d-old", "d-new", ArticleFilter.Folder("d-old")) {
+            insertFolder("d-new", "Folder New", sortOrder = 0L)
+            insertFolder("d-old", "Folder Old", sortOrder = 1L)
+        }
+    }
+
+    @Test
+    fun aMapJoiningTwoListedTagRowsHostsOneEditor() = runDesktopComposeUiTest {
+        assertOneEditorWhileTheMapJoinsTwoListedRows("tag", "t-old", "t-new", ArticleFilter.Tag("t-old")) {
+            insertTag("t-new", "Tag New", sortOrder = 0L)
+            insertTag("t-old", "Tag Old", sortOrder = 1L)
         }
     }
 
