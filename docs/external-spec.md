@@ -81,8 +81,9 @@ RSS 2.0 / Atom 1.0 (RSS 1.0/RDF parsed loosely). JSON Feed will come after α.
 | Subscription list (remove), tags / folders, global settings | Last-write-wins (propagated via logical deletion) |
 | Device-local settings | Not synced |
 
-Sync does not lose data: apart from the last-write-wins and deletion rules above and an article's `content` taking precedence over its `summary`, nothing is dropped. Once every
-device has synced the same changes, every device holds and shows the same subscriptions, folders, tags, read/star state
+Sync does not lose data: apart from the last-write-wins and deletion rules above, an article's `content` taking
+precedence over its `summary`, and internal bookkeeping values (a row keeps its earliest creation time, and an article
+its latest fetch and update times), nothing is dropped. Once every device has synced the same changes, every device holds and shows the same subscriptions, folders, tags, read/star state
 and settings (device-local settings, fetch errors and the search index excepted); a device that has not synced yet, an
 offline one say, catches up when it does.
 
