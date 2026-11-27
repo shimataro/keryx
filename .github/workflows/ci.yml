@@ -24,8 +24,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     # Every OS additionally runs createDistributable + native packaging below, so this matches the
     # 30 min budget release.yml's packaging jobs use.
-    # Windows gets 45: its runner runs the file-database sync tests about ten times slower than the
-    # others, and the desktop test suite alone takes about 20 minutes there.
+    # Windows gets 45: its runner runs the file-database sync tests far slower than the others (before
+    # the "Speed up temp-file I/O (Windows)" step below, :shared's desktop tests took about 42 minutes
+    # there against under 3 on ubuntu-latest, which overran this budget).
     timeout-minutes: ${{ matrix.os == 'windows-latest' && 45 || 30 }}
     strategy:
       fail-fast: false
@@ -51,6 +52,29 @@ jobs:
       # there is no separate wrapper-validation step.
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
+
+      # The sync tests create real database files with File.createTempFile, and every commit in
+      # SQLite's default rollback-journal mode creates, fsyncs and deletes a journal file. On the
+      # Windows runner that per-file cost is dominated by Defender's real-time scanning and by the
+      # user temp directory living on the slow C: drive: :shared's desktop tests took 2515 s there
+      # against 149 s on ubuntu-latest (SyncSimulationTest 609 s vs 56 s). So the temp directory is
+      # moved to RUNNER_TEMP (D:) — Java takes java.io.tmpdir from TMP on Windows, and Gradle and its
+      # test JVMs, started by the later steps, inherit it — and the workspace, temp and Gradle
+      # directories are excluded from real-time scanning. Placed after "Set up Gradle", which sets
+      # GRADLE_USER_HOME. The exclusion is only a speed-up, so a failure to add it warns and goes on.
+      - name: Speed up temp-file I/O (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          "TMP=$env:RUNNER_TEMP" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "TEMP=$env:RUNNER_TEMP" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          $paths = @($env:GITHUB_WORKSPACE, $env:RUNNER_TEMP, $env:GRADLE_USER_HOME) | Where-Object { $_ }
+          try {
+            Add-MpPreference -ExclusionPath $paths -ErrorAction Stop
+            Write-Host "Excluded from Defender real-time scanning: $($paths -join ', ')"
+          } catch {
+            Write-Warning "Could not add Defender exclusions: $_"
+          }
 
       # Required on the arm64 leg even though it never builds :androidApp: :composeApp is an
       # android.kotlin.multiplatform.library (see its `android { compileSdk = 37 }` block), so AGP

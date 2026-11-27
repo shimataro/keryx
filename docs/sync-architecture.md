@@ -40,8 +40,24 @@ pre-delta migration and the legacy watch), `domain/MergeSql.kt`,
     same edges have arrived every device ends in the same state. Nothing is lost: the articles, read and star state
     and tag links of both feeds end on the canonical feed. The merged feed takes each field from the newer version,
     so it can come out in the other feed's folder (or, by a newer unsubscribe, unsubscribed). A collision no device
-    ever observes — both feeds always seen holding the URL at different times — is missed everywhere (see
-    [known-issues.md](known-issues.md)).
+    ever observes — both feeds always seen holding the URL at different times — is missed everywhere: every device keeps
+    the two feeds apart in the same way, and nothing is lost (see "Sync: a feed identity collision no device observes
+    leaves two feeds" in [known-issues.md](known-issues.md)).
+- **No data is lost by a sync.** A merge, fold or garbage collection never removes a row, a field value, an article
+  body or a link (tag attachment, folder assignment) unless its field group's own rule supersedes it — last-write-wins,
+  or an article body's precedence of `content` (a version with `content` beats one with only a `summary`, and `summary`
+  is dropped once there is `content`) — or an explicit fold rule (`RowFold`: the earliest `created_at`, an article's
+  latest `cached_at` / `updated_at`, the greatest non-NULL `v2_id`) takes the other version's value — or a logical
+  deletion removes it. Losing a concurrent write to such a rule is not a loss; a row, child row or value that no rule supersedes disappearing from any device is. Identity merges (feeds, articles, tags, folders) move
+  children onto the surviving id instead of dropping them.
+- **Every device ends with the same data and the same display.** Once the same files have been merged — including
+  the deltas that carry the identity edges merges discovered (see the feeds bullet above) — and no device holds a local
+  change it has not yet sent, every device holds the same synced rows, and everything a user sees that derives from them — names, the sort order of feeds, folders and tags,
+  folder assignment, the numbering of same-named rows — is identical. No row exists on only some devices and no name
+  differs between devices. Device-local data (fetch state, the search index, `local_settings.json`) never feeds a synced
+  value or what is displayed from synced data; the feed list's fetch-problem indicator, search results and view
+  preferences such as the article list's sort direction are per-device, outside this guarantee. An identity collision
+  no device ever observes does not break this either: every device keeps both feeds (see the feeds bullet above).
 - **Only local changes are sent.** A change that arrived through a merge is never re-sent, so changes do not echo
   back and forth between devices. The one exception is a feed identity edge a merge discovers (a URL collision
   between main and the file): it is recorded for sending even inside the merge, since another device may never
@@ -566,6 +582,22 @@ and the ambiguous `SQLITE_ERROR` case of the classification below is checked aga
 
 > [!IMPORTANT]
 > SQLDelight's JVM `JdbcSqliteDriver` opens a new connection per statement for file DBs. Therefore, executing `ATTACH` through the driver makes it invisible to subsequent merge statements (`no such table: cloud.*`). The merge is done on a **single dedicated connection** in `platform/DatabaseMerger`: attach → version check → merge (transaction) → detach.
+
+**Conditions every merge rule must meet**, so that the guarantees in "Design Philosophy" (no data lost, the same data and
+display on every device) hold for any statement added or changed:
+
+- Every synced column belongs to exactly one field group with one stamp (or an explicit OR rule); a column in no group
+  changes only through an explicit fold rule (`RowFold`: the earliest `created_at`, an article's latest `cached_at` /
+  `updated_at`, the greatest non-NULL `v2_id`), and one with neither diverges between devices. The identity merge
+  moves a row's id, and the references it rewrites (`feed_tags.feed_id` / `tag_id`, `articles.feed_id`), onto the
+  canonical id; that is not a fold rule, so every other column that has no fold rule — a `UNIQUE` one such as
+  `feeds.url`, or a reference that is a value such as a feed's folder assignment — still needs its field group.
+- The tie rule is a total order on values (`SyncLww`), so arrival order never decides the result.
+- A statement that drops, folds or re-keys rows moves their children (articles, `feed_tags`, fetch state, raw folder
+  assignment) first.
+- Folding (`ReduceSql`) and garbage collection obey the same rules, so a fold equals the files it replaces.
+- A derived cache (`feeds.folder_id`) is computed from synced state alone, and a displayed name or its numbering
+  derives from synced data only.
 
 Merge SQL (`MergeSql`) key points:
 

@@ -70,6 +70,15 @@ See CLAUDE.md constraints #1–#2.
 - Is merge-failure classification still driven by SQLite's **error code**
   (`SQLiteException.resultCode`), classified in `DatabaseMerger` / `MergeFailureClassifier` — not by
   matching message text in `SyncRepository`? It drives the destructive `ResetCloudData` action.
+- Can any row, value, body or link disappear from a device without its field group's own rule (last-write-wins, an
+  article body's `content` precedence), an explicit `RowFold` rule or a logical deletion superseding it (a dropped, folded or re-keyed row whose
+  children are not moved first)? Losing a concurrent write to such a rule is not a loss. (`docs/sync-architecture.md` "Design Philosophy")
+- Do all devices end with the same data and display? Check that the result does not depend on the order files arrive in
+  or on folding, that every new synced column belongs to a field group, and that no device-local value (fetch state,
+  search index, `local_settings.json`) reaches a synced value or the display derived from synced data (names, the sort
+  order of feeds, folders and tags, numbering). Per-device status — the feed list's fetch-problem indicator, search
+  results — and view preferences kept in `local_settings.json` (the article list's sort direction and mode, e.g.
+  `lastNewestFirst`) are outside this.
 
 ## Investigation
 
