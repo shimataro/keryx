@@ -40,8 +40,9 @@ pre-delta migration and the legacy watch), `domain/MergeSql.kt`,
     same edges have arrived every device ends in the same state. Nothing is lost: the articles, read and star state
     and tag links of both feeds end on the canonical feed. The merged feed takes each field from the newer version,
     so it can come out in the other feed's folder (or, by a newer unsubscribe, unsubscribed). A collision no device
-    ever observes — both feeds always seen holding the URL at different times — is missed everywhere (see
-    [known-issues.md](known-issues.md)).
+    ever observes — both feeds always seen holding the URL at different times — is missed everywhere: every device keeps
+    the two feeds apart in the same way, and nothing is lost (see "Sync: a feed identity collision no device observes
+    leaves two feeds" in [known-issues.md](known-issues.md)).
 - **No data is lost by a sync.** A merge, fold or garbage collection never removes a row, a field value, an article
   body or a link (tag attachment, folder assignment) unless its field group's own rule supersedes it — last-write-wins,
   or an article body's precedence of `content` (a version with `content` beats one with only a `summary`, and `summary`

@@ -808,6 +808,47 @@ to be chosen when this is taken up:
 Whichever is chosen, the live `articles_fts` must not be dropped during the switch, and `ks_search_awaiting_body`
 becomes unnecessary once a body arriving later simply re-indexes the row.
 
+## Sync: a feed identity collision no device observes leaves two feeds
+
+**Status**: not fixed — no data is lost and every device ends the same; closing it needs evidence of identity
+beyond a shared URL, which is a redesign of feed identity discovery.
+
+### Symptom
+
+One feed shows as two rows in the feed list, each with its own copy of the articles, and the read and star state
+of an article split between the two. Every device shows the same two rows.
+
+### Diagnosis
+
+A feed keeps the id derived from the URL it was first subscribed at across a permanent redirect, so the same feed
+can be held under two ids. Two ids become one feed only through an identity edge, and an edge comes only from two
+ids holding the same `url` at the same time — a merge (or a fold) that meets both, or a refresh whose same-host
+permanent redirect lands on the other feed's URL ("Identities of feeds and articles" in
+[sync-architecture.md](sync-architecture.md); `FeedIdentitySql`, `ReduceSql.feedUrlEdges`). Whether that happens
+depends on the order the two meet: `a@X`, `a@Y`, `b@X` records no edge, while `a@X`, `b@X`, `a@Y` does.
+
+`feeds.url` is `UNIQUE`, so a device that would come to hold both feeds at one URL observes the collision in that
+merge, and the edge it records reaches every other device. A device that never observes it holds the two feeds at
+different URLs. When no device ever observes it, every device therefore holds the same two rows: nothing diverges
+and nothing is lost — the feed is only duplicated.
+
+### Ruled out
+
+- **Edges from a URL's history.** A feed's earlier URL may since have been subscribed by an unrelated feed, so
+  linking every id that ever held a URL would merge feeds that are not the same.
+
+### What a real fix would need
+
+Evidence that two feeds are one beyond a URL they happened to share. Candidates, to be chosen when this is taken
+up:
+
+- **A user-initiated merge** of two feeds the user knows to be the same.
+- **Matching article guids** between the two feeds. This needs checking that unrelated feeds (two feeds of one
+  site, a mirror) cannot match.
+
+Whichever is chosen, it must stay an identity edge — a grow-only set whose canonical id depends on the set of edges
+alone — so the result never depends on the order files arrive in.
+
 ## Linux/GNOME: the tray menu briefly shows the previous label when it opens
 
 **Status**: not fixed — external (GNOME Shell AppIndicator extension) design limitation, and not
