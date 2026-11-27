@@ -1761,7 +1761,7 @@ class FeedRepositoryTest {
             val repo = newRepo(db, driver, fetcherWith { request -> fetched += request.url.toString(); respond(RSS, HttpStatusCode.OK) })
 
             assertEquals("fa", repo.resolveFeedId("fb"))
-            assertNotNull(repo.refreshFeedById("fb"))
+            assertIs<Result.Ok<Int>>(repo.refreshFeedById("fb"))
 
             // One fetch, of the merged feed's own URL (whichever of the two its merge kept).
             assertEquals(listOf(db.feedsQueries.getById("fa").executeAsOne().url), fetched.toList())
