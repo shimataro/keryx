@@ -4,6 +4,8 @@ import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -113,7 +115,24 @@ class FeedListInlineRenameTest {
                 renameSelectedRequestId = renameSelectedRequestId,
                 deleteSelectedRequestId = deleteSelectedRequestId,
             )
+            AfterListCompositionProbe(vm)
         }
+    }
+
+    /** Runs [afterListComposition] once the feed list's recomposition has been applied — see its use. */
+    @Volatile private var afterListComposition: () -> Unit = {}
+
+    /**
+     * Recomposes with the feed list and runs [afterListComposition] in that pass's side effects: after
+     * the pane's own effects have been launched and before any of their bodies has run, which is the
+     * one point where a test can change the ViewModel's live state between a composition and the
+     * effects that decide on it.
+     */
+    @Composable
+    private fun AfterListCompositionProbe(vm: HomeViewModel) {
+        // Read here, in the composition itself, so that the probe recomposes with the list.
+        val listed = vm.feeds.collectAsState().value.map { it.id }
+        SideEffect { if (listed.isNotEmpty()) afterListComposition() }
     }
 
     private fun ComposeUiTest.setInlineRenameContent(vm: HomeViewModel, menuController: MenuController = testMenuController) {
@@ -737,6 +756,44 @@ class FeedListInlineRenameTest {
         assertOneEditorWhileTheMapJoinsTwoListedRows("tag", "t-old", "t-new", ArticleFilter.Tag("t-old")) {
             insertTag("t-new", "Tag New", sortOrder = 0L)
             insertTag("t-old", "Tag Old", sortOrder = 1L)
+        }
+    }
+
+    /**
+     * The composition has collected the new feed list but not yet the map that joins the edit's old id
+     * to it, while the ViewModel's live map already has it: the editor's row is renderable under the live
+     * map, so the edit is kept, and it carries on onto the merged feed once composition catches up.
+     */
+    @Test
+    fun aLiveMapThatFindsTheRowKeepsTheEditWhileCompositionStillHoldsTheOldMap() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        db.insertFeed("f-new", sortOrder = 0L)
+        db.insertFeed("f-old", sortOrder = 1L)
+        val remaps = IdRemaps(db, Dispatchers.Unconfined)
+        useHomeViewModel(driver, db, idRemaps = remaps) { fixture ->
+            val vm = fixture.vm
+            setInlineRenameContent(vm)
+            startInlineRename(vm, ArticleFilter.Feed("f-old"))
+            typeName("Half typed")
+
+            // The map is published (the ViewModel's live value) right after the composition that first
+            // shows the new list, while that composition still holds the old map, and before the pane's
+            // effects decide on it.
+            var published = false
+            afterListComposition = {
+                if (!published && vm.feeds.value.map { it.id } == listOf("f-new")) {
+                    published = true
+                    runBlocking { remaps.publishFromDb() }
+                }
+            }
+            driver.mergeFeedForTest("f-old", "f-new")
+            waitUntil(timeoutMillis = 5_000) { published }
+            waitForIdle()
+
+            editor().assertIsDisplayed()
+            editor().assertTextContains("Half typed")
+            pressEnter()
+            assertEquals("Half typed", db.customTitleOf("f-new"), "the commit lands on the feed it became")
         }
     }
 

@@ -460,10 +460,12 @@ internal fun FeedListPane(
     // not scroll — only clears the stranded state — so it never fights a user who scrolled away for
     // unrelated reasons.
     //
-    // "Vanished" means the row was rendered for this edit and no longer is (editRowSeen). A row not
-    // rendered *yet* is not stranded: revealing a collapsed folder updates the ViewModel at once but
-    // reaches collapsedFolderIds above only on a later frame, so clearing on that first frame would
-    // cancel every rename that needed the reveal. A row the ViewModel's live state can't render
+    // The edit ends only when the ViewModel's live state cannot render its row — and not merely when
+    // the collected state, which can trail it by a frame, does not show the row. A row not rendered
+    // *yet* is not stranded: revealing a collapsed folder updates the ViewModel at once but reaches
+    // collapsedFolderIds above only on a later frame, so clearing on that first frame would cancel
+    // every rename that needed the reveal; and a row the live re-key map already finds is only waiting
+    // for the collected state to catch up, which reruns this effect. A row the live state can't render
     // either is cleared at once, so an edit can never wait forever on a row that will never come.
     //
     // Keyed on the lists (and on the expansion state, which decides which rows render) as well as on
@@ -472,7 +474,7 @@ internal fun FeedListPane(
     // row that is found returns at once, a catch-up that publishes the map restarts the effect only
     // through a changed editRowIndex, and a rerun for values that changed during a catch-up stops once
     // they stop changing, so this never loops.
-    var editRowSeen by remember(inlineEdit) { mutableStateOf(false) }
+    //
     // Bumped by a run that found a value changed during its catch-up, so a rerun decides on the newer
     // values even where no key has changed yet (the ViewModel's live expansion state, read below, can
     // move without the collected one ever showing it).
@@ -482,10 +484,7 @@ internal fun FeedListPane(
         strandedEditRecheck,
     ) {
         val target = inlineEdit ?: return@LaunchedEffect
-        if (editRowIndex != null) {
-            editRowSeen = true
-            return@LaunchedEffect
-        }
+        if (editRowIndex != null) return@LaunchedEffect
         // The values this run decides on. The delegated lists read the *current* value, which after
         // the catch-up's suspension can be newer than the one this run started for — newer than the
         // map the catch-up read, too — so every decision below is made on these snapshots. The
@@ -522,23 +521,22 @@ internal fun FeedListPane(
         // of its own. A re-key the catch-up reveals changes [idRemap], which restarts this effect with
         // the row found. A catch-up that failed decides nothing: the edit stays open, and the next value
         // asks again.
-        if (!renderableUnder(vm.idRemap.value)) {
-            if (!vm.catchUpIdRemapFromDb()) return@LaunchedEffect
-            val changedSinceStart = feeds != feedsAtStart ||
-                folders != foldersAtStart ||
-                tags != tagsAtStart ||
-                feedTagMap != feedTagMapAtStart ||
-                vm.collapsedFolderIds.value != collapsedAtStart ||
-                vm.expandedTagIds.value != expandedAtStart
-            if (changedSinceStart) {
-                strandedEditRecheck++
-                return@LaunchedEffect
-            }
-            // The row, matched through the caught-up map: found, so it only moved (a restart of this
-            // effect follows when the map reaches [idRemap]).
-            if (renderableUnder(vm.idRemap.value)) return@LaunchedEffect
+        if (renderableUnder(vm.idRemap.value)) return@LaunchedEffect
+        if (!vm.catchUpIdRemapFromDb()) return@LaunchedEffect
+        val changedSinceStart = feeds != feedsAtStart ||
+            folders != foldersAtStart ||
+            tags != tagsAtStart ||
+            feedTagMap != feedTagMapAtStart ||
+            vm.collapsedFolderIds.value != collapsedAtStart ||
+            vm.expandedTagIds.value != expandedAtStart
+        if (changedSinceStart) {
+            strandedEditRecheck++
+            return@LaunchedEffect
         }
-        if (editRowSeen || !renderableUnder(vm.idRemap.value)) inlineEdit = null
+        // The row, matched through the caught-up map: found, so it only moved (a restart of this
+        // effect follows when the map reaches [idRemap]).
+        if (renderableUnder(vm.idRemap.value)) return@LaunchedEffect
+        inlineEdit = null
     }
 
     FeedListAutoScrollEffect(dragPointerYState, hostBoundsState, listState, dragController)
