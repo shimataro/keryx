@@ -162,6 +162,30 @@ class HomeViewModelArticleRekeyTest {
         assertEquals("a0", vm.selectedArticle.value?.id)
     }
 
+    /**
+     * A list row read before a merge still carries the id the article had, and the ViewModel already
+     * knows the move (it carried the selection over it). Selecting that row names the article by its
+     * current id from the start: otherwise the cursor would keep the old id while the hydration, which
+     * works in the current one, matches nothing — and the body would never be applied.
+     */
+    @Test
+    fun selectingARowReadBeforeAMergeTheViewModelAlreadyKnowsSelectsTheArticleByItsCurrentId() = runVmTest {
+        val vm = newViewModel()
+        val staleRow = vm.row("a1")
+        vm.selectArticle(staleRow)
+        testScheduler.advanceUntilIdle()
+        mergeF1IntoF0()
+        assertEquals("a0", vm.currentArticleId("a1"), "precondition: the move is known")
+
+        vm.selectArticle(staleRow)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals("a0", vm.selectedArticleId.value)
+        assertEquals("a0", vm.selectedArticle.value?.id)
+        // The survivor of the key is the row with the larger rowid (a1's), under the smaller id.
+        assertEquals("Body a1", vm.selectedArticle.value?.content)
+    }
+
     /** The saved article, moved while the app was closed, is restored under the id it has now. */
     @Test
     fun aSavedArticleMovedWhileTheAppWasClosedIsRestored() = runVmTest {

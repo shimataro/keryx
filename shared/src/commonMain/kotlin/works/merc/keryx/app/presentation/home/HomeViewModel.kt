@@ -1216,9 +1216,12 @@ class HomeViewModel(
     /**
      * Selects an existing article, loads its full content, and marks it as read.
      *
-     * @param article The article row to select.
+     * @param row The article row to select. Its ids are brought up to date first: a feed merge may have
+     *   moved the article (and its feed) onto other ids since the row was read, and the cursor, the
+     *   pending row, the read pin and the hydration must all name the article by the id it has now.
      */
-    fun selectArticle(article: ArticleListRow) {
+    fun selectArticle(row: ArticleListRow) {
+        val article = row.copy(id = currentArticleId(row.id), feed_id = idRemaps.current.value.feed(row.feed_id))
         // Marking read is unconditional (external-spec §7: read the instant it is selected), so an
         // article passed over by a fast key repeat is still marked read. Enqueued here, at call time,
         // rather than after the body lookup below: dbWriteDispatcher runs writes one at a time in

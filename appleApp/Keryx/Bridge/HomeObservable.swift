@@ -296,7 +296,7 @@ final class HomeObservable: ObservableAssignment {
     /// flow a moment later, and a screen pushed in the same turn (the iOS reader) would first draw the
     /// previous article's state and then change it — see `HomeViewModel.isSelectedArticleShownUnread`.
     func selectArticle(_ article: ArticleListRow) {
-        selecting { viewModel.selectArticle(article: article) }
+        selecting { viewModel.selectArticle(row: article) }
     }
 
     func selectNextArticle() {
