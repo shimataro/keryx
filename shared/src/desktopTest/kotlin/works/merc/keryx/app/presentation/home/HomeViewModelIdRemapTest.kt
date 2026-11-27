@@ -721,10 +721,15 @@ class HomeViewModelIdRemapTest {
 
         held.hold()
         val show = launch { vm.showFeedDetail("f1") }
-        testScheduler.runCurrent()
-        assertEquals(true, show.isActive, "precondition: the catch-up is held")
-        vm.selectFilter(ArticleFilter.Feed("f2"))
-        held.release()
+        // Released on every way out, so a failed assertion reports itself instead of leaving `show` queued
+        // on the dispatcher until runTest times out waiting for it.
+        try {
+            testScheduler.runCurrent()
+            assertEquals(true, show.isActive, "precondition: the catch-up is held")
+            vm.selectFilter(ArticleFilter.Feed("f2"))
+        } finally {
+            held.release()
+        }
         show.join()
         testScheduler.advanceUntilIdle()
 
