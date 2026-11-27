@@ -63,6 +63,13 @@ SELECT * FROM feeds WHERE url = ?;
 resolveId:
 SELECT COALESCE((SELECT id FROM feeds WHERE id = :id), (SELECT new_id FROM ks_id_remap WHERE kind = 'feed' AND old_id = :id), :id);
 
+-- The row the feed :id is now: getById after resolveId, in one statement, so a merge that commits
+-- between the two cannot leave the id resolved to a row the same merge has since deleted. No row when
+-- the id is unknown.
+getByIdResolved:
+SELECT * FROM feeds
+WHERE id = COALESCE((SELECT id FROM feeds WHERE id = :id), (SELECT new_id FROM ks_id_remap WHERE kind = 'feed' AND old_id = :id), :id);
+
 getAllIncludingDeleted:
 SELECT * FROM feeds;
 

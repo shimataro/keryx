@@ -55,6 +55,15 @@ class StaleFeedArticleIdWriteTest {
     }
 
     @Test
+    fun getByIdResolvedReadsTheRowAStaleFeedIdBecameInOneStatement() = withDb { driver, db ->
+        staleFeed(driver, db)
+
+        assertEquals("f-new", db.feedsQueries.getByIdResolved("f-old").executeAsOne().id)
+        assertEquals("f-new", db.feedsQueries.getByIdResolved("f-new").executeAsOne().id)
+        assertNull(db.feedsQueries.getByIdResolved("f-unknown").executeAsOneOrNull())
+    }
+
+    @Test
     fun softDeleteByStaleFeedIdDeletesTheCanonicalFeed() = withDb { driver, db ->
         staleFeed(driver, db)
         db.feedsQueries.softDelete(500L, 500L, 500L, "f-old")
