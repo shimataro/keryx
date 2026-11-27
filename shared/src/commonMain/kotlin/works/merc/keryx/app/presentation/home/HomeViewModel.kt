@@ -1804,17 +1804,27 @@ class HomeViewModel(
     private suspend fun revertFailedArticleWrite(write: ArticleWrite) {
         write.awaitRegistered()
         val generations = generationsOf(write.field)
-        // In the id space of the moves applied since the write was made: its pins, intents and generations
-        // have moved with them ([remapHeldArticleIds]).
-        val writeIds = write.ids.map(::currentArticleId)
         try {
-            val flags = runCatchingUnlessCancelled {
-                withContext(dbWriteDispatcher) { articleRepository.aliveArticleFlags(writeIds) }
-            }.getOrElse { e ->
-                Log.warn(TAG, "Re-reading the articles of a failed read/star write failed", e)
-                _pinnedReadStates.update { pins -> pins.withoutPinsOf(write.readPins) }
-                _pinnedUnstarredArticles.update { pins -> pins.withoutPinsOf(write.unstarredPins) }
-                return
+            // In the id space of the moves applied since the write was made: its pins, intents and generations
+            // have moved with them ([remapHeldArticleIds]). A move can land while the read below is out (the
+            // ViewModel carries every held id over it, and the row the read asked for is then gone), so a read
+            // made for ids that have moved since is made again for the current ones — each repeat follows one
+            // more move, so this ends — and the flags, the generation checks and the release below all name
+            // the same ids.
+            var writeIds: List<String>
+            var flags: Map<String, ArticleFlags>
+            while (true) {
+                val asked = write.ids.map(::currentArticleId)
+                flags = runCatchingUnlessCancelled {
+                    withContext(dbWriteDispatcher) { articleRepository.aliveArticleFlags(asked) }
+                }.getOrElse { e ->
+                    Log.warn(TAG, "Re-reading the articles of a failed read/star write failed", e)
+                    _pinnedReadStates.update { pins -> pins.withoutPinsOf(write.readPins) }
+                    _pinnedUnstarredArticles.update { pins -> pins.withoutPinsOf(write.unstarredPins) }
+                    return
+                }
+                writeIds = write.ids.map(::currentArticleId)
+                if (writeIds == asked) break
             }
             val ids = writeIds.filterTo(HashSet()) { generations.isLatest(it, write.generation) }
             if (ids.isEmpty()) return
