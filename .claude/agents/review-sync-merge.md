@@ -75,7 +75,8 @@ See CLAUDE.md constraints #1–#2.
   write to last-write-wins is not a loss. (`docs/sync-architecture.md` "Design Philosophy")
 - Do all devices end with the same data and display? Check that the result does not depend on the order files arrive in
   or on folding, that every new synced column belongs to a field group, and that no device-local value (fetch state,
-  search index, `local_settings.json`) reaches a synced or displayed value.
+  search index, `local_settings.json`) reaches a synced value or the display derived from synced data (names, order,
+  numbering). Per-device status — the feed list's fetch-problem indicator, search results — is outside this.
 
 ## Investigation
 
