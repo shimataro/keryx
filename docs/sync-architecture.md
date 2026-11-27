@@ -709,7 +709,10 @@ Merge SQL (`MergeSql`) key points:
      the edges, so once observed anywhere an edge reaches every device.
   3. **Article identity** needs no edges: an article's key is `(canonical feed id of its feed, guid)`, and its
      canonical id is the smallest id among main's and the file's rows with that key. An id main holds keeps main's key,
-     even when the file carries it under a feed this device does not yet know to be the same one.
+     even when the file carries it under a feed this device does not yet know to be the same one: the file's row is
+     then merged into main's row of that id (its read, star, deletion and body groups by their own stamps, never its
+     `feed_id` / `guid`), so nothing it carries waits for the edge — the file is recorded as applied and is not merged
+     again, and the edge's later arrival only moves the row onto its identity's id.
   4. **The cloud side** is read, not rewritten: `cloud.feeds` mapped onto canonical ids and folded into one row per id
      by the per-group last-write-wins (content, sort order, custom title, subscription state and the raw folder
      assignment, kept as the file wrote it; `created_at` the earliest), and the touched `cloud.articles` likewise
@@ -793,7 +796,8 @@ Merge SQL (`MergeSql`) key points:
   own `updated_at`.
 - `NOT EXISTS` / `EXISTS` guards skip rows colliding with main (a feed's URL or an article's `(feed_id, guid)` under
   a different id — which the feed identity step leaves none of, so these are defensive — or a referenced row main
-  lacks) so UNIQUE / FK violations do not fail the whole transaction. Tag and
+  lacks) so UNIQUE / FK violations do not fail the whole transaction — except that an article main already holds by
+  id is always merged into that row, whatever key the file carries it under (see "Identities of feeds and articles"). Tag and
   folder rows carry no extra guard: a name main holds under another id is allowed through, and same-named rows
   coexist.
 - `MergeSql.all` order: the cloud rows' and main's rows' identity edges, the tag/folder identity step

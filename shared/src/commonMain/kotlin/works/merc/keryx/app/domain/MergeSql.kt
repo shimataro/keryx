@@ -39,7 +39,9 @@ package works.merc.keryx.app.domain
  * NOT-EXISTS / EXISTS guards still keep a merge from ever aborting on main's own constraints: a row
  * that would collide with main (a feed's URL or an article's `(feed_id, guid)` under a different id —
  * which the identity step leaves none of, so these guards are defensive) or reference a row main lacks
- * is skipped.
+ * is skipped. An article main already holds by id is the exception: it is merged into that row by id
+ * whatever key the file carries it under, so its read, star, deletion and body are never lost to a
+ * feed edge that has not arrived yet.
  */
 object MergeSql {
 
@@ -231,15 +233,28 @@ object MergeSql {
 
     /**
      * Which cloud articles the merge considers (also what the ks_search_pending statements consider).
-     * After the identity step no main row holds a cloud row's `(feed_id, guid)` under another id, so
-     * the NOT EXISTS guard is defensive.
+     *
+     * An article main already holds by id is always merged into that row, whatever key `(feed_id, guid)`
+     * the file carries it under: the file may name a feed that main does not yet know to be the same one
+     * (the identity edge can arrive in a later file), and skipping the row would drop the read, star,
+     * deletion and body it carries for good — the file is recorded as applied and is not merged again.
+     * The row's own `feed_id` / `guid` are never rewritten ([articles]), so this cannot break
+     * `UNIQUE(feed_id, guid)`; the identity step moves it onto its identity's id once the edge is known.
+     *
+     * A row main does not hold is inserted only when no main row holds its key under another id (the
+     * NOT EXISTS guard is defensive: the identity step leaves none) and its feed exists.
      */
     private val articleEligible = """
-        NOT EXISTS (
+        (
+          EXISTS (SELECT 1 FROM main.articles l0 WHERE l0.id = c.id)
+          OR (
+            NOT EXISTS (
               SELECT 1 FROM main.articles l2
               WHERE l2.feed_id = c.feed_id AND l2.guid = c.guid AND l2.id <> c.id
+            )
+            AND EXISTS (SELECT 1 FROM main.feeds mf WHERE mf.id = c.feed_id)
           )
-          AND EXISTS (SELECT 1 FROM main.feeds mf WHERE mf.id = c.feed_id)
+        )
     """.trimIndent()
 
     /** Whether the cloud version of [group] wins (always, for an article main does not have). */
@@ -288,7 +303,10 @@ object MergeSql {
     )
 
     // feed_id / guid are only ever set on insert: they make up the article's id, and rewriting them
-    // on an existing row could only break UNIQUE(feed_id, guid) or the feed reference.
+    // on an existing row could only break UNIQUE(feed_id, guid) or the feed reference. The row proposed
+    // for an existing id therefore carries main's own feed_id / guid (COALESCE with l's), not the file's:
+    // the file may hold the article under a key main holds under another id (see [articleEligible]), and
+    // the proposed row would then violate UNIQUE(feed_id, guid) before ON CONFLICT(id) could update it.
     // updated_at is the row's generic stamp and no group's key: it takes the greater of the two.
     private val articles = """
         INSERT INTO main.articles (
@@ -297,7 +315,7 @@ object MergeSql {
             updated_at, created_at, deleted_at, deleted_updated_at, body_updated_at
         )
         SELECT
-            c.id, c.feed_id, c.guid,
+            c.id, COALESCE(l.feed_id, c.feed_id), COALESCE(l.guid, c.guid),
             ${winner(SyncLww.ARTICLE_BODY, "url")},
             ${winner(SyncLww.ARTICLE_BODY, "title")},
             CASE WHEN ${cloudWins(SyncLww.ARTICLE_BODY)} THEN ${SyncLww.normalizedSummary("c")} ELSE ${SyncLww.normalizedSummary("l")} END,

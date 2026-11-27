@@ -480,16 +480,19 @@ class FeedIdentityMergeTest {
         val edge = transportFile(deltaName(DEV_A, 2), "INSERT INTO feed_edges (a, b) VALUES ('fp', 'fq')")
 
         val viaFileFirst = main().also { merge(it, file) }
-        // Transitional: every id keeps exactly one key (main's), and nothing violates a constraint. The
-        // file's row for a1 is not applied while main holds its (feed, guid) under b1 (`MergeSql`'s
-        // defensive guard), so the read state it carries has not arrived yet.
-        assertEquals(listOf("a1|fq|g1|0", "b1|fp|g1|0"), rows(viaFileFirst, "SELECT id, feed_id, guid, is_read FROM articles ORDER BY id"))
+        // Transitional: every id keeps exactly one key (main's) and nothing violates a constraint. The
+        // file's a1 is merged into main's row of that id although the file names it under fp, so the read
+        // state it carries has arrived with this one delivery — the file is recorded as applied and is not
+        // merged again, so it would otherwise never reach this device.
+        assertEquals(listOf("a1|fq|g1|1", "b1|fp|g1|0"), rows(viaFileFirst, "SELECT id, feed_id, guid, is_read FROM articles ORDER BY id"))
         assertEquals(emptyList(), foreignKeyViolations(viaFileFirst))
-        merge(viaFileFirst, edge)
-        // The edge consolidates the two rows onto one; a later delivery of the file's content
-        // (a base, say) then brings the state it carries.
-        assertEquals(listOf("a1|fp|g1"), rows(viaFileFirst, "SELECT id, feed_id, guid FROM articles"))
+        // Idempotent: the same file again changes nothing.
+        val afterFirstDelivery = identityState(viaFileFirst)
         merge(viaFileFirst, file)
+        assertEquals(afterFirstDelivery, identityState(viaFileFirst))
+        merge(viaFileFirst, edge)
+        // The edge consolidates the two rows onto one; the read state is already there.
+        assertEquals(listOf("a1|fp|g1|1"), rows(viaFileFirst, "SELECT id, feed_id, guid, is_read FROM articles"))
 
         val viaEdgeFirst = main().also { merge(it, edge); merge(it, file) }
 
