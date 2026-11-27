@@ -1,6 +1,10 @@
 package works.merc.keryx.app.presentation.home
 
+import app.cash.sqldelight.db.QueryResult
+import app.cash.sqldelight.db.SqlCursor
 import app.cash.sqldelight.db.SqlDriver
+import app.cash.sqldelight.db.SqlPreparedStatement
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -22,6 +26,9 @@ import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
 import works.merc.keryx.app.platform.AppDirs
 import works.merc.keryx.app.platform.FileIO
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import kotlin.random.Random
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
@@ -50,9 +57,9 @@ class HomeViewModelArticleRekeyTest {
     fun setUp() {
         scheduler = TestCoroutineScheduler()
         Dispatchers.setMain(StandardTestDispatcher(scheduler))
-        val (d, database) = inMemoryDb()
-        driver = d
-        db = database
+        val (raw, _) = inMemoryDb()
+        driver = ArticleLookupHookDriver(raw)
+        db = KeryxDatabase(driver)
         db.insertFeed("f0")
         db.insertFeed("f1")
         db.insertArticle("a0", "f0", guid = "g", publishedAt = 2000L)
@@ -181,5 +188,76 @@ class HomeViewModelArticleRekeyTest {
         mergeF1IntoF0()
 
         assertEquals("a0", vm.currentArticleId("a1"))
+    }
+
+    /**
+     * The selection's body lookup resolves the article (a2 -> a1) and is then held before it returns,
+     * while a second merge moves that row on (a1 -> a0) and the ViewModel carries every held id onto it
+     * (a2 -> a0). The late lookup result names a1, which is no longer the current id: the selection, its
+     * cursor and the saved article stay on a0 instead of being moved back onto a1.
+     */
+    @Test
+    fun aLookupThatReadAnIdAMergeThenMovedOnLeavesTheSelectionOnTheCurrentId() = runVmTest {
+        db.insertFeed("f2")
+        db.insertArticle("a2", "f2", guid = "g", publishedAt = 500L)
+        // A pool: the ViewModel's flows run on this dispatcher too, so one parked thread must not stop them.
+        val lookupThreads = Executors.newCachedThreadPool()
+        try {
+            val vm = newViewModel(dispatcher = lookupThreads.asCoroutineDispatcher())
+            val row = vm.row("a2")
+            // a2 -> a1 is already in the database (the lists have not been told), so the lookup resolves it.
+            db.transaction { FeedIdentitySql.mergeLocally(driver, "f2", "f1") }
+            val read = CountDownLatch(1)
+            val proceed = CountDownLatch(1)
+            (driver as ArticleLookupHookDriver).afterNextArticleLookup = {
+                read.countDown()
+                check(proceed.await(10, TimeUnit.SECONDS)) { "the test never let the lookup return" }
+            }
+            vm.selectArticle(row)
+            check(read.await(10, TimeUnit.SECONDS)) { "the lookup never ran" }
+
+            // The lookup holds a1. Now a1 moves on, and the ViewModel learns of it before the lookup returns.
+            db.transaction { FeedIdentitySql.mergeLocally(driver, "f1", "f0") }
+            driver.notifyListeners("feeds", "articles", "feed_tags", "feed_fetch_state")
+            testScheduler.advanceUntilIdle()
+            assertEquals("a0", vm.currentArticleId("a2"), "precondition: the held id moved to a0 while the lookup waited")
+
+            proceed.countDown()
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
+            while (vm.selectedArticle.value == null && System.nanoTime() < deadline) {
+                testScheduler.advanceUntilIdle()
+                Thread.sleep(10)
+            }
+            testScheduler.advanceUntilIdle()
+
+            assertEquals("a0", vm.selectedArticleId.value)
+            assertEquals("a0", vm.selectedArticle.value?.id)
+            assertEquals("a0", vm.currentArticleId("a2"))
+        } finally {
+            lookupThreads.shutdownNow()
+        }
+    }
+}
+
+/**
+ * Passes every statement through to [delegate]; [afterNextArticleLookup], when set, runs once, right
+ * after the next `articles.getByIdResolved` statement has read its row (on the thread that ran it) —
+ * the one point at which a test can hold a selection's body lookup between its read and its return.
+ */
+private class ArticleLookupHookDriver(private val delegate: SqlDriver) : SqlDriver by delegate {
+    @Volatile var afterNextArticleLookup: (() -> Unit)? = null
+
+    override fun <R> executeQuery(
+        identifier: Int?,
+        sql: String,
+        mapper: (SqlCursor) -> QueryResult<R>,
+        parameters: Int,
+        binders: (SqlPreparedStatement.() -> Unit)?,
+    ): QueryResult<R> {
+        val result = delegate.executeQuery(identifier, sql, mapper, parameters, binders)
+        if ("ks_id_remap" in sql && "FROM articles" in sql && "WHERE id = COALESCE" in sql) {
+            afterNextArticleLookup?.also { afterNextArticleLookup = null }?.invoke()
+        }
+        return result
     }
 }

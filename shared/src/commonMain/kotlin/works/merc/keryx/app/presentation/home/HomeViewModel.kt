@@ -1337,19 +1337,33 @@ class HomeViewModel(
         // onto another id since the list row was read — its old row is then gone, which must not be
         // taken for a deletion. A row that comes back under another id moves every id held for it
         // first ([remapHeldArticleIds]); everything below then works in the id it has now.
+        //
+        // The id asked for is the one held at the time of the lookup. A merge can move it on while the
+        // lookup is out (the ViewModel carries every held id over such a move, [remapHeldArticleIds]), and
+        // then the row that came back belongs to an id that is no longer current: carrying the held ids onto
+        // it would move them back off the current one. So a lookup made for an id that has moved since is
+        // made again for the current id; each repeat follows one more move, so this ends.
         var article = selected.copy(id = currentArticleId(selected.id))
-        val full = runCatchingUnlessCancelled {
-            withContext(dispatcher) { articleRepository.getArticleByIdResolved(article.id) }
-        }.getOrElse { e ->
-            Log.warn(TAG, "Loading the selected article's body failed", e)
-            if (token == latestSelectionToken && selectionCursorId == article.id) {
-                _headerArticleId.value = article.id
-                // It is still the selection on screen, so it is the one the next launch restores. Whether
-                // it is still visible is unknown here, but the launch-time restore filters by visibility itself,
-                // and restores nothing if its own lookup of this article fails again.
-                settingsRepository.mutateLocalSettings { it.copy(lastArticleId = article.id) }
+        var full: Articles?
+        while (true) {
+            val asked = article.id
+            full = runCatchingUnlessCancelled {
+                withContext(dispatcher) { articleRepository.getArticleByIdResolved(asked) }
+            }.getOrElse { e ->
+                Log.warn(TAG, "Loading the selected article's body failed", e)
+                val id = currentArticleId(asked)
+                if (token == latestSelectionToken && selectionCursorId == id) {
+                    _headerArticleId.value = id
+                    // It is still the selection on screen, so it is the one the next launch restores. Whether
+                    // it is still visible is unknown here, but the launch-time restore filters by visibility itself,
+                    // and restores nothing if its own lookup of this article fails again.
+                    settingsRepository.mutateLocalSettings { it.copy(lastArticleId = id) }
+                }
+                return
             }
-            return
+            val current = currentArticleId(asked)
+            if (current == asked) break
+            article = article.copy(id = current)
         }
         // A null row, or one no longer visible (deleted and not starred, isVisible), means a sync merge
         // deleted it between the emission the user clicked and the click itself: leave the selection
@@ -1357,7 +1371,7 @@ class HomeViewModel(
         // resurrecting deleted content into the list (the `articles` merge re-adds any pinned id
         // missing from the query result) or restoring it on the next launch. A pin dropped by a
         // browsing-context switch since is not this hydration's to touch.
-        if (full != null && full.id != currentArticleId(article.id)) remapHeldArticleIds(mapOf(currentArticleId(article.id) to full.id))
+        if (full != null && full.id != article.id) remapHeldArticleIds(mapOf(article.id to full.id))
         article = article.copy(id = currentArticleId(article.id))
         if (full == null || !full.isVisible) {
             if (pinnedAtSelect && epoch == browsingEpoch) _pinnedReadStates.update { it - article.id }
