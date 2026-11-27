@@ -3614,9 +3614,15 @@ class FeedRepositoryTest {
         val (driver, db) = inMemoryDb()
         try {
             val notified = redirectMergeSetup(driver, db)
-            val repo = newRepo(db, driver, redirectOldToNew(), publishIdRemaps = { error("simulated publish failure") })
+            var publishes = 0
+            val repo = newRepo(
+                db, driver, redirectOldToNew(),
+                publishIdRemaps = { publishes++; error("simulated publish failure") },
+            )
 
             assertIs<Result.Ok<Int>>(repo.refreshFeed(db.feedsQueries.getById("f-q").executeAsOne()))
+
+            assertEquals(1, publishes, "the merge's re-keys were handed to the publisher")
 
             assertEquals(listOf("f-p|https://ex.com/new"), driver.rows("SELECT id, url FROM feeds"))
             assertEquals(listOf("f-p|t1"), driver.rows("SELECT feed_id, tag_id FROM feed_tags"))
