@@ -22,6 +22,7 @@ import works.merc.keryx.app.data.local.LocalSettingsStore
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.domain.FeedIdentitySql
 import works.merc.keryx.app.domain.IdRemaps
+import works.merc.keryx.app.awaitCondition
 import works.merc.keryx.app.fileDb
 import works.merc.keryx.app.insertFeed
 import works.merc.keryx.app.platform.AppDirs
@@ -245,15 +246,13 @@ class HomeViewModelArticleRekeyTest {
             // The lookup holds a1. Now a1 moves on, and the ViewModel learns of it before the lookup returns.
             db.transaction { FeedIdentitySql.mergeLocally(driver, "f1", "f0") }
             driver.notifyListeners("feeds", "articles", "feed_tags", "feed_fetch_state")
-            testScheduler.advanceUntilIdle()
+            // The ViewModel's reconcile runs on the pool and hands the move to the main dispatcher, which
+            // runTest's scheduler runs while this body waits on the real-time helper.
+            awaitCondition { vm.selectedArticleId.value == "a0" }
             assertEquals("a0", vm.currentArticleId("a2"), "precondition: the held id moved to a0 while the lookup waited")
 
             proceed.countDown()
-            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
-            while (vm.selectedArticle.value == null && System.nanoTime() < deadline) {
-                testScheduler.advanceUntilIdle()
-                Thread.sleep(10)
-            }
+            awaitCondition { vm.selectedArticle.value != null }
             testScheduler.advanceUntilIdle()
 
             assertEquals("a0", vm.selectedArticleId.value)
