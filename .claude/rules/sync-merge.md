@@ -64,9 +64,10 @@ it covers is a destructive-action decision, not a refactor.
 
 ## Invariants every change must keep
 
-- **No data is lost.** Nothing a merge, fold or garbage collection does may remove a row, value, body or link that no
-  its field group's own rule (last-write-wins, an article body's `content` precedence) or a logical deletion supersedes;
-  losing a concurrent write to such a rule is not a loss.
+- **No data is lost.** Nothing a merge, fold or garbage collection does may remove a row, value, body or link
+  unless its field group's own rule (last-write-wins, an article body's `content` precedence), an explicit `RowFold`
+  rule (the earliest `created_at`, the latest `cached_at` / `updated_at`, the greatest `v2_id`) or a logical deletion
+  supersedes it; losing a concurrent write to such a rule is not a loss.
 - **Every device ends identical.** After the same files are merged, all devices hold and show the same synced data
   (names and numbering included); device-local data never leaks into it.
 
