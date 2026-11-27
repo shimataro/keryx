@@ -13,8 +13,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextContains
@@ -857,12 +860,31 @@ class FeedListInlineRenameTest {
     }
 
     /**
-     * Waits until the ViewModel's tag list shows exactly [ids], then for Compose to settle. The list
-     * queries re-run on the repositories' own dispatcher, which [waitForIdle] alone does not wait for.
+     * Waits until the ViewModel's tag list shows exactly [ids] *and* the feed list has rendered exactly
+     * those tag rows, then for Compose to settle. The list queries re-run on the repositories' own
+     * dispatcher, which [waitForIdle] alone does not wait for; and the ViewModel's value alone is not
+     * enough either: `MutableStateFlow` publishes a value before it resumes its collectors, so the test
+     * thread can see the new value while the pane's `collectAsState` has not even been scheduled yet —
+     * [waitForIdle] then returns at once over the old rows. A rendered row set equal to [ids] means the
+     * pane has received the list, so the [waitForIdle] after it also runs the stranded-edit effect keyed
+     * on it. Tag rows are lazy items, so this relies on every row being on screen (two tags at most here).
      */
     private fun ComposeUiTest.awaitTags(vm: HomeViewModel, vararg ids: String) {
-        waitUntil(timeoutMillis = 5_000) { vm.tags.value.map { it.id }.toSet() == ids.toSet() }
+        val expected = ids.toSet()
+        waitUntil(timeoutMillis = 5_000) {
+            vm.tags.value.map { it.id }.toSet() == expected && renderedTagRowIds() == expected
+        }
         waitForIdle()
+    }
+
+    /** The ids of the tag rows the feed list currently renders (see [tagRowTestTag]). */
+    private fun ComposeUiTest.renderedTagRowIds(): Set<String> {
+        val prefix = tagRowTestTag("")
+        return onAllNodes(
+            SemanticsMatcher("is a tag row") {
+                it.config.getOrNull(SemanticsProperties.TestTag)?.startsWith(prefix) == true
+            },
+        ).fetchSemanticsNodes().mapTo(HashSet()) { it.config[SemanticsProperties.TestTag].removePrefix(prefix) }
     }
 
     /**
