@@ -60,7 +60,7 @@ import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.data.local.db.Folders
 import works.merc.keryx.app.data.local.db.Tags
-import works.merc.keryx.app.domain.TagFolderIdRemap
+import works.merc.keryx.app.domain.IdRemap
 import works.merc.keryx.app.domain.displayTitle
 import works.merc.keryx.app.presentation.home.FeedListRowSelection
 import works.merc.keryx.app.presentation.home.FeedListSelectionTarget
@@ -236,8 +236,7 @@ internal fun FeedListPane(
     // changes reach composition on separate flows, in either order: a rewrite could name an id the
     // lists do not have yet, and one that waited could name an id they no longer have; but two ids
     // the map joins are the same row, whichever of them the lists currently use.
-    val idRemap by vm.tagFolderIdRemap.collectAsState()
-    fun isEditing(row: InlineEditTarget): Boolean = inlineEdit?.remappedBy(idRemap) == row.remappedBy(idRemap)
+    val idRemap by vm.idRemap.collectAsState()
     var searchFieldFocused by remember { mutableStateOf(false) }
     val folderNameDuplicateError = stringResource(Res.string.home_folder_name_duplicate)
     val tagNameDuplicateError = stringResource(Res.string.home_tag_name_duplicate)
@@ -423,15 +422,25 @@ internal fun FeedListPane(
     // The rendered index of the row the in-progress edit lives on, or null while that row isn't in
     // the list — derived from the same collected state the rows render from, and recomputed only when
     // that state changes rather than on every keystroke's recomposition while the edit is open.
-    // The edit's row is looked up under the id the lists carry for it, matched the way isEditing
-    // matches a row (both ids brought up to date by idRemap — see resolvedIn): the lists and the map
+    // The edit's row is looked up under the id the lists carry for it (both ids brought up to date
+    // by idRemap — see resolvedIn): the lists and the map
     // reach composition separately, so the lists can show the id the edit was started with, the one
     // the map gives it, or one in between.
-    val editRowIndex = remember(inlineEdit, idRemap, feeds, folders, tags, collapsedFolderIds, feedTagMap, expandedTagIds) {
-        inlineEdit?.resolvedIn(folders, tags, idRemap)?.let {
+    //
+    // The edit's row is resolved once, to the single row the lists carry for it ([editTargetRendered]),
+    // and both the editor and the index below follow that one target. Matching every row against the
+    // edit instead would host an editor on each of two rows that the map joins when the lists still
+    // show both (a merge's map can reach composition before the lists drop the old row): two editors
+    // with one draft, the later one's focus making the earlier one commit.
+    val editTargetRendered = remember(inlineEdit, idRemap, feeds, folders, tags) {
+        inlineEdit?.resolvedIn(feeds, folders, tags, idRemap)
+    }
+    val editRowIndex = remember(editTargetRendered, feeds, folders, tags, collapsedFolderIds, feedTagMap, expandedTagIds) {
+        editTargetRendered?.let {
             feedListRowIndex(it.rowInstance, feeds, folders, tags, collapsedFolderIds, feedTagMap, expandedTagIds)
         }
     }
+    fun isEditing(row: InlineEditTarget): Boolean = editTargetRendered == row
 
     // An edit can be started from the menu bar (or a shortcut) while its row is scrolled out of
     // view, and an editor the user cannot see would swallow every keystroke with nothing to show.
@@ -451,10 +460,12 @@ internal fun FeedListPane(
     // not scroll — only clears the stranded state — so it never fights a user who scrolled away for
     // unrelated reasons.
     //
-    // "Vanished" means the row was rendered for this edit and no longer is (editRowSeen). A row not
-    // rendered *yet* is not stranded: revealing a collapsed folder updates the ViewModel at once but
-    // reaches collapsedFolderIds above only on a later frame, so clearing on that first frame would
-    // cancel every rename that needed the reveal. A row the ViewModel's live state can't render
+    // The edit ends only when the ViewModel's live state cannot render its row — and not merely when
+    // the collected state, which can trail it by a frame, does not show the row. A row not rendered
+    // *yet* is not stranded: revealing a collapsed folder updates the ViewModel at once but reaches
+    // collapsedFolderIds above only on a later frame, so clearing on that first frame would cancel
+    // every rename that needed the reveal; and a row the live re-key map already finds is only waiting
+    // for the collected state to catch up, which reruns this effect. A row the live state can't render
     // either is cleared at once, so an edit can never wait forever on a row that will never come.
     //
     // Keyed on the lists (and on the expansion state, which decides which rows render) as well as on
@@ -463,7 +474,7 @@ internal fun FeedListPane(
     // row that is found returns at once, a catch-up that publishes the map restarts the effect only
     // through a changed editRowIndex, and a rerun for values that changed during a catch-up stops once
     // they stop changing, so this never loops.
-    var editRowSeen by remember(inlineEdit) { mutableStateOf(false) }
+    //
     // Bumped by a run that found a value changed during its catch-up, so a rerun decides on the newer
     // values even where no key has changed yet (the ViewModel's live expansion state, read below, can
     // move without the collected one ever showing it).
@@ -473,10 +484,7 @@ internal fun FeedListPane(
         strandedEditRecheck,
     ) {
         val target = inlineEdit ?: return@LaunchedEffect
-        if (editRowIndex != null) {
-            editRowSeen = true
-            return@LaunchedEffect
-        }
+        if (editRowIndex != null) return@LaunchedEffect
         // The values this run decides on. The delegated lists read the *current* value, which after
         // the catch-up's suspension can be newer than the one this run started for — newer than the
         // map the catch-up read, too — so every decision below is made on these snapshots. The
@@ -491,7 +499,7 @@ internal fun FeedListPane(
         val expandedAtStart = vm.expandedTagIds.value
         // Whether the snapshots render the edit's row, found under whatever id they carry for it the
         // same way editRowIndex finds it, with [remap] in place of idRemap.
-        fun renderableUnder(remap: TagFolderIdRemap) = target.resolvedIn(foldersAtStart, tagsAtStart, remap)?.let {
+        fun renderableUnder(remap: IdRemap) = target.resolvedIn(feedsAtStart, foldersAtStart, tagsAtStart, remap)?.let {
             feedListRowIndex(
                 it.rowInstance,
                 feedsAtStart,
@@ -503,7 +511,7 @@ internal fun FeedListPane(
             ) != null
         } ?: false
         // The lists can reach here ahead of the re-key map: a merge publishes the map only after it
-        // commits, and another write in between re-runs the tag/folder queries over the re-keyed rows.
+        // commits, and another write in between re-runs the feed/tag/folder queries over the re-keyed rows.
         // So the row is not declared gone while the published map might be stale — the map is first
         // caught up from the committed database (the one shared ViewModel implementation, also the
         // SwiftUI app's), and only an absence that survives that ends the edit. That absence is judged
@@ -513,23 +521,22 @@ internal fun FeedListPane(
         // of its own. A re-key the catch-up reveals changes [idRemap], which restarts this effect with
         // the row found. A catch-up that failed decides nothing: the edit stays open, and the next value
         // asks again.
-        if (!renderableUnder(vm.tagFolderIdRemap.value)) {
-            if (!vm.catchUpIdRemapFromDb()) return@LaunchedEffect
-            val changedSinceStart = feeds != feedsAtStart ||
-                folders != foldersAtStart ||
-                tags != tagsAtStart ||
-                feedTagMap != feedTagMapAtStart ||
-                vm.collapsedFolderIds.value != collapsedAtStart ||
-                vm.expandedTagIds.value != expandedAtStart
-            if (changedSinceStart) {
-                strandedEditRecheck++
-                return@LaunchedEffect
-            }
-            // The row, matched through the caught-up map: found, so it only moved (a restart of this
-            // effect follows when the map reaches [idRemap]).
-            if (renderableUnder(vm.tagFolderIdRemap.value)) return@LaunchedEffect
+        if (renderableUnder(vm.idRemap.value)) return@LaunchedEffect
+        if (!vm.catchUpIdRemapFromDb()) return@LaunchedEffect
+        val changedSinceStart = feeds != feedsAtStart ||
+            folders != foldersAtStart ||
+            tags != tagsAtStart ||
+            feedTagMap != feedTagMapAtStart ||
+            vm.collapsedFolderIds.value != collapsedAtStart ||
+            vm.expandedTagIds.value != expandedAtStart
+        if (changedSinceStart) {
+            strandedEditRecheck++
+            return@LaunchedEffect
         }
-        if (editRowSeen || !renderableUnder(vm.tagFolderIdRemap.value)) inlineEdit = null
+        // The row, matched through the caught-up map: found, so it only moved (a restart of this
+        // effect follows when the map reaches [idRemap]).
+        if (renderableUnder(vm.idRemap.value)) return@LaunchedEffect
+        inlineEdit = null
     }
 
     FeedListAutoScrollEffect(dragPointerYState, hostBoundsState, listState, dragController)

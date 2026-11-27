@@ -1,13 +1,9 @@
 package works.merc.keryx.app.domain
 
 /**
- * One last-write-wins field group of a synced table: its stamp column(s) and the [values] they stamp.
+ * One last-write-wins field group of a synced table: its [stamp] column and the [values] it stamps.
  * [MergeSql] and [ReduceSql] resolve every group with [SyncLww.wins], so both order a group's
  * versions identically.
- *
- * @property stamps the group's stamp columns. Usually one; a group with several (an article's
- * retention group) is ranked by the greatest of them — `MAX(COALESCE(s1, 0), COALESCE(s2, 0), …)`,
- * present when any of them is — so the newest of its events wins the whole group.
  *
  * @property bodyFirst for an article's body group: ranks a version carrying `content` above every
  * version without, then one carrying any body (`content` or `summary`) above one carrying none —
@@ -16,15 +12,9 @@ package works.merc.keryx.app.domain
  * content (the content OR-merge). `summary` is ranked as [SyncLww.normalizedSummary], since a
  * summary is dropped once content exists.
  */
-data class LwwGroup(val stamps: List<String>, val values: List<String>, val bodyFirst: Boolean = false) {
-    constructor(stamp: String, values: List<String>, bodyFirst: Boolean = false) : this(listOf(stamp), values, bodyFirst)
-
-    init {
-        require(stamps.isNotEmpty()) { "A last-write-wins group needs a stamp" }
-    }
-
-    /** Every column the group writes: the stamps and their values. */
-    val columns: List<String> get() = stamps + values
+data class LwwGroup(val stamp: String, val values: List<String>, val bodyFirst: Boolean = false) {
+    /** Every column the group writes: the stamp and its values. */
+    val columns: List<String> get() = listOf(stamp) + values
 }
 
 /**
@@ -37,11 +27,9 @@ data class LwwGroup(val stamps: List<String>, val values: List<String>, val body
  * ```
  *
  * (the bracketed prefix only for [LwwGroup.bodyFirst]), where `c1, …` are every column of
- * [LwwGroup.columns] — the stamp column(s) themselves, then the values — and, for a group with
- * several stamps, `stamp IS NOT NULL` is "any of them is not NULL" and `COALESCE(stamp, 0)` is
- * `MAX(COALESCE(s1, 0), COALESCE(s2, 0), …)`,
- * compared lexicographically with SQLite's row-value `>` (BINARY collation; NULL-free by
- * construction, so the comparison is always true or false, never NULL). A version replaces another
+ * [LwwGroup.columns] — the stamp column itself, then the values — compared lexicographically with
+ * SQLite's row-value `>` (BINARY collation; NULL-free by construction, so the comparison is always
+ * true or false, never NULL). A version replaces another
  * only when its rank is strictly greater. So:
  *
  * - a stamped version beats an unstamped one (NULL = "no such event"), and the greater stamp wins;
@@ -67,10 +55,6 @@ object SyncLww {
             if (group.bodyFirst) {
                 add("(${col(alias, "content")} IS NOT NULL)")
                 add("(${col(alias, "content")} IS NOT NULL OR ${col(alias, "summary")} IS NOT NULL)")
-            }
-            if (group.stamps.size > 1) {
-                add(group.stamps.joinToString(" OR ", prefix = "(", postfix = ")") { "${col(alias, it)} IS NOT NULL" })
-                add(group.stamps.joinToString(", ", prefix = "MAX(", postfix = ")") { "COALESCE(${col(alias, it)}, 0)" })
             }
             group.columns.forEach { column ->
                 add(key(if (group.bodyFirst && column == "summary") normalizedSummary(alias) else col(alias, column)))
@@ -132,17 +116,22 @@ object SyncLww {
     val ARTICLE_READ = LwwGroup("read_at", listOf("is_read"))
 
     /**
-     * An article's retention: its star and its deletion as **one** group, ranked by the newer of
-     * `starred_at` and `deleted_updated_at` — the newer operation wins, and the whole group (star
-     * flag, deletion and both stamps) comes from the version holding it. Two separate groups with a
-     * "a newer star revives" rule on top would not be commutative (delete, star, unstar merged in
-     * different orders would disagree). A local star or deletion stamps above both stamps of its own
-     * row (`updateStarStatus`, `softDeleteExpired`), so it wins the group it changed.
+     * An article's star: `is_starred` by `starred_at`. Independent of [ARTICLE_DELETION]: the merge has
+     * no rule that crosses the two groups, and whether an article is shown is decided when it is read —
+     * visible while it is not deleted **or** is starred (`articleVisibleSql`, `Articles.isVisible`) — so
+     * a star is never lost to a cache cleanup, of this row or another, on this device or another.
+     *
+     * With no rule across the groups, each is a plain last-write-wins of its own, so the merge and the
+     * fold stay idempotent, commutative and associative.
      */
-    val ARTICLE_RETENTION = LwwGroup(
-        listOf("starred_at", "deleted_updated_at"),
-        listOf("is_starred", "deleted_at"),
-    )
+    val ARTICLE_STAR = LwwGroup("starred_at", listOf("is_starred"))
+
+    /**
+     * An article's deletion: `deleted_at` by `deleted_updated_at` — a cache cleanup, or the undelete an
+     * unstar of a deleted article stamps (`updateStarStatus`). See [ARTICLE_STAR] for why the two are
+     * separate and how visibility is decided.
+     */
+    val ARTICLE_DELETION = LwwGroup("deleted_updated_at", listOf("deleted_at"))
 
     val FEED_TAG = LwwGroup("updated_at", listOf("deleted_at"))
     val GLOBAL_SETTING = LwwGroup("updated_at", listOf("value"))

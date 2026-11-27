@@ -102,7 +102,7 @@ class SyncMergerTest {
     }
 
     @Test
-    fun feedUrlCollisionGuardSkipsCloudFeed() {
+    fun feedUrlCollisionWithMainMergesOntoTheSmallerId() {
         val (cloudFile, cloudDriver, cloudDb) = fileDb()
         cloudDb.insertFeed("f-cloud", now = 200, url = "https://shared/feed")
         cloudDriver.close()
@@ -114,9 +114,9 @@ class SyncMergerTest {
         DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
-        // The cloud feed (different id, same URL) must not be imported.
-        assertNull(verifyDb.feedsQueries.getById("f-cloud").executeAsOneOrNull())
-        assertNotNull(verifyDb.feedsQueries.getById("f-local").executeAsOneOrNull())
+        // The cloud feed (different id, same URL) is the same feed: both end on the smaller id.
+        assertNotNull(verifyDb.feedsQueries.getById("f-cloud").executeAsOneOrNull())
+        assertNull(verifyDb.feedsQueries.getById("f-local").executeAsOneOrNull())
         verifyDriver.close()
     }
 
@@ -281,7 +281,7 @@ class SyncMergerTest {
     }
 
     @Test
-    fun articleGuidCollisionGuardSkipsCloudArticle() {
+    fun articleGuidCollisionMergesOntoTheSmallerId() {
         val (cloudFile, cloudDriver, cloudDb) = fileDb()
         cloudDb.insertFeed("f1", now = 100)
         insertArticle(cloudDb, "a-cloud", "f1", "g1", isRead = 0, readAt = null, updatedAt = 200)
@@ -295,8 +295,9 @@ class SyncMergerTest {
         DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
-        assertNull(verifyDb.articlesQueries.getById("a-cloud").executeAsOneOrNull())
-        assertNotNull(verifyDb.articlesQueries.getById("a-local").executeAsOneOrNull())
+        // One (feed_id, guid) under two ids is one article: main's row moves onto the smaller id.
+        assertNotNull(verifyDb.articlesQueries.getById("a-cloud").executeAsOneOrNull())
+        assertNull(verifyDb.articlesQueries.getById("a-local").executeAsOneOrNull())
         verifyDriver.close()
     }
 
@@ -977,11 +978,11 @@ class SyncMergerTest {
     }
 
     @Test
-    fun duplicateUniqueKeysInsideCloudMergeOnlyTheirWinner() {
+    fun duplicateUniqueKeysInsideCloudMergeOntoTheSmallestId() {
         // Two cloud feeds rows share a url — possible because this fixture's feeds table (unlike
-        // main's real schema) has no UNIQUE(url), as in a folded transport file. MergeSql considers
-        // only the winner among them (greatest updated_at, then greatest id: f-dup-2 at a tie), so
-        // the merge never reaches SQLite's UNIQUE check.
+        // main's real schema) has no UNIQUE(url), as in a folded transport file. The merge records the
+        // collision as a feed edge and folds both onto the smaller id (f-dup-1), so it never reaches
+        // SQLite's UNIQUE check.
         val cloudFile = java.io.File.createTempFile("dup-url", ".db")
         java.sql.DriverManager.getConnection("jdbc:sqlite:${cloudFile.absolutePath}").use { conn ->
             conn.createStatement().use { st ->
@@ -1029,8 +1030,8 @@ class SyncMergerTest {
         cloudFile.delete()
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
-        assertNotNull(verifyDb.feedsQueries.getById("f-dup-2").executeAsOneOrNull())
-        assertNull(verifyDb.feedsQueries.getById("f-dup-1").executeAsOneOrNull())
+        assertNotNull(verifyDb.feedsQueries.getById("f-dup-1").executeAsOneOrNull())
+        assertNull(verifyDb.feedsQueries.getById("f-dup-2").executeAsOneOrNull())
         verifyDriver.close()
     }
 
@@ -1090,6 +1091,38 @@ class SyncMergerTest {
     }
 
     /**
+     * A feed's validators describe the url they were fetched from: a merge that takes another device's url
+     * drops them (the next fetch is unconditional), and keeps them — and the error count — where the url
+     * stays.
+     */
+    @Test
+    fun aMergeChangingAFeedsUrlDropsItsValidatorsAndOneKeepingItKeepsThem() {
+        val (cloudFile, cloudDriver, cloudDb) = fileDb()
+        cloudDb.insertFeed("moved", now = 500, url = "https://new/moved")
+        cloudDb.insertFeed("same", now = 500, url = "https://same")
+        cloudDriver.close()
+
+        val (localFile, localDriver, localDb) = fileDb()
+        localDb.insertFeed("moved", now = 100, url = "https://old/moved")
+        localDb.insertFeed("same", now = 100, url = "https://same")
+        localDriver.setFeedFetchState("moved", etag = "m-etag", lastModified = "m-lm", errorCount = 2)
+        localDriver.setFeedFetchState("same", etag = "s-etag", lastModified = "s-lm", errorCount = 1)
+        localDriver.close()
+
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, KeryxDatabase.Schema.version, MergeSql.all)
+
+        val (_, verifyDriver, verifyDb) = reopen(localFile)
+        try {
+            assertEquals("https://new/moved", verifyDb.feedsQueries.getById("moved").executeAsOne().url)
+            val states = verifyDb.feed_fetch_stateQueries.getAll().executeAsList().associateBy { it.feed_id }
+            assertEquals(listOf(null, null, 2L), states.getValue("moved").let { listOf(it.etag, it.last_modified, it.error_count) })
+            assertEquals(listOf("s-etag", "s-lm", 1L), states.getValue("same").let { listOf(it.etag, it.last_modified, it.error_count) })
+        } finally {
+            verifyDriver.close()
+        }
+    }
+
+    /**
      * A version-2 cloud file (written by an older build) is migrated to version 3 by the merge's own
      * migrateCloudIfOlder and merged: its feeds, tags and folders arrive with their values and the
      * per-field stamps its migration initialized, while its fetch state stays behind — a feed's
@@ -1132,6 +1165,49 @@ class SyncMergerTest {
             assertEquals(listOf<Long?>(600L, 600L, 600L), listOf(tag.name_updated_at, tag.color_updated_at, tag.sort_order_updated_at))
             val folder = verifyDb.foldersQueries.getById(IdGenerator.folderId("Folder")).executeAsOne()
             assertEquals(listOf<Long?>(700L, 700L), listOf(folder.name_updated_at, folder.sort_order_updated_at))
+        } finally {
+            verifyDriver.close()
+        }
+    }
+
+    /**
+     * A version-2 cloud file holds rows both starred and deleted (a star older than another device's
+     * cache cleanup), which version 2 never showed. The merge migrates the file with the same `2.sqm` as
+     * a local upgrade, so those stars arrive as removed at the deletion: an article only the cloud holds
+     * is imported hidden, and one main holds starred but not deleted takes the newer unstar and the
+     * deletion — hidden, as version 2 would leave it.
+     */
+    @Test
+    fun aVersionTwoCloudFilesStarredAndDeletedRowsStayHiddenAfterTheMerge() {
+        val cloudFile = File.createTempFile("cloud-v2-", ".db").apply { deleteOnExit() }
+        JdbcSqliteDriver("jdbc:sqlite:${cloudFile.absolutePath}").use { driver ->
+            driver.createSchemaV2()
+            listOf(
+                "INSERT INTO feeds (id, url, title, updated_at, created_at) VALUES ('f1', 'https://a', 'A', 100, 1)",
+                """INSERT INTO articles (id, feed_id, guid, url, title, content, is_starred, starred_at, cached_at,
+                                         updated_at, created_at, deleted_at, deleted_updated_at)
+                   VALUES ('a1', 'f1', 'g1', 'u', 'T', 'c', 1, 150, 100, 250, 0, 250, 250)""",
+                """INSERT INTO articles (id, feed_id, guid, url, title, content, is_starred, starred_at, cached_at,
+                                         updated_at, created_at, deleted_at, deleted_updated_at)
+                   VALUES ('a2', 'f1', 'g2', 'u', 'T', 'c', 1, 150, 100, 250, 0, 250, 250)""",
+            ).forEach { driver.execute(null, it, 0) }
+        }
+
+        val (localFile, localDriver, localDb) = fileDb()
+        localDb.insertFeed("f1", now = 100, url = "https://a")
+        insertArticle(localDb, "a1", "f1", "g1", isRead = 0, readAt = null, updatedAt = 150, isStarred = 1, starredAt = 150)
+        localDriver.close()
+
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, KeryxDatabase.Schema.version, MergeSql.all)
+
+        val (_, verifyDriver, verifyDb) = reopen(localFile)
+        try {
+            for (id in listOf("a1", "a2")) {
+                val row = verifyDb.articlesQueries.getById(id).executeAsOne()
+                assertEquals(listOf<Any?>(0L, 250L, 250L), listOf(row.is_starred, row.starred_at, row.deleted_at), id)
+            }
+            assertEquals(emptyList(), verifyDb.articlesQueries.watchAll().executeAsList().map { it.id })
+            assertEquals(emptyList(), verifyDb.articlesQueries.watchStarred().executeAsList().map { it.id })
         } finally {
             verifyDriver.close()
         }
@@ -1865,9 +1941,9 @@ class SyncMergerTest {
     }
 
     @Test
-    fun starNewerThanDeletionWinsTheRetentionGroup() {
-        // Device A deleted the article (t=100); device B starred it later (t=200). Star and deletion
-        // are one group: the newer operation (the star) wins it whole, so the article is alive.
+    fun aStarNewerThanADeletionLeavesTheDeletionAndKeepsTheArticleVisible() {
+        // Device A deleted the article (t=100); device B starred it later (t=200). Star and deletion are
+        // separate groups: each keeps its own winner, and the starred article is visible although deleted.
         val (cloudFile, cloudDriver, cloudDb) = fileDb()
         cloudDb.insertFeed("f1", now = 100)
         insertArticle(cloudDb, "a1", "f1", "g1", isRead = 0, readAt = null, updatedAt = 200, isStarred = 1, starredAt = 200)
@@ -1883,14 +1959,17 @@ class SyncMergerTest {
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
         val merged = verifyDb.articlesQueries.getById("a1").executeAsOne()
-        assertNull(merged.deleted_at)
+        assertEquals(100L, merged.deleted_at)
         assertEquals(1L, merged.is_starred)
+        assertEquals(listOf("a1"), verifyDb.articlesQueries.watchAll().executeAsList().map { it.id })
         verifyDriver.close()
     }
 
     @Test
-    fun deletionNewerThanStarKeepsArticleDeleted() {
-        // Local starred (t=100); cloud deleted later (t=200). Deletion wins.
+    fun aDeletionNewerThanTheStarKeepsTheStarAndTheArticleVisible() {
+        // Review finding #1, same id: local starred (t=100); another device that never saw the star
+        // cleaned it up later (t=200). The deletion wins its group, the star keeps its own — the star is
+        // not lost, and the article stays visible.
         val (cloudFile, cloudDriver, cloudDb) = fileDb()
         cloudDb.insertFeed("f1", now = 100)
         insertArticle(cloudDb, "a1", "f1", "g1", isRead = 0, readAt = null, updatedAt = 200)
@@ -1905,7 +1984,12 @@ class SyncMergerTest {
         DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
 
         val (_, verifyDriver, verifyDb) = reopen(localFile)
-        assertEquals(200L, verifyDb.articlesQueries.getById("a1").executeAsOne().deleted_at)
+        val merged = verifyDb.articlesQueries.getById("a1").executeAsOne()
+        assertEquals(200L, merged.deleted_at)
+        assertEquals(1L, merged.is_starred)
+        assertEquals(100L, merged.starred_at)
+        assertEquals(listOf("a1"), verifyDb.articlesQueries.watchStarred().executeAsList().map { it.id })
+        assertEquals(listOf("a1"), verifyDb.articlesQueries.watchAll().executeAsList().map { it.id })
         verifyDriver.close()
     }
 
@@ -2609,63 +2693,126 @@ class SyncMergerTest {
     )
 
     @Test
-    fun aLocalStarAfterAMergedDeletionWinsTheRetentionGroup() = localWriteThenMerge(
-        // Both sides hold the article deleted at 600 (the local side merged it), a stamp ahead of the
-        // local clock (500). The star must still be the group's newest event, and revive the article.
+    fun aLocalStarAfterAMergedUnstarKeepsTheMergedDeletionAndShowsTheArticle() = localWriteThenMerge(
+        // Both sides hold the article unstarred at 600 and deleted at 600 (the local side merged both),
+        // stamps ahead of the local clock (500). The star moves above its own group's stamp only, leaves
+        // the deletion alone, and still wins its group in the merge — the article is visible.
         setup = {
             it.insertFeed("f1", now = 100)
-            insertArticle(it, "a1", "f1", "g1", isRead = 0, readAt = null, updatedAt = 100)
+            insertArticle(it, "a1", "f1", "g1", isRead = 0, readAt = null, updatedAt = 100, isStarred = 0, starredAt = 600)
         },
         setupRaw = { it.stampArticleDeleted("a1", deletedAt = 600) },
         write = { it.articlesQueries.updateStarStatus(1L, 500L, 500L, "a1") },
         afterWrite = { db, _ ->
             val article = db.articlesQueries.getById("a1").executeAsOne()
             assertEquals(601L, article.starred_at)
-            assertNull(article.deleted_at)
+            assertEquals(600L, article.deleted_at)
+            assertEquals(600L, article.deleted_updated_at)
         },
         verify = { db, _ ->
             val article = db.articlesQueries.getById("a1").executeAsOne()
             assertEquals(1L, article.is_starred)
             assertEquals(601L, article.starred_at)
-            assertNull(article.deleted_at)
+            assertEquals(600L, article.deleted_at)
+            assertEquals(listOf("a1"), db.articlesQueries.watchAll().executeAsList().map { it.id })
         },
     )
 
     @Test
-    fun anUnstarLeavesTheDeletionAlone() {
-        // Only a star revives locally; an unstar of a deleted (pre-v3, starred-and-deleted) row keeps
-        // it deleted, and still stamps above the deletion.
+    fun anUnstarOfADeletedRowStampsAnUndeleteAboveTheDeletion() = localWriteThenMerge(
+        // A starred article another device's cleanup deleted (600, merged on both sides). Unstarring it
+        // at 500 stamps an undelete above the deletion, so it stays visible here and after the merge
+        // until the next cache cleanup.
+        setup = {
+            it.insertFeed("f1", now = 100)
+            insertArticle(it, "a1", "f1", "g1", isRead = 0, readAt = null, updatedAt = 100, isStarred = 1, starredAt = 100)
+        },
+        setupRaw = { it.stampArticleDeleted("a1", deletedAt = 600) },
+        write = { it.articlesQueries.updateStarStatus(0L, 500L, 500L, "a1") },
+        afterWrite = { db, _ ->
+            val article = db.articlesQueries.getById("a1").executeAsOne()
+            assertEquals(0L, article.is_starred)
+            assertEquals(500L, article.starred_at)
+            assertNull(article.deleted_at)
+            assertEquals(601L, article.deleted_updated_at)
+        },
+        verify = { db, _ ->
+            val article = db.articlesQueries.getById("a1").executeAsOne()
+            assertEquals(0L, article.is_starred)
+            assertNull(article.deleted_at)
+            assertEquals(601L, article.deleted_updated_at)
+            assertEquals(listOf("a1"), db.articlesQueries.watchAll().executeAsList().map { it.id })
+        },
+    )
+
+    @Test
+    fun anUnstarOfARowThatIsNotDeletedLeavesTheDeletionGroupAlone() {
         val (_, driver, db) = fileDb()
         db.insertFeed("f1", now = 100)
         insertArticle(db, "a1", "f1", "g1", isRead = 0, readAt = null, updatedAt = 100, isStarred = 1, starredAt = 100)
-        driver.stampArticleDeleted("a1", deletedAt = 600)
         db.articlesQueries.updateStarStatus(0L, 500L, 500L, "a1")
         val article = db.articlesQueries.getById("a1").executeAsOne()
         assertEquals(0L, article.is_starred)
-        assertEquals(601L, article.starred_at)
-        assertEquals(600L, article.deleted_at)
+        assertNull(article.deleted_at)
+        assertNull(article.deleted_updated_at)
         driver.close()
     }
 
+    /**
+     * Pins the unstar of a row that is not deleted: it stamps no undelete, so a deletion another
+     * device made before the unstar (300 < 500) and that arrives afterwards still wins the deletion
+     * group, and the article — unstarred, deleted — is hidden, as version 2 leaves it.
+     */
     @Test
-    fun aLocalCleanupAfterAMergedUnstarWinsTheRetentionGroup() = localWriteThenMerge(
-        // 11 articles in one feed: cleanup expires a00. Both sides hold a00 unstarred at 600 (the
-        // local side merged that unstar), ahead of the cleanup's clock (500).
+    fun anOlderDeletionArrivingAfterAnUnstarOfARowNotDeletedHidesTheArticle() {
+        val (cloudFile, cloudDriver, cloudDb) = fileDb()
+        cloudDb.insertFeed("f1", now = 100)
+        insertArticle(cloudDb, "a1", "f1", "g1", isRead = 0, readAt = null, updatedAt = 100, isStarred = 1, starredAt = 100)
+        cloudDriver.stampArticleDeleted("a1", deletedAt = 300)
+        cloudDriver.close()
+
+        val (localFile, localDriver, localDb) = fileDb()
+        localDb.insertFeed("f1", now = 100)
+        insertArticle(localDb, "a1", "f1", "g1", isRead = 0, readAt = null, updatedAt = 100, isStarred = 1, starredAt = 100)
+        localDb.articlesQueries.updateStarStatus(0L, 500L, 500L, "a1")
+        localDriver.close()
+
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, 1L, MergeSql.all)
+
+        val (_, verifyDriver, verifyDb) = reopen(localFile)
+        try {
+            val article = verifyDb.articlesQueries.getById("a1").executeAsOne()
+            assertEquals(0L, article.is_starred)
+            assertEquals(500L, article.starred_at)
+            assertEquals(300L, article.deleted_at)
+            assertEquals(300L, article.deleted_updated_at)
+            assertEquals(emptyList(), verifyDb.articlesQueries.watchAll().executeAsList().map { it.id })
+        } finally {
+            verifyDriver.close()
+        }
+    }
+
+    @Test
+    fun aLocalCleanupAfterAMergedUndeleteWinsTheDeletionGroup() = localWriteThenMerge(
+        // 11 articles in one feed: cleanup expires a00. Both sides hold a00 undeleted at 600 (the local
+        // side merged that undelete), ahead of the cleanup's clock (500). The star is not consulted.
         setup = { db ->
             db.insertFeed("f1", now = 100)
             for (i in 0..10) {
                 insertArticle(db, "a%02d".format(i), "f1", "g$i", isRead = 0, readAt = null, updatedAt = 100)
             }
-            db.articlesQueries.updateStarStatus(1L, 300L, 300L, "a00")
-            db.articlesQueries.updateStarStatus(0L, 600L, 600L, "a00")
+            db.articlesQueries.updateStarStatus(1L, 900L, 900L, "a00")
+            db.articlesQueries.updateStarStatus(0L, 950L, 950L, "a00")
         },
+        setupRaw = { it.stampArticleDeleted("a00", deletedAt = null, deletedUpdatedAt = 600) },
         write = { db -> db.articlesQueries.softDeleteExpired(500L, 500L, 500L, 1000L) },
         afterWrite = { db, _ -> assertEquals(601L, db.articlesQueries.getById("a00").executeAsOne().deleted_updated_at) },
         verify = { db, _ ->
             val article = db.articlesQueries.getById("a00").executeAsOne()
             assertEquals(500L, article.deleted_at)
             assertEquals(601L, article.deleted_updated_at)
-            assertEquals(600L, article.starred_at)
+            assertEquals(950L, article.starred_at)
+            assertTrue(db.articlesQueries.watchAll().executeAsList().none { it.id == "a00" })
         },
     )
 

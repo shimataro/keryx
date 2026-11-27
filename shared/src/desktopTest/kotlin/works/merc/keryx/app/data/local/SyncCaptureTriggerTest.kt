@@ -5,6 +5,7 @@ import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.data.local.db.Sync_outbox
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
+import works.merc.keryx.app.putValidators
 import works.merc.keryx.app.insertFeedTag
 import works.merc.keryx.app.insertFolder
 import works.merc.keryx.app.insertGlobalSetting
@@ -121,8 +122,8 @@ class SyncCaptureTriggerTest {
         db.insertFeed("f1", now = 100)
         enableCapture()
 
-        // What a refresh writes for an unchanged feed: the same content, a newer updated_at.
-        db.feedsQueries.updateContent(site_url = null, title = "Feed f1", description = null, updated_at = 200, id = "f1")
+        // Only updated_at moves (no query writes that alone, so raw SQL): nothing to record.
+        driver.execute(null, "UPDATE feeds SET updated_at = 200 WHERE id = 'f1'", 0)
         assertEquals(emptyList(), outbox())
 
         db.feedsQueries.updateContent(site_url = null, title = "Renamed upstream", description = null, updated_at = 300, id = "f1")
@@ -135,7 +136,7 @@ class SyncCaptureTriggerTest {
         db.insertFeed("f1")
         enableCapture()
 
-        db.feed_fetch_stateQueries.upsertValidators("f1", "\"e\"", null)
+        db.putValidators("f1", "\"e\"", null)
         db.feed_fetch_stateQueries.incrementErrorCount("f1", "boom")
         db.feed_fetch_stateQueries.resetErrorCount("f1")
 
@@ -271,4 +272,53 @@ class SyncCaptureTriggerTest {
     private companion object {
         const val DAY = 86_400_000L
     }
+
+    // ---- Feed identity edges (ks_feed_edge) ----
+
+    @Test
+    fun aFeedEdgeInsertIsRecordedWhileCaptureIsEnabled() {
+        enableCapture()
+        exec("INSERT INTO ks_feed_edge (a, b) VALUES ('fa', 'fb')")
+
+        assertEquals(listOf(listOf<Any?>("feed_edges", "fa", "fb", 0L)), recorded())
+    }
+
+    @Test
+    fun aFeedEdgeInsertInsideAMergeIsRecordedToo() {
+        enableCapture()
+        bookkeeping.beginMerging()
+        exec("INSERT INTO ks_feed_edge (a, b) VALUES ('fa', 'fb')")
+        bookkeeping.endMerging()
+
+        assertEquals(listOf(listOf<Any?>("feed_edges", "fa", "fb", 0L)), recorded())
+    }
+
+    @Test
+    fun aFeedEdgeInsertIsNotRecordedWhileCaptureIsDisabled() {
+        exec("INSERT INTO ks_feed_edge (a, b) VALUES ('fa', 'fb')")
+        bookkeeping.beginMerging()
+        exec("INSERT INTO ks_feed_edge (a, b) VALUES ('fa', 'fc')")
+        bookkeeping.endMerging()
+
+        assertEquals(emptyList(), outbox())
+        assertEquals(2L, driver.rowCount("ks_feed_edge"))
+    }
+
+    @Test
+    fun insertingAKnownFeedEdgeAgainRecordsNothing() {
+        enableCapture()
+        exec("INSERT OR IGNORE INTO ks_feed_edge (a, b) VALUES ('fa', 'fb')")
+        exec("INSERT OR IGNORE INTO ks_feed_edge (a, b) VALUES ('fa', 'fb')")
+        bookkeeping.beginMerging()
+        exec("INSERT OR IGNORE INTO ks_feed_edge (a, b) VALUES ('fa', 'fb')")
+        bookkeeping.endMerging()
+
+        assertEquals(listOf(listOf<Any?>("feed_edges", "fa", "fb", 0L)), recorded())
+        assertEquals(1L, driver.rowCount("ks_feed_edge"))
+    }
+
+    private fun SqlDriver.rowCount(table: String): Long =
+        executeQuery(null, "SELECT COUNT(*) FROM $table", { c ->
+            app.cash.sqldelight.db.QueryResult.Value(if (c.next().value) c.getLong(0) else null)
+        }, 0).value!!
 }

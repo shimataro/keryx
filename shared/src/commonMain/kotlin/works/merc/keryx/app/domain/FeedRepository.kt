@@ -2,6 +2,8 @@ package works.merc.keryx.app.domain
 
 import app.cash.sqldelight.coroutines.asFlow
 import app.cash.sqldelight.coroutines.mapToList
+import app.cash.sqldelight.db.SqlDriver
+import io.ktor.http.Url
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
@@ -75,6 +77,18 @@ class FeedRepository(
     // Guards feed placement — see the "[feedPlacementMutex] guards" comment below. A constructor parameter only so
     // tests can wrap or hold it and observe a placement waiting on it.
     private val feedPlacementMutex: Mutex = Mutex(),
+    /**
+     * The driver [db] runs on: a refresh whose permanent redirect lands on a URL another feed holds
+     * merges the two feeds with raw statements ([FeedIdentitySql.mergeLocally]) inside its own
+     * transaction, which only the same driver joins.
+     */
+    private val driver: SqlDriver,
+    /**
+     * Republishes `ks_id_remap` to the ids held outside the database once such a merge has committed
+     * (`IdRemaps.publishFromDb`), as `DeltaSync` does after a sync merge. Best effort: a
+     * failure is logged.
+     */
+    private val publishIdRemaps: suspend () -> Unit = {},
 ) {
     private val feeds get() = db.feedsQueries
 
@@ -129,6 +143,19 @@ class FeedRepository(
      * @return The matching feed, or `null` if no feed exists with the identifier.
      */
     fun getFeedById(id: String): Feeds? = feeds.getById(id).executeAsOneOrNull()
+
+    /**
+     * The id the feed [id] has now: [id] itself while a row has it, else the id a merge moved it to
+     * (`ks_id_remap`), else [id] unchanged — for an id held from before such a merge (`feeds.resolveId`).
+     */
+    fun resolveFeedId(id: String): String = feeds.resolveId(id).executeAsOne()
+
+    /**
+     * The row the feed [id] is now — [getFeedById] after [resolveFeedId], read in one statement so a
+     * merge committing in between cannot leave the resolved id naming a row it has just deleted
+     * (`feeds.getByIdResolved`). `null` when no row has the id and no merge moved it.
+     */
+    fun getFeedByIdResolved(id: String): Feeds? = feeds.getByIdResolved(id).executeAsOneOrNull()
 
     /** All feeds currently stored in the database. */
     fun getAllFeeds(): List<Feeds> = feeds.watchAll().executeAsList()
@@ -360,8 +387,11 @@ class FeedRepository(
         val feedId = written.feedId
         val wasNewlyCreated = written.wasNewlyCreated
         syncScheduler.scheduleSync()
+        // Resolved in the statement: the write has committed, and a feed identity merge can commit before this
+        // read and move the row onto its canonical id (deleting the one this subscription wrote), which an
+        // exact-id read would then miss — the subscription succeeded, so the caller gets the feed it became.
         return FeedWriteOutcome(
-            Result.Ok(feeds.getById(feedId).executeAsOne()),
+            Result.Ok(feeds.getByIdResolved(feedId).executeAsOne()),
             hadArticles = fetched.articles.isNotEmpty(),
             wasNewlyCreated = wasNewlyCreated,
         )
@@ -409,11 +439,14 @@ class FeedRepository(
         if (afterFeedId == null && beforeFeedId == null) return feeds.nextSortOrderInGroup(folderId).executeAsOne()
         val group = feeds.getByFolder(folderId).executeAsList()
         val groupIds = group.map { it.id }
-        val afterIndex = afterFeedId?.let { groupIds.indexOf(it) } ?: -1
+        // The anchors may be held from before a merge moved a feed onto another id; this runs inside the
+        // subscribe transaction, so resolving them is consistent with the group read just above.
+        val afterIndex = afterFeedId?.let { groupIds.indexOf(resolveFeedId(it)) } ?: -1
+        val resolvedBeforeId = beforeFeedId?.let(::resolveFeedId)
         // The feed the new one is placed *before* (reorderIds' insertion target); null = append.
         val targetFeedId = when {
             afterIndex >= 0 -> groupIds.getOrNull(afterIndex + 1)
-            beforeFeedId != null && beforeFeedId in groupIds -> beforeFeedId
+            resolvedBeforeId != null && resolvedBeforeId in groupIds -> resolvedBeforeId
             else -> return feeds.nextSortOrderInGroup(folderId).executeAsOne()
         }
         val newOrder = reorderIds(groupIds, feedId, targetFeedId)
@@ -440,13 +473,21 @@ class FeedRepository(
             // reads and then writes has to upgrade its lock, which SQLite can refuse with an
             // immediate SQLITE_BUSY (see docs/known-issues.md). The mutex serializes the read and
             // the write against every other placement in this process instead.
-            val current = feeds.getByFolder(folderId).executeAsList()
+            //
+            // The feed ids may be held from before a merge that moved a feed onto another id: the group
+            // read resolves them in the same statement (`groupForMove`), so the order is computed over
+            // the surviving rows — never with a stale id inserted beside the row it became, or a stale
+            // target not found. With no group there is nothing to order among, and the writes resolve
+            // the moved id themselves.
+            val current = feeds.groupForMove(folderId = folderId, moved = feedId, target = targetFeedId).executeAsList()
+            val movedId = current.firstOrNull()?.moved_id ?: feedId
+            val resolvedTargetId = current.firstOrNull()?.target_id
             val sortOrderOf = current.associate { it.id to it.sort_order }
-            val newOrder = reorderIds(current.map { it.id }, feedId, targetFeedId)
+            val newOrder = reorderIds(current.map { it.id }, movedId, resolvedTargetId)
             val now = clock.nowMillis()
             db.transaction {
-                applyReorderUpdates(newOrder, sortOrderOf, feedId, now, feeds) { index ->
-                    feeds.updateFolderAndSortOrder(folderId = folderId, sortOrder = index.toLong(), updatedAt = now, folderUpdatedAt = now, sortOrderUpdatedAt = now, id = feedId)
+                applyReorderUpdates(newOrder, sortOrderOf, movedId, now, feeds) { index ->
+                    feeds.updateFolderAndSortOrder(folderId = folderId, sortOrder = index.toLong(), updatedAt = now, folderUpdatedAt = now, sortOrderUpdatedAt = now, id = movedId)
                 }
             }
         }
@@ -507,8 +548,14 @@ class FeedRepository(
             val current = feeds.getByUrl(effectiveUrl).executeAsOneOrNull()
             // Deterministic id from the (redirect-resolved) url so two devices that subscribe the
             // same feed independently get the SAME id and the sync merge can converge them (existing
-            // feeds keep their id). See IdGenerator.feedId.
-            val feedId = current?.id ?: IdGenerator.feedId(effectiveUrl)
+            // feeds keep their id). See IdGenerator.feedId. With no row for this url, that id can
+            // still be taken: by a feed whose url a permanent redirect has since changed (upserting
+            // it would rewrite that feed's url and drop its subscription), or by an id a re-key moved
+            // onto another feed (ks_id_remap). A random id is used then, as a tag or folder does
+            // (tags.sq's insertIfNameAbsent); it is decided from this transaction's own reads.
+            val feedId = current?.id
+                ?: IdGenerator.feedId(effectiveUrl).takeUnless { feeds.isIdTaken(it).executeAsOne() }
+                ?: IdGenerator.newId()
             val sortOrder = when {
                 current == null -> insertionSortOrderForNewFeed(feedId, folderId, afterFeedId, beforeFeedId, now)
                 current.deleted_at == null -> current.sort_order
@@ -568,7 +615,7 @@ class FeedRepository(
             // The validators describing the content just written (kept or fetched, together), in the
             // feed's device-local fetch state. A new row starts with no errors; an existing row's
             // error state is left alone, as the feed row's upsert used to leave it.
-            fetchStates.upsertValidators(feedId, values.etag, values.lastModified)
+            fetchStates.upsertValidators(etag = values.etag, last_modified = values.lastModified, feed_id = feedId, url = effectiveUrl)
             // Files a brand-new feed into the folder selected in the feed list at add time. A
             // re-subscribed feed (current != null) keeps its prior folder instead — upsert never
             // touches folder_id, so there's nothing to do for that case.
@@ -630,16 +677,23 @@ class FeedRepository(
      * the feed's current `etag` / `last_modified` rather than whatever a caller's (possibly stale)
      * copy of the row holds.
      *
+     * An id held from before a merge moved the feed onto another id (a row the feed list rendered
+     * before the merge was published) refreshes the feed it became ([getFeedByIdResolved]: id resolved and row read in one statement).
+     *
      * @return The refresh result, or `null` when no subscribed feed has that id (it was
      *   unsubscribed in the meantime), in which case nothing is fetched.
      */
     suspend fun refreshFeedById(id: String): Result<Int>? {
-        val feed = getFeedById(id)?.takeIf { it.deleted_at == null } ?: return null
+        val feed = getFeedByIdResolved(id)?.takeIf { it.deleted_at == null } ?: return null
         return refreshFeed(feed)
     }
 
-    /** Outcome of [applyFetch]: the article-count result, plus whether any articles were fetched. */
-    private data class RefreshOutcome(val result: Result<Int>, val hadArticles: Boolean)
+    /**
+     * Outcome of [applyFetch]: the article-count result, plus whether the search index is due — articles
+     * were fetched, or a redirect merge ran, which registers the surviving articles whose body changed in
+     * `ks_search_pending` whether or not this response carried any article.
+     */
+    private data class RefreshOutcome(val result: Result<Int>, val indexingDue: Boolean)
 
     /** What [refreshFeeds]' fetches hand to its single writer, in the order they happen. */
     private sealed interface RefreshStep {
@@ -740,7 +794,7 @@ class FeedRepository(
                         coalesce = true,
                     )
                 }
-                return RefreshOutcome(r, hadArticles = false)
+                return RefreshOutcome(r, indexingDue = false)
             }
         }
         val fetched = ok.fetched
@@ -770,16 +824,14 @@ class FeedRepository(
         // Each write is additionally guarded on the value actually changing, so a refresh that
         // changed nothing writes nothing at all and notifies no one. The fetch state lives in its
         // own device-local table, so its writes never move the feed row's sync stamps.
-        val newCount = db.transactionWithResult {
+        // A redirect's handling opens the transaction with a write (see [redirectFirstWrite]), and the
+        // rest of the apply phase keeps its order after it.
+        val sameHostRedirect = redirectTarget != null && isSameHost(feed.url, redirectTarget)
+        val applied = db.transactionWithResult {
+            if (redirectTarget != null) redirectFirstWrite(feed.id, redirectTarget, sameHostRedirect, now)
+
             if (state != null && (state.error_count != 0L || state.last_error != null)) {
                 fetchStates.resetErrorCount(feed.id)
-            }
-
-            // A 304 carries no validators, so writing them back would erase the ones that produced it.
-            if (!fetched.notModified &&
-                (fetched.etag != state?.etag || fetched.lastModified != state?.last_modified)
-            ) {
-                fetchStates.upsertValidators(feed.id, fetched.etag, fetched.lastModified)
             }
 
             if (fetched.title != null || fetched.description != null) {
@@ -802,28 +854,163 @@ class FeedRepository(
                 }
             }
 
-            if (redirectTarget != null) {
-                feeds.updateUrl(redirectTarget, now, feed.id)
-            }
+            // Read only after the redirect's first write, never in a transaction without one.
+            val redirect = redirectTarget?.let { completeRedirect(feed.id, it, sameHostRedirect, now, prepared) }
 
-            articleRepository.insertPrepared(prepared)
+            // After the redirect's handling, so a merge that moved this feed's fetch state onto the canonical
+            // feed has already run and the validators go to the row that is left. A 304 carries no
+            // validators, so writing them back would erase the ones that produced it. They belong to the url
+            // the feed holds now when it moved onto the redirect's target, and otherwise to the url it was
+            // fetched from; the write itself checks that the row still holds that url (upsertValidators), so
+            // a merge that moved the feed onto another url since the snapshot leaves them unwritten.
+            if (!fetched.notModified &&
+                (fetched.etag != state?.etag || fetched.lastModified != state?.last_modified)
+            ) {
+                val validatorsUrl = redirectTarget?.takeIf { redirect?.urlMoved == true } ?: feed.url
+                fetchStates.upsertValidators(
+                    etag = fetched.etag, last_modified = fetched.lastModified, feed_id = feed.id, url = validatorsUrl,
+                )
+            }
+            AppliedFetch(
+                newCount = articleRepository.insertPrepared(redirect?.merge?.recounted ?: prepared),
+                mergedInto = redirect?.merge?.canonicalId,
+                urlMoved = redirect?.urlMoved == true,
+            )
+        }
+        if (applied.mergedInto != null) {
+            // The merge's raw statements bypass SQLDelight's listeners (feed_tags and the fetch state are
+            // not written by any generated statement here), so the lists are told after the commit. The
+            // generated statements in the same transaction (the revival, the URL, the article insert)
+            // already notified their listeners at that commit — before this publish — so a holder of an
+            // id the merge moved must catch up from the database (ks_id_remap) before it decides the id
+            // is gone. In `finally`, as after a sync merge, so a publish that throws (cancellation
+            // included) still leaves the lists told.
+            try {
+                publishIdRemapsAfterMerge()
+            } finally {
+                driver.notifyListeners("feeds", "articles", "feed_tags", "feed_fetch_state")
+            }
         }
 
         // Notifications are emitted after the commit, so a listener never observes a half-applied
         // feed. `notify` is declared `suspend` so it cannot be called from inside the transaction
-        // block by mistake.
-        if (redirectTarget != null) {
+        // block by mistake. A redirect whose target another feed holds on another host left the URL
+        // alone, so nothing changed to announce.
+        if (applied.urlMoved) {
             notify(
                 NotificationText.FeedUrlChanged(feed.displayTitle()),
                 AppNotificationLevel.WARNING,
-                action = AppNotificationAction.ShowFeedDetail(feed.id),
+                action = AppNotificationAction.ShowFeedDetail(applied.mergedInto ?: feed.id),
             )
         }
         // No sync is scheduled here: a refresh of many feeds would otherwise arm the debounce once
         // per feed and could fire a whole-DB upload mid-refresh. RefreshCycleRunner covers the batch
         // (it syncs right after, or schedules one when the cycle synced first); the single-feed
         // refreshFeed() schedules its own.
-        return RefreshOutcome(Result.Ok(newCount), fetched.articles.isNotEmpty())
+        return RefreshOutcome(Result.Ok(applied.newCount), indexingDue = fetched.articles.isNotEmpty() || applied.mergedInto != null)
+    }
+
+    /** What [applyFetch]'s transaction did: the new-article count, the merge's canonical id, whether the URL moved. */
+    private data class AppliedFetch(val newCount: Int, val mergedInto: String?, val urlMoved: Boolean)
+
+    /** A redirect merge's outcome: the identity's canonical id, and the fetched articles recounted against it. */
+    private data class RedirectMerge(val canonicalId: String, val recounted: ArticleRepository.PreparedArticles)
+
+    /**
+     * The first statement of a redirected refresh's transaction — always a write. SQLite's deferred
+     * BEGIN takes the write lock only at the first write, and a transaction whose first statement is a
+     * read can then fail that upgrade with a non-retryable SQLITE_BUSY when another connection
+     * committed in between, without waiting out `busy_timeout`. Opening with a write makes every read
+     * after it (the holder, the merge) run under the write lock.
+     *
+     * - Same host: records the identity edge with the feed holding [target], if any
+     *   (`recordRedirectEdge`); the merge follows once the rest of the apply phase has run.
+     * - Another host: never merged — a redirect to another site is no proof the two feeds are one.
+     *   The URL write is guarded on no other feed holding [target], so it leaves the URL alone then,
+     *   rather than failing UNIQUE(url) on this and every later refresh.
+     */
+    /** Whether [from] and [to] name the same host — case-insensitive, scheme and port ignored. */
+    private fun isSameHost(from: String, to: String): Boolean {
+        val fromHost = runCatching { Url(from).host }.getOrNull() ?: return false
+        val toHost = runCatching { Url(to).host }.getOrNull() ?: return false
+        return fromHost.isNotEmpty() && fromHost.equals(toHost, ignoreCase = true)
+    }
+
+    private fun redirectFirstWrite(feedId: String, target: String, sameHost: Boolean, now: Long) {
+        if (sameHost) feeds.recordRedirectEdge(own = feedId, target = target)
+        // With a holder this writes nothing: on the same host the merge moves the URL; on another host
+        // it stays. A no-op too when the row already has the target (a merge brought it since the snapshot).
+        feeds.updateUrl(target, now, feedId)
+    }
+
+    /** A redirect's outcome: the merge, when there was one, and whether the feed now holds the target. */
+    private data class RedirectOutcome(val merge: RedirectMerge?, val urlMoved: Boolean)
+
+    /**
+     * The rest of a redirect after [redirectFirstWrite] and the apply phase's other writes. A same-host
+     * redirect onto another feed's URL means the two are one feed (that feed subscribed at the moved URL
+     * here, or merged in from another device): they are merged ([mergeRedirectCollision]). Otherwise
+     * the guarded URL write already ran; the URL has moved when the feed now holds [target] (a merge may
+     * have brought it since the snapshot), and not when another feed holds it.
+     */
+    private fun completeRedirect(
+        feedId: String,
+        target: String,
+        sameHost: Boolean,
+        now: Long,
+        prepared: ArticleRepository.PreparedArticles,
+    ): RedirectOutcome {
+        val ownId = feeds.resolveId(feedId).executeAsOne()
+        val holder = if (sameHost) feeds.getByUrl(target).executeAsOneOrNull() else null
+        if (holder != null && holder.id != ownId) {
+            return RedirectOutcome(mergeRedirectCollision(ownId, holder, target, now, prepared), urlMoved = true)
+        }
+        return RedirectOutcome(merge = null, urlMoved = feeds.getById(ownId).executeAsOneOrNull()?.url == target)
+    }
+
+    /**
+     * Merges the feed [ownId] with [holder], which holds the redirect [target], onto their identity's
+     * canonical id inside the caller's transaction ([FeedIdentitySql.mergeLocally]); the edge then
+     * reaches the other devices with the next send, so they merge the same rows. The fetched articles
+     * land in the canonical feed (the insert resolves the feed id through ks_id_remap and conflicts on
+     * (feed_id, guid)), so the new-article count read before the merge is recounted against it.
+     */
+    private fun mergeRedirectCollision(
+        ownId: String,
+        holder: Feeds,
+        target: String,
+        now: Long,
+        prepared: ArticleRepository.PreparedArticles,
+    ): RedirectMerge {
+        // Read before the merge: whether the user still had either feed.
+        val anyAlive = holder.deleted_at == null || feeds.getById(ownId).executeAsOneOrNull()?.deleted_at == null
+        FeedIdentitySql.mergeLocally(driver, ownId, holder.id)
+        val canonicalId = feeds.resolveId(ownId).executeAsOne()
+        // The merge's subscription state is plain last-write-wins, so a tombstone holding the target can
+        // unsubscribe the merged feed. A redirect must never silently unsubscribe a feed the user still
+        // has: that case is a re-subscribe, stamped above every folded stamp so it also wins on the other
+        // devices. Two tombstones stay deleted.
+        if (anyAlive) feeds.reviveAfterMerge(now, canonicalId)
+        // Writes only when the merged feed does not hold the target yet (its content group came from this
+        // feed): updateUrl is guarded on the url changing, so it never moves updated_at — a stamp the
+        // capture trigger does not watch — without a captured change.
+        feeds.updateUrl(target, now, canonicalId)
+        return RedirectMerge(canonicalId, articleRepository.recountPrepared(prepared, canonicalId))
+    }
+
+    /**
+     * Brings the ids held outside the database onto the canonical ids a redirect's feed merge moved
+     * rows to. Logged, not thrown: the merge has committed and every write resolves a stale id itself
+     * (feeds.sq / articles.sq), so the next publish (a sync merge, the next launch) catches up.
+     */
+    private suspend fun publishIdRemapsAfterMerge() {
+        try {
+            publishIdRemaps()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            Log.warn(TAG, "Publishing id re-keys after a redirect merge failed; the next merge or launch catches up: ${e.message}")
+        }
     }
 
     /**
@@ -1002,7 +1189,7 @@ class FeedRepository(
             when (step) {
                 is RefreshStep.Fetched -> {
                     val outcome = applyFetch(step.feed, step.fetchState, step.fetch)
-                    val wasLast = state.recordFetched(step.feed.id, outcome.result, outcome.hadArticles)
+                    val wasLast = state.recordFetched(step.feed.id, outcome.result, outcome.indexingDue)
                     step.committed.complete(Unit)
                     if (wasLast) indexIfNeeded(state)
                 }
@@ -1011,7 +1198,7 @@ class FeedRepository(
         }
     }
 
-    /** Brings the search index up to date once, if any applied feed had articles. */
+    /** Brings the search index up to date once, if any applied feed had articles or merged with another. */
     private suspend fun indexIfNeeded(state: RefreshApplyState) {
         if (state.takeIndexingDue()) ftsManager.indexMissing()
     }
@@ -1035,19 +1222,19 @@ class FeedRepository(
     private class RefreshApplyState(private val total: Int) {
         private val results = HashMap<String, Result<Int>>(total)
         private var applied = 0
-        private var anyHadArticles = false
+        private var anyIndexingDue = false
         private var indexed = false
 
         /** Records a feed's outcome; returns whether it was the last feed to be applied. */
-        fun recordFetched(feedId: String, result: Result<Int>, hadArticles: Boolean): Boolean {
+        fun recordFetched(feedId: String, result: Result<Int>, indexingDue: Boolean): Boolean {
             results[feedId] = result
-            if (hadArticles) anyHadArticles = true
+            if (indexingDue) anyIndexingDue = true
             return ++applied == total
         }
 
-        /** Whether the search index is due — some feed had articles and it hasn't run — claiming it. */
+        /** Whether the search index is due — some feed had articles or merged and it hasn't run — claiming it. */
         fun takeIndexingDue(): Boolean {
-            if (!anyHadArticles || indexed) return false
+            if (!anyIndexingDue || indexed) return false
             indexed = true
             return true
         }

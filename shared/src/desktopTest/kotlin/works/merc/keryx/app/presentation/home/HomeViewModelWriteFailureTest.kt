@@ -21,6 +21,7 @@ import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.LocalWriteFailureKind
 import works.merc.keryx.app.core.NotificationText
 import works.merc.keryx.app.data.local.db.KeryxDatabase
+import works.merc.keryx.app.domain.FeedIdentitySql
 import works.merc.keryx.app.domain.LocalWriteFailureReporter
 import works.merc.keryx.app.domain.NotificationCenter
 import works.merc.keryx.app.inMemoryDb
@@ -238,6 +239,61 @@ class HomeViewModelWriteFailureTest {
 
         assertEquals(listOf(1L, 1L), listOf(dbIsRead("a1"), dbIsRead("a2")))
         assertEquals(listOf("a1" to 1L, "a2" to 1L), vm.articles.value.map { it.id to it.is_read })
+    }
+
+    /**
+     * A feed merge moves the article onto another id before the revert reads its flags, and the ViewModel
+     * carries every held id over the move (here through the selection's body lookup, which finds the article
+     * under its new id) before that read returns: the read asked for the old id, whose row is gone. The
+     * revert reads again for the id it has now and records the DB's read state as that article's latest
+     * intent, instead of finding its write superseded and leaving the failed read on the selection.
+     */
+    @Test
+    fun aRevertWhoseArticleMovedWhileItReadItsFlagsIsAppliedToTheIdItHasNow() = runVmTest {
+        db.insertFeed("f0")
+        // The article the merge folds a1 into: the same key in f0, under the smaller id.
+        db.articlesQueries.insert(
+            id = "a0", feed_id = "f0", guid = "a1", url = "https://article/a0", title = "Title a0",
+            summary = null, content = "<p>a0</p>", author = null, published_at = 99L,
+            thumbnail_url = null, is_read = 0L, read_at = null, is_starred = 0L,
+            starred_at = null, cached_at = 0L, search_text = "a0", updated_at = 0L, created_at = 99L,
+        )
+        val hydration = HoldingDispatcher()
+        val writes = HoldingDispatcher()
+        val vm = newViewModel("a1", "a2", hydration = hydration, dbWriteDispatcher = writes)
+        failReadWrites()
+
+        // The read write runs and fails; the revert it starts is then held at its flags read, and the
+        // selection's body lookup at its own.
+        // Released on every way out, so a failed assertion cannot leave the ViewModel's coroutines queued
+        // on them (closing the fixture would then wait for them forever).
+        try {
+            writes.hold()
+            hydration.hold()
+            vm.selectArticle(vm.row("a1"))
+            writes.release()
+            driver.failExecute = null
+            writes.hold()
+            testScheduler.advanceUntilIdle()
+            assertTrue(hydration.queuedCount > 0, "precondition: the body lookup is held")
+            assertTrue(writes.queuedCount > 0, "precondition: the revert's flags read is held")
+
+        // The merge moves a1 onto a0. The lookup now runs and finds the article under a0, so the ViewModel
+        // follows the move; the revert's read, which asks for a1, only then returns.
+            db.transaction { FeedIdentitySql.mergeLocally(driver, "f1", "f0") }
+            hydration.release()
+            testScheduler.advanceUntilIdle()
+            writes.release()
+            testScheduler.advanceUntilIdle()
+        } finally {
+            hydration.release()
+            writes.release()
+        }
+
+        assertEquals("a0", vm.currentArticleId("a1"), "precondition: the merge moved the article")
+        assertEquals(0L, dbIsRead("a0"))
+        assertEquals("a0", vm.selectedArticle.value?.id)
+        assertEquals(0L, vm.selectedArticle.value?.is_read, "the selection shows the DB's unread, not the failed read")
     }
 
     @Test

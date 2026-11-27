@@ -105,11 +105,13 @@ class SchemaV3MigrationTest {
         assertEquals(created.keys, migrated.keys)
         for (key in created.keys) assertEquals(created[key], migrated[key], "schema differs at $key")
         assertTrue("feed_fetch_state" in (created["tables"] as List<*>))
-        // The twelve capture triggers plus the raw folder row's capture trigger, and the eight that keep
+        // The twelve capture triggers plus the raw folder row's capture trigger, the two identity edge
+        // capture triggers (ks_v2_edge, ks_feed_edge), and the eight that keep
         // feeds.folder_id resolved from ks_feed_folder_raw (its creation with the feed, and resolution
         // on a raw row's insert/update, a folder's insert and liveness change, and a folder entry of
-        // ks_id_remap's insert/update/delete); the one view is ks_feed_folder_resolved.
-        assertEquals(22, (created["triggers"] as List<*>).size)
+        // ks_id_remap's insert/update/delete), and the one that drops a feed's validators when its url
+        // changes; the one view is ks_feed_folder_resolved.
+        assertEquals(24, (created["triggers"] as List<*>).size)
         assertEquals(listOf("ks_feed_folder_resolved"), (created["views"] as List<*>).map { (it as List<*>)[0] })
     }
 
@@ -480,6 +482,51 @@ class SchemaV3MigrationTest {
     }
 
     /**
+     * Version 2 writes a row both starred and deleted when another device's cache cleanup is newer than
+     * the star, and hides it. The migration records that star as removed at the deletion, so the row
+     * stays out of every list once version 3 shows starred rows whatever their deletion says. A row only
+     * starred, or only deleted, is left as it was, and nothing reaches the outbox.
+     */
+    @Test
+    fun migrationUnstarsARowBothStarredAndDeletedSoItStaysHidden() {
+        fun article(id: String, starred: Long, starredAt: Long?, deletedAt: Long?, deletedUpdatedAt: Long?) =
+            """INSERT INTO articles (id, feed_id, guid, url, title, is_starred, starred_at, cached_at, updated_at, created_at,
+                                     deleted_at, deleted_updated_at)
+               VALUES ('$id', 'f1', '$id', 'u', 'T', $starred, ${starredAt ?: "NULL"}, 0, 0, 0,
+                       ${deletedAt ?: "NULL"}, ${deletedUpdatedAt ?: "NULL"})"""
+        val file = migratedDb(
+            listOf(
+                "INSERT INTO feeds (id, url, title, updated_at, created_at) VALUES ('f1', 'https://a', 'A', 0, 0)",
+                article("starred-then-cleaned", starred = 1, starredAt = 150, deletedAt = 250, deletedUpdatedAt = 250),
+                article("starred-no-stamp", starred = 1, starredAt = null, deletedAt = 300, deletedUpdatedAt = null),
+                article("starred-only", starred = 1, starredAt = 150, deletedAt = null, deletedUpdatedAt = null),
+                article("deleted-only", starred = 0, starredAt = 100, deletedAt = 250, deletedUpdatedAt = 250),
+            ),
+        )
+        withConnection(file) { conn ->
+            assertEquals(
+                listOf(
+                    listOf<Any?>("deleted-only", 0, 100, 250, 250),
+                    listOf<Any?>("starred-no-stamp", 0, 0, 300, null),
+                    listOf<Any?>("starred-only", 1, 150, null, null),
+                    listOf<Any?>("starred-then-cleaned", 0, 250, 250, 250),
+                ),
+                conn.rows("SELECT id, is_starred, starred_at, deleted_at, deleted_updated_at FROM articles ORDER BY id"),
+            )
+            assertEquals(listOf(listOf<Any?>(0)), conn.rows("SELECT COUNT(*) FROM sync_outbox"))
+        }
+        val driver = JdbcSqliteDriver("jdbc:sqlite:${file.absolutePath}")
+        try {
+            val queries = KeryxDatabase(driver).articlesQueries
+            assertEquals(listOf("starred-only"), queries.watchAll().executeAsList().map { it.id })
+            assertEquals(listOf("starred-only"), queries.watchStarred().executeAsList().map { it.id })
+            assertEquals(listOf("starred-only"), queries.watchByFeed("f1").executeAsList().map { it.id })
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
      * The desktop factory runs a migration and its `user_version` stamp in one transaction: a migration
      * that fails halfway leaves the file at version 2 with none of its statements applied, so the next
      * launch can run it again.
@@ -528,5 +575,53 @@ class SchemaV3MigrationTest {
             assertEquals(listOf(listOf<Any?>(3)), conn.rows("PRAGMA user_version"))
         }
         assertEquals(schemaOf(createdDb()), schemaOf(file))
+    }
+
+    /** A url change drops the feed's validators, created and migrated alike; nothing else of the fetch state. */
+    @Test
+    fun aFeedUrlChangeDropsItsValidatorsInACreatedAndInAMigratedDatabase() {
+        for (file in listOf(createdDb(), migratedDb())) {
+            withConnection(file) { conn ->
+                conn.createStatement().use {
+                    it.execute(
+                        "INSERT INTO feeds (id, url, title, updated_at, created_at, sort_order) VALUES ('f1', 'https://a', 'T', 1, 1, 0)",
+                    )
+                    it.execute("INSERT INTO feed_fetch_state (feed_id, etag, last_modified, error_count) VALUES ('f1', 'e', 'lm', 2)")
+                    it.execute("UPDATE feeds SET title = 'T2' WHERE id = 'f1'")
+                }
+                assertEquals(
+                    listOf(listOf<Any?>("e", "lm", 2)),
+                    conn.rows("SELECT etag, last_modified, error_count FROM feed_fetch_state"),
+                    "a change of another column keeps the validators",
+                )
+                conn.createStatement().use { it.execute("UPDATE feeds SET url = 'https://b' WHERE id = 'f1'") }
+                assertEquals(
+                    listOf(listOf<Any?>(null, null, 2)),
+                    conn.rows("SELECT etag, last_modified, error_count FROM feed_fetch_state"),
+                )
+            }
+        }
+    }
+
+    /** `ks_feed_edge(a, b)` with the composite primary key and its capture trigger, created and migrated alike. */
+    @Test
+    fun theFeedEdgeTableAndItsTriggerExistInACreatedAndInAMigratedDatabase() {
+        for (file in listOf(createdDb(), migratedDb())) {
+            withConnection(file) { conn ->
+                assertEquals(
+                    listOf(listOf<Any?>("a", "TEXT", 1, 1), listOf<Any?>("b", "TEXT", 1, 2)),
+                    conn.rows("SELECT name, type, \"notnull\", pk FROM pragma_table_info('ks_feed_edge') ORDER BY cid"),
+                )
+                assertEquals(
+                    listOf(listOf<Any?>("ks_capture_feed_edge_insert")),
+                    conn.rows("SELECT name FROM sqlite_master WHERE type = 'trigger' AND tbl_name = 'ks_feed_edge'"),
+                )
+                conn.createStatement().use { it.execute("INSERT INTO ks_feed_edge (a, b) VALUES ('x', 'y')") }
+                assertFailsWith<java.sql.SQLException> {
+                    conn.createStatement().use { it.execute("INSERT INTO ks_feed_edge (a, b) VALUES ('x', 'y')") }
+                }
+                assertEquals(listOf(listOf<Any?>("x", "y")), conn.rows("SELECT a, b FROM ks_feed_edge"))
+            }
+        }
     }
 }

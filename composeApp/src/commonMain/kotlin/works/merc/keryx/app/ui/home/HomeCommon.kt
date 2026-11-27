@@ -26,7 +26,7 @@ import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.data.local.db.Folders
 import works.merc.keryx.app.data.local.db.Tags
 import works.merc.keryx.app.domain.ArticleListRow
-import works.merc.keryx.app.domain.TagFolderIdRemap
+import works.merc.keryx.app.domain.IdRemap
 import works.merc.keryx.app.platform.BrowserOpener
 import works.merc.keryx.app.platform.NativeMenuShortcut
 import works.merc.keryx.app.platform.isMacOs
@@ -259,33 +259,37 @@ internal sealed interface InlineEditTarget {
 }
 
 /**
- * This target with its tag or folder id brought up to date by [remap] — the row the edit is on
- * after a merge re-keyed it — and the same instance when nothing changes. A feed's id is never
- * re-keyed, but the tag its tag-nested row sits under can be.
+ * This target with its ids brought up to date by [remap] — the row the edit is on after a merge
+ * re-keyed its tag, folder or feed (and, for a tag-nested feed row, the tag it sits under) — and the
+ * same instance when nothing changes.
  */
-internal fun InlineEditTarget.remappedBy(remap: TagFolderIdRemap): InlineEditTarget = when (this) {
+internal fun InlineEditTarget.remappedBy(remap: IdRemap): InlineEditTarget = when (this) {
     is InlineEditTarget.Folder -> remap.folder(id).let { if (it == id) this else InlineEditTarget.Folder(it) }
     is InlineEditTarget.Tag -> remap.tag(id).let { if (it == id) this else InlineEditTarget.Tag(it) }
-    is InlineEditTarget.Feed -> tagId?.let { remap.tag(it) }.let { if (it == tagId) this else copy(tagId = it) }
+    is InlineEditTarget.Feed -> {
+        val feed = remap.feed(id)
+        val tag = tagId?.let { remap.tag(it) }
+        if (feed == id && tag == tagId) this else InlineEditTarget.Feed(feed, tag)
+    }
 }
 
 /**
- * This target under the id the given [folders] / [tags] actually carry for its row, or null when they
- * hold no such row (it was deleted, or has not arrived yet).
+ * This target under the ids the given [feeds] / [folders] / [tags] actually carry for its row, or null
+ * when they hold no such row (it was deleted, or has not arrived yet).
  *
  * A row matches the way `FeedListPane`'s `isEditing` matches it: both the row's id and this target's
  * id are brought up to date by the same [remap] before they are compared. The lists and the map reach
  * composition separately, so the lists can still show an id the map has already moved on from — even
  * an intermediate one (`a → b → c` while the lists show `b` and the map already says `a → c`,
- * `b → c`) — which neither the target's own id nor its remapped id would find. A feed's id is never
- * re-keyed, so a feed's folder-group row is returned as is; its tag-nested row is resolved through
- * the tag it sits under. Whether the resolved row is actually rendered (a collapsed folder, a tag not
- * expanded) is left to `feedListRowIndex`.
+ * `b → c`) — which neither the target's own id nor its remapped id would find. A feed row is resolved
+ * by its feed id, and a tag-nested one also through the tag it sits under. Whether the resolved row is
+ * actually rendered (a collapsed folder, a tag not expanded) is left to `feedListRowIndex`.
  */
 internal fun InlineEditTarget.resolvedIn(
+    feeds: List<Feeds>,
     folders: List<Folders>,
     tags: List<Tags>,
-    remap: TagFolderIdRemap,
+    remap: IdRemap,
 ): InlineEditTarget? = when (this) {
     is InlineEditTarget.Folder -> remap.folder(id).let { current ->
         folders.firstOrNull { remap.folder(it.id) == current }?.let { if (it.id == id) this else InlineEditTarget.Folder(it.id) }
@@ -293,11 +297,17 @@ internal fun InlineEditTarget.resolvedIn(
     is InlineEditTarget.Tag -> remap.tag(id).let { current ->
         tags.firstOrNull { remap.tag(it.id) == current }?.let { if (it.id == id) this else InlineEditTarget.Tag(it.id) }
     }
-    is InlineEditTarget.Feed -> if (tagId == null) {
-        this
-    } else {
-        remap.tag(tagId).let { current ->
-            tags.firstOrNull { remap.tag(it.id) == current }?.let { if (it.id == tagId) this else copy(tagId = it.id) }
+    is InlineEditTarget.Feed -> remap.feed(id).let { currentFeed ->
+        feeds.firstOrNull { remap.feed(it.id) == currentFeed }?.id?.let { feedId ->
+            if (tagId == null) {
+                if (feedId == id) this else InlineEditTarget.Feed(feedId)
+            } else {
+                remap.tag(tagId).let { currentTag ->
+                    tags.firstOrNull { remap.tag(it.id) == currentTag }?.let {
+                        if (it.id == tagId && feedId == id) this else InlineEditTarget.Feed(feedId, it.id)
+                    }
+                }
+            }
         }
     }
 }

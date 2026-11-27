@@ -17,6 +17,18 @@
 --
 -- A feed's fetch state (validators, error count, last error) is device-local and lives in
 -- feed_fetch_state (feed_fetch_state.sq), not here: this table holds synced columns only.
+--
+-- A write that takes a feed id resolves it first, exactly as a tag or folder write does (see
+-- tags.sq): an id whose row is gone because a re-key moved it onto another id of the same identity
+-- names the row it became through ks_id_remap, so a write issued with the id held before the move (a
+-- refresh that fetched under it, a queued feed-list write, an open rename field) lands on that row
+-- instead of matching nothing or failing a FOREIGN KEY. The resolution is an expression inside the
+-- write statement itself, so no write is preceded by a read of its own:
+--   COALESCE((SELECT id FROM feeds WHERE id = :id),
+--            (SELECT new_id FROM ks_id_remap WHERE kind = 'feed' AND old_id = :id), :id)
+-- An existing row's id resolves to itself. 'feed' is ID_REMAP_KIND_FEED (TagFolderIdRekey.kt). The
+-- writes that take a feed id in feed_fetch_state.sq, feed_tags.sq and articles.sq resolve it the same
+-- way.
 
 CREATE TABLE feeds (
     id            TEXT    NOT NULL PRIMARY KEY,
@@ -46,9 +58,34 @@ SELECT * FROM feeds WHERE id = ?;
 getByUrl:
 SELECT * FROM feeds WHERE url = ?;
 
+-- The id the feed :id has now: :id itself while a row has it, else the id a re-key moved it to
+-- (ks_id_remap), else :id unchanged — the same resolution the writes below make in their statements.
+resolveId:
+SELECT COALESCE((SELECT id FROM feeds WHERE id = :id), (SELECT new_id FROM ks_id_remap WHERE kind = 'feed' AND old_id = :id), :id);
+
+-- The row the feed :id is now: getById after resolveId, in one statement, so a merge that commits
+-- between the two cannot leave the id resolved to a row the same merge has since deleted. No row when
+-- the id is unknown.
+getByIdResolved:
+SELECT * FROM feeds
+WHERE id = COALESCE((SELECT id FROM feeds WHERE id = :id), (SELECT new_id FROM ks_id_remap WHERE kind = 'feed' AND old_id = :id), :id);
+
 getAllIncludingDeleted:
 SELECT * FROM feeds;
 
+-- Whether :id cannot be a new subscription's id: a row already has it (under another url, alive or
+-- tombstoned — feeds.upsert's ON CONFLICT(id) would otherwise rewrite that row's url and drop its
+-- subscription), or ks_id_remap maps it onto another feed (a re-key moved the row that had it, and a
+-- write resolving a stale id would land on that other feed instead of the new one — so no row ever
+-- carries an id ks_id_remap maps). A new subscription then takes a random id (FeedRepository).
+isIdTaken:
+SELECT EXISTS (SELECT 1 FROM feeds WHERE id = :id)
+    OR EXISTS (SELECT 1 FROM ks_id_remap WHERE kind = 'feed' AND old_id = :id);
+
+-- updated_at (the content group's last-write-wins stamp) moves on an existing row only when a column the
+-- capture trigger watches changes with it: re-subscribing a live feed whose values are unchanged writes
+-- the same row, and a stamp moved without being sent would beat a peer's later content change here and
+-- lose to it there, so the devices would never agree.
 upsert:
 INSERT INTO feeds (
     id, url, site_url, title, description, favicon_url,
@@ -61,7 +98,17 @@ ON CONFLICT(id) DO UPDATE SET
     description = excluded.description,
     favicon_url = excluded.favicon_url,
     deleted_at = excluded.deleted_at,
-    updated_at = excluded.updated_at,
+    updated_at = CASE
+        WHEN url IS NOT excluded.url
+            OR site_url IS NOT excluded.site_url
+            OR title IS NOT excluded.title
+            OR description IS NOT excluded.description
+            OR favicon_url IS NOT excluded.favicon_url
+            OR deleted_at IS NOT excluded.deleted_at
+            OR sort_order IS NOT excluded.sort_order
+        THEN excluded.updated_at
+        ELSE updated_at
+    END,
     sort_order = excluded.sort_order;
 
 -- deleted_updated_at never goes backwards or repeats on a row: MAX(now, previous + 1), so an
@@ -70,13 +117,21 @@ ON CONFLICT(id) DO UPDATE SET
 -- (the cloud side wins), which knows nothing of which event came later, so an equal stamp could let
 -- the earlier event win. See docs/db-schema.md.
 softDelete:
-UPDATE feeds SET deleted_at = ?, updated_at = ?, deleted_updated_at = MAX(?, COALESCE(deleted_updated_at, 0) + 1) WHERE id = ?;
+UPDATE feeds SET deleted_at = ?, updated_at = ?, deleted_updated_at = MAX(?, COALESCE(deleted_updated_at, 0) + 1) WHERE id = COALESCE((SELECT id FROM feeds WHERE id = :id), (SELECT new_id FROM ks_id_remap WHERE kind = 'feed' AND old_id = :id), :id);
 
 -- Stamps the subscription-state timestamp on re-subscribe (upsert has already cleared
 -- deleted_at back to NULL); lets an unsubscribe -> re-subscribe propagate over a refresh. Moves only
 -- forward, as in softDelete.
 stampResubscribed:
-UPDATE feeds SET deleted_updated_at = MAX(?, COALESCE(deleted_updated_at, 0) + 1) WHERE id = ?;
+UPDATE feeds SET deleted_updated_at = MAX(?, COALESCE(deleted_updated_at, 0) + 1) WHERE id = COALESCE((SELECT id FROM feeds WHERE id = :id), (SELECT new_id FROM ks_id_remap WHERE kind = 'feed' AND old_id = :id), :id);
+
+-- A refresh's redirect merged a feed the user still had into a tombstoned one, and the merged feed
+-- came out deleted (FeedRepository.applyFetch): the merge is treated as a re-subscribe, so the
+-- redirect never unsubscribes a feed silently. deleted_updated_at moves only forward, as in
+-- stampResubscribed, and the merged row already holds the greatest stamp of the feeds it folded, so
+-- the new stamp beats every one of them and wins on the other devices too.
+reviveAfterMerge:
+UPDATE feeds SET deleted_at = NULL, updated_at = :updated_at, deleted_updated_at = MAX(:updated_at, COALESCE(deleted_updated_at, 0) + 1) WHERE id = COALESCE((SELECT id FROM feeds WHERE id = :id), (SELECT new_id FROM ks_id_remap WHERE kind = 'feed' AND old_id = :id), :id) AND deleted_at IS NOT NULL;
 
 -- Each user-edit stamp below (custom_title_updated_at, folder_updated_at, sort_order_updated_at)
 -- moves only forward on its row, as deleted_updated_at does: MAX(now, previous + 1). The sync merge
@@ -85,7 +140,7 @@ UPDATE feeds SET deleted_updated_at = MAX(?, COALESCE(deleted_updated_at, 0) + 1
 -- millisecond, or one made right after a merge brought that stamp in — would lose to the older
 -- value on the next merge. See docs/db-schema.md.
 updateCustomTitle:
-UPDATE feeds SET custom_title = ?, updated_at = ?, custom_title_updated_at = MAX(:custom_title_updated_at, COALESCE(custom_title_updated_at, 0) + 1) WHERE id = ?;
+UPDATE feeds SET custom_title = ?, updated_at = ?, custom_title_updated_at = MAX(:custom_title_updated_at, COALESCE(custom_title_updated_at, 0) + 1) WHERE id = COALESCE((SELECT id FROM feeds WHERE id = :id), (SELECT new_id FROM ks_id_remap WHERE kind = 'feed' AND old_id = :id), :id);
 
 -- Refresh path: fills in a favicon resolved after the feed's own writes. Guarded in the statement
 -- itself rather than on a row read beforehand, so a feed unsubscribed — or given a favicon by a
@@ -93,17 +148,43 @@ UPDATE feeds SET custom_title = ?, updated_at = ?, custom_title_updated_at = MAX
 -- last-write-wins stamp in the sync merge) does not move when nothing is written.
 updateFaviconUrlIfMissing:
 UPDATE feeds SET favicon_url = ?, updated_at = ?
-WHERE id = ? AND deleted_at IS NULL AND (favicon_url IS NULL OR favicon_url = '');
+WHERE id = COALESCE((SELECT id FROM feeds WHERE id = :id), (SELECT new_id FROM ks_id_remap WHERE kind = 'feed' AND old_id = :id), :id) AND deleted_at IS NULL AND (favicon_url IS NULL OR favicon_url = '');
 
 -- Refresh path: update only the content columns a feed refresh owns. Deliberately does NOT touch
 -- deleted_at / sort_order / custom_title / folder_id / favicon_url (favicon has its own
 -- updateFaviconUrlIfMissing), so a concurrent unsubscribe / reorder / rename can't be reverted by a refresh
 -- that started from a now-stale snapshot.
+-- Writes only when one of the three columns actually changes, so updated_at (the content group's
+-- last-write-wins stamp, which the capture trigger does not watch) never moves without a captured
+-- change sent with it: a refresh compares the fetched values with its snapshot, and a sync merge or
+-- another refresh may have stored the same values meanwhile. A stamp moved without being sent would
+-- beat a peer's later content change here and lose to it there (as for updateUrl).
 updateContent:
-UPDATE feeds SET site_url = ?, title = ?, description = ?, updated_at = ? WHERE id = ?;
+UPDATE feeds SET site_url = :site_url, title = :title, description = :description, updated_at = :updated_at
+WHERE id = COALESCE((SELECT id FROM feeds WHERE id = :id), (SELECT new_id FROM ks_id_remap WHERE kind = 'feed' AND old_id = :id), :id)
+  AND (site_url IS NOT :site_url OR title IS NOT :title OR description IS NOT :description);
 
+-- Writes only when the url actually changes, so updated_at (the content group's last-write-wins stamp,
+-- which the capture trigger does not watch) never moves without a captured change sent with it: a
+-- refresh reads its feed from a snapshot, and a sync merge may have brought the same url meanwhile.
+-- A stamp moved without being sent would beat a peer's later content change here and lose to it there.
+-- Also writes nothing while another feed holds :url (UNIQUE(url) would fail the statement): a redirect
+-- onto another feed's URL that is not merged with it (FeedRepository.applyFetch) leaves the URL alone,
+-- so the refresh still succeeds instead of failing on the constraint every cycle.
 updateUrl:
-UPDATE feeds SET url = ?, updated_at = ? WHERE id = ?;
+UPDATE feeds SET url = :url, updated_at = :updated_at WHERE id = COALESCE((SELECT id FROM feeds WHERE id = :id), (SELECT new_id FROM ks_id_remap WHERE kind = 'feed' AND old_id = :id), :id) AND url IS NOT :url
+  AND NOT EXISTS (SELECT 1 FROM feeds AS holder WHERE holder.url = :url AND holder.id <> feeds.id);
+
+-- A redirect of the feed :own onto :target, which another feed may hold: records the two feeds' identity
+-- edge (a < b) when it does, and nothing otherwise — the detection and the record in one statement. A
+-- write, so a transaction it opens holds the write lock from its first statement and the reads after it
+-- (the holder, the merge) see no other connection's commit in between (FeedRepository.applyFetch).
+-- :own is resolved like every feed id a write takes. Inserting an edge already there inserts nothing.
+recordRedirectEdge:
+INSERT OR IGNORE INTO ks_feed_edge (a, b)
+SELECT MIN(f.id, own.id), MAX(f.id, own.id)
+FROM feeds AS f, (SELECT COALESCE((SELECT id FROM feeds WHERE id = :own), (SELECT new_id FROM ks_id_remap WHERE kind = 'feed' AND old_id = :own), :own) AS id) AS own
+WHERE f.url = :target AND f.id <> own.id;
 
 -- A folder move writes the feed's raw assignment (ks_feed_folder_raw, the source of truth — see
 -- sync_bookkeeping.sq); the resolution trigger then derives feeds.folder_id / folder_updated_at from
@@ -116,17 +197,18 @@ UPDATE feeds SET url = ?, updated_at = ? WHERE id = ?;
 -- failing the FOREIGN KEY. The two resolve alike: they run in one transaction, which holds the write
 -- lock from the first, so no merge can re-key in between. The CASE passes a NULL :folderId (no
 -- folder) straight through; it also states :folderId's nullability, which SQLDelight would otherwise
--- infer as NOT NULL from the id comparisons inside the resolution.
+-- infer as NOT NULL from the id comparisons inside the resolution. :id (the feed) is resolved in both
+-- statements too (see the note at the top), so the feeds row and its raw row are the same feed.
 updateFolder {
-    UPDATE feeds SET folder_id = CASE WHEN :folderId IS NULL THEN NULL ELSE COALESCE((SELECT id FROM folders WHERE id = :folderId), (SELECT new_id FROM ks_id_remap WHERE kind = 'folder' AND old_id = :folderId), :folderId) END, updated_at = :updatedAt WHERE id = :id;
+    UPDATE feeds SET folder_id = CASE WHEN :folderId IS NULL THEN NULL ELSE COALESCE((SELECT id FROM folders WHERE id = :folderId), (SELECT new_id FROM ks_id_remap WHERE kind = 'folder' AND old_id = :folderId), :folderId) END, updated_at = :updatedAt WHERE id = COALESCE((SELECT id FROM feeds WHERE id = :id), (SELECT new_id FROM ks_id_remap WHERE kind = 'feed' AND old_id = :id), :id);
     UPDATE ks_feed_folder_raw SET
         folder_id = CASE WHEN :folderId IS NULL THEN NULL ELSE COALESCE((SELECT id FROM folders WHERE id = :folderId), (SELECT new_id FROM ks_id_remap WHERE kind = 'folder' AND old_id = :folderId), :folderId) END,
         folder_updated_at = MAX(:folderUpdatedAt, COALESCE(folder_updated_at, 0) + 1)
-    WHERE feed_id = :id;
+    WHERE feed_id = COALESCE((SELECT id FROM feeds WHERE id = :id), (SELECT new_id FROM ks_id_remap WHERE kind = 'feed' AND old_id = :id), :id);
 }
 
 updateSortOrder:
-UPDATE feeds SET sort_order = ?, updated_at = ?, sort_order_updated_at = MAX(:sort_order_updated_at, COALESCE(sort_order_updated_at, 0) + 1) WHERE id = ?;
+UPDATE feeds SET sort_order = ?, updated_at = ?, sort_order_updated_at = MAX(:sort_order_updated_at, COALESCE(sort_order_updated_at, 0) + 1) WHERE id = COALESCE((SELECT id FROM feeds WHERE id = :id), (SELECT new_id FROM ks_id_remap WHERE kind = 'feed' AND old_id = :id), :id);
 
 -- Updates a moved feed's own folder assignment and sort_order together (the folder as in updateFolder).
 updateFolderAndSortOrder {
@@ -135,17 +217,31 @@ updateFolderAndSortOrder {
         sort_order = :sortOrder,
         updated_at = :updatedAt,
         sort_order_updated_at = MAX(:sortOrderUpdatedAt, COALESCE(sort_order_updated_at, 0) + 1)
-    WHERE id = :id;
+    WHERE id = COALESCE((SELECT id FROM feeds WHERE id = :id), (SELECT new_id FROM ks_id_remap WHERE kind = 'feed' AND old_id = :id), :id);
     UPDATE ks_feed_folder_raw SET
         folder_id = CASE WHEN :folderId IS NULL THEN NULL ELSE COALESCE((SELECT id FROM folders WHERE id = :folderId), (SELECT new_id FROM ks_id_remap WHERE kind = 'folder' AND old_id = :folderId), :folderId) END,
         folder_updated_at = MAX(:folderUpdatedAt, COALESCE(folder_updated_at, 0) + 1)
-    WHERE feed_id = :id;
+    WHERE feed_id = COALESCE((SELECT id FROM feeds WHERE id = :id), (SELECT new_id FROM ks_id_remap WHERE kind = 'feed' AND old_id = :id), :id);
 }
 
 -- All surviving feeds belonging to the given folder (NULL = "no folder"), in display order. The folder
 -- id is resolved (see folders.sq), so a placement computed for a stale id reads the group it became.
 getByFolder:
 SELECT * FROM feeds WHERE deleted_at IS NULL AND (folder_id = COALESCE((SELECT id FROM folders WHERE id = :folderId), (SELECT new_id FROM ks_id_remap WHERE kind = 'folder' AND old_id = :folderId), :folderId) OR (folder_id IS NULL AND :folderId IS NULL)) ORDER BY sort_order ASC, title COLLATE NOCASE ASC;
+
+-- The group getByFolder reads, for placing the feed :moved before the feed :target (NULL = last), each
+-- row also carrying the ids :moved and :target resolve to now (the id itself while a row has it, else the
+-- id ks_id_remap maps it to). One statement, so the group and both resolutions come from the same
+-- committed state: a feed merge that commits around it is either wholly before it or wholly after it,
+-- and the order computed from the rows never mixes an id of one state with an id of the other
+-- (FeedRepository.moveFeed). The two ids repeat on every row; no row, no group to order.
+groupForMove:
+SELECT id, sort_order,
+    COALESCE((SELECT f.id FROM feeds f WHERE f.id = :moved), (SELECT new_id FROM ks_id_remap WHERE kind = 'feed' AND old_id = :moved), :moved) AS moved_id,
+    CAST(CASE WHEN :target IS NULL THEN NULL
+        ELSE COALESCE((SELECT f.id FROM feeds f WHERE f.id = :target), (SELECT new_id FROM ks_id_remap WHERE kind = 'feed' AND old_id = :target), :target)
+    END AS TEXT) AS target_id
+FROM feeds WHERE deleted_at IS NULL AND (folder_id = COALESCE((SELECT id FROM folders WHERE id = :folderId), (SELECT new_id FROM ks_id_remap WHERE kind = 'folder' AND old_id = :folderId), :folderId) OR (folder_id IS NULL AND :folderId IS NULL)) ORDER BY sort_order ASC, title COLLATE NOCASE ASC;
 
 -- The next sort_order value to append to the end of the given folder's group (NULL = "no folder"),
 -- the folder id resolved as in getByFolder.

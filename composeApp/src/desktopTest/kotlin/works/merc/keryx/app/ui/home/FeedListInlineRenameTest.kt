@@ -4,6 +4,8 @@ import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -13,6 +15,7 @@ import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.onAllNodesWithTag
@@ -34,13 +37,14 @@ import org.koin.dsl.module
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.awaitConditionBlocking
 import works.merc.keryx.app.data.local.db.KeryxDatabase
-import works.merc.keryx.app.domain.TagFolderIdRemap
-import works.merc.keryx.app.domain.TagFolderIdRemaps
+import works.merc.keryx.app.domain.IdRemap
+import works.merc.keryx.app.domain.IdRemaps
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
 import works.merc.keryx.app.insertFeedTag
 import works.merc.keryx.app.insertFolder
 import works.merc.keryx.app.insertTag
+import works.merc.keryx.app.mergeFeedForTest
 import works.merc.keryx.app.rekeyFolderForTest
 import works.merc.keryx.app.rekeyTagForTest
 import works.merc.keryx.app.presentation.home.FeedListRowSelection
@@ -111,7 +115,24 @@ class FeedListInlineRenameTest {
                 renameSelectedRequestId = renameSelectedRequestId,
                 deleteSelectedRequestId = deleteSelectedRequestId,
             )
+            AfterListCompositionProbe(vm)
         }
+    }
+
+    /** Runs [afterListComposition] once the feed list's recomposition has been applied — see its use. */
+    @Volatile private var afterListComposition: () -> Unit = {}
+
+    /**
+     * Recomposes with the feed list and runs [afterListComposition] in that pass's side effects: after
+     * the pane's own effects have been launched and before any of their bodies has run, which is the
+     * one point where a test can change the ViewModel's live state between a composition and the
+     * effects that decide on it.
+     */
+    @Composable
+    private fun AfterListCompositionProbe(vm: HomeViewModel) {
+        // Read here, in the composition itself, so that the probe recomposes with the list.
+        val listed = vm.feeds.collectAsState().value.map { it.id }
+        SideEffect { if (listed.isNotEmpty()) afterListComposition() }
     }
 
     private fun ComposeUiTest.setInlineRenameContent(vm: HomeViewModel, menuController: MenuController = testMenuController) {
@@ -565,7 +586,7 @@ class FeedListInlineRenameTest {
     fun aReKeyOfTheTagBeingRenamedKeepsTheEditorOpenWithTheTypedText() = runDesktopComposeUiTest {
         val (driver, db) = inMemoryDb()
         db.insertTag("t-old", "Tag One", sortOrder = 0L)
-        val remaps = TagFolderIdRemaps(db, Dispatchers.Unconfined)
+        val remaps = IdRemaps(db, Dispatchers.Unconfined)
         useHomeViewModel(driver, db, idRemaps = remaps) { fixture ->
             val vm = fixture.vm
             setInlineRenameContent(vm)
@@ -588,7 +609,7 @@ class FeedListInlineRenameTest {
     fun aReKeyOfTheFolderBeingRenamedKeepsTheEditorOpenWithTheTypedText() = runDesktopComposeUiTest {
         val (driver, db) = inMemoryDb()
         db.insertFolder("d-old", "Folder One", sortOrder = 0L)
-        val remaps = TagFolderIdRemaps(db, Dispatchers.Unconfined)
+        val remaps = IdRemaps(db, Dispatchers.Unconfined)
         useHomeViewModel(driver, db, idRemaps = remaps) { fixture ->
             val vm = fixture.vm
             setInlineRenameContent(vm)
@@ -614,7 +635,7 @@ class FeedListInlineRenameTest {
     fun aListAheadOfTheMapDoesNotDiscardTheTagRenameInProgress() = runDesktopComposeUiTest {
         val (driver, db) = inMemoryDb()
         db.insertTag("t-old", "Tag One", sortOrder = 0L)
-        val remaps = TagFolderIdRemaps(db, Dispatchers.Unconfined)
+        val remaps = IdRemaps(db, Dispatchers.Unconfined)
         useHomeViewModel(driver, db, idRemaps = remaps) { fixture ->
             val vm = fixture.vm
             setInlineRenameContent(vm)
@@ -636,7 +657,7 @@ class FeedListInlineRenameTest {
     fun aListAheadOfTheMapDoesNotDiscardTheFolderRenameInProgress() = runDesktopComposeUiTest {
         val (driver, db) = inMemoryDb()
         db.insertFolder("d-old", "Folder One", sortOrder = 0L)
-        val remaps = TagFolderIdRemaps(db, Dispatchers.Unconfined)
+        val remaps = IdRemaps(db, Dispatchers.Unconfined)
         useHomeViewModel(driver, db, idRemaps = remaps) { fixture ->
             val vm = fixture.vm
             setInlineRenameContent(vm)
@@ -654,6 +675,129 @@ class FeedListInlineRenameTest {
     }
 
     /**
+     * A merge folds the feed being renamed into another feed, and the feed list shows only the merged
+     * feed before the re-key is published (the merge's commit notifies the lists first). The editor's
+     * row is not taken for gone: the catch-up from the database finds it moved, the editor carries on
+     * on the merged feed's row with the typed text, and the commit lands on that feed.
+     */
+    @Test
+    fun aListAheadOfTheMapDoesNotDiscardTheFeedRenameInProgressAcrossAMerge() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        db.insertFeed("f-new", sortOrder = 0L)
+        db.insertFeed("f-old", sortOrder = 1L)
+        val remaps = IdRemaps(db, Dispatchers.Unconfined)
+        useHomeViewModel(driver, db, idRemaps = remaps) { fixture ->
+            val vm = fixture.vm
+            setInlineRenameContent(vm)
+            startInlineRename(vm, ArticleFilter.Feed("f-old"))
+            typeName("Half typed")
+
+            driver.mergeFeedForTest("f-old", "f-new")
+            waitUntil(timeoutMillis = 5_000) { vm.feeds.value.map { it.id } == listOf("f-new") }
+            waitForIdle()
+
+            editor().assertIsDisplayed()
+            editor().assertTextContains("Half typed")
+            pressEnter()
+            assertEquals("Half typed", db.customTitleOf("f-new"), "the commit lands on the feed it became")
+        }
+    }
+
+    /**
+     * The map reaches composition while the lists still show both ids it joins (the old row has not
+     * been dropped yet): exactly one row hosts the editor, whichever kind of row it is, and the typed
+     * text is kept.
+     */
+    private suspend fun ComposeUiTest.assertOneEditorWhileTheMapJoinsTwoListedRows(
+        kind: String,
+        oldId: String,
+        newId: String,
+        filter: ArticleFilter,
+        seed: KeryxDatabase.() -> Unit,
+    ) {
+        val (driver, db) = inMemoryDb()
+        db.seed()
+        val remaps = IdRemaps(db, Dispatchers.Unconfined)
+        useHomeViewModel(driver, db, idRemaps = remaps) { fixture ->
+            val vm = fixture.vm
+            setInlineRenameContent(vm)
+            startInlineRename(vm, filter)
+            typeName("Half typed")
+
+            driver.execute(null, "INSERT INTO ks_id_remap (kind, old_id, new_id) VALUES ('$kind', '$oldId', '$newId')", 0)
+            runBlocking { remaps.publishFromDb() }
+            waitForIdle()
+            mainClock.advanceTimeByFrame()
+            waitForIdle()
+
+            onAllNodesWithTag(INLINE_RENAME_FIELD_TEST_TAG, useUnmergedTree = true).assertCountEquals(1)
+            editor().assertTextContains("Half typed")
+        }
+    }
+
+    @Test
+    fun aMapJoiningTwoListedFeedRowsHostsOneEditor() = runDesktopComposeUiTest {
+        assertOneEditorWhileTheMapJoinsTwoListedRows("feed", "f-old", "f-new", ArticleFilter.Feed("f-old")) {
+            insertFeed("f-new", sortOrder = 0L)
+            insertFeed("f-old", sortOrder = 1L)
+        }
+    }
+
+    @Test
+    fun aMapJoiningTwoListedFolderRowsHostsOneEditor() = runDesktopComposeUiTest {
+        assertOneEditorWhileTheMapJoinsTwoListedRows("folder", "d-old", "d-new", ArticleFilter.Folder("d-old")) {
+            insertFolder("d-new", "Folder New", sortOrder = 0L)
+            insertFolder("d-old", "Folder Old", sortOrder = 1L)
+        }
+    }
+
+    @Test
+    fun aMapJoiningTwoListedTagRowsHostsOneEditor() = runDesktopComposeUiTest {
+        assertOneEditorWhileTheMapJoinsTwoListedRows("tag", "t-old", "t-new", ArticleFilter.Tag("t-old")) {
+            insertTag("t-new", "Tag New", sortOrder = 0L)
+            insertTag("t-old", "Tag Old", sortOrder = 1L)
+        }
+    }
+
+    /**
+     * The composition has collected the new feed list but not yet the map that joins the edit's old id
+     * to it, while the ViewModel's live map already has it: the editor's row is renderable under the live
+     * map, so the edit is kept, and it carries on onto the merged feed once composition catches up.
+     */
+    @Test
+    fun aLiveMapThatFindsTheRowKeepsTheEditWhileCompositionStillHoldsTheOldMap() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        db.insertFeed("f-new", sortOrder = 0L)
+        db.insertFeed("f-old", sortOrder = 1L)
+        val remaps = IdRemaps(db, Dispatchers.Unconfined)
+        useHomeViewModel(driver, db, idRemaps = remaps) { fixture ->
+            val vm = fixture.vm
+            setInlineRenameContent(vm)
+            startInlineRename(vm, ArticleFilter.Feed("f-old"))
+            typeName("Half typed")
+
+            // The map is published (the ViewModel's live value) right after the composition that first
+            // shows the new list, while that composition still holds the old map, and before the pane's
+            // effects decide on it.
+            var published = false
+            afterListComposition = {
+                if (!published && vm.feeds.value.map { it.id } == listOf("f-new")) {
+                    published = true
+                    runBlocking { remaps.publishFromDb() }
+                }
+            }
+            driver.mergeFeedForTest("f-old", "f-new")
+            waitUntil(timeoutMillis = 5_000) { published }
+            waitForIdle()
+
+            editor().assertIsDisplayed()
+            editor().assertTextContains("Half typed")
+            pressEnter()
+            assertEquals("Half typed", db.customTitleOf("f-new"), "the commit lands on the feed it became")
+        }
+    }
+
+    /**
      * The map ahead of the lists by more than one re-key: t-a -> t-b has reached both, then t-b -> t-c
      * is published (folded: t-a -> t-c, t-b -> t-c) while the lists still show t-b. Neither the edit's
      * own id (t-a) nor its remapped one (t-c) is in the lists, but t-b is the same row: the editor
@@ -664,7 +808,7 @@ class FeedListInlineRenameTest {
     fun aMapAheadOfTheListsByAChainedReKeyDoesNotDiscardTheRenameInProgress() = runDesktopComposeUiTest {
         val (driver, db) = inMemoryDb()
         db.insertTag("t-a", "Tag One", sortOrder = 0L)
-        val remaps = TagFolderIdRemaps(db, Dispatchers.Unconfined)
+        val remaps = IdRemaps(db, Dispatchers.Unconfined)
         useHomeViewModel(driver, db, idRemaps = remaps) { fixture ->
             val vm = fixture.vm
             setInlineRenameContent(vm)
@@ -679,7 +823,7 @@ class FeedListInlineRenameTest {
             // catch-up run on it — before the lists are notified of the re-key, so they still show t-b.
             driver.rekeyTagForTest("t-b", "t-c") {
                 runBlocking { remaps.publishFromDb() }
-                assertEquals(mapOf("t-a" to "t-c", "t-b" to "t-c"), vm.tagFolderIdRemap.value.tagIds)
+                assertEquals(mapOf("t-a" to "t-c", "t-b" to "t-c"), vm.idRemap.value.tagIds)
                 waitForIdle()
                 mainClock.advanceTimeByFrame()
                 waitForIdle()
@@ -697,15 +841,15 @@ class FeedListInlineRenameTest {
     }
 
     /**
-     * A [TagFolderIdRemaps] whose reads of `ks_id_remap` fail while [failing] is set — the initial load
+     * A [IdRemaps] whose reads of `ks_id_remap` fail while [failing] is set — the initial load
      * succeeds (the flag starts clear), so only the catch-up a test provokes afterwards fails.
      */
     private class FailableIdRemaps(db: KeryxDatabase) {
         @Volatile var failing = false
-        val remaps = TagFolderIdRemaps({
+        val remaps = IdRemaps({
             check(!failing) { "ks_id_remap read failed (test)" }
-            val rows = db.sync_bookkeepingQueries.idRemapAll().executeAsList()
-            TagFolderIdRemap(
+            val rows = db.sync_bookkeepingQueries.idRemapPublished().executeAsList()
+            IdRemap(
                 tagIds = rows.filter { it.kind == "tag" }.associate { it.old_id to it.new_id },
                 folderIds = rows.filter { it.kind == "folder" }.associate { it.old_id to it.new_id },
             )
@@ -839,16 +983,16 @@ class FeedListInlineRenameTest {
     }
 
     /**
-     * A [TagFolderIdRemaps] whose next read, once armed ([arm]), reads `ks_id_remap` when it starts —
+     * A [IdRemaps] whose next read, once armed ([arm]), reads `ks_id_remap` when it starts —
      * as the database read does — and then waits at a gate until [release]: a re-key committed
      * meanwhile is not in the map it publishes. Later reads are ordinary.
      */
     private class GatedIdRemaps(db: KeryxDatabase) {
         @Volatile private var gate: CountDownLatch? = null
         val entered = CountDownLatch(1)
-        val remaps = TagFolderIdRemaps({
-            val rows = db.sync_bookkeepingQueries.idRemapAll().executeAsList()
-            val read = TagFolderIdRemap(
+        val remaps = IdRemaps({
+            val rows = db.sync_bookkeepingQueries.idRemapPublished().executeAsList()
+            val read = IdRemap(
                 tagIds = rows.filter { it.kind == "tag" }.associate { it.old_id to it.new_id },
                 folderIds = rows.filter { it.kind == "folder" }.associate { it.old_id to it.new_id },
             )
@@ -912,7 +1056,7 @@ class FeedListInlineRenameTest {
                     // on the EDT; drain the EDT (twice: anything that continuation queues runs too) so it
                     // has run before frames resume.
                     awaitConditionBlocking { diverting.inFlight.get() == 0 }
-                    assertEquals(mapOf("t-a" to "t-b"), vm.tagFolderIdRemap.value.tagIds)
+                    assertEquals(mapOf("t-a" to "t-b"), vm.idRemap.value.tagIds)
                     SwingUtilities.invokeAndWait {}
                     SwingUtilities.invokeAndWait {}
                 } finally {
@@ -924,7 +1068,7 @@ class FeedListInlineRenameTest {
                 waitUntil("the editor is back on the re-keyed row", timeoutMillis = 5_000) {
                     onAllNodesWithTag(INLINE_RENAME_FIELD_TEST_TAG, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
                 }
-                assertEquals("t-c", vm.tagFolderIdRemap.value.tag("t-a"))
+                assertEquals("t-c", vm.idRemap.value.tag("t-a"))
 
                 editor().assertIsDisplayed()
                 editor().assertTextContains("Half typed")

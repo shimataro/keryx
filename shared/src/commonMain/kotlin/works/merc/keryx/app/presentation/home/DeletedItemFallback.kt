@@ -49,17 +49,19 @@ internal sealed interface DeletedTarget {
  *
  * Whether [shown] has the item is decided in the id space of [currentRemap], read afresh at each
  * decision: the request's id and every shown id are both mapped through the current re-key map
- * (`TagFolderIdRemaps`) before they are compared. A merge that re-keys the deleted item's row
+ * (`IdRemaps`) before they are compared. A merge that re-keys the deleted item's row
  * publishes the map before it notifies the list queries, so a list value that shows the row under its
  * new id is never taken for "the item is gone" merely because this class has not yet been told to move
  * the request ([remapPending] is delivered on another coroutine, in no fixed order against [shown]).
  *
  * **An absence is confirmed against the committed re-key map before it is believed.** A merge
  * publishes the map only after its transaction commits, and any other write in between (a feed
- * refresh, a user action) re-runs the tag/folder list queries, which then already read the re-keyed
- * rows while [currentRemap] still holds the old map: the item looks gone when it only moved. So when
+ * refresh, a user action) re-runs the feed, tag and folder list queries, which then already read the re-keyed
+ * rows while [currentRemap] still holds the old map: the item looks gone when it only moved. (A
+ * refresh's redirect merge is the same: its generated statements notify the lists at its commit,
+ * before it publishes the map.) So when
  * [shown] lacks the item and [catchUp] is given, it is run first (on [checkDispatcher]; in production
- * it re-reads `ks_id_remap` from the database, serialized by `TagFolderIdRemaps`' lock — the list was
+ * it re-reads `ks_id_remap` from the database, serialized by `IdRemaps`' lock — the list was
  * read after the commit, so the read sees the re-key), and the decision is taken again with the
  * refreshed map: still absent means really gone and the fallback runs, present means the request
  * goes on as for a value that still shows the item. The decision is taken on the very list that was
@@ -69,7 +71,8 @@ internal sealed interface DeletedTarget {
  * own — instead. After one catch-up an unexplained absence is a
  * real disappearance, so a real deletion always falls back. A [catchUp] that fails is logged and
  * leaves the request pending (best effort, as the liveness check): the next value of [shown] decides.
- * Without [catchUp] (feeds, whose ids are never re-keyed) an absence is decided at once.
+ * Without [catchUp] (a list whose ids are never re-keyed) an absence is decided at once; every list
+ * `HomeViewModel` hands over — feeds, tags, folders — has one, since a merge can move any of them.
  *
  * Once dropped, a request is gone, so a deletion that arrives later from elsewhere (a sync merge)
  * never moves the selection (external-spec §9, "Least surprise").
@@ -129,7 +132,7 @@ internal class DeletedItemFallback<T>(
 
     /**
      * Moves every pending request onto the id [remap] gives it — a merge re-keyed the deleted item
-     * onto another id (see `TagFolderIdRemapping`), whose row now stands for it. A moved request
+     * onto another id (see `IdRemapping`), whose row now stands for it. A moved request
      * is decided against the current value of [shown] at once, as a new request would be: if the list
      * lacks the new id, the absence is confirmed as any other is (`decideAbsence`) — with [catchUp], the
      * committed map is read first, since the list can already show a later re-key of the same row
@@ -209,7 +212,7 @@ internal class DeletedItemFallback<T>(
             val caughtUp = runCatchingUnlessCancelled {
                 withContext(checkDispatcher) { catchUp() }
             }.onFailure { e ->
-                Log.warn(TAG, "Catching up the tag/folder re-keys before a deleted item's fallback failed", e)
+                Log.warn(TAG, "Catching up the id re-keys before a deleted item's fallback failed", e)
             }.isSuccess
             if (request !in pending || generation != request.checkGeneration) return@launch
             // Undecided: the next value of [shown] asks again.

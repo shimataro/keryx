@@ -143,7 +143,7 @@ private fun KeryxDatabase.insertArticle(
 }
 
 /**
- * Fails the article-by-id lookup (`articles.getById`, the body a selection loads) while [failGetById]
+ * Fails the article-by-id lookup (`articles.getById` / `getByIdResolved`, the body a selection loads) while [failGetById]
  * is set — standing in for a lookup whose connection waited out the whole `busy_timeout`.
  */
 private class GetByIdFailingSqlDriver(private val delegate: SqlDriver) : SqlDriver by delegate {
@@ -159,7 +159,10 @@ private class GetByIdFailingSqlDriver(private val delegate: SqlDriver) : SqlDriv
         parameters: Int,
         binders: (app.cash.sqldelight.db.SqlPreparedStatement.() -> Unit)?,
     ): app.cash.sqldelight.db.QueryResult<R> {
-        val isGetById = sql.startsWith("SELECT articles.") && sql.endsWith("FROM articles WHERE id = ?")
+        // `getById`, or `getByIdResolved` (the selection's and the restore's lookup, which resolves an id a
+        // feed merge moved).
+        val isGetById = sql.startsWith("SELECT articles.") &&
+            (sql.endsWith("FROM articles WHERE id = ?") || sql.contains("FROM articles\nWHERE id = COALESCE((SELECT id FROM articles WHERE id = ?)"))
         if (isGetById) onGetById?.invoke()
         if (failGetById && isGetById) {
             throw IllegalStateException("database is locked")
@@ -316,7 +319,7 @@ class HomeViewModelTest {
         // Where a failed write is reported; a test can pass one over its own NotificationCenter.
         localWriteFailureReporter: LocalWriteFailureReporter = LocalWriteFailureReporter(NotificationCenter(), clock),
         // The tag/folder re-keys the ViewModel observes — a test publishes one through it.
-        idRemaps: works.merc.keryx.app.domain.TagFolderIdRemaps = works.merc.keryx.app.domain.TagFolderIdRemaps(db, Dispatchers.Unconfined),
+        idRemaps: works.merc.keryx.app.domain.IdRemaps = works.merc.keryx.app.domain.IdRemaps(db, Dispatchers.Unconfined),
     ): HomeViewModel {
         val articleRepository = ArticleRepository(db, FtsSearch(ftsDriver), syncScheduler, clock, Dispatchers.Unconfined)
         // Mirror startup: ensureIndexed() creates articles_fts so the subscribe/refresh path's indexMissing() works.
@@ -325,6 +328,7 @@ class HomeViewModelTest {
             NotificationCenter(), clock, listDispatcher,
             faviconMisses = InMemoryFaviconMissStore(),
             feedPlacementMutex = feedPlacementMutex,
+            driver = driver,
         )
         val tagRepository = TagRepository(db, syncScheduler, clock, listDispatcher)
         val folderRepository = FolderRepository(db, feedRepository, syncScheduler, clock, listDispatcher)
@@ -1365,7 +1369,7 @@ class HomeViewModelTest {
         db.insertFeedTag("f1", "t-old")
         val gate = CompletableDeferred<Unit>()
         val fetches = java.util.concurrent.atomic.AtomicInteger(0)
-        val remaps = works.merc.keryx.app.domain.TagFolderIdRemaps(db, Dispatchers.Unconfined)
+        val remaps = works.merc.keryx.app.domain.IdRemaps(db, Dispatchers.Unconfined)
         val vm = newViewModel(feedFetcher = gatedCountingFetcher(gate, fetches), idRemaps = remaps)
         subscribeAll(vm)
         vm.selectFilter(ArticleFilter.Tag("t-old"))
@@ -1677,6 +1681,33 @@ class HomeViewModelTest {
 
         assertNull(vm.selectedArticle.value)
         assertTrue(vm.articles.value.none { it.id == "a1" })
+    }
+
+    /**
+     * A starred article stays visible even when another device's cache cleanup deleted it (the star and
+     * the deletion are separate merge groups), so the launch-time restore and a selection both keep it.
+     */
+    @Test
+    fun aStarredArticleDeletedElsewhereIsRestoredAndSelectableAsVisible() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 1L, isStarred = 1L, content = "<p>kept</p>")
+        db.insertArticle("a2", "f1", isRead = 0L, isStarred = 1L, content = "<p>also kept</p>")
+        val store = LocalSettingsStore(dirOverride = dir)
+        store.save(store.load().copy(lastArticleId = "a1"))
+        driver.stampArticleDeleted("a1", deletedAt = 10L)
+        driver.stampArticleDeleted("a2", deletedAt = 10L)
+
+        val vm = newViewModel()
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals("a1", vm.selectedArticle.value?.id)
+        assertEquals(setOf("a1", "a2"), vm.articles.value.map { it.id }.toSet())
+
+        vm.selectArticle(vm.articles.value.first { it.id == "a2" })
+        testScheduler.advanceUntilIdle()
+        assertEquals("a2", vm.selectedArticle.value?.id)
+        assertEquals("<p>also kept</p>", vm.selectedArticle.value?.content)
     }
 
     /**
@@ -6513,7 +6544,7 @@ class HomeViewModelTest {
         driver.rekeyTagForTest("t-old", "t-new")
 
         val loader = StandardTestDispatcher(mainScheduler)
-        val vm2 = newViewModel(idRemaps = works.merc.keryx.app.domain.TagFolderIdRemaps(db, loader))
+        val vm2 = newViewModel(idRemaps = works.merc.keryx.app.domain.IdRemaps(db, loader))
         subscribeAll(vm2)
         assertEquals(ArticleFilter.Tag("t-old"), vm2.filter.value, "held as saved while the map loads")
         assertTrue(vm2.filterRestoredOnLaunch)
@@ -6535,7 +6566,7 @@ class HomeViewModelTest {
         db.tagsQueries.softDelete(1L, 1L, "t1")
 
         val loader = StandardTestDispatcher(mainScheduler)
-        val vm2 = newViewModel(idRemaps = works.merc.keryx.app.domain.TagFolderIdRemaps(db, loader))
+        val vm2 = newViewModel(idRemaps = works.merc.keryx.app.domain.IdRemaps(db, loader))
         subscribeAll(vm2)
         mainScheduler.advanceUntilIdle()
         testScheduler.advanceUntilIdle()
@@ -7244,8 +7275,10 @@ class HomeViewModelTest {
         assertEquals(listOf("f1"), vm.structuralFeeds.value.map { it.id })
         val afterLoad = emissions.size
 
-        // The same content, stamped later: what a refresh's updateContent writes for an unchanged feed.
-        db.feedsQueries.updateContent(site_url = null, title = "Feed f1", description = null, updated_at = 1_000L, id = "f1")
+        // The same content, stamped later (no query writes updated_at alone, so raw SQL; the lists re-run
+        // on the notification).
+        driver.execute(null, "UPDATE feeds SET updated_at = 1000 WHERE id = 'f1'", 0)
+        driver.notifyListeners("feeds")
         testScheduler.advanceUntilIdle()
         assertEquals(1_000L, vm.feeds.value.single().updated_at)
         assertEquals(afterLoad, emissions.size)

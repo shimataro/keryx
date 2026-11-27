@@ -5,6 +5,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import works.merc.keryx.app.data.local.db.Articles
@@ -16,7 +17,12 @@ import works.merc.keryx.app.data.local.db.Articles
  */
 class ArticleContentCacheTest {
 
-    private fun articleRow(id: String, content: String) = Articles(
+    private fun articleRow(
+        id: String,
+        content: String,
+        isStarred: Long = 0L,
+        deletedAt: Long? = null,
+    ) = Articles(
         id = id,
         feed_id = "f1",
         guid = id,
@@ -29,14 +35,14 @@ class ArticleContentCacheTest {
         thumbnail_url = null,
         is_read = 0L,
         read_at = null,
-        is_starred = 0L,
+        is_starred = isStarred,
         starred_at = null,
         cached_at = 0L,
         search_text = "",
         updated_at = 0L,
         created_at = 0L,
-        deleted_at = null,
-        deleted_updated_at = null,
+        deleted_at = deletedAt,
+        deleted_updated_at = deletedAt,
         body_updated_at = null,
     )
 
@@ -88,5 +94,36 @@ class ArticleContentCacheTest {
         testScheduler.advanceUntilIdle()
 
         assertEquals("<p>fresh</p>", cache.rows.value["a1"]?.content)
+    }
+
+    /** A cache whose lookups return [row], with the load run eagerly so the result lands at once. */
+    private fun TestScope.cacheReturning(row: Articles) = ArticleContentCache(
+        scope = this,
+        dispatcher = UnconfinedTestDispatcher(),
+        load = { row },
+    )
+
+    // A starred article another device's cache cleanup deleted is still visible (deleted_at set,
+    // is_starred = 1), so its body is cached for the reader like any other.
+    @Test
+    fun aDeletedButStarredRowIsCached() = runTest(UnconfinedTestDispatcher()) {
+        val cache = cacheReturning(articleRow("a1", "<p>kept</p>", isStarred = 1L, deletedAt = 500L))
+
+        cache.request("a1")
+        testScheduler.advanceUntilIdle()
+
+        assertEquals("<p>kept</p>", cache.rows.value["a1"]?.content)
+    }
+
+    // A row deleted and not starred is no longer visible: a merge that deleted it while the lookup
+    // ran must not put its body back on screen.
+    @Test
+    fun aDeletedUnstarredRowIsDropped() = runTest(UnconfinedTestDispatcher()) {
+        val cache = cacheReturning(articleRow("a1", "<p>gone</p>", isStarred = 0L, deletedAt = 500L))
+
+        cache.request("a1")
+        testScheduler.advanceUntilIdle()
+
+        assertFalse("a1" in cache.rows.value)
     }
 }

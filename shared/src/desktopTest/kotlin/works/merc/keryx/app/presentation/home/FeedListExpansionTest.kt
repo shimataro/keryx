@@ -7,7 +7,7 @@ import works.merc.keryx.app.data.local.LocalSettingsStore
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SyncScheduler
-import works.merc.keryx.app.domain.TagFolderIdRemap
+import works.merc.keryx.app.domain.IdRemap
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
 import works.merc.keryx.app.insertFolder
@@ -178,7 +178,7 @@ class FeedListExpansionTest {
             it.copy(collapsedFolderIds = setOf("d-old", "d-kept"), expandedTagIds = setOf("t-old"))
         }
         val expansion = FeedListExpansion(settingsRepository())
-        val remap = TagFolderIdRemap(tagIds = mapOf("t-old" to "t-new"), folderIds = mapOf("d-old" to "d-new"))
+        val remap = IdRemap(tagIds = mapOf("t-old" to "t-new"), folderIds = mapOf("d-old" to "d-new"))
 
         expansion.remap(remap)
 

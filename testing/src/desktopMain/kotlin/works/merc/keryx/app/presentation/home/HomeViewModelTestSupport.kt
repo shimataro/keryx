@@ -42,7 +42,7 @@ import works.merc.keryx.app.domain.RefreshCycleRunner
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.SyncScheduler
-import works.merc.keryx.app.domain.TagFolderIdRemaps
+import works.merc.keryx.app.domain.IdRemaps
 import works.merc.keryx.app.domain.TagRepository
 import works.merc.keryx.app.ftsManagerIndexed
 import works.merc.keryx.app.platform.AppDirs
@@ -181,8 +181,8 @@ fun newHomeViewModel(
     // Where the ViewModel reports a write that failed — overridable so a test can observe it.
     localWriteFailureReporter: LocalWriteFailureReporter = LocalWriteFailureReporter(NotificationCenter(), clock),
     // The tag/folder id re-keys the settings and the ViewModel observe — overridable so a test can
-    // publish a re-key ([TagFolderIdRemaps.publishFromDb]) after changing `ks_id_remap` itself.
-    idRemaps: TagFolderIdRemaps = TagFolderIdRemaps(db, Dispatchers.Unconfined),
+    // publish a re-key ([IdRemaps.publishFromDb]) after changing `ks_id_remap` itself.
+    idRemaps: IdRemaps = IdRemaps(db, Dispatchers.Unconfined),
     // The directory holding `local_settings.json`. Null (the default) uses a fresh, unique one; a test
     // that models a process restart passes the previous fixture's, so the saved state is restored.
     settingsDir: String? = null,
@@ -203,6 +203,7 @@ fun newHomeViewModel(
             ftsManagerIndexed(driver), syncScheduler, NotificationCenter(),
             clock, Dispatchers.Unconfined,
             faviconMisses = InMemoryFaviconMissStore(),
+            driver = driver,
         )
         val tagRepository = TagRepository(db, syncScheduler, clock, Dispatchers.Unconfined)
         val folderRepository = FolderRepository(db, feedRepository, syncScheduler, clock, Dispatchers.Unconfined)

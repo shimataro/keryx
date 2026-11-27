@@ -141,6 +141,7 @@ class OpmlImporterTest {
             db, feedFetcher, missingFaviconResolver(), articleRepository, ftsManager, syncScheduler,
             NotificationCenter(), clock, Dispatchers.Unconfined,
             faviconMisses = InMemoryFaviconMissStore(),
+            driver = driver,
         )
         val folderRepository = FolderRepository(db, feedRepository, syncScheduler, clock, Dispatchers.Unconfined)
         val tagRepository = TagRepository(db, syncScheduler, clock, Dispatchers.Unconfined)

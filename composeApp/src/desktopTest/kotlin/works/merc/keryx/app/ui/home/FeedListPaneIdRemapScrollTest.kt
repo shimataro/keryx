@@ -15,7 +15,7 @@ import org.koin.compose.KoinApplication
 import org.koin.dsl.koinConfiguration
 import org.koin.dsl.module
 import works.merc.keryx.app.core.ArticleFilter
-import works.merc.keryx.app.domain.TagFolderIdRemaps
+import works.merc.keryx.app.domain.IdRemaps
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
 import works.merc.keryx.app.insertTag
@@ -37,7 +37,7 @@ class FeedListPaneIdRemapScrollTest {
         val (driver, db) = inMemoryDb()
         repeat(30) { i -> db.insertFeed("f$i", sortOrder = i.toLong()) }
         db.insertTag("t-old", "Tag One")
-        val remaps = TagFolderIdRemaps(db, Dispatchers.Unconfined)
+        val remaps = IdRemaps(db, Dispatchers.Unconfined)
         useHomeViewModel(driver, db, idRemaps = remaps) { fixture ->
             val vm = fixture.vm
             setContent {

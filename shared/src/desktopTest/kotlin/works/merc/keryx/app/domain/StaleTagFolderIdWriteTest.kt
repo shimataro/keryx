@@ -51,6 +51,7 @@ class StaleTagFolderIdWriteTest {
             db, FeedFetcher(failingClient()), FaviconResolver(failingClient()), articles,
             ftsManagerIndexed(driver), SyncScheduler {}, NotificationCenter(), clock, Dispatchers.Unconfined,
             faviconMisses = InMemoryFaviconMissStore(),
+            driver = driver,
         )
         return Repos(
             TagRepository(db, SyncScheduler {}, clock, Dispatchers.Unconfined),

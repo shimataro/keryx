@@ -18,9 +18,10 @@ import works.merc.keryx.app.domain.ColumnKind.TEXT
  * `ks_covered`. A tag's or folder's `v2_id` travels with it as well: the id it carried before the
  * v2→v3 migration re-keyed it, which gives every receiver the identity edge linking rows renamed
  * differently on two devices before they upgraded (`V2IdentitySql`). Version 2 also adds the identity edge tables
- * `folder_v2_edges` / `tag_v2_edges` ([EDGE_TABLES]): the sender's `ks_v2_edge`, carried by full
+ * `folder_v2_edges` / `tag_v2_edges` ([V2_EDGE_TABLES]): the sender's `ks_v2_edge`, carried by full
  * sends and bases (and, for an edge a pre-delta merge added while capture was on, by an ordinary
- * delta) and folded by union. `KeryxDatabase.Schema.migrate` is never run on a
+ * delta) and folded by union. Version 3 adds `feed_edges` ([FEED_EDGES]): the sender's `ks_feed_edge`,
+ * the feed ids that ever shared a URL. `KeryxDatabase.Schema.migrate` is never run on a
  * transport file.
  *
  * Pure data; the DDL is generated from the same [TableSpec]s the validation reads, so the two
@@ -29,7 +30,7 @@ import works.merc.keryx.app.domain.ColumnKind.TEXT
 object TransportSchema {
 
     /** The transport format this build writes (`PRAGMA user_version` of a transport file). */
-    const val VERSION: Long = 2L
+    const val VERSION: Long = 3L
 
     private val FOLDERS_V1 = TableSpec(
         "folders",
@@ -127,6 +128,20 @@ object TransportSchema {
         primaryKey = listOf("v2_id", "id"),
     )
 
+    /**
+     * `feed_edges(a, b)` (version 3): feed identity edges — two feed ids that shared a `url` at some
+     * point, normalized `a < b` — the sender's `ks_feed_edge`. Filled in full by full sends and bases
+     * (less the edges the except file carries), in a delta with the edges recorded in the outbox
+     * (`ks_capture_feed_edge_insert`), folded by union plus the URL collisions a fold sees ([ReduceSql]),
+     * and merged into the receiver's `ks_feed_edge`. No reference check: an edge means something
+     * without its rows.
+     */
+    private val FEED_EDGES = TableSpec(
+        "feed_edges",
+        listOf(req("a", ID), req("b", ID)),
+        primaryKey = listOf("a", "b"),
+    )
+
     /** `ks_meta(key, value)`: the file's identity; keys are [MetaKeys]. */
     private val KS_META = TableSpec("ks_meta", listOf(req("key", ID), req("value", TEXT)), primaryKey = listOf("key"))
 
@@ -161,11 +176,17 @@ object TransportSchema {
     val META_TABLES: List<TableSpec> = listOf(KS_META, KS_VECTOR, KS_COVERED)
 
     /**
-     * The identity edge tables of the current transport version (`folder_v2_edges`,
-     * `tag_v2_edges`), present (possibly empty) in every file of version 2: not synced tables —
-     * they are not local columns — but the sender's `ks_v2_edge`, split by kind.
+     * The tag / folder identity edge tables (`folder_v2_edges`, `tag_v2_edges`), present (possibly
+     * empty) in every file of version 2 on: the sender's `ks_v2_edge`, split by kind.
      */
-    val EDGE_TABLES: List<TableSpec> = listOf(FOLDER_V2_EDGES, TAG_V2_EDGES)
+    val V2_EDGE_TABLES: List<TableSpec> = listOf(FOLDER_V2_EDGES, TAG_V2_EDGES)
+
+    /**
+     * The identity edge tables of the current transport version ([V2_EDGE_TABLES], then `feed_edges`,
+     * present (possibly empty) in every file of version 3 on): not synced tables — they are not local columns — but the sender's
+     * `ks_v2_edge` (split by kind) and `ks_feed_edge`.
+     */
+    val EDGE_TABLES: List<TableSpec> = V2_EDGE_TABLES + FEED_EDGES
 
     /**
      * Every table a transport file of a given version must have, by `user_version`. A version
@@ -174,7 +195,8 @@ object TransportSchema {
      */
     val EXPECTED_TABLES: Map<Long, List<TableSpec>> = mapOf(
         1L to SYNCED_TABLES_V1 + META_TABLES,
-        2L to SYNCED_TABLES + EDGE_TABLES + META_TABLES,
+        2L to SYNCED_TABLES + V2_EDGE_TABLES + META_TABLES,
+        3L to SYNCED_TABLES + EDGE_TABLES + META_TABLES,
     )
 
     /** The `CREATE TABLE` statements of a fresh transport file of [VERSION]. */
@@ -189,8 +211,8 @@ object TransportSchema {
 
     /**
      * Transport migrations, in order. The 1→2 step adds the optional `v2_id` column to folders and
-     * tags and creates the (empty) identity edge tables, so older transport files without them can
-     * still be validated and merged.
+     * tags and creates the (empty) tag / folder identity edge tables; the 2→3 step creates the (empty)
+     * feed identity edge table. Older transport files without them can still be validated and merged.
      */
     val MIGRATIONS: List<Migration> = listOf(
         Migration(
@@ -198,8 +220,9 @@ object TransportSchema {
             listOf(
                 "ALTER TABLE folders ADD COLUMN v2_id TEXT",
                 "ALTER TABLE tags ADD COLUMN v2_id TEXT",
-            ) + EDGE_TABLES.map(::createTable),
+            ) + V2_EDGE_TABLES.map(::createTable),
         ),
+        Migration(2, 3, listOf(createTable(FEED_EDGES))),
     )
 
     /**

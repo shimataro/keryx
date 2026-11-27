@@ -10,6 +10,12 @@ internal const val ID_REMAP_KIND_TAG = "tag"
 /** The `ks_id_remap.kind` / `ks_v2_edge.kind` of a folder row's record. */
 internal const val ID_REMAP_KIND_FOLDER = "folder"
 
+/** The `ks_id_remap.kind` of a feed row's record: a feed moved onto another id of its identity. */
+internal const val ID_REMAP_KIND_FEED = "feed"
+
+/** The `ks_id_remap.kind` of an article row's record: an article moved onto another id of its key. */
+internal const val ID_REMAP_KIND_ARTICLE = "article"
+
 /**
  * The schema-migration callbacks every migration of this app's database runs: the local factories
  * (desktop's `DatabaseDriverFactory.createDriver`, Android's `AndroidSqliteDriver.Callback`, Apple's

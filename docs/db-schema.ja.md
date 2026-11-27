@@ -32,8 +32,8 @@
   `feeds.custom_title_updated_at` / `folder_updated_at` / `sort_order_updated_at`（`updateCustomTitle`、`updateFolder`、
   `updateSortOrder`、`updateFolderAndSortOrder`）、`articles.read_at` / `starred_at`（`updateReadStatus`、
   `updateReadStatusByIds`、`updateStarStatus`、`markAllRead*` の各クエリ）と `deleted_updated_at`（`softDeleteExpired`）
-  ——`starred_at` と `deleted_updated_at` はマージで 1 つのグループとして順位を付けるので、スターもキャッシュ削除も
-  その*両方*より大きく打刻する——、`articles.body_updated_at`（記事の upsert。本文の列が変わったときだけ進める）、
+  （と、`updateStarStatus` のスター解除が打刻する削除の取り消し）——スターと削除はマージで別々のグループなので、
+  それぞれ自分の前の値より大きく打刻する——、`articles.body_updated_at`（記事の upsert。本文の列が変わったときだけ進める）、
   `tags.name_updated_at` / `color_updated_at` / `sort_order_updated_at` と `folders.name_updated_at` /
   `sort_order_updated_at`（それぞれ自分のフィールドが変わったときだけ進める——`upsert`、`updateSortOrder`、
   `upsertByName`）、`feed_tags.updated_at` / `global_settings.updated_at`（`upsert`）がそれにあたる。こうしないと、行が
@@ -52,7 +52,8 @@
   その間に子を退避・復帰させる（外部キーは有効のまま: `feeds.folder_id` は参照先のフォルダーが存在するときだけ
   退避して NULL にし、タグが存在する `feed_tags` 行を作業表へ移す。親がもともと存在しない子は触らずに残るので、
   `foreign_key_check` に新しい違反は現れない。フィードが存在しないリンクは復帰できないため捨てられる）——、
-  `articles.body_updated_at` を追加し（初期値は `updated_at`）、`search_text` が生の `content` / `summary` と同じままの記事（HTML 除去の
+  `articles.body_updated_at` を追加し（初期値は `updated_at`）、スター付きかつ削除済みの記事のスターを、その削除の時点で
+  外れたものとして記録し（`is_starred` を 0、`starred_at` を 2 つのスタンプの新しいほうにする。後述の「articles」参照）、`search_text` が生の `content` / `summary` と同じままの記事（HTML 除去の
   導入前に書かれた行）を `ks_search_pending` に登録し、さらにすべての移行が走らせる `AfterVersion(2)` コールバック
   （`domain/TagFolderIdRekey.kt`。各プラットフォームのドライバーと `DatabaseMerger` のクラウドファイル移行に
   `KERYX_SCHEMA_CALLBACKS` として配線済み）で、**すべてのタグとフォルダーの id を名前から導かれた id に振り直す**
@@ -88,7 +89,32 @@
 - `id` は新規購読時に（リダイレクト解決済みの）`url` から **UUIDv5** で決定的に生成する
   （`IdGenerator.feedId`）。同じフィードは全デバイスで同一 id になるため、同期マージ（feeds を `id` で
   照合）が独立購読されたフィードを収束でき、記事 id（`feed_id` から導出）も一致する。既存 url の再購読は
-  既存 id を再利用するため既存行は据え置き（新規のみ決定的）。
+  既存 id を再利用するため既存行は据え置き（新規のみ決定的）。導いた id が使えないとき（`feeds.isIdTaken`）は、
+  新規購読はランダムな id（`IdGenerator.newId`）を取る: 別の URL の行が持っている——恒久的なリダイレクトで URL が
+  変わったフィードで、upsert するとその行の URL を書き換えてしまう——か、`ks_id_remap` が別の id へ写しているときで、
+  書き込みが別のフィードへ解決してしまう id を持つ行は決して生じない。この判断は購読のトランザクション自身の読み取りで行う。
+- **フィードの id は動くことがある。** 恒久的なリダイレクトは id を保つので、移動したフィードの URL で新たに購読された
+  フィードは、その URL を別の id で持つ。1 つの URL を持った 2 つのフィード id は同一性の辺として `ks_feed_edge` に
+  記録し、同期マージ——または、同じホストへの恒久的なリダイレクトが別のフィードの URL に着いたフィード更新——が、
+  その同一性のフィードをすべて正規の id（最小の id）へ、記事・タグの結び付き・取得状態・生のフォルダー割り当てと
+  ともに移す。移動は `ks_id_remap`（kind `feed`）に記録し、古い行は削除する（[sync-architecture.ja.md](sync-architecture.ja.md)
+  の「フィードと記事の同一性」参照）。移動の前から保持されている id でもその行に届くよう、**フィード id を受け取る
+  書き込みはすべて**、タグ・フォルダーの書き込みと同じく、文の中でそれを解決する——`feeds.sq`: `softDelete`、
+  `stampResubscribed`、`reviveAfterMerge`、`updateCustomTitle`、`updateFaviconUrlIfMissing`、`updateContent`、`updateUrl`、
+  `recordRedirectEdge`、`updateFolder`、`updateSortOrder`、`updateFolderAndSortOrder`。`feed_fetch_state.sq`:
+  `upsertValidators`、`incrementErrorCount`、`resetErrorCount`、`markGone`。`feed_tags.sq`: `upsert`。`articles.sq`:
+  `insert`、`insertIfAbsent`、`markAllReadByFeed`（と一覧のクエリ `watchByFeed`）。`feeds.resolveId` は同じ解決を
+  読み取りとして行い（`FeedRepository.resolveFeedId`）、公開された振り直しの対応表が読み込まれる前に復元する保存済みの
+  フィードのフィルターや、移動の前に描画された行からのフィード更新に使う。行も要る読み取りは、同じ文の中で解決する——
+  間にコミットされた merge が、削除したばかりの行の id を返さないようにするため: `feeds.getByIdResolved`
+  （`FeedRepository.getFeedByIdResolved`、id 指定の更新）と `feeds.groupForMove`（移動先のグループ。移動するフィードと
+  目標の id を、その行の中で解決する——`moveFeed`）。`feeds.reviveAfterMerge` は、利用者が
+  どちらかのフィードをまだ購読していたのにリダイレクトの統合で削除済みになったフィードを、打刻した再購読として復活させる。
+- `updated_at` は内容グループの後勝ちのスタンプで、capture のトリガーはこれを見ないので、既存の行では記録される
+  変更と一緒にしか動かさない: `upsert` は書く列が変わったときだけこれを動かし、`updateUrl` は URL が変わるとき
+  だけ（かつ別のフィードがそれを持っていない間だけ）書き、`updateContent`（リフレッシュの内容の書き込み）はサイトの URL、
+  タイトル、説明のどれかが変わるときだけ書く。送られずに動いたスタンプは、ほかの端末の後の内容の変更に、
+  この端末では勝ち、向こうでは負けてしまう。
 - `deleted_at` で論理削除。再購読時に NULL へ戻す。
 - `folder_id` はフィードが属するフォルダー（1フィード = 最大1フォルダー）。タグ（`feed_tags`、多対多）とは
   独立した分類軸。`feeds.upsert`（購読・リフレッシュ用）はこの列に一切触れない設計にしており、
@@ -128,6 +154,14 @@
 - この端末が最後にそのフィードを取得したときに得た情報。同期は決してしない: ほかの端末のバリデータ（`etag` /
   `last_modified`）を使うと、この端末が取得したことのない内容について条件付きリクエストを送ってしまい、エラーは
   それを見た端末のものだからである。行は最初の取得時に作る。行の無いフィードは「未取得、エラーなし」として扱う。
+- バリデータは取得元の URL に属するので、**フィードの `url` が変わると破棄する**（トリガー
+  `ks_fetch_state_validators_url_change`。`error_count` と `last_error` は残す）。url を変えるものが何であれ——
+  同期の merge が他端末の url を取り込む、フィードの identity merge が正規のフィードに他方の url を持たせる
+  （または他方の fetch state を移す）、恒久リダイレクト——次の取得は無条件になり、新しい url から取得したことの
+  ない内容に対して `304` が返りうる条件付きリクエストにはならない。refresh は自分の url の書き込みとリダイレクトの
+  merge の後にレスポンスのバリデータを保存するので、リダイレクト先のものは、残った行に残る——ただしその行が、バリデータを
+  取得した url をまだ持っている間だけ（`upsertValidators` は url を受け取り、文の中で確かめる）: refresh は snapshot で
+  動くので、フェッチ中に同期の merge がフィードを別の url へ移していたら、バリデータは書かれず、次の取得は無条件になる。
 - フィード一覧は `error_count > 0`（またはフィードが gone、後述）でエラー扱いとしてフラグを立てる——つまり、
   **この端末で**取得に失敗したとき。`FEED_TIMEOUT_RETRY_COUNT` は無関係な別の定数で、`FeedFetcher` が1回の
   フェッチを諦めるまでのリトライ予算（`core/Constants.kt`）。
@@ -146,7 +180,15 @@
   全デバイスで同一 ID になるため、同期マージ（記事を `id` で照合する）が既読・スターを後勝ちで
   伝播できる。既存行は `upsert` の `ON CONFLICT(feed_id, guid)` が既存 ID を保持する
   （決定的生成は新規行のみに効く）。
-- 既読の競合解決は `read_at` で後勝ち。スターは保持グループ（後述）の一部で、`starred_at` で順位を付ける。どちらも状態が実際に変わったときだけ打刻される（`updateReadStatus` / `updateStarStatus` が変化を条件にしている）ため、既読の記事を再度開いても `read_at` は更新されない。
+- **記事の id は動くことがある。** フィードがその同一性の正規の id へ移るとき、その各記事は
+  `(正規のフィード id, guid)` をキーとし、そのキーの最小の id へ移る。1 つのキーの行が複数あれば rowid が最大の行が
+  残り（ほかはそれに畳んで削除する）、残る行は rowid を保つ。移動は `ks_id_remap`（kind `article`）に記録する。記事 id を
+  受け取る書き込みは文の中でそれを解決し（`updateReadStatus`、`updateReadStatusByIds`——集合として——、`updateStarStatus`）、
+  `insert` / `insertIfAbsent` はフィード id を解決して記事 id は渡されたままにする。離れた id は、移った行が今そのキーを
+  持つ記事のものなので、挿入は衝突の対象に当たる。`resolveId` / `getByIdResolved` は時間をまたいで保持された id を
+  解決し、`movedIdsIn` / `rekeysOnto` は、id の集合のうちどれが移ったか、移動がどの id に着いたかを答える
+  （`HomeViewModel`。[app-architecture.ja.md](app-architecture.ja.md) の「id の振り直し」参照）。
+- 既読の競合解決は `read_at` で後勝ち。スターは `starred_at` で後勝ちの独立したグループで、削除（後述）とは別に決める。どちらも状態が実際に変わったときだけ打刻される（`updateReadStatus` / `updateStarStatus` が変化を条件にしている）ため、既読の記事を再度開いても `read_at` は更新されない。
 - `body_updated_at` は本文自身の後勝ちタイムスタンプで、マージが 1 つの版からまとめて取る `content`・`summary`・
   `title`・`url`・`author`・`published_at`・`thumbnail_url` に対するもの。記事の upsert（`insert`、`insertIfAbsent`）は
   新しい行では書き込みの時刻を入れ、既存の行では本文の列が実際に変わったときだけ前に進める（`MAX(今の時刻, 前の値 + 1)`）。
@@ -161,21 +203,28 @@
   同期しない。同期マージが本文を埋めた、または変えた記事は `ks_search_pending` に登録し、次の
   `FtsManager.indexMissing()` が索引を作る前に `search_text` を再計算する（新しく挿入された記事は `""` から始まる）。
   `indexMissing()` は登録されたままの行を飛ばす。
-- `deleted_at`（NULL = 生存）で論理削除する。削除を**ローカルで発生させる**のはキャッシュ削除
+- `deleted_at`（NULL = 削除されていない）で論理削除する。削除を**ローカルで発生させる**のはキャッシュ削除
   （`softDeleteExpired`）のみで、スター付き記事は削除しない（同期マージも `deleted_at` を書き込み、
   他デバイスでの削除を伝播する。後述）。`deleted_updated_at` は削除/復活イベントの
   フィールド別後勝ちタイムスタンプ（`read_at` / `starred_at`、および `feeds.deleted_updated_at` と同様）で、
   コンテンツ更新・既読の変更が同期マージで削除を上書きしないよう `updated_at` とは分離する。
-  マージではスターと削除を **1 つのグループ**（*保持*グループ: `is_starred`・`starred_at`・`deleted_at`・
-  `deleted_updated_at`）とし、`MAX(starred_at, deleted_updated_at)`（NULL は 0）で順位を付ける: 新しいほうの操作が
-  勝ち、グループ全体をその操作から取る。スターは `deleted_at` を消す（`updateStarStatus`）——スターは記事を残す操作
-  なので、マージが削除したばかりの記事にスターを付ければ、この端末でもほかのすべての端末でも記事は復活する——一方、
-  スター解除は削除に触れない。スターもキャッシュ削除も行の両方のタイムスタンプより大きく打刻するので、それぞれが
-  自分の変えたグループに勝つ。したがって、スター付きかつ削除済みの行は存在しない。別の端末のスターで復活し、
-  そのあとスターを外された記事は、次のキャッシュ削除で再び削除されるまで表示されたままになる。これにより、
+  マージではスター（`is_starred` を `starred_at` で）と削除（`deleted_at` を `deleted_updated_at` で）を
+  **独立した 2 つのグループ**とし、グループをまたぐ規則は持たない。そのため、行がスター付きかつ削除済みになることが
+  ある——ある端末のスターと別の端末のキャッシュ削除をどちらの順序でマージしても、またフィードや記事の同一性が 2 行を
+  1 つに寄せても。バージョン 2 もこの状態の行——他の端末のキャッシュ削除より古いスター——を書き、`deleted_at IS NULL`
+  の行しか表示しなかったので隠していた。`2.sqm` はその各行のスターを、削除の時点で外れたものとして記録する（ローカル
+  DB でも、マージが移行する pre-delta のクラウドファイルでも同じ）ので、アップグレード後も表示されない。
+  **削除されていないか、スター付きの記事は表示される**: `(deleted_at IS NULL OR is_starred = 1)` で、
+  読むときに決める。一覧・未読数・検索・`aliveFlagsIn` / `idsByFeeds` の照会・すべて既読にする、のすべてがちょうど
+  この判定を使う（`articles.sq`。生の SQL と Kotlin には `data/local/ArticleVisibility.kt`）ので、スターがキャッシュ
+  削除に負けることはない。スターはスターのグループにしか触れない（`updateStarStatus`）。この端末で既に削除済みの行の
+  スターを外すと削除の取り消し（`deleted_at` を NULL にし、`deleted_updated_at` を進める）も打刻するので、その記事は
+  次のキャッシュ削除で再び削除されるまで表示されたままになる。削除されていない行のスターを外しても削除には触れない
+  ので、他の端末がそれより前に行った削除があとから届けば適用され、スターの外れた記事は表示されなくなる（バージョン 2
+  と同じ）。これにより、
   削除が次回同期でクラウドから復活せず、他デバイスへ伝播する。ここでは行を物理削除しない（古い
-  トゥームストーンの物理GCは将来対応）。全 UI/一覧/検索クエリは `deleted_at IS NULL` で除外し、
-  `upsert`（フィード更新）は `deleted_at` に触れないため、更新が削除済み記事を復活させることはない。
+  トゥームストーンの物理GCは将来対応）——フィードの同一性の統合だけが、1 つの記事の余った行を残る行に畳んで削除する（上述）。`getByFeedAndGuid` / `getGuidsByFeed` は削除済みの行も意図的に含める
+  （フィード更新が削除済みの記事を追加し直さないため）。`upsert`（フィード更新）は `deleted_at` に触れないため、更新が削除済み記事を復活させることはない。
 
 ### tags / feed_tags
 
@@ -267,7 +316,7 @@
 
 | テーブル | 内容 |
 | --- | --- |
-| `sync_outbox` | `seq`(PK, AUTOINCREMENT), `tbl`, `pk`, `pk2`（`feed_tags` のみ: タグ id）, `heavy` — 同期対象の行へのローカルの変更 1 件につき 1 行。トリガーが追記する。capture 有効のまま行うマージ（差分同期以前のマージ）が `ks_v2_edge` に加えた同一性の辺も 1 件につき 1 行（`tbl` は `folder_v2_edges` / `tag_v2_edges`、`pk` は移行前の id、`pk2` は行 id） |
+| `sync_outbox` | `seq`(PK, AUTOINCREMENT), `tbl`, `pk`, `pk2`（`feed_tags` のみ: タグ id）, `heavy` — 同期対象の行へのローカルの変更 1 件につき 1 行。トリガーが追記する。capture 有効のまま行うマージ（差分同期以前のマージ）が `ks_v2_edge` に加えた同一性の辺も 1 件につき 1 行（`tbl` は `folder_v2_edges` / `tag_v2_edges`、`pk` は移行前の id、`pk2` は行 id）、capture 有効の間に——マージの中も含めて——`ks_feed_edge` に加わったフィードの同一性の辺も 1 件につき 1 行（`tbl` は `feed_edges`、`pk` は `a`、`pk2` は `b`） |
 | `sync_capture` | 1 行だけ: `enabled`（接続中は記録する）, `full_pending`（全量送信が必要） |
 | `sync_merging` | マージのトランザクションの中にだけ存在する印の行。記録を止める |
 | `sync_applied` | `name`(PK) — マージ済みのクラウドファイル |
@@ -275,14 +324,15 @@
 | `ks_search_pending` | `rowid`(PK) — `search_text` の再計算が必要な記事 |
 | `ks_search_awaiting_body` | `id`(PK) — マージが本文なし（軽量行）で挿入した記事。本文が届くか、日次 rebuild が索引するまで検索索引に入れない |
 | `ks_feed_folder_raw` | `feed_id`(PK), `folder_updated_at`, `folder_id` — フィードごとの生のフォルダー割り当て（勝った版が書いたままのフォルダー id とスタンプ。この端末で生きているかは問わない）: `feeds.folder_id` / `folder_updated_at` の解決元となる正（ビュー `ks_feed_folder_resolved`）であり、マージが生と生で比べる値、送信が運ぶ値でもある。フィードごとに 1 行で、フィードと一緒に（トリガーで）作られ、既存のフィードの分は `2.sqm` が埋める。`folder_id` は書かれたまま保つので、この端末が行を持たないフォルダーの同一性の別名を指すことがあり（`ks_id_remap` で解決する）、NULL になるのはフォルダーなしか、差分同期以前のファイルの孤立した参照だけである。参加でも接続解除でも残す |
-| `ks_id_remap` | `kind` + `old_id`（複合 PK）, `new_id` — タグ/フォルダーの id の振り直しすべての記録: 行が持っていた id と、移った先の id。v2→v3 移行による名前由来 id への移動（`domain/TagFolderIdRekey.kt`）と、同期マージによる同じ同一性の別の id への移動（同一性の別名すべてについて記録し、他の端末のファイルだけが使った別名や、同一性の辺だけが指す v2 時代の id も含む。フィードの生のフォルダー割り当てがそれを指すことがあり、`ks_feed_folder_resolved` はこの表で解決する）。記録は必ず `domain/IdRemapSql.kt` を通し、移動を足すたびに連鎖を畳む（`a → b` の後に `b → c` なら `a → c`・`b → c` が残る。元へ戻す移動では、再び生きた id の項目を消す）ので、引くのは 1 回で済み、旧 id を持つ行は存在しない。データベースの外で保持される id を最新に保つために使う: `SettingsRepository` は、起動後にバックグラウンドで表が読み込まれたときと、マージが行の id を振り直した後に表が再公開されるたびに（`domain/TagFolderIdRemaps.kt`。畳んだ対応表全体の `StateFlow`）`local_settings.json`（`lastFilter`、`collapsedFolderIds`、`expandedTagIds`）を書き換え、`HomeViewModel` は選択・展開状態・保留中の削除フォールバックを書き換える。また、タグ/フォルダー id を受け取る書き込みはすべて、この表を通して id を解決する（「tags / feed_tags」と「folders」を参照）。無期限に保持するので、再適用しても何も変わらない。同期マージはこの表の移動も同一性の辺として読む（ふつうは `ks_v2_edge` にある辺と重なる）ので、この端末が離れた id も、移った先の同一性に残る。新規作成 DB では、何かが振り直すまで空 |
+| `ks_id_remap` | `kind` + `old_id`（複合 PK）, `new_id` — 振り直しすべての記録: 行が持っていた id と、移った先の id。`kind` `tag` / `folder`: v2→v3 移行による名前由来 id への移動（`domain/TagFolderIdRekey.kt`）と、同期マージによる同じ同一性の別の id への移動（同一性の別名すべてについて記録し、他の端末のファイルだけが使った別名や、同一性の辺だけが指す v2 時代の id も含む。フィードの生のフォルダー割り当てがそれを指すことがあり、`ks_feed_folder_resolved` はこの表で解決する）。`kind` `feed` / `article`: 同期マージ、またはフィード更新のリダイレクトによる統合が、フィードと、統合されたフィードの各記事を正規の id へ移したもの（「feeds」と「articles」参照。他の端末のファイルだけ、またはフィードの辺だけが指す別名も含めて記録する）。記録は必ず `domain/IdRemapSql.kt` を通し、移動を足すたびに種類の中で連鎖を畳む（`a → b` の後に `b → c` なら `a → c`・`b → c` が残る。元へ戻す移動では、再び生きた id の項目を消す）ので、引くのは 1 回で済み、旧 id を持つ行は存在しない（`insertIfNameAbsent` と `feeds.isIdTaken` は写される id を使用中として扱う）。データベースの外で保持される id を最新に保つために使う: `domain/IdRemaps.kt` が、起動後にバックグラウンドでタグ・フォルダー・フィードの移動（`idRemapPublished`。記事の移動は含めない——フィードの統合は、データベースの外で保持されるものよりはるかに多くの記事を移しうるため）を読み込み、行の id を振り直したマージのたびに、畳んだ対応表全体の `StateFlow` として再公開する。そこから `SettingsRepository` は `local_settings.json`（`lastFilter`、`collapsedFolderIds`、`expandedTagIds`、`faviconMissedAt` のキー）を、`HomeViewModel` は選択・展開状態・保留中の削除フォールバックを書き換える。移動をまたいで保持される記事 id（選択、そのピン、保存済みの `lastArticleId`）は、代わりにこの表から 1 つずつ解決する（`articles.resolveId`）。タグ・フォルダー・フィード・記事の id を受け取る書き込みはすべて、この表を通して id を解決する（「feeds」「articles」「tags / feed_tags」「folders」を参照）。無期限に保持するので、再適用しても何も変わらない。同期マージはこの表の移動も同一性の辺として読む（ふつうは `ks_v2_edge` / `ks_feed_edge` にある辺と重なる）ので、この端末が離れた id も、移った先の同一性に残る。新規作成 DB では、何かが振り直すまで空 |
 | `ks_v2_edge` | `kind` + `v2_id` + `id`（複合 PK）— タグとフォルダーの同一性の辺（`kind` は `tag` / `folder`）: 移行前の id と、それを持つ行が振り直された先の行 id の組で、辺でつながる行は 1 つの識別になる。増えるだけの集合: v2→v3 の振り直しが `v2_id` を持つすべての行について書き、同期マージのたびに（クラウドファイルの辺の表と、クラウドと main の行のうち `v2_id` を持つものの `(v2_id, id)` を）加える。削除はせず、参加時にも接続解除時にも消さない——辺は 2 つの id についての事実であり、接続についてのものではない。全量送信は、これを転送ファイルの `folder_v2_edges` / `tag_v2_edges` として運び、capture 有効でマージ用マーカーが無いときに加わった辺は `sync_outbox` にも記録され（トリガー `ks_capture_v2_edge_insert`）、次の通常の差分が運ぶ（[sync-architecture.ja.md](sync-architecture.ja.md) の「転送用スキーマ」参照）。マージの同一性の処理は、辺がつなぐ id を 1 つの同一性とし、そのうち最小の行 id を正規の id とする（同「タグとフォルダーの同一性」参照） |
+| `ks_feed_edge` | `a` + `b`（複合 PK、`WITHOUT ROWID`）— フィードの同一性の辺: ある時点で同じ `url` を持った 2 つのフィード id の組で、`a < b` に正規化したもの。辺でつながるフィードは 1 つのフィードで、その正規の id は連結成分のうち（バイト順で）最小の id（[sync-architecture.ja.md](sync-architecture.ja.md) の「フィードと記事の同一性」参照）。増えるだけの集合: 同期マージのたびに（main とファイルの間、ファイルの中で気付いた URL の衝突と、転送ファイルの `feed_edges` を）書き、同じホストへの恒久的なリダイレクトが別のフィードの URL に着いたフィード更新も書く（`feeds.recordRedirectEdge`）。削除はせず、`ks_v2_edge` と同じく参加時にも接続解除時にも消さない。`a < b` の正規化は書く側が行う。全量送信は、これを転送ファイルの `feed_edges` として運び、capture 有効の間に加わった辺はすべて `sync_outbox` にも記録され（トリガー `ks_capture_feed_edge_insert`。ほかの capture のトリガーと違い、マージの中でも記録する——端末が衝突に気付くかどうかは到着順に左右されるため）、次の通常の差分が運ぶ |
 
-`ks_v2_edge` を除くこれらも、`sync_state`、`feed_fetch_state`、`articles_fts` も、端末の外に出ることは決してない:
+`ks_v2_edge` と `ks_feed_edge` を除くこれらも、`sync_state`、`feed_fetch_state`、`articles_fts` も、端末の外に出ることは決してない:
 差分ファイルとベースは同期対象のテーブルだけから作る（[sync-architecture.ja.md](sync-architecture.ja.md) 参照）。
 ただしフィードの `folder_id` / `folder_updated_at` は、その `ks_feed_folder_raw` の行——この表が持つための値——から
-書き、全量送信とベースにはそれに加えて `ks_v2_edge` の同一性の辺を入れる。通常の差分も、送る生のフォルダー割り当てが
-別名を指すときは、その別名の連結成分のフォルダーの辺を運ぶ（[sync-architecture.ja.md](sync-architecture.ja.md) の
+書き、全量送信とベースにはそれに加えて `ks_v2_edge` と `ks_feed_edge` の同一性の辺を入れる。通常の差分は outbox に
+記録された辺を運び、送る生のフォルダー割り当てが別名を指すときは、その別名の連結成分のフォルダーの辺も運ぶ（[sync-architecture.ja.md](sync-architecture.ja.md) の
 「送信」参照）。
 
 ### articles_fts（FTS5 仮想テーブル、SQLDelight 管理外）
@@ -382,7 +432,7 @@ SQLite を使う。理由と撤退条件は `.claude/rules/android-sqlite-bundli
 ## キャッシュ削除
 
 `cache_retention_days` に基づき、起動時に前回削除から 24 時間以上経過していればバックグラウンドで実行。
-スター付き記事とフィードごとの最新 10 件は保持期間に関わらず削除しない。`null`（無期限）なら実行しない。
+スター付き記事とフィードごとの最新 10 件は保持期間に関わらず削除しない（別の端末のキャッシュ削除が削除したスター付き記事も、そのまま表示される。上の `articles` 参照）。`null`（無期限）なら実行しない。
 削除は行の物理削除ではなく**論理削除**（`articles.deleted_at` / `deleted_updated_at` を刻む）で、削除が
 クラウドから復活せず同期マージで伝播する。古いトゥームストーンの物理回収は将来対応。
 

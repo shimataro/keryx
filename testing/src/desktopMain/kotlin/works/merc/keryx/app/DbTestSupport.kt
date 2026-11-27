@@ -41,7 +41,8 @@ class CountingSqlDriver(private val delegate: SqlDriver) : SqlDriver {
      * How many single-row `getById` fetches ran — the shape an N+1 shows up as. Matched on the
      * trailing clause, not the projection: SQLDelight expands `SELECT *` into explicit columns, so
      * a `startsWith("SELECT * ...")` sentinel would silently never match. `WHERE id = ?` separates
-     * it from `getListRowsByIds` and `aliveFlagsIn`, which both use `WHERE id IN`.
+     * it from `getListRowsByIds` and `aliveFlagsIn`, which both use `WHERE id IN`. `getByIdResolved`
+     * (the same fetch, resolving an id a feed merge moved) counts too.
      */
     var articleGetByIdExecutions = 0
         private set
@@ -64,7 +65,9 @@ class CountingSqlDriver(private val delegate: SqlDriver) : SqlDriver {
         binders: (app.cash.sqldelight.db.SqlPreparedStatement.() -> Unit)?,
     ): app.cash.sqldelight.db.QueryResult<R> {
         if (sql.contains("is_starred") && sql.contains("published_at DESC")) listQueryExecutions++
-        if (sql.endsWith("FROM articles WHERE id = ?")) articleGetByIdExecutions++
+        if (sql.endsWith("FROM articles WHERE id = ?") || sql.contains("FROM articles\nWHERE id = COALESCE((SELECT id FROM articles WHERE id = ?)")) {
+            articleGetByIdExecutions++
+        }
         return delegate.executeQuery(identifier, sql, mapper, parameters, binders)
     }
 
@@ -228,6 +231,17 @@ fun KeryxDatabase.insertTag(id: String, name: String, now: Long = 0L, deletedAt:
     )
 }
 
+/**
+ * Stores [etag] / [lastModified] as the validators of the feed [feedId] (a stale id resolves), as
+ * if they had been fetched from [url] — the url the feed holds now when it is not given. Writes nothing
+ * for a feed that does not exist, or that holds another url than [url]. Pass [url] from inside a
+ * transaction that must not read before its first write (SQLite's deferred BEGIN).
+ */
+fun KeryxDatabase.putValidators(feedId: String, etag: String?, lastModified: String?, url: String? = null) {
+    val fetchedFrom = url ?: feedsQueries.getByIdResolved(feedId).executeAsOneOrNull()?.url ?: return
+    feed_fetch_stateQueries.upsertValidators(etag = etag, last_modified = lastModified, feed_id = feedId, url = fetchedFrom)
+}
+
 /** Attaches (or updates) a feed-tag link. */
 fun KeryxDatabase.insertFeedTag(feedId: String, tagId: String, now: Long = 0L, deletedAt: Long? = null) {
     feed_tagsQueries.upsert(feed_id = feedId, tag_id = tagId, deleted_at = deletedAt, updated_at = now)
@@ -332,6 +346,32 @@ fun SqlDriver.rekeyFolderForTest(oldId: String, newId: String, beforeNotify: () 
     newId = newId,
     beforeNotify = beforeNotify,
 )
+
+/**
+ * Folds the feed [oldId] into the existing feed [newId] the way a feed merge leaves them (for tests
+ * outside `:shared`, which cannot reach `FeedIdentitySql`): [oldId]'s articles, tag links and folder
+ * record move to [newId] (its fetch state is dropped), the move is recorded in `ks_id_remap`
+ * ([IdRemapSql.record], kind `feed`), and the old row is deleted — one transaction. The articles keep
+ * their ids, so the fixture must not give both feeds an article of the same guid. [beforeNotify] runs
+ * after the commit and before the observing queries are re-run — where a merge publishes the re-key.
+ */
+fun SqlDriver.mergeFeedForTest(oldId: String, newId: String, beforeNotify: () -> Unit = {}) {
+    object : app.cash.sqldelight.TransacterImpl(this) {}.transaction {
+        fun run(sql: String) = execute(null, sql, 2) {
+            bindString(0, newId)
+            bindString(1, oldId)
+        }
+        run("UPDATE articles SET feed_id = ? WHERE feed_id = ?")
+        run("INSERT OR IGNORE INTO feed_tags (feed_id, tag_id, deleted_at, updated_at) SELECT ?, tag_id, deleted_at, updated_at FROM feed_tags WHERE feed_id = ?")
+        execute(null, "DELETE FROM feed_tags WHERE feed_id = ?", 1) { bindString(0, oldId) }
+        execute(null, "DELETE FROM feed_fetch_state WHERE feed_id = ?", 1) { bindString(0, oldId) }
+        execute(null, "DELETE FROM ks_feed_folder_raw WHERE feed_id = ?", 1) { bindString(0, oldId) }
+        works.merc.keryx.app.domain.IdRemapSql.record(this@mergeFeedForTest, "feed", oldId, newId)
+        execute(null, "DELETE FROM feeds WHERE id = ?", 1) { bindString(0, oldId) }
+    }
+    beforeNotify()
+    notifyListeners("feeds", "articles", "feed_tags", "feed_fetch_state")
+}
 
 private fun SqlDriver.rekeyForTest(
     table: String,

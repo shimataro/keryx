@@ -37,12 +37,14 @@ internal data class ArticleScopeSql(val clause: String, val args: List<String>)
  * parameter regardless of how many feeds it contains — relevant because this is combined with the
  * short-term `LIKE` bindings in the same query, and SQLite's bound-parameter limit is shared.
  */
-// The scope's tag or folder id, resolved through ks_id_remap as articles.sq's watchByTag /
-// watchByFolder resolve it — so a search re-run when a merge moved the selected tag or folder onto
+// The scope's feed, tag or folder id, resolved through ks_id_remap as articles.sq's watchByFeed /
+// watchByTag / watchByFolder resolve it — so a search re-run when a merge moved the selected tag or folder onto
 // another id still finds the same rows. The bound value is read once into `r.v`, so the clause still
 // binds exactly the one argument `args` holds.
 private const val RESOLVED_TAG_ID =
     "(SELECT COALESCE((SELECT id FROM tags WHERE id = r.v), (SELECT new_id FROM ks_id_remap WHERE kind = 'tag' AND old_id = r.v), r.v) FROM (SELECT ? AS v) r)"
+private const val RESOLVED_FEED_ID =
+    "(SELECT COALESCE((SELECT id FROM feeds WHERE id = r.v), (SELECT new_id FROM ks_id_remap WHERE kind = 'feed' AND old_id = r.v), r.v) FROM (SELECT ? AS v) r)"
 private const val RESOLVED_FOLDER_ID =
     "(SELECT COALESCE((SELECT id FROM folders WHERE id = r.v), (SELECT new_id FROM ks_id_remap WHERE kind = 'folder' AND old_id = r.v), r.v) FROM (SELECT ? AS v) r)"
 
@@ -52,7 +54,7 @@ internal fun articleScopeSql(scope: ArticleFilter): ArticleScopeSql = when (scop
         args = emptyList(),
     )
     ArticleFilter.Starred -> ArticleScopeSql(clause = "a.is_starred = 1", args = emptyList())
-    is ArticleFilter.Feed -> ArticleScopeSql(clause = "a.feed_id = ?", args = listOf(scope.feedId))
+    is ArticleFilter.Feed -> ArticleScopeSql(clause = "a.feed_id = $RESOLVED_FEED_ID", args = listOf(scope.feedId))
     is ArticleFilter.Tag -> ArticleScopeSql(
         clause = """
             EXISTS (
@@ -128,7 +130,7 @@ class FtsSearch(private val driver: SqlDriver) {
                 FROM articles a
                 INNER JOIN articles_fts ON articles_fts.rowid = a.rowid
                 WHERE articles_fts MATCH ?
-                  AND a.deleted_at IS NULL
+                  AND ${articleVisibleSql("a")}
                 """.trimIndent(),
             )
             if (likeClause != null) append("\n  AND ").append(likeClause)
@@ -162,7 +164,7 @@ class FtsSearch(private val driver: SqlDriver) {
      * Fallback path: every term is too short for the trigram index. Scans `articles` directly with
      * `LIKE`, ordered by recency (no FTS rank is available) and capped at
      * [SEARCH_FALLBACK_RESULT_LIMIT] so a common short term can't stream unbounded results into the
-     * UI. Mirrors [searchByFts]'s `a.deleted_at IS NULL` filter exactly (no `feeds` join either,
+     * UI. Mirrors [searchByFts]'s visibility filter ([articleVisibleSql]) exactly (no `feeds` join either,
      * matching the FTS path's existing scope).
      */
     private fun searchByLikeOnly(shortTerms: List<String>, scope: ArticleScopeSql): List<FtsHit> {
@@ -170,7 +172,7 @@ class FtsSearch(private val driver: SqlDriver) {
         val sql = """
             SELECT a.id, a.title
             FROM articles a
-            WHERE a.deleted_at IS NULL
+            WHERE ${articleVisibleSql("a")}
               AND $likeClause
               AND ${scope.clause}
             ORDER BY a.published_at DESC, a.created_at DESC, a.id DESC

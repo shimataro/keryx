@@ -322,4 +322,37 @@ class NewArticleTrackingTest {
         val display = rows("a", "b", "c")
         assertEquals(1, freshSideUnseenCount(display, setOf("a", "hidden"), VisibleRange("c", "c"), newestFirst = true))
     }
+
+    // ---- A feed merge moving articles onto other ids ----
+
+    /**
+     * A moved article whose old id was known is known under its new id — it is not a new arrival, even
+     * though its new row may have been inserted after the watermark — and an unseen one stays unseen.
+     */
+    @Test
+    fun aMovedArticleIsKnownUnderItsNewIdAndKeepsItsUnseenState() {
+        val tracking = NewArticleTracking().withList(setOf("a", "b")).withList(setOf("a", "b", "u"))
+        assertEquals(setOf("u"), tracking.unseenIds, "precondition: u arrived and is unseen")
+
+        val moved = tracking.withRemapped(mapOf("b" to "b2", "u" to "u2"))
+            .withList(setOf("a", "b2", "u2"), inserted = setOf("b2", "u2"))
+
+        assertEquals(setOf("u2"), moved.unseenIds)
+        assertTrue(moved.knownIds!!.containsAll(setOf("b2", "u2")))
+    }
+
+    @Test
+    fun aMoveOfAnIdNeverKnownChangesNothing() {
+        val tracking = NewArticleTracking().withList(setOf("a"))
+        assertEquals(tracking, tracking.withRemapped(mapOf("x" to "y")))
+        val unseeded = NewArticleTracking()
+        assertEquals(unseeded, unseeded.withRemapped(mapOf("a" to "b")))
+    }
+
+    @Test
+    fun aViewportEndMovedByAMergeFollowsIt() {
+        assertEquals(VisibleRange("a2", "c"), VisibleRange("a", "c").remappedBy(mapOf("a" to "a2")))
+        val untouched = VisibleRange("a", "c")
+        assertEquals(untouched, untouched.remappedBy(mapOf("x" to "y")))
+    }
 }

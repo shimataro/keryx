@@ -106,7 +106,7 @@ internal class DeltaSync(
     private val compactionAllowed: suspend () -> Boolean,
     private val setPhase: (SyncPhase) -> Unit,
     /**
-     * Republishes `ks_id_remap` to the ids held outside the database ([TagFolderIdRemaps.publishFromDb])
+     * Republishes `ks_id_remap` to the ids held outside the database ([IdRemaps.publishFromDb])
      * after a merge has committed — a merge may have moved tags or folders onto their canonical ids
      * ([V2IdentitySql]). Never called inside the merge's transaction.
      */
@@ -783,7 +783,7 @@ internal class DeltaSync(
             // told at once — whatever happens to the indexing after it, and even when the sync is
             // cancelled while publishing (waiting for the re-key map's lock, say): the changes are
             // committed, so they are always announced. The cancellation still propagates.
-            driver.notifyListeners(*SYNCED_TABLES)
+            driver.notifyListeners(*MERGED_TABLES)
         }
         return finishIndexing()
     }
@@ -1194,8 +1194,11 @@ internal class DeltaSync(
         /** A saved send's file name ([pendingPath]). */
         val PENDING_FILE_NAME = Regex("pending-\\d+\\.db\\.gz")
 
-        /** The tables a merge writes. */
-        val SYNCED_TABLES = arrayOf("folders", "feeds", "tags", "feed_tags", "articles", "global_settings")
+        /**
+         * The tables a merge writes whose queries the UI watches: the synced tables, plus
+         * `feed_fetch_state`, which the feed identity step moves onto a feed's canonical id.
+         */
+        val MERGED_TABLES = arrayOf("folders", "feeds", "tags", "feed_tags", "articles", "global_settings", "feed_fetch_state")
 
         fun deleteDb(path: String) {
             FileIO.delete(path)

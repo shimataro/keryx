@@ -61,8 +61,16 @@ class SyncSimulationTest {
         val cloud = FakeCloudStorage()
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         val urls = (1..6).map { "https://feeds.example/$it.xml" }
+
+        /** URLs the feed server answers with a permanent redirect (301) to the mapped one. */
+        val redirects = mutableMapOf<String, String>()
         val client = HttpClient(MockEngine { request ->
-            respond(rss(request.url.toString()), HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/rss+xml"))
+            val target = redirects[request.url.toString()]
+            if (target != null) {
+                respond("", HttpStatusCode.MovedPermanently, headersOf(HttpHeaders.Location, target))
+            } else {
+                respond(rss(request.url.toString()), HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/rss+xml"))
+            }
         }) {
             followRedirects = false
             expectSuccess = false
@@ -116,6 +124,7 @@ class SyncSimulationTest {
         val feeds = FeedRepository(
             db, FeedFetcher(sim.client), FaviconResolver(sim.failingClient), articles, sync.fts, SyncScheduler {},
             NotificationCenter(), sim.clock, Dispatchers.Unconfined, faviconMisses = InMemoryFaviconMissStore(),
+            driver = sync.driver,
         )
         val folders = FolderRepository(db, feeds, SyncScheduler {}, sim.clock, Dispatchers.Unconfined, newId = sim.ids)
         val tags = TagRepository(db, SyncScheduler {}, sim.clock, Dispatchers.Unconfined, newId = sim.ids)
@@ -279,6 +288,270 @@ class SyncSimulationTest {
             }
         }
     }
+
+    // ---- Feed identity: the same URL under different ids ----
+
+    /** Everyone syncs, with the cloud consistent, until a whole round changes nothing and the states agree. */
+    private suspend fun syncUntilQuiet(sim: Sim, devices: List<SyncDevice>, where: String) {
+        var quiet = 0
+        var last = ""
+        repeat(12) {
+            if (quiet == 2) return
+            val before = sim.cloud.written.size + sim.cloud.deleteCount
+            for (device in devices) {
+                sim.tick(1_000)
+                val result = device.repo.sync()
+                if (result is Result.Err) fail("$where: ${device.label}: ${result.exception}")
+            }
+            val states = devices.map(::agreedState)
+            val wrote = sim.cloud.written.size + sim.cloud.deleteCount - before
+            val differing = states[0].keys.filter { key -> states.map { it[key] }.distinct().size > 1 }
+            last = "wrote=$wrote differing=$differing " + differing.joinToString { key -> "$key: " + states.map { it[key] } }
+            quiet = if (wrote == 0 && differing.isEmpty()) quiet + 1 else 0
+        }
+        if (quiet != 2) fail("$where: the devices never became quiescent ($last)")
+    }
+
+    /**
+     * What every device must agree on once the same edges have arrived: the synced tables, the raw folder
+     * assignments, the edges and the feed moves. Not the article moves (`ks_id_remap`'s `article` kind):
+     * they record the ids a device held a row under, and a device that was only ever sent the canonical id
+     * never held the other one. Not an article's `cached_at` / `updated_at` either: a refresh moves them on
+     * the refreshing device and a send carries `cached_at` only when its day changes, so devices that
+     * refreshed at different times legitimately differ there (`docs/db-schema.md`, "Cache Cleanup").
+     */
+    private fun agreedState(device: SyncDevice): Map<String, List<String>> =
+        TransportFixtures.identityState(device.file) + mapOf(
+            "ks_id_remap" to device.rows("SELECT kind, old_id, new_id FROM ks_id_remap WHERE kind <> 'article' ORDER BY 1, 2, 3"),
+            "feeds" to device.rows(
+                "SELECT id, url, site_url, title, description, favicon_url, custom_title, folder_id, deleted_at, updated_at, created_at, sort_order, " +
+                    "folder_updated_at, sort_order_updated_at, custom_title_updated_at, deleted_updated_at FROM feeds ORDER BY id",
+            ),
+            "articles" to device.rows(
+                "SELECT id, feed_id, guid, url, title, summary, content, author, published_at, thumbnail_url, is_read, read_at, " +
+                    "is_starred, starred_at, created_at, deleted_at, deleted_updated_at, body_updated_at FROM articles ORDER BY id",
+            ),
+        )
+
+    private fun SyncDevice.rows(sql: String): List<String> = TransportFixtures.rows(file, sql)
+
+    /**
+     * Feed `a` (id `fb2`) is held by devices 1 and 3, which each saw it move: device 1 at URL X, device 3
+     * (later) at URL Y; device 2 holds feed `b` (id `fa1`, the smaller one) at X. Only a device that holds
+     * `a` at X together with `b` at X can see the collision, and which devices do depends on the order they
+     * sync in. Separately, device 2 resolves a 301 collision locally (its `fc` redirected onto the URL its own
+     * `fd` holds, which device 1 holds as well) before it has synced. Whatever order the three first sync in,
+     * once the edges have travelled every device holds the same feeds on the same canonical ids and the same
+     * articles with the same read and star states — nothing lost — and later 301-style URL moves converge.
+     */
+    @Test
+    fun devicesConvergeWhenOnlyOneDeviceObservesAFeedUrlCollisionInEveryFirstSyncOrder() = runBlocking {
+        val feedA = "fb2"
+        val feedB = "fa1"
+        val x = "https://feeds.example/x"
+        val y = "https://feeds.example/y"
+        val cOld = "https://feeds.example/c-old"
+        val cNew = "https://feeds.example/c-new"
+        val orders = listOf(listOf(0, 1, 2), listOf(0, 2, 1), listOf(1, 0, 2), listOf(1, 2, 0), listOf(2, 0, 1), listOf(2, 1, 0))
+        for (order in orders) {
+            val sim = Sim(71)
+            val devices = (0 until 3).map { SyncDevice("collide-$it", sim.cloud, sim.clock, sim.scope, sim.ids) }
+            try {
+                val seeds = listOf(
+                    // F1: a@X, with g1 read; and fd (alone) with h1 read.
+                    listOf(
+                        TransportFixtures.feed(feedA, url = x, title = "A@X", updatedAt = 100),
+                        TransportFixtures.article("art-a1", feedA, guid = "g1", content = "g1 body", updatedAt = 500, bodyAt = 100, isRead = 1, readAt = 500),
+                        TransportFixtures.article("art-a2", feedA, guid = "g2", content = "g2 body"),
+                        TransportFixtures.feed("fd", url = cNew, title = "D", updatedAt = 100),
+                        TransportFixtures.article("art-d1", "fd", guid = "h1", content = "h1 body", updatedAt = 400, bodyAt = 100, isRead = 1, readAt = 400),
+                    ),
+                    // F2: b@X, with its g1 starred and a g3; and fc / fd, which it merges locally below.
+                    listOf(
+                        TransportFixtures.feed(feedB, url = x, title = "B@X", updatedAt = 150),
+                        TransportFixtures.article("art-b1", feedB, guid = "g1", content = "g1 body", updatedAt = 700, bodyAt = 100, isStarred = 1, starredAt = 700),
+                        TransportFixtures.article("art-b3", feedB, guid = "g3", content = "g3 body"),
+                        TransportFixtures.feed("fc", url = cOld, title = "C", updatedAt = 100),
+                        TransportFixtures.article("art-c2", "fc", guid = "h2", content = "h2 body"),
+                        TransportFixtures.feed("fd", url = cNew, title = "D", updatedAt = 100),
+                        TransportFixtures.article("art-d1b", "fd", guid = "h1", content = "h1 body"),
+                    ),
+                    // F3: a@Y (newer than a@X), with g2 read.
+                    listOf(
+                        TransportFixtures.feed(feedA, url = y, title = "A@Y", updatedAt = 800),
+                        TransportFixtures.article("art-a1", feedA, guid = "g1", content = "g1 body", bodyAt = 100),
+                        TransportFixtures.article("art-a2", feedA, guid = "g2", content = "g2 body", updatedAt = 900, bodyAt = 100, isRead = 1, readAt = 900),
+                    ),
+                )
+                devices.forEachIndexed { i, d -> seeds[i].forEach { d.driver.execute(null, it, 0) } }
+                // Device 2's refresh of fc was redirected (301) onto the URL fd holds: the local merge.
+                devices[1].db.transaction {
+                    FeedIdentitySql.mergeLocally(devices[1].driver, "fc", "fd")
+                    devices[1].db.feedsQueries.updateUrl(cNew, 900, "fc")
+                }
+                assertEquals(listOf("fa1", "fc"), devices[1].rows("SELECT id FROM feeds ORDER BY id"), "order $order: the local merge")
+
+                for (i in order) {
+                    sim.tick(1_000)
+                    val result = devices[i].repo.sync()
+                    if (result is Result.Err) fail("order $order: device $i: ${result.exception}")
+                }
+                syncUntilQuiet(sim, devices, "order $order")
+
+                val states = devices.map(::agreedState)
+                for (i in 1 until states.size) assertEquals(states[0], states[i], "order $order: device 0 and $i differ")
+                for (device in devices) {
+                    val label = "order $order: ${device.label}"
+                    // The locally merged pair is one feed everywhere, whatever the order.
+                    assertEquals(0, device.rows("SELECT id FROM feeds WHERE id = 'fd'").size, label)
+                    assertEquals(listOf("fc"), device.rows("SELECT feed_id FROM articles WHERE guid = 'h1'").distinct(), label)
+                    // Nothing lost: every guid, read once read, starred once starred.
+                    assertEquals(
+                        listOf("g1", "g2", "g3", "h1", "h2"),
+                        device.rows("SELECT DISTINCT guid FROM articles ORDER BY guid"),
+                        label,
+                    )
+                    assertTrue(device.rows("SELECT guid FROM articles WHERE guid = 'g1' AND is_read = 1").isNotEmpty(), "$label: g1 read")
+                    assertTrue(device.rows("SELECT guid FROM articles WHERE guid = 'g1' AND is_starred = 1").isNotEmpty(), "$label: g1 starred")
+                    assertTrue(device.rows("SELECT guid FROM articles WHERE guid = 'g2' AND is_read = 1").isNotEmpty(), "$label: g2 read")
+                    assertTrue(device.rows("SELECT guid FROM articles WHERE guid = 'h1' AND is_read = 1").isNotEmpty(), "$label: h1 read")
+                    assertEquals(emptyList(), device.rows("PRAGMA foreign_key_check"), label)
+                    assertTrue(device.outbox().isEmpty(), "$label has unsent changes")
+                    // A's feed is one row per identity: never two rows holding one URL.
+                    assertEquals(device.rows("SELECT url FROM feeds ORDER BY url"), device.rows("SELECT DISTINCT url FROM feeds ORDER BY url"), label)
+                }
+                if (order == listOf(0, 1, 2)) {
+                    // Device 2 saw a@X with its b@X in this order, and the edge reached everyone.
+                    for (device in devices) {
+                        assertEquals(listOf("fa1|$y", "fc|$cNew"), device.rows("SELECT id, url FROM feeds ORDER BY id"), "${device.label}: one feed per identity")
+                        assertEquals(
+                            listOf("g1|1|1|fa1", "g2|1|0|fa1", "g3|0|0|fa1", "h1|1|0|fc", "h2|0|0|fc"),
+                            device.rows("SELECT guid, is_read, is_starred, feed_id FROM articles ORDER BY guid"),
+                            device.label,
+                        )
+                    }
+                }
+
+                // 301-style URL moves from two devices, then a sync round: the newest URL wins everywhere.
+                for ((i, url) in listOf(0 to "https://feeds.example/z1", 2 to "https://feeds.example/z2")) {
+                    sim.tick(1_000)
+                    devices[i].db.feedsQueries.updateUrl(url, sim.now, feedA)
+                }
+                syncUntilQuiet(sim, devices, "order $order (after the URL moves)")
+                for (device in devices) {
+                    // Feed a, wherever its identity ended up, carries the newest move's URL (device 3's, z2).
+                    val aNow = device.db.feedsQueries.resolveId(feedA).executeAsOne()
+                    assertEquals(
+                        listOf("https://feeds.example/z2"),
+                        device.rows("SELECT url FROM feeds WHERE id = '$aNow'"),
+                        "order $order: ${device.label}: the newest move wins",
+                    )
+                }
+                val after = devices.map(::agreedState)
+                for (i in 1 until after.size) assertEquals(after[0], after[i], "order $order: device 0 and $i differ after the URL moves")
+            } finally {
+                devices.forEach { it.close() }
+                sim.scope.cancel()
+                sim.client.close()
+                sim.failingClient.close()
+            }
+        }
+    }
+
+    /**
+     * Subscriptions, permanent redirects (301) of a feed onto another URL — which collide with a feed another
+     * device (or this one) holds there — reading, starring and syncs, interrupted and delayed, in seeded random
+     * order over a small URL pool. Collisions are found as the files happen to arrive; once everyone has synced
+     * until nothing changes, every device holds the same state, no article is missing and everything read or
+     * starred anywhere still is.
+     */
+    @Test
+    fun devicesConvergeUnderRandomUrlMovesThatCollideAcrossDevices() {
+        for (seed in listOf(5, 17, 29)) runUrlMoveSimulation(seed, operations = 200)
+    }
+
+    private fun runUrlMoveSimulation(seed: Int, operations: Int) = runBlocking {
+        val sim = Sim(seed)
+        val devices = (0 until 3).map { Device(sim, "m$it-s$seed") }
+        val everGuids = mutableSetOf<String>()
+        val readGuids = mutableSetOf<String>()
+        val starredGuids = mutableSetOf<String>()
+        var moves = 0
+        try {
+            for (step in 0 until operations) {
+                sim.tick()
+                sim.cloud.listingDelay = { sim.random.nextLong(3) }
+                sim.cloud.ghostListings = { sim.random.nextLong(2) }
+                val r = sim.random
+                val device = devices[r.nextInt(devices.size)]
+                val where = "seed $seed step $step"
+                when (r.nextInt(100)) {
+                    in 0..24 -> device.feeds.subscribeFeed(sim.urls[r.nextInt(sim.urls.size)])
+                    in 25..49 -> {
+                        val feed = device.db.feedsQueries.getAllIncludingDeleted().executeAsList().filter { it.deleted_at == null }.randomOrNull(r)
+                        val target = sim.urls.filter { it != feed?.url }.randomOrNull(r)
+                        if (feed != null && target != null) {
+                            sim.redirects[feed.url] = target
+                            try {
+                                val result = device.feeds.refreshFeed(feed)
+                                if (result is Result.Err) fail("$where: the redirecting refresh failed: ${result.exception}")
+                            } finally {
+                                sim.redirects.clear()
+                            }
+                            moves++
+                        }
+                    }
+                    in 50..64 -> articleIdAndGuid(device).randomOrNull(r)?.let { (id, guid) ->
+                        device.articles.markAsRead(id)
+                        readGuids += guid
+                    }
+                    in 65..74 -> articleIdAndGuid(device).randomOrNull(r)?.let { (id, guid) ->
+                        device.articles.setStarred(id, true)
+                        starredGuids += guid
+                    }
+                    else -> syncWithChaos(sim, device, devices, where)
+                }
+                everGuids += device.sync.rows("SELECT DISTINCT guid FROM articles")
+            }
+            assertTrue(moves > 0, "seed $seed: no redirect ran")
+            quiesce(sim, devices, seed)
+
+            val states = devices.map { agreedState(it.sync) }
+            for (i in 1 until states.size) {
+                for (key in states[0].keys) {
+                    val first = states[0].getValue(key)
+                    val other = states[i].getValue(key)
+                    val onlyFirst = first - other.toSet()
+                    val onlyOther = other - first.toSet()
+                    // The first few differing rows, side by side by their key (the first column).
+                    val shown = (onlyFirst.map { it.substringBefore('|') } + onlyOther.map { it.substringBefore('|') }).distinct().take(3).map { k ->
+                        "first=" + onlyFirst.filter { it.startsWith("$k|") } + " second=" + onlyOther.filter { it.startsWith("$k|") }
+                    }
+                    assertEquals(emptyList(), shown, "seed $seed: $key differs between ${devices[0].sync.label} and ${devices[i].sync.label} (${onlyFirst.size} / ${onlyOther.size} rows)")
+                }
+            }
+            for (device in devices) {
+                val label = "seed $seed: ${device.sync.label}"
+                val guids = device.sync.rows("SELECT DISTINCT guid FROM articles").toSet()
+                assertEquals(emptySet(), everGuids - guids, "$label lost articles")
+                for (guid in readGuids) assertTrue(device.sync.rows("SELECT 1 FROM articles WHERE guid = '$guid' AND is_read = 1").isNotEmpty(), "$label: $guid lost its read state")
+                for (guid in starredGuids) assertTrue(device.sync.rows("SELECT 1 FROM articles WHERE guid = '$guid' AND is_starred = 1").isNotEmpty(), "$label: $guid lost its star")
+                assertEquals(emptyList(), device.sync.rows("PRAGMA foreign_key_check"), label)
+                assertTrue(device.sync.outbox().isEmpty(), "$label has unsent changes")
+                assertEquals(0L, device.sync.capture().full_pending)
+            }
+            // The run must have met collisions, or it proves nothing about them.
+            assertTrue(states[0].getValue("ks_feed_edge").isNotEmpty(), "seed $seed: no URL collision was ever observed")
+        } finally {
+            devices.forEach { it.close() }
+            sim.scope.cancel()
+            sim.client.close()
+            sim.failingClient.close()
+        }
+    }
+
+    private fun articleIdAndGuid(device: Device): List<Pair<String, String>> =
+        device.sync.rows("SELECT id || '|' || guid FROM articles WHERE deleted_at IS NULL ORDER BY id").map { it.substringBefore('|') to it.substringAfter('|') }
 
     /**
      * A version-2 database holding the shared pre-upgrade tag "old-tag" and folder "old-folder", renamed
@@ -461,7 +734,7 @@ class SyncSimulationTest {
         val aliveFeeds = db.feedsQueries.getAllIncludingDeleted().executeAsList().filter { it.deleted_at == null }
         val aliveFolders = db.foldersQueries.watchAll().executeAsList().filter { it.deleted_at == null }
         val aliveTags = db.tagsQueries.watchAll().executeAsList().filter { it.deleted_at == null }
-        val liveArticles = device.sync.driver.executeQuery(null, "SELECT id FROM articles WHERE deleted_at IS NULL ORDER BY id", { c ->
+        val liveArticles = device.sync.driver.executeQuery(null, "SELECT id FROM articles WHERE (deleted_at IS NULL OR is_starred = 1) ORDER BY id", { c ->
             QueryResult.Value(buildList { while (c.next().value) add(c.getString(0)!!) })
         }, 0).value
         fun name(kind: String) = "$kind-${device.sync.label}-${sim.nameCounter++}"
@@ -562,13 +835,15 @@ class SyncSimulationTest {
         }
         for (
             r in rows(
-                "SELECT id, read_at, is_read, MAX(COALESCE(starred_at, 0), COALESCE(deleted_updated_at, 0)), " +
-                    "is_starred || '/' || (deleted_at IS NULL), body_updated_at, content, summary FROM articles",
+                "SELECT id, read_at, is_read, starred_at, is_starred, deleted_updated_at, deleted_at IS NULL, " +
+                    "body_updated_at, content, summary FROM articles",
             )
         ) {
+            // The star and the deletion are two independent groups (SyncLww.ARTICLE_STAR / ARTICLE_DELETION).
             add(Group("article ${r[0]} read", r[1]?.toLong(), r[2]!!))
-            add(Group("article ${r[0]} retention", r[3]?.toLong()?.takeIf { it > 0 }, r[4]!!))
-            add(Group("article ${r[0]} body", r[5]?.toLong(), "${r[6]}|${r[7]}"))
+            add(Group("article ${r[0]} star", r[3]?.toLong(), r[4]!!))
+            add(Group("article ${r[0]} deleted", r[5]?.toLong(), r[6]!!))
+            add(Group("article ${r[0]} body", r[7]?.toLong(), "${r[8]}|${r[9]}"))
         }
         for (r in rows("SELECT key, updated_at, value FROM global_settings")) {
             add(Group("setting ${r[0]}", r[1]?.toLong(), r[2]!!))
@@ -629,7 +904,7 @@ class SyncSimulationTest {
     }
 
     private companion object {
-        const val COLUMNS = 9
+        const val COLUMNS = 10
 
         /** RFC 822 weekday names, starting from 2024-01-01 (a Monday). */
         val WEEKDAYS = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")

@@ -10,6 +10,7 @@ import works.merc.keryx.app.domain.TransportFixtures.feed
 import works.merc.keryx.app.domain.TransportFixtures.feedTag
 import works.merc.keryx.app.domain.TransportFixtures.fold
 import works.merc.keryx.app.domain.TransportFixtures.folder
+import works.merc.keryx.app.domain.TransportFixtures.identityState
 import works.merc.keryx.app.domain.TransportFixtures.localDb
 import works.merc.keryx.app.domain.TransportFixtures.merge
 import works.merc.keryx.app.domain.TransportFixtures.searchPendingIds
@@ -140,11 +141,11 @@ class SyncAlgebraTest {
                     assertEquals(null, rs.getString(2)) // the stale summary is dropped next to content
                     assertEquals(0L, rs.getLong(3)) // read 250 > 200
                     assertEquals(250L, rs.getLong(4))
-                    assertEquals(1L, rs.getLong(5))
-                    // Retention group: the star (260) is newer than the deletion (180), so the whole
-                    // group comes from fileB's version — which was never deleted.
-                    assertEquals(null, rs.getObject(6))
-                    assertEquals(null, rs.getObject(7))
+                    assertEquals(1L, rs.getLong(5)) // star 260, fileB
+                    // The deletion is a group of its own: fileC's cleanup (180) wins it whatever the
+                    // star says. The article stays visible because it is starred.
+                    assertEquals(180L, rs.getLong(6))
+                    assertEquals(180L, rs.getLong(7))
                     assertEquals(400L, rs.getLong(8)) // the latest cached_at
                     assertEquals(300L, rs.getLong(9)) // updated_at is no group's key: the latest
                 }
@@ -201,22 +202,27 @@ class SyncAlgebraTest {
     }
 
     @Test
-    fun foldTakesTheWholeRetentionGroupFromItsNewestOperation() {
+    fun foldTakesTheStarAndTheDeletionEachFromItsOwnNewestVersion() {
         val folded = fold(fileB() to nameB, fileC() to nameC)
         TransportFixtures.connect(folded).use { conn ->
             conn.createStatement().use { st ->
                 st.executeQuery("SELECT deleted_at, deleted_updated_at, is_starred, starred_at FROM articles WHERE id = 'a1'").use { rs ->
                     rs.next()
-                    assertEquals(null, rs.getObject(1))
-                    assertEquals(null, rs.getObject(2))
-                    assertEquals(1L, rs.getLong(3))
+                    assertEquals(180L, rs.getLong(1)) // fileC's cleanup
+                    assertEquals(180L, rs.getLong(2))
+                    assertEquals(1L, rs.getLong(3)) // fileB's star, kept beside the deletion
                     assertEquals(260L, rs.getLong(4))
                 }
             }
         }
     }
 
-    // ---- The retention group: delete @D, star @S > D, unstar @U > S on three devices ----
+    // ---- Star and deletion: delete @D, star @S > D, unstar @U > S on three devices ----
+    //
+    // Each file is what that device's own local writes leave behind (articles.sq): a star touches only
+    // the star group, and an unstar of a deleted row also stamps an undelete. This is the counterexample
+    // that broke the old "a newer star revives" rule; with two plain last-write-wins groups every merge
+    // and fold order agrees.
 
     private val deleteName = deltaName(DEV_A, 7)
     private val starName = deltaName(DEV_B, 7)
@@ -225,10 +231,10 @@ class SyncAlgebraTest {
     private fun retentionFiles(): List<Pair<File, TransportFileName>> = listOf(
         // Device A's cache cleanup deleted the article.
         transportFile(deleteName, feed("f1"), article("a1", "f1", deletedAt = 100, deletedUpdatedAt = 100)) to deleteName,
-        // Device B, after merging that deletion, starred it (which revives it).
-        transportFile(starName, feed("f1"), article("a1", "f1", isStarred = 1, starredAt = 200, deletedUpdatedAt = 100)) to starName,
-        // Device C, after merging the star, unstarred it.
-        transportFile(unstarName, feed("f1"), article("a1", "f1", isStarred = 0, starredAt = 300, deletedUpdatedAt = 100)) to unstarName,
+        // Device B, after merging that deletion, starred it: the deletion stays, the star keeps it visible.
+        transportFile(starName, feed("f1"), article("a1", "f1", isStarred = 1, starredAt = 200, deletedAt = 100, deletedUpdatedAt = 100)) to starName,
+        // Device C, after merging the star, unstarred it: an unstar of a deleted row stamps an undelete.
+        transportFile(unstarName, feed("f1"), article("a1", "f1", isStarred = 0, starredAt = 300, deletedUpdatedAt = 300)) to unstarName,
     )
 
     private fun retention(file: File): String = TransportFixtures.connect(file).use { conn ->
@@ -241,10 +247,10 @@ class SyncAlgebraTest {
     }
 
     @Test
-    fun theRetentionGroupConvergesOnTheNewestOperationInEveryMergeAndFoldOrder() {
-        // The unstar (300) is the newest operation: not starred, not deleted (it stays visible
-        // until the next cache cleanup deletes it again).
-        val expected = "0|300|null|100"
+    fun deleteStarAndUnstarOnThreeDevicesConvergeInEveryMergeAndFoldOrder() {
+        // The unstar (300) wins the star group, its undelete (300) the deletion group: not starred, not
+        // deleted — visible until the next cache cleanup deletes it again.
+        val expected = "0|300|null|300"
         val inputs = retentionFiles()
         for (local in listOf(emptyArray(), arrayOf(feed("f1"), article("a1", "f1")))) {
             for (order in permutations(listOf(0, 1, 2))) {
@@ -264,9 +270,22 @@ class SyncAlgebraTest {
     }
 
     @Test
-    fun aDeletionNewerThanTheStarWinsTheRetentionGroup() {
-        // The pre-v3 revive rule would have kept a star newer than any deletion alive; the group
-        // simply takes its newest operation, here a deletion after an unstar.
+    fun aDeletionNewerThanTheStarKeepsTheStar() {
+        // Finding #1: a cleanup on a device that never saw the star (deletion 250) is newer than the
+        // star (150), but the two are separate groups — the star stays, and keeps the article visible.
+        val delete = transportFile(nameB, feed("f1"), article("a1", "f1", deletedAt = 250, deletedUpdatedAt = 250))
+        val star = transportFile(nameA, feed("f1"), article("a1", "f1", isStarred = 1, starredAt = 150))
+        for (order in listOf(listOf(star, delete), listOf(delete, star))) {
+            val db = localDb()
+            order.forEach { merge(db, it) }
+            assertEquals("1|150|250|250", retention(db))
+            assertEquals("1|150|250|250", retention(fold(*order.map { it to (if (it == star) nameA else nameB) }.toTypedArray())))
+        }
+    }
+
+    @Test
+    fun anUnstarAndANewerDeletionLeaveTheArticleUnstarredAndDeleted() {
+        // The user unstarred it (200); another device's cleanup (250) deleted it: neither group keeps it.
         val unstar = transportFile(nameA, feed("f1"), article("a1", "f1", isStarred = 0, starredAt = 200))
         val delete = transportFile(nameB, feed("f1"), article("a1", "f1", isStarred = 0, starredAt = 200, deletedAt = 250, deletedUpdatedAt = 250))
         for (order in listOf(listOf(unstar, delete), listOf(delete, unstar))) {
@@ -277,7 +296,7 @@ class SyncAlgebraTest {
     }
 
     @Test
-    fun theRetentionGroupIsIdempotentAndCommutativeForEveryPair() {
+    fun theStarAndDeletionGroupsAreIdempotentAndCommutativeForEveryPair() {
         val inputs = retentionFiles().map { it.first }
         for (file in inputs) {
             val once = localDb().also { merge(it, file) }
@@ -415,8 +434,8 @@ class SyncAlgebraTest {
         // A tag's and a folder's id derive from the name (IdGenerator.tagId / folderId), so two
         // devices that created the same name independently hold the same id: the fold keys by id and
         // merges their rows into one, and merging the fold — or the files one by one — lands on that
-        // one row in every order. A feed's URL under two ids is the one remaining duplicate of this
-        // kind (see "Feeds sharing one URL under different ids" in docs/known-issues.md).
+        // one row in every order. A feed's URL under two ids is one feed (FeedIdentitySql): the fold
+        // records the collision as a feed edge, and the merge moves both onto the smallest id.
         val p = transportFile(
             nameA,
             tag(IdGenerator.tagId("dup"), "dup", updatedAt = 100),
@@ -439,10 +458,10 @@ class SyncAlgebraTest {
         val viaQp = localDb().also { merge(it, qp) }
         assertEquals(dump(viaPq), dump(viaQp))
         val merged = dump(viaPq)
-        // Each row's greater updated_at wins; the feeds' URL collision keeps the greater id.
+        // Each row's greater updated_at wins; the feeds sharing a URL become one feed at the smaller id.
         assertEquals(listOf(IdGenerator.tagId("dup")), merged.getValue("tags").map { it.substringBefore('|') })
         assertEquals(listOf(IdGenerator.folderId("Dup")), merged.getValue("folders").map { it.substringBefore('|') })
-        assertEquals(listOf("fq"), merged.getValue("feeds").map { it.substringBefore('|') })
+        assertEquals(listOf("fp"), merged.getValue("feeds").map { it.substringBefore('|') })
     }
 
     // ---- A rename onto a name another row holds (no UNIQUE(name) blocks it any more) ----
@@ -703,5 +722,138 @@ class SyncAlgebraTest {
                 st.executeQuery("SELECT COUNT(*) FROM pragma_foreign_key_check").use { rs -> rs.next(); assertEquals(0, rs.getInt(1)) }
             }
         }
+    }
+
+    // ---- Feed identity: the same URL under different ids ----
+
+    private val sharedUrl = "https://shared/feed"
+
+    /**
+     * Two versions of one feed — ids `fp` < `fq`, one URL — with every stamp equal, so each field group
+     * is a tie decided by value, and with articles (one colliding key `g1`), tag links and raw folders.
+     */
+    private fun versionOfFeed(feedId: String, suffix: String, articleSuffix: String) = arrayOf(
+        tag("t1", "news"), tag("t2", "tech"), folder("d1", "Work"), folder("d2", "Home"),
+        feed(
+            feedId, url = sharedUrl, title = "Title $suffix", updatedAt = 100, createdAt = if (suffix == "P") 80 else 90,
+            folderId = if (suffix == "P") "d1" else "d2", folderAt = 200, sortOrder = if (suffix == "P") 1 else 2, sortAt = 200,
+            customTitle = "Custom $suffix", customAt = 200,
+        ),
+        feedTag(feedId, "t1", updatedAt = 100, deletedAt = if (suffix == "P") null else 100),
+        feedTag(feedId, "t2", updatedAt = 100),
+        article(
+            "a-$articleSuffix-1", feedId, guid = "g1", title = "Article $suffix", content = "body $suffix", updatedAt = 100, bodyAt = 100,
+            isRead = if (suffix == "P") 1 else 0, readAt = 200, isStarred = if (suffix == "P") 0 else 1, starredAt = 200,
+            cachedAt = if (suffix == "P") 100 else 150, createdAt = if (suffix == "P") 70 else 60,
+        ),
+        article("a-$articleSuffix-2", feedId, guid = "g-own-$suffix", updatedAt = 100),
+    )
+
+    private val feedP = deltaName(DEV_A, 1)
+    private val feedQ = deltaName(DEV_B, 1)
+    private val feedEdge = deltaName(DEV_C, 1)
+
+    private fun filePForFeeds() = transportFile(feedP, *versionOfFeed("fp", "P", "p"))
+    private fun fileQForFeeds() = transportFile(feedQ, *versionOfFeed("fq", "Q", "q"))
+    private fun fileEdgeOnly() = transportFile(feedEdge, "INSERT INTO feed_edges (a, b) VALUES ('fp', 'fq')")
+
+    @Test
+    fun sameUrlFeedsUnderDifferentIdsReachTheSameStateWhicheverIsMergedFirstAndWhenFolded() {
+        val pThenQ = localDb().also { merge(it, filePForFeeds()); merge(it, fileQForFeeds()) }
+        val qThenP = localDb().also { merge(it, fileQForFeeds()); merge(it, filePForFeeds()) }
+        val folded = localDb().also { merge(it, fold(filePForFeeds() to feedP, fileQForFeeds() to feedQ)) }
+        val foldedBackwards = localDb().also { merge(it, fold(fileQForFeeds() to feedQ, filePForFeeds() to feedP)) }
+        // A device that already holds one version, receiving the other as its file.
+        val holdsP = localDb(*versionOfFeed("fp", "P", "p")).also { merge(it, fileQForFeeds()) }
+        val holdsQ = localDb(*versionOfFeed("fq", "Q", "q")).also { merge(it, filePForFeeds()) }
+        // A device holding the greater id and receiving both, and one holding the smaller.
+        val holdsQReceivesBoth = localDb(*versionOfFeed("fq", "Q", "q")).also { merge(it, filePForFeeds()); merge(it, fileQForFeeds()) }
+
+        val reference = identityState(pThenQ)
+        for ((label, db) in listOf(
+            "Q then P" to qThenP, "fold(P, Q)" to folded, "fold(Q, P)" to foldedBackwards,
+            "holds P, receives Q" to holdsP, "holds Q, receives P" to holdsQ, "holds Q, receives both" to holdsQReceivesBoth,
+        )) {
+            assertEquals(reference, identityState(db), label)
+        }
+        // One feed on the smallest id; both versions' articles under it, the colliding key folded to the
+        // smallest article id; the two feeds' ties decided by value (the greater title, sort order).
+        assertEquals(listOf("fp"), TransportFixtures.rows(pThenQ, "SELECT id FROM feeds"))
+        assertEquals(
+            listOf("a-p-1|fp|g1", "a-p-2|fp|g-own-P", "a-q-2|fp|g-own-Q"),
+            TransportFixtures.rows(pThenQ, "SELECT id, feed_id, guid FROM articles ORDER BY id"),
+        )
+        assertEquals(
+            listOf("fp|Title Q|80|2|Custom Q"),
+            TransportFixtures.rows(pThenQ, "SELECT id, title, created_at, sort_order, custom_title FROM feeds"),
+        )
+        assertEquals(listOf("fp|fq"), reference.getValue("ks_feed_edge"))
+        assertEquals(listOf("article|a-q-1|a-p-1", "feed|fq|fp"), reference.getValue("ks_id_remap"))
+        // The tag links of the two versions fold per (feed, tag): the detach (tie) outranks the attach.
+        assertEquals(listOf("fp|t1|100|100", "fp|t2|100|null"), TransportFixtures.rows(pThenQ, "SELECT feed_id, tag_id, updated_at, deleted_at FROM feed_tags ORDER BY 1, 2"))
+    }
+
+    @Test
+    fun mergeAndFoldAreCommutativeOverEveryOrderOfTwoFeedVersionsAndAnEdgeOnlyFile() {
+        val inputs = listOf(::filePForFeeds to feedP, ::fileQForFeeds to feedQ, ::fileEdgeOnly to feedEdge)
+        val merged = permutations(listOf(0, 1, 2)).map { order ->
+            order to localDb().also { db -> order.forEach { merge(db, inputs[it].first()) } }
+        }
+        val reference = identityState(merged.first().second)
+        for ((order, db) in merged) assertEquals(reference, identityState(db), "merge order $order")
+        // With either version already held.
+        for (held in listOf(versionOfFeed("fp", "P", "p"), versionOfFeed("fq", "Q", "q"))) {
+            for (order in permutations(listOf(0, 1, 2))) {
+                val db = localDb(*held).also { d -> order.forEach { merge(d, inputs[it].first()) } }
+                assertEquals(reference, identityState(db), "held ${held.size}, merge order $order")
+            }
+        }
+        for (order in permutations(listOf(0, 1, 2))) {
+            val folded = fold(*order.map { inputs[it].first() to inputs[it].second }.toTypedArray())
+            assertEquals(reference, identityState(localDb().also { merge(it, folded) }), "fold order $order")
+        }
+        // Folding folds is associative, and a merge of a fold of folds equals the one-by-one merge.
+        val left = fold(fold(filePForFeeds() to feedP, fileQForFeeds() to feedQ) to TransportFixtures.baseName(DEV_A, 1), fileEdgeOnly() to feedEdge)
+        val right = fold(filePForFeeds() to feedP, fold(fileQForFeeds() to feedQ, fileEdgeOnly() to feedEdge) to TransportFixtures.baseName(DEV_A, 1))
+        assertEquals(identityState(localDb().also { merge(it, left) }), identityState(localDb().also { merge(it, right) }))
+        assertEquals(reference, identityState(localDb().also { merge(it, left) }))
+    }
+
+    @Test
+    fun feedIdentityMergeIsIdempotent() {
+        for (file in listOf(filePForFeeds(), fileQForFeeds(), fileEdgeOnly())) {
+            for (local in listOf(emptyArray(), versionOfFeed("fp", "P", "p"), versionOfFeed("fq", "Q", "q"))) {
+                val once = localDb(*local).also { merge(it, file) }
+                val twice = localDb(*local).also { merge(it, file); merge(it, file) }
+                assertEquals(identityState(once), identityState(twice))
+            }
+        }
+    }
+
+    /** The same feed on every device, two article ids for one `(feed, guid)`: one article on the smallest id. */
+    @Test
+    fun articlesSharingAKeyUnderDifferentIdsConvergeOnTheSmallestIdInEveryOrder() {
+        fun withId(id: String, read: Boolean, readAt: Long, body: String, bodyAt: Long) = arrayOf(
+            feed("f1", url = sharedUrl),
+            article(id, "f1", guid = "g", content = body, updatedAt = bodyAt, bodyAt = bodyAt, isRead = if (read) 1 else 0, readAt = readAt, cachedAt = bodyAt),
+        )
+        val x = deltaName(DEV_A, 1)
+        val y = deltaName(DEV_B, 1)
+        fun fileX() = transportFile(x, *withId("a2", read = true, readAt = 300, body = "body X", bodyAt = 100))
+        fun fileY() = transportFile(y, *withId("a1", read = false, readAt = 100, body = "body Y", bodyAt = 200))
+        val results = listOf(
+            localDb().also { merge(it, fileX()); merge(it, fileY()) },
+            localDb().also { merge(it, fileY()); merge(it, fileX()) },
+            localDb().also { merge(it, fold(fileX() to x, fileY() to y)) },
+            localDb().also { merge(it, fold(fileY() to y, fileX() to x)) },
+            localDb(*withId("a2", read = true, readAt = 300, body = "body X", bodyAt = 100)).also { merge(it, fileY()) },
+            localDb(*withId("a1", read = false, readAt = 100, body = "body Y", bodyAt = 200)).also { merge(it, fileX()) },
+        )
+        val reference = identityState(results.first())
+        results.forEachIndexed { i, db -> assertEquals(reference, identityState(db), "variant $i") }
+        // The smallest id, the newer body (Y's) and the newer read (X's).
+        assertEquals(listOf("a1|body Y|1|300"), TransportFixtures.rows(results.first(), "SELECT id, content, is_read, read_at FROM articles"))
+        assertEquals(listOf("article|a2|a1"), reference.getValue("ks_id_remap"))
+        assertEquals(emptyList(), reference.getValue("ks_feed_edge"))
     }
 }

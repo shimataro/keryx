@@ -45,6 +45,7 @@ import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.domain.FeedFetchProblem
 import works.merc.keryx.app.data.local.db.Folders
 import works.merc.keryx.app.data.local.db.Tags
+import works.merc.keryx.app.data.local.isVisible
 import works.merc.keryx.app.domain.ActivityCenter
 import works.merc.keryx.app.domain.ActivitySnapshot
 import works.merc.keryx.app.domain.AddFeedPreview
@@ -64,8 +65,8 @@ import works.merc.keryx.app.domain.RefreshCycleRunner
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SubscribeOutcome
 import works.merc.keryx.app.domain.SyncRepository
-import works.merc.keryx.app.domain.TagFolderIdRemap
-import works.merc.keryx.app.domain.TagFolderIdRemaps
+import works.merc.keryx.app.domain.IdRemap
+import works.merc.keryx.app.domain.IdRemaps
 import works.merc.keryx.app.domain.TagRepository
 import works.merc.keryx.app.presentation.DerivedStateFlow
 import works.merc.keryx.app.presentation.ManualSync
@@ -110,9 +111,9 @@ class HomeViewModel(
     // Reports a read/star or feed-list write that failed off the UI thread (its optimistic state is
     // then undone here — see [revertFailedArticleWrite]). The app's one instance in production.
     private val localWriteFailureReporter: LocalWriteFailureReporter,
-    // The tag/folder id re-keys a merge publishes (see [TagFolderIdRemapping]). The app's one instance in
+    // The tag/folder/feed id re-keys a merge publishes (see [IdRemapping]). The app's one instance in
     // production; by default the one [settingsRepository] observes, so both always agree.
-    private val idRemaps: TagFolderIdRemaps = settingsRepository.idRemaps,
+    private val idRemaps: IdRemaps = settingsRepository.idRemaps,
 ) : ViewModel() {
 
     // Eagerly (not WhileSubscribed) so these start populating as soon as the ViewModel is
@@ -216,10 +217,10 @@ class HomeViewModel(
      * Restores the last-selected filter from local settings, falling back to
      * [ArticleFilter.All] if it's missing, undecodable, or points at a feed/tag/folder that
      * was deleted while the app was closed. A tag or folder id a merge or the v2->v3 migration has
-     * re-keyed is brought up to date first ([TagFolderIdRemaps]); [RestoredFilter.reproduced] says
+     * re-keyed is brought up to date first ([IdRemaps]); [RestoredFilter.reproduced] says
      * whether the saved filter was actually reproduced (false for any of those fallbacks).
      *
-     * The re-key map loads in the background ([TagFolderIdRemaps.loaded]), and this runs on the UI
+     * The re-key map loads in the background ([IdRemaps.loaded]), and this runs on the UI
      * thread, which must not wait for it. A tag or folder filter restored before the map has loaded
      * is therefore taken as is, unvalidated ([RestoredFilter.validated] false): validating it now
      * would read a re-keyed id as a deleted row and fall back to All. [validateRestoredFilterOnceRemapLoaded]
@@ -235,7 +236,8 @@ class HomeViewModel(
             return RestoredFilter(remapped, reproduced = true, validated = false)
         }
         val validated = validateFilterTarget(remapped)
-        return RestoredFilter(validated, reproduced = validated == remapped)
+        // A feed filter can come back under the id its feed has now (see validateFilterTarget).
+        return RestoredFilter(validated, reproduced = validated != ArticleFilter.All || remapped == ArticleFilter.All)
     }
 
     /**
@@ -260,11 +262,21 @@ class HomeViewModel(
      * Falls back to [ArticleFilter.All] when [filter] references a feed/tag/folder that no longer
      * exists (soft-deleted locally, or since [restoreFilter] read it). Filters with no target of
      * their own pass through unchanged.
+     *
+     * A feed id is resolved from the database ([FeedRepository.getFeedByIdResolved], which resolves the id
+     * and reads the row in one statement, so a merge committing in between cannot leave the resolved id
+     * naming a row it has just deleted), so a feed a merge moved onto another id is restored under that id
+     * even before the published re-key map has loaded: the merged-away row is gone, and checking the saved
+     * id alone would fall back to All.
      */
     private fun validateFilterTarget(filter: ArticleFilter): ArticleFilter = when (filter) {
         is ArticleFilter.Feed -> {
-            val feed = feedRepository.getFeedById(filter.feedId)
-            if (feed != null && feed.deleted_at == null) filter else ArticleFilter.All
+            val feed = feedRepository.getFeedByIdResolved(filter.feedId)
+            when {
+                feed == null || feed.deleted_at != null -> ArticleFilter.All
+                feed.id == filter.feedId -> filter
+                else -> ArticleFilter.Feed(feed.id)
+            }
         }
         is ArticleFilter.Tag -> {
             val tag = tagRepository.getTagById(filter.tagId)
@@ -325,12 +337,12 @@ class HomeViewModel(
     val selectedRowGeneration: StateFlow<Long> = _selectedRowGeneration.asStateFlow()
 
     /**
-     * The tag/folder id re-keys a sync merge has published ([TagFolderIdRemaps.current]), for a UI
-     * that holds a tag or folder id of its own — an inline rename's target — to bring up to date.
+     * The tag/folder/feed id re-keys a merge has published ([IdRemaps.current]), for a UI that
+     * holds such an id of its own — an inline rename's target — to bring up to date.
      * Published before the lists a merge changes are, so a UI that sees a list under a new id reads
      * a map that already holds the move.
      */
-    val tagFolderIdRemap: StateFlow<TagFolderIdRemap> get() = idRemaps.current
+    val idRemap: StateFlow<IdRemap> get() = idRemaps.current
 
     // --- Search ---
     //
@@ -405,21 +417,24 @@ class HomeViewModel(
     // The last-selected article, restored at launch (not via selectArticle(), to avoid re-marking it as
     // read and clobbering another device's "mark as unread" sync via read_at last-write-wins). Looked
     // up here, before [_pinnedReadStates] and the eagerly collected article list, so its pin is in
-    // place before that list first emits. A tombstone can land while the app is closed, so the
-    // restored row is filtered the same way selectArticle filters a concurrently-deleted one —
-    // otherwise the next launch would select and pin deleted content.
+    // place before that list first emits. A merged deletion can leave it no longer visible (deleted
+    // and not starred) while the app is closed, so the restored row is filtered by isVisible the same
+    // way selectArticle filters one a merge deleted concurrently — otherwise the next launch would
+    // select and pin deleted content.
     //
     // Best effort (docs/error-design.md): a failing lookup restores nothing. A selection whose body
     // lookup failed is persisted too (see applyHydratedSelection), so a lookup that fails every time
     // would otherwise throw out of this constructor on every launch and Home would never open.
     private val restoredArticle: Articles? = settingsRepository.getLocalSettings().lastArticleId
         ?.let { id ->
-            runCatchingUnlessCancelled { articleRepository.getArticleById(id) }.getOrElse { e ->
+            // Resolved: a feed merge made while the app was closed can have moved the saved article onto
+            // another id (articles.getByIdResolved), and the saved id's row is then gone.
+            runCatchingUnlessCancelled { articleRepository.getArticleByIdResolved(id) }.getOrElse { e ->
                 Log.warn(TAG, "Restoring the last selected article failed", e)
                 null
             }
         }
-        ?.takeIf { it.deleted_at == null }
+        ?.takeIf { it.isVisible }
 
     // Read state the user just set on an article while browsing the current filter: read (as a side
     // effect of selection, or an explicit "mark as read") or unread (an explicit "mark as unread"). The
@@ -456,6 +471,11 @@ class HomeViewModel(
     // sequentially.
     private var trackedGeneration = -1L
 
+    // The article list's viewport as of its last markArticlesSeen report — what newArticleCount
+    // measures "the fresh side" against. null until the list first reports. Declared before
+    // filteredArticles, which carries it over a feed merge's article re-keys (see _newArticleTracking).
+    private val _visibleRange = MutableStateFlow<VisibleRange?>(null)
+
     // Only the filter keys the DB query: switching filters must switch queries, but the unread-only,
     // sort and pinned inputs are pure display transforms over whatever that query returned. Keeping
     // them in the flatMapLatest key made every article selection (which pins the article it marks
@@ -484,14 +504,23 @@ class HomeViewModel(
                     // runs only when there is a candidate at all, so the common re-emission (a read
                     // or star toggle) issues no extra query. Runs on `dispatcher` (articles'
                     // flowOn), like the list query itself.
+                    //
+                    // A candidate can also be an article the list already showed under another id: a
+                    // feed merge moved it onto its canonical id (whose row may be newly inserted). Read
+                    // from the database here, with the list — the merge's commit re-runs this query
+                    // before the re-keys are published — and carried over (withRemapped), so it is
+                    // neither counted as new nor loses its unseen state; the viewport follows it too.
                     val tracking = _newArticleTracking.value
-                    val candidates = tracking.candidatesIn(ids)
+                    val unremapped = tracking.candidatesIn(ids)
+                    val rekeys = if (unremapped.isEmpty()) emptyMap() else articleRepository.articleRekeysOnto(unremapped)
+                    val candidates = if (rekeys.isEmpty()) unremapped else tracking.withRemapped(rekeys).candidatesIn(ids)
                     val inserted = if (candidates.isEmpty()) {
                         emptySet()
                     } else {
                         articleRepository.articleIdsInsertedAfter(tracking.insertedAfterRowId, candidates)
                     }
-                    _newArticleTracking.update { it.withList(ids, inserted) }
+                    if (rekeys.isNotEmpty()) _visibleRange.update { it?.remappedBy(rekeys) }
+                    _newArticleTracking.update { it.withRemapped(rekeys).withList(ids, inserted) }
                 }
                 .map { filter to it }
         }
@@ -546,10 +575,6 @@ class HomeViewModel(
         combine(hasFeeds, articlesLoaded, ::articleListBody),
     )
 
-    // The article list's viewport as of its last markArticlesSeen report — what newArticleCount
-    // measures "the fresh side" against. null until the list first reports.
-    private val _visibleRange = MutableStateFlow<VisibleRange?>(null)
-
     /**
      * Count for the article list's "new articles" pill — ids tracked by [_newArticleTracking] that
      * are also in the currently displayed [articles] (so an unseen id hidden by unread-only doesn't
@@ -601,6 +626,22 @@ class HomeViewModel(
     private val _selectedArticle = MutableStateFlow<Articles?>(null)
 
     /**
+     * Every article re-key applied to the ids held here this session ([remapHeldArticleIds]): old id ->
+     * the id it has now, folded so one lookup suffices. What an operation started before a move (a
+     * hydration, a read/star write's completion or revert) translates the ids it captured through
+     * ([currentArticleId]), since what it compares them with has moved meanwhile. Main thread only.
+     */
+    private val articleIdMoves = HashMap<String, String>()
+
+    /**
+     * [id] in the id space of the article moves applied so far ([articleIdMoves]) — including the move
+     * of the saved article the launch-time restore resolved. For a UI that holds an article id of its
+     * own across such a move (the SwiftUI reader's saved scroll position names its article) to compare
+     * it with [selectedArticleId]. Main thread only.
+     */
+    fun currentArticleId(id: String): String = articleIdMoves[id] ?: id
+
+    /**
      * The selected article, fully loaded (body included). It catches up with [selectedArticleId] only
      * once [selectArticle]'s body lookup returns, so it is still the previous article until then —
      * what the reader shows is [readerContent], and what the toolbar and every other per-selection
@@ -645,7 +686,8 @@ class HomeViewModel(
     /**
      * The article whose header [readerContent] shows while its body is still loading: set by
      * [hydrateSelection]'s grace timer once [READER_HEADER_FIRST_GRACE_MS] has passed without the body,
-     * cleared once it lands, by [selectFilter], and by a tombstoned lookup.
+     * cleared once it lands, by [selectFilter], and by a lookup that finds its row no longer visible
+     * (deleted and not starred).
      */
     private val _headerArticleId = MutableStateFlow<String?>(null)
 
@@ -663,8 +705,8 @@ class HomeViewModel(
      * whatever route made it (a click, J/K, a notification); choosing the article that is already
      * selected is not counted — so the article list scrolls the selection into view when this changes, and
      * not whenever [selectedArticleId] does. That id also moves without the user acting: a selection
-     * whose row turns out to have been tombstoned by a sync merge hands the cursor back to the
-     * article before it, and the list must not scroll back to that article on its own
+     * whose row a sync merge has left no longer visible (deleted and not starred) hands the cursor back
+     * to the article before it, and the list must not scroll back to that article on its own
      * (external-spec §9, "Nothing happens unprompted").
      */
     val selectionRevealRequests: StateFlow<Int> = _selectionRevealRequests.asStateFlow()
@@ -693,8 +735,12 @@ class HomeViewModel(
         combine(_selectionCursor, _selectedArticle, _pendingSelectedRow, _headerArticleId, ::resolveReaderContent),
     )
 
-    /** The feed [feedId] names among [feeds], if any. */
-    private fun selectedFeed(feeds: List<Feeds>, feedId: String?): Feeds? = feedId?.let { id -> feeds.find { it.id == id } }
+    /**
+     * The feed [feedId] names among [feeds], if any — under the id it has now ([remap]): the selected
+     * article's row is read once, so its `feed_id` can predate a merge that moved the feed.
+     */
+    private fun selectedFeed(feeds: List<Feeds>, feedId: String?, remap: IdRemap): Feeds? =
+        feedId?.let { remap.feed(it) }?.let { id -> feeds.find { it.id == id } }
 
     /**
      * The feed of [selectedArticleRow] — not of [selectedArticle] — so the reader's toolbar never names
@@ -710,8 +756,8 @@ class HomeViewModel(
 
     /** One field of the feed that owns the currently selected article (see [selectedFeedId]). */
     private fun <T> selectedFeedField(pick: (Feeds) -> T?): StateFlow<T?> = DerivedStateFlow(
-        { selectedFeed(structuralFeeds.value, selectedArticleRow.value?.feed_id)?.let(pick) },
-        combine(structuralFeeds, selectedFeedId) { feeds, id -> selectedFeed(feeds, id)?.let(pick) },
+        { selectedFeed(structuralFeeds.value, selectedArticleRow.value?.feed_id, idRemaps.current.value)?.let(pick) },
+        combine(structuralFeeds, selectedFeedId, idRemaps.current) { feeds, id, remap -> selectedFeed(feeds, id, remap)?.let(pick) },
     )
 
     /**
@@ -938,7 +984,8 @@ class HomeViewModel(
         structuralFeeds,
         dispatcher,
         isLive = { id -> feedRepository.getFeedById(id).let { it != null && it.deleted_at == null } },
-        currentRemap = { { it } },
+        currentRemap = { idRemaps.current.value::feed },
+        catchUp = ::loadIdRemapFromDb,
     ) { it.id }
     private val deletedTagFallback = DeletedItemFallback(
         viewModelScope,
@@ -1031,6 +1078,14 @@ class HomeViewModel(
     init {
         // The restored article (see [restoredArticle]) is already pinned (see [_pinnedReadStates]).
         if (restoredArticle != null) {
+            // The saved id resolved to another article (a feed merge moved it while the app was closed):
+            // recorded as a move, so an id a UI saved alongside it (the reader's scroll position) still
+            // matches, and saved under the id it has now.
+            val savedId = settingsRepository.getLocalSettings().lastArticleId
+            if (savedId != null && savedId != restoredArticle.id) {
+                articleIdMoves[savedId] = restoredArticle.id
+                settingsRepository.mutateLocalSettings { it.copy(lastArticleId = restoredArticle.id) }
+            }
             _selectedArticle.value = restoredArticle
             // Seed the navigation cursor too, so the first arrow key steps from the restored
             // article instead of jumping back to the top of the list.
@@ -1043,8 +1098,8 @@ class HomeViewModel(
             articleRestored = articleRestoredOnLaunch,
         )
 
-        // Any write to `articles` can be a sync merge propagating a soft-delete tombstone for an
-        // article currently pinned here; revalidate the pins so a deleted one can't stay visible.
+        // Any write to `articles` can be a sync merge leaving an article currently pinned here no longer
+        // visible (deleted and not starred); revalidate the pins so such a one can't stay on screen.
         articleChangeSignal
             .onEach { reconcilePinnedArticlesAndSelection() }
             .flowOn(dispatcher)
@@ -1058,7 +1113,7 @@ class HomeViewModel(
      * filter (see this class's own "Search" section), so switching feeds/folders/tags while
      * actively searching keeps the query and simply re-scopes the search to the new filter.
      *
-     * A tag or folder id a merge has re-keyed is brought up to date first ([TagFolderIdRemaps]).
+     * A tag or folder id a merge has re-keyed is brought up to date first ([IdRemaps]).
      *
      * @param filter The article filter to select.
      * @param instance Which rendered feed-list row was selected — defaults to [filter]'s canonical
@@ -1071,8 +1126,9 @@ class HomeViewModel(
         filter: ArticleFilter,
         instance: FeedListRowSelection = FeedListRowSelection.canonicalFor(filter),
     ) {
+        filterRequestSeq++
         // A row the feed list rendered before a merge re-keyed its tag or folder still carries the old
-        // id; select the row it became (see [TagFolderIdRemapping]). The selection itself is caught up first,
+        // id; select the row it became (see [IdRemapping]). The selection itself is caught up first,
         // so both sides of the comparison below are in the same id space.
         val remap = catchUpAndGetIdRemap()
         val current = remap.filter(filter)
@@ -1101,6 +1157,34 @@ class HomeViewModel(
         browsingEpoch++
         settingsRepository.mutateLocalSettings { it.copy(lastFilter = current.encode(), lastArticleId = null) }
     }
+
+    /**
+     * A notification's "show feed" action ([works.merc.keryx.app.core.AppNotificationAction.ShowFeedDetail]):
+     * selects the feed it names, the same as clicking it in the feed list, on its canonical row. The one
+     * implementation both UIs call (each then focuses its own pane).
+     *
+     * The notification keeps the id the feed had when it was raised, and a merge may have moved the
+     * feed onto another id since — possibly committed but not yet published, so the re-key map is first
+     * caught up from the database ([catchUpIdRemapFromDb]); [selectFilter] then resolves the id through
+     * it. A catch-up that fails is logged there and the published map is used as it stands.
+     *
+     * A selection the user makes while the catch-up is out — or a later "show feed" — is newer, and wins:
+     * this one then selects nothing ([filterRequestSeq]), rather than taking the feed list back to the
+     * notification's feed and dropping the article selection made under the newer one.
+     */
+    suspend fun showFeedDetail(feedId: String) {
+        val request = ++filterRequestSeq
+        catchUpIdRemapFromDb()
+        if (request != filterRequestSeq) return
+        selectFilter(ArticleFilter.Feed(feedId))
+    }
+
+    /**
+     * Counts the filter selection requests: [selectFilter] calls, and [showFeedDetail]s before their
+     * catch-up. A [showFeedDetail] whose number is no longer the latest once its catch-up returns was
+     * overtaken by a newer request. Only ever touched on the ViewModel's (main) context.
+     */
+    private var filterRequestSeq = 0L
 
     private val articleContentCache = ArticleContentCache(
         scope = viewModelScope,
@@ -1147,9 +1231,12 @@ class HomeViewModel(
     /**
      * Selects an existing article, loads its full content, and marks it as read.
      *
-     * @param article The article row to select.
+     * @param row The article row to select. Its ids are brought up to date first: a feed merge may have
+     *   moved the article (and its feed) onto other ids since the row was read, and the cursor, the
+     *   pending row, the read pin and the hydration must all name the article by the id it has now.
      */
-    fun selectArticle(article: ArticleListRow) {
+    fun selectArticle(row: ArticleListRow) {
+        val article = row.copy(id = currentArticleId(row.id), feed_id = idRemaps.current.value.feed(row.feed_id))
         // Marking read is unconditional (external-spec §7: read the instant it is selected), so an
         // article passed over by a fast key repeat is still marked read. Enqueued here, at call time,
         // rather than after the body lookup below: dbWriteDispatcher runs writes one at a time in
@@ -1157,7 +1244,7 @@ class HomeViewModel(
         // unread" on this article made while the lookup is still waiting lands after this write,
         // not before it. Also dispatched before the optimistic pin below — see
         // reconcilePinnedArticlesAndSelection's own KDoc for why that order is load-bearing. Should a
-        // sync merge tombstone the row concurrently, marking it read only stamps read_at/updated_at;
+        // sync merge delete the row concurrently, marking it read only stamps read_at/updated_at;
         // deletion's last-write-wins runs on deleted_updated_at, which this write never touches, so
         // it cannot revive or otherwise disturb the deletion.
         val write = launchArticleWrite(ArticleWriteField.READ, listOf(article.id)) { articleRepository.markAsRead(article.id) }
@@ -1231,8 +1318,10 @@ class HomeViewModel(
         // is still the newest selection, still on the cursor and still not loaded.
         val headerTimer = viewModelScope.launch {
             delay(READER_HEADER_FIRST_GRACE_MS)
-            if (token == latestSelectionToken && selectionCursorId == article.id && _selectedArticle.value?.id != article.id) {
-                _headerArticleId.value = article.id
+            // In the id space of the moves applied since the selection (see [remapHeldArticleIds]).
+            val id = currentArticleId(article.id)
+            if (token == latestSelectionToken && selectionCursorId == id && _selectedArticle.value?.id != id) {
+                _headerArticleId.value = id
             }
         }
         try {
@@ -1244,7 +1333,7 @@ class HomeViewModel(
 
     /** [hydrateSelection]'s body lookup, and the selection it applies once that returns. */
     private suspend fun applyHydratedSelection(
-        article: ArticleListRow,
+        selected: ArticleListRow,
         token: Long,
         epoch: Int,
         pinnedAtSelect: Boolean,
@@ -1261,26 +1350,48 @@ class HomeViewModel(
         // busy_timeout, say — shows this selection's header instead of the body, so the list, the toolbar
         // and the reader all stay on it and choosing it again tries again. Propagated, it would end the
         // app on Android and Apple, and leave the previous article in the reader on desktop.
-        val full = runCatchingUnlessCancelled {
-            withContext(dispatcher) { articleRepository.getArticleById(article.id) }
-        }.getOrElse { e ->
-            Log.warn(TAG, "Loading the selected article's body failed", e)
-            if (token == latestSelectionToken && selectionCursorId == article.id) {
-                _headerArticleId.value = article.id
-                // It is still the selection on screen, so it is the one the next launch restores. Whether
-                // it was tombstoned is unknown here, but the launch-time restore filters tombstones itself,
-                // and restores nothing if its own lookup of this article fails again.
-                settingsRepository.mutateLocalSettings { it.copy(lastArticleId = article.id) }
+        //
+        // The lookup resolves the id (articles.getByIdResolved): a feed merge can have moved the article
+        // onto another id since the list row was read — its old row is then gone, which must not be
+        // taken for a deletion. A row that comes back under another id moves every id held for it
+        // first ([remapHeldArticleIds]); everything below then works in the id it has now.
+        //
+        // The id asked for is the one held at the time of the lookup. A merge can move it on while the
+        // lookup is out (the ViewModel carries every held id over such a move, [remapHeldArticleIds]), and
+        // then the row that came back belongs to an id that is no longer current: carrying the held ids onto
+        // it would move them back off the current one. So a lookup made for an id that has moved since is
+        // made again for the current id; each repeat follows one more move, so this ends.
+        var article = selected.copy(id = currentArticleId(selected.id))
+        var full: Articles?
+        while (true) {
+            val asked = article.id
+            full = runCatchingUnlessCancelled {
+                withContext(dispatcher) { articleRepository.getArticleByIdResolved(asked) }
+            }.getOrElse { e ->
+                Log.warn(TAG, "Loading the selected article's body failed", e)
+                val id = currentArticleId(asked)
+                if (token == latestSelectionToken && selectionCursorId == id) {
+                    _headerArticleId.value = id
+                    // It is still the selection on screen, so it is the one the next launch restores. Whether
+                    // it is still visible is unknown here, but the launch-time restore filters by visibility itself,
+                    // and restores nothing if its own lookup of this article fails again.
+                    settingsRepository.mutateLocalSettings { it.copy(lastArticleId = id) }
+                }
+                return
             }
-            return
+            val current = currentArticleId(asked)
+            if (current == asked) break
+            article = article.copy(id = current)
         }
-        // A null (or tombstoned) row means a sync merge deleted it between the emission the user
-        // clicked and the click itself: leave the selection and the persisted id entirely alone, and
-        // take back the pin selectArticle added, rather than resurrecting deleted content into the
-        // list (the `articles` merge re-adds any pinned id missing from the query result) or
-        // restoring it on the next launch. A pin dropped by a browsing-context switch since is not
-        // this hydration's to touch.
-        if (full == null || full.deleted_at != null) {
+        // A null row, or one no longer visible (deleted and not starred, isVisible), means a sync merge
+        // deleted it between the emission the user clicked and the click itself: leave the selection
+        // and the persisted id entirely alone, and take back the pin selectArticle added, rather than
+        // resurrecting deleted content into the list (the `articles` merge re-adds any pinned id
+        // missing from the query result) or restoring it on the next launch. A pin dropped by a
+        // browsing-context switch since is not this hydration's to touch.
+        if (full != null && full.id != article.id) remapHeldArticleIds(mapOf(article.id to full.id))
+        article = article.copy(id = currentArticleId(article.id))
+        if (full == null || !full.isVisible) {
             if (pinnedAtSelect && epoch == browsingEpoch) _pinnedReadStates.update { it - article.id }
             // Resume navigating from what is actually on screen, not from the dead article — and stop
             // standing in for it in the reader and the toolbar.
@@ -1290,8 +1401,9 @@ class HomeViewModel(
             return
         }
         // Nothing is selected any more (a filter switch, or an earlier hydration finding its own
-        // article tombstoned), or a newer selection — possibly of this same article — owns the
-        // reader: an older lookup that finished later must not put its result back on screen.
+        // article no longer visible (deleted and not starred)), or a newer selection — possibly of this
+        // same article — owns the reader: an older lookup that finished later must not put its result
+        // back on screen.
         val cursor = selectionCursorId ?: return
         if (cursor != article.id || token != latestSelectionToken) return
         // An explicit read-state intent made on this article after it was selected (e.g. "Mark as
@@ -1623,7 +1735,7 @@ class HomeViewModel(
             val landed = localWriteFailureReporter.runLocalWrite(write)
             // Back on the main thread, which owns the generations and every piece of optimistic state.
             viewModelScope.launch {
-                if (landed) generations.release(ids, pending.generation) else revertFailedArticleWrite(pending)
+                if (landed) generations.release(ids.map(::currentArticleId), pending.generation) else revertFailedArticleWrite(pending)
             }
         }.invokeOnCompletion { pendingLocalWrites.end() }
         return pending
@@ -1684,8 +1796,8 @@ class HomeViewModel(
      * that shows it only through its pin; the selection ([_selectedArticle], [_pendingSelectedRow])
      * takes it too; and it is recorded as the article's latest intent ([readIntents] / [starIntents]),
      * so a selection still loading its body lays the DB's value over its row rather than the failed
-     * one. An article the DB no longer has alive (a sync merge tombstoned it) loses its pins instead,
-     * as in [reconcilePinnedArticlesAndSelection]. Search results showing are re-run.
+     * one. An article the DB no longer shows (a sync merge deleted it, and it is not starred) loses its
+     * pins instead, as in [reconcilePinnedArticlesAndSelection]. Search results showing are re-run.
      *
      * Should the read itself fail, only the pins [write] set — as long as they are still in place —
      * are dropped; the next change to `articles` reconciles the rest.
@@ -1694,15 +1806,28 @@ class HomeViewModel(
         write.awaitRegistered()
         val generations = generationsOf(write.field)
         try {
-            val flags = runCatchingUnlessCancelled {
-                withContext(dbWriteDispatcher) { articleRepository.aliveArticleFlags(write.ids) }
-            }.getOrElse { e ->
-                Log.warn(TAG, "Re-reading the articles of a failed read/star write failed", e)
-                _pinnedReadStates.update { pins -> pins.withoutPinsOf(write.readPins) }
-                _pinnedUnstarredArticles.update { pins -> pins.withoutPinsOf(write.unstarredPins) }
-                return
+            // In the id space of the moves applied since the write was made: its pins, intents and generations
+            // have moved with them ([remapHeldArticleIds]). A move can land while the read below is out (the
+            // ViewModel carries every held id over it, and the row the read asked for is then gone), so a read
+            // made for ids that have moved since is made again for the current ones — each repeat follows one
+            // more move, so this ends — and the flags, the generation checks and the release below all name
+            // the same ids.
+            var writeIds: List<String>
+            var flags: Map<String, ArticleFlags>
+            while (true) {
+                val asked = write.ids.map(::currentArticleId)
+                flags = runCatchingUnlessCancelled {
+                    withContext(dbWriteDispatcher) { articleRepository.aliveArticleFlags(asked) }
+                }.getOrElse { e ->
+                    Log.warn(TAG, "Re-reading the articles of a failed read/star write failed", e)
+                    _pinnedReadStates.update { pins -> pins.withoutPinsOf(write.readPins) }
+                    _pinnedUnstarredArticles.update { pins -> pins.withoutPinsOf(write.unstarredPins) }
+                    return
+                }
+                writeIds = write.ids.map(::currentArticleId)
+                if (writeIds == asked) break
             }
-            val ids = write.ids.filterTo(HashSet()) { generations.isLatest(it, write.generation) }
+            val ids = writeIds.filterTo(HashSet()) { generations.isLatest(it, write.generation) }
             if (ids.isEmpty()) return
             when (write.field) {
                 ArticleWriteField.READ -> revertReadState(ids, flags)
@@ -1710,7 +1835,7 @@ class HomeViewModel(
             }
             if (searchActive.value) _searchRefreshTrigger.update { it + 1 }
         } finally {
-            generations.release(write.ids, write.generation)
+            generations.release(write.ids.map(::currentArticleId), write.generation)
         }
     }
 
@@ -1761,8 +1886,8 @@ class HomeViewModel(
         // When scoped, exactly the unread rows the update below pins: taken from the pin-resolved
         // results rather than the raw search snapshot, which can lag an optimistic "mark as unread"
         // (its re-run is debounced) and would leave such a row pinned read but never written. Pins
-        // can outrun the DB, so the write itself skips any id whose row is already read or tombstoned
-        // (updateReadStatusByIds).
+        // can outrun the DB, so the write itself skips any id whose row is already read or no longer
+        // visible (deleted and not starred) (updateReadStatusByIds).
         val idsToMark = if (scoped) {
             visibleUnread.map { it.id }.distinct()
         } else {
@@ -1880,7 +2005,7 @@ class HomeViewModel(
      *
      * @param verifyAlive Whether to check the selection is still alive — a DB read, run afterwards on
      *   [dbWriteDispatcher] rather than on the caller's thread, which then drops the selection's pin
-     *   if it was tombstoned. A tombstone a sync merge wrote does not necessarily tick the
+     *   if it is no longer visible. A deletion a sync merge wrote does not necessarily tick the
      *   reconcile, so the refresh/sync edges and the user's own re-trims check; mark-all-read under
      *   Starred, which never did, skips it.
      */
@@ -1897,12 +2022,12 @@ class HomeViewModel(
         }
         val pin = keptPin
         if (!verifyAlive || candidate == null || pin == null) return
-        // A selected row tombstoned by a sync merge must not stay read-pinned: the `articles` merge
-        // step re-adds any read-pinned id missing from the repository result, which would put
-        // deleted content back into the visible list. Checked after the re-trim rather than before
-        // it, so the caller's (main) thread never waits on the DB — a write lock held by a merge
-        // would stall it for as long as the merge runs. Read through dbWriteDispatcher, behind any
-        // write already queued there. Only the very pin kept above is dropped: one a later
+        // A selected row a sync merge left no longer visible (deleted and not starred) must not stay
+        // read-pinned: the `articles` merge step re-adds any read-pinned id missing from the repository
+        // result, which would put deleted content back into the visible list. Checked after the re-trim
+        // rather than before it, so the caller's (main) thread never waits on the DB — a write lock
+        // held by a merge would stall it for as long as the merge runs. Read through dbWriteDispatcher,
+        // behind any write already queued there. Only the very pin kept above is dropped: one a later
         // selection or reconcile pass replaced since belongs to that newer state.
         viewModelScope.launch {
             val alive = withContext(dbWriteDispatcher) { candidate.id in articleRepository.aliveArticleFlags(listOf(candidate.id)) }
@@ -1949,7 +2074,8 @@ class HomeViewModel(
      * [toggleStar]/[markAllRead]'s own comments) — but nothing here ever
      * re-checks that the DB actually caught up, so a pin that started as "optimistic" could
      * otherwise stay wrong forever once something *external* changes the same article: another
-     * device's sync propagating a "mark unread" or a restar, or a soft-delete tombstone. This runs
+     * device's sync propagating a "mark unread" or a restar, or a deletion leaving it no longer visible
+     * (deleted and not starred). This runs
      * on every write to `articles` (via the `articleChangeSignal` collector below) precisely so
      * such a change surfaces promptly rather than staying hidden until the next filter switch.
      *
@@ -1982,6 +2108,20 @@ class HomeViewModel(
         // is not "same thread, so it's safe" — the two sides run on different dispatchers.
         val ids = readStateSnapshot.keys + unstarredSnapshot.keys + listOfNotNull(selectedSnapshot?.id)
         val flags = withContext(dbWriteDispatcher) { articleRepository.aliveArticleFlags(ids) }
+        // An id with no visible row is either gone or was moved onto another id by a feed merge — whose
+        // commit re-runs this before its re-keys reach anything else. Asked of the database first (the
+        // same queue, so after the same writes), and a moved one is carried over to the id it has now
+        // ([remapHeldArticleIds], on the main thread, which owns the selection) instead of being dropped;
+        // the pass then starts over on the moved state. A moved id resolves to a live row's id, which
+        // is never itself moved, so the second pass finds nothing more to move.
+        val missing = ids.filterNot { it in flags }
+        if (missing.isNotEmpty()) {
+            val moved = withContext(dbWriteDispatcher) { articleRepository.movedArticleIds(missing) }
+            if (moved.isNotEmpty()) {
+                viewModelScope.launch { remapHeldArticleIds(moved) }.join()
+                return reconcilePinnedArticlesAndSelection()
+            }
+        }
         if (readStateSnapshot.isNotEmpty()) {
             _pinnedReadStates.update { pinned ->
                 // Read inside the CAS loop, so a retry sees the selection as of that attempt.
@@ -2000,6 +2140,49 @@ class HomeViewModel(
                 _selectedArticle.update {
                     if (it?.id == selected.id) it.copy(is_read = current.isRead, is_starred = current.isStarred) else it
                 }
+            }
+        }
+    }
+
+    /**
+     * Carries every article id held here over a feed merge that moved those articles onto other ids
+     * ([moved]: old id -> the id each has now, read from `ks_id_remap` by the caller): the read-state and
+     * unstarred pins (their rows' ids, and their feed ids through the published feed re-keys), the
+     * selection, its cursor, pending row and header, the read/star intents and write generations, the
+     * new-articles tracking and its viewport, and the saved article. Article re-keys are not published
+     * as a whole (see `IdRemap`), so each holder is moved here, the moment the database shows a held id
+     * moved — before anything takes its row for deleted. The cursor moves without counting as a
+     * selection: the list does not scroll to it ([selectionRevealRequests]).
+     *
+     * Main thread only, like the selection it moves. Idempotent: an id already moved is no longer held.
+     */
+    private fun remapHeldArticleIds(moved: Map<String, String>) {
+        val applicable = moved.filter { (old, new) -> old != new }
+        if (applicable.isEmpty()) return
+        // Folded, so an id captured before an earlier move still reaches the latest one.
+        for ((key, value) in articleIdMoves) applicable[value]?.let { articleIdMoves[key] = it }
+        articleIdMoves.putAll(applicable)
+        val feedRemap = idRemaps.current.value
+        fun ArticleListRow.moved(): ArticleListRow =
+            applicable[id]?.let { copy(id = it, feed_id = feedRemap.feed(feed_id)) } ?: this
+        _pinnedReadStates.update { it.withMovedKeys(applicable) { row -> row.moved() } }
+        _pinnedUnstarredArticles.update { it.withMovedKeys(applicable) { row -> row.moved() } }
+        _selectedArticle.update { article ->
+            article?.let { a -> applicable[a.id]?.let { a.copy(id = it, feed_id = feedRemap.feed(a.feed_id)) } } ?: article
+        }
+        _pendingSelectedRow.update { row -> row?.moved() }
+        _headerArticleId.update { id -> id?.let { applicable[it] ?: it } }
+        // The backing flow directly: the setter would forget the intents counted since the selection.
+        _selectionCursor.update { id -> id?.let { applicable[it] ?: it } }
+        readIntents.remap(applicable)
+        starIntents.remap(applicable)
+        readWriteGenerations.remap(applicable)
+        starWriteGenerations.remap(applicable)
+        _visibleRange.update { it?.remappedBy(applicable) }
+        _newArticleTracking.update { it.withRemapped(applicable) }
+        if (settingsRepository.getLocalSettings().lastArticleId in applicable) {
+            settingsRepository.mutateLocalSettings { settings ->
+                settings.lastArticleId?.let { applicable[it] }?.let { settings.copy(lastArticleId = it) } ?: settings
             }
         }
     }
@@ -2085,7 +2268,13 @@ class HomeViewModel(
      * @param id The identifier of the feed to unsubscribe from.
      */
     fun unsubscribeFeed(id: String) {
-        val fallBack = { if (_filter.value == ArticleFilter.Feed(id)) selectFilter(ArticleFilter.All) }
+        // Compared in the current re-key map's id space, as a tag's or folder's fallback is
+        // (FeedListActions): a merge can have moved the feed — and the selection with it — onto
+        // another id by the time the fallback runs.
+        val fallBack = {
+            val current = catchUpAndGetIdRemap().feed(id)
+            if (_filter.value == ArticleFilter.Feed(current)) selectFilter(ArticleFilter.All)
+        }
         feedListWrites.enqueue({ feedRepository.unsubscribeFeed(id) }) {
             fallBackOnceHidden(DeletedTarget.Feed(id), fallBack)
         }
@@ -2110,10 +2299,14 @@ class HomeViewModel(
 
     /**
      * The feeds whose row shows the refreshing indicator: those being refreshed by any route — see
-     * [FeedRepository.refreshingFeedIds].
+     * [FeedRepository.refreshingFeedIds] —, each under the id its feed has now: a refresh is counted
+     * under the id it started with, and a merge that moves the feed meanwhile (a sync merge, or the
+     * refresh's own redirect merge) must not take the spinner off the row the feed became.
      */
     val refreshingFeedIds: StateFlow<Set<String>> =
-        feedRepository.refreshingFeedIds.stateIn(viewModelScope, started, emptySet())
+        combine(feedRepository.refreshingFeedIds, idRemaps.current) { ids, remap -> remap.feeds(ids) }
+            .distinctUntilChanged()
+            .stateIn(viewModelScope, started, emptySet())
 
     /**
      * The collapsed folders whose row shows the refreshing indicator, since their feeds' own rows
@@ -2300,21 +2493,21 @@ class HomeViewModel(
     fun reorderFolders(draggedFolderId: String, targetFolderId: String?) =
         feedListActions.reorderFolders(draggedFolderId, targetFolderId)
 
-    // Applies the tag/folder id re-keys a merge publishes to the state held here (see
-    // [TagFolderIdRemapping]). Declared after every property it touches.
-    private val idRemapping = TagFolderIdRemapping(
+    // Applies the tag/folder/feed id re-keys a merge publishes to the state held here (see
+    // [IdRemapping]). Declared after every property it touches.
+    private val idRemapping = IdRemapping(
         idRemaps, _filterSelection, _selectedRowInstance, expansion, refreshController,
-        deletedTagFallback, deletedFolderFallback,
+        deletedFeedFallback, deletedTagFallback, deletedFolderFallback,
     )
 
-    /** See [TagFolderIdRemapping.catchUp]: the ViewModel's state is in the current re-key map's id space. */
+    /** See [IdRemapping.catchUp]: the ViewModel's state is in the current re-key map's id space. */
     private fun catchUpIdRemap() = idRemapping.catchUp()
 
-    /** See [TagFolderIdRemapping.catchUpAndGet]: [catchUpIdRemap], then the map an id is resolved by. */
-    private fun catchUpAndGetIdRemap(): TagFolderIdRemap = idRemapping.catchUpAndGet()
+    /** See [IdRemapping.catchUpAndGet]: [catchUpIdRemap], then the map an id is resolved by. */
+    private fun catchUpAndGetIdRemap(): IdRemap = idRemapping.catchUpAndGet()
 
     /**
-     * Re-reads the committed `ks_id_remap` and publishes it ([TagFolderIdRemaps.publishFromDb], under its
+     * Re-reads the committed `ks_id_remap` and publishes it ([IdRemaps.publishFromDb], under its
      * lock), off the main thread. A merge publishes the map only after it commits, so a list that was
      * re-run by another write in between already shows a re-keyed row while the published map is stale;
      * a decision that an item "disappeared" must first catch the map up from here. Throws on a failed read.
@@ -2331,7 +2524,7 @@ class HomeViewModel(
      */
     suspend fun catchUpIdRemapFromDb(): Boolean {
         val caughtUp = runCatchingUnlessCancelled { loadIdRemapFromDb() }.onFailure { e ->
-            Log.warn(TAG, "Catching up the tag/folder re-keys failed", e)
+            Log.warn(TAG, "Catching up the id re-keys failed", e)
         }.isSuccess
         if (caughtUp) catchUpIdRemap()
         return caughtUp

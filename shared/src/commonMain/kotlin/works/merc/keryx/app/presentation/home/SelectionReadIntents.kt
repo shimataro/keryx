@@ -73,6 +73,23 @@ internal class SelectionReadIntents {
      * @return The intended read state, or `null` when no intent was recorded for [id] since then.
      */
     fun since(id: String, seq: Long): Boolean? = intents.value.readIntentSince(id, seq)
+
+    /**
+     * Moves each intent of an article a feed merge moved onto another id ([moved]: old id -> id it has
+     * now) onto that id, so a hydration or the reader's button that now names the new id still finds
+     * it. Of two intents meeting on one id, the newer (higher seq) one stands.
+     */
+    fun remap(moved: Map<String, String>) {
+        val current = intents.value
+        if (current.keys.none { it in moved }) return
+        val remapped = LinkedHashMap<String, ReadIntent>()
+        for ((id, intent) in current) {
+            val target = moved[id] ?: id
+            val existing = remapped[target]
+            if (existing == null || intent.seq > existing.seq) remapped[target] = intent
+        }
+        intents.value = remapped
+    }
 }
 
 /**

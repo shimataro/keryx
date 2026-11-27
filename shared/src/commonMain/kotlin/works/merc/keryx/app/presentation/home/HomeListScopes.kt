@@ -3,7 +3,7 @@ package works.merc.keryx.app.presentation.home
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.domain.ArticleListRow
 import works.merc.keryx.app.domain.ArticleSearchResult
-import works.merc.keryx.app.domain.TagFolderIdRemap
+import works.merc.keryx.app.domain.IdRemap
 
 // The list-scope and snapshot types HomeViewModel's article list and search flows are built from.
 
@@ -23,8 +23,8 @@ internal data class SearchSnapshot(
  * previous one — [HomeViewModel.markAllRead] waits until this matches the current selection.
  */
 internal data class ListScope(val filter: ArticleFilter, val narrowing: ListNarrowing) {
-    /** This scope with its tag or folder id brought up to date on [remap]. */
-    fun remappedBy(remap: TagFolderIdRemap): ListScope =
+    /** This scope with its tag, folder or feed id brought up to date on [remap]. */
+    fun remappedBy(remap: IdRemap): ListScope =
         remap.filter(filter).let { if (it == filter) this else copy(filter = it) }
 }
 
@@ -34,7 +34,7 @@ internal data class ScopedRows<T>(val rows: List<T>, val scope: ListScope)
 /**
  * The article list's selected [filter], with the [generation] of the user's selection that put it
  * there ([HomeViewModel.filterSelection]). The generation moves only when the user switches to
- * another filter; a merge moving the selected tag or folder onto another id ([HomeViewModel]'s
+ * another filter; a merge moving the selected tag, folder or feed onto another id ([HomeViewModel]'s
  * re-key handling) changes [filter] and keeps [generation], since it is the same list under a new
  * id. Every UI reaction to a switch — the list back to the top, a pull's indicator ending, the
  * new-articles pill starting afresh — keys on [generation], so a re-key causes none of them

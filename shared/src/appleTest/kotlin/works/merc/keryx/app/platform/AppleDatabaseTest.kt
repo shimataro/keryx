@@ -557,7 +557,7 @@ class AppleDatabaseTest {
          */
         val VERSION_3_TABLES = listOf(
             "feed_fetch_state", "sync_outbox", "sync_capture", "sync_merging", "sync_applied", "sync_cursor", "ks_search_pending",
-            "ks_search_awaiting_body", "ks_feed_folder_raw", "ks_id_remap", "ks_v2_edge",
+            "ks_search_awaiting_body", "ks_feed_folder_raw", "ks_id_remap", "ks_v2_edge", "ks_feed_edge",
         )
 
         /** The triggers `2.sqm` creates, dropped before the tables they read and write. */
@@ -567,6 +567,7 @@ class AppleDatabaseTest {
             "ks_feed_folder_resolve_raw_update", "ks_feed_folder_resolve_folder",
             "ks_feed_folder_resolve_folder_insert", "ks_feed_folder_resolve_remap_insert",
             "ks_feed_folder_resolve_remap_update", "ks_feed_folder_resolve_remap_delete",
+            "ks_fetch_state_validators_url_change",
         )
 
         /** The views `2.sqm` creates, dropped before the tables they read. */

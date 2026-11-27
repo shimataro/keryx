@@ -54,7 +54,7 @@ final class HomeObservable: ObservableAssignment {
     private(set) var labels: TagFolderLabelSet = .empty
     /// The same snapshot as the Kotlin value the shared functions take (`articleListOrdinalName`).
     @ObservationIgnored private var kotlinLabels: TagFolderLabels = TagFolderLabels.companion.EMPTY
-    /// The tag/folder id re-keys a sync merge has published (`HomeViewModel.tagFolderIdRemap`): what an
+    /// The tag/folder/feed id re-keys a merge has published (`HomeViewModel.idRemap`): what an
     /// id or row key held from before a re-key — an inline rename's — is compared through.
     private(set) var idRemap: SidebarIdRemap = .empty
     private(set) var feedTagMap: [String: Set<String>] = [:]
@@ -272,6 +272,18 @@ final class HomeObservable: ObservableAssignment {
         updateFeedListSelectionTarget()
     }
 
+    /// A notification's "show feed" action (`HomeViewModel.showFeedDetail`, the one implementation both
+    /// UIs call): selects the feed — under the id a merge moved it to since the notification was raised,
+    /// once the re-key map has caught up from the database — then mirrors the selection like
+    /// `selectFilter`.
+    func showFeedDetail(feedId: String) async {
+        try? await viewModel.showFeedDetail(feedId: feedId)
+        assignFilterSelection(viewModel.filterSelection.value)
+        assignSelectedRowInstance(viewModel.selectedRowInstance.value)
+        assignSelectedRowGeneration(viewModel.selectedRowGeneration.value.int64Value)
+        updateFeedListSelectionTarget()
+    }
+
     /// Refreshes `feed`. Only its id is passed on: `HomeViewModel.refreshFeed` re-reads the row,
     /// so the refresh always starts from the feed's current row rather than the copy the sidebar
     /// and `feedsById` hold (see `structuralFeeds`).
@@ -284,7 +296,7 @@ final class HomeObservable: ObservableAssignment {
     /// flow a moment later, and a screen pushed in the same turn (the iOS reader) would first draw the
     /// previous article's state and then change it — see `HomeViewModel.isSelectedArticleShownUnread`.
     func selectArticle(_ article: ArticleListRow) {
-        selecting { viewModel.selectArticle(article: article) }
+        selecting { viewModel.selectArticle(row: article) }
     }
 
     func selectNextArticle() {
@@ -488,7 +500,7 @@ final class HomeObservable: ObservableAssignment {
     }
 
     private func observeIdRemap() async {
-        for await v in viewModel.tagFolderIdRemap { assignIfChanged(\.idRemap, SidebarIdRemap(v)) }
+        for await v in viewModel.idRemap { assignIfChanged(\.idRemap, SidebarIdRemap(v)) }
     }
 
     private func observeFeedTagMap() async {

@@ -30,7 +30,8 @@ internal fun <T : Any> retrimmedSelectionPin(prior: T?, now: T?, candidate: T): 
         // refreshes only after the pin, so it can be the staler of the two — and every write that
         // changes the selection's read state re-pins it at the same time anyway.
         now != null -> now
-        // Dropped since (an external change or a tombstone): it stays dropped.
+        // Dropped since (an external change, or the article no longer visible — deleted and not
+        // starred): it stays dropped.
         prior != null -> null
         else -> candidate
     }
@@ -40,8 +41,8 @@ internal fun <T : Any> retrimmedSelectionPin(prior: T?, now: T?, candidate: T): 
  *
  * @param pinned The read-state pins as they are now (the map being updated).
  * @param snapshot The read-state pins as they were when [flags] was requested.
- * @param flags The current read/star flags of the alive articles among the pinned ids; an id missing
- *   from it is tombstoned (or gone).
+ * @param flags The current read/star flags of the visible articles among the pinned ids (not deleted,
+ *   or starred); an id missing from it is no longer visible (or gone).
  * @param selectedId The article the user has selected, if any.
  * @return [pinned] minus every pin the DB no longer agrees with, with the selection's own pin
  *   refreshed to the current value instead of dropped while its article is alive.
@@ -56,7 +57,8 @@ internal fun reconciledReadPins(
     // that justified it was enqueued, so it has no verdict on it (identity, not equality — a
     // re-pin with the same value is still a write `flags` knows nothing about). Otherwise a
     // pin is dropped once the article's current is_read no longer matches the pinned value
-    // (an external "mark unread"/"mark read", or a soft-delete tombstone), the same rule as
+    // (an external "mark unread"/"mark read", or the article no longer visible — deleted and not
+    // starred), the same rule as
     // the starred pin ([reconciledUnstarredPins]) — except the selection's own pin, which while its article is
     // alive is refreshed to the current value instead: under unread-only a dropped unread
     // pin read externally would take the open article out of the list (and the pager).
@@ -76,8 +78,8 @@ internal fun reconciledReadPins(
  *
  * @param pinned The unstarred pins as they are now (the map being updated).
  * @param snapshot The unstarred pins as they were when [flags] was requested.
- * @param flags The current read/star flags of the alive articles among the pinned ids; an id missing
- *   from it is tombstoned (or gone).
+ * @param flags The current read/star flags of the visible articles among the pinned ids (not deleted,
+ *   or starred); an id missing from it is no longer visible (or gone).
  * @return [pinned] minus every pin unchanged since [snapshot] whose article's current is_starred no
  *   longer matches the pinned value; pins added or replaced since [snapshot] are kept.
  */

@@ -446,7 +446,7 @@ class SyncRepositoryTest {
         val other = ids()
         val (good, goodBytes) = SyncFiles.transportFile(TransportMeta(gen, TransportFileKind.DELTA, other, 1, now), feedRow("good"))
         cloud.put(good.fileName, goodBytes)
-        val (newer, newerBytes) = SyncFiles.transportFile(TransportMeta(gen, TransportFileKind.DELTA, other, 3, now), "PRAGMA user_version = 3")
+        val (newer, newerBytes) = SyncFiles.transportFile(TransportMeta(gen, TransportFileKind.DELTA, other, 3, now), "PRAGMA user_version = ${TransportSchema.VERSION + 1}")
         cloud.put(newer.fileName, newerBytes)
         val cursorsBefore = a.db.sync_bookkeepingQueries.cursorAll().executeAsList()
 
@@ -651,6 +651,33 @@ class SyncRepositoryTest {
 
         assertEquals(listOf("merged"), FtsSearch(a.driver).search("multiplatform", ArticleFilter.All).map { it.id })
         assertNull(a.state(SYNC_STATE_INDEX_PENDING))
+    }
+
+    /**
+     * A merge that folds a local feed onto another feed's id (the two shared a url) moves the feed's
+     * device-local fetch state with it, through the merge's own connection: the fetch-state queries are
+     * told too, so the feed list's error flag follows the feed to its canonical id.
+     */
+    @Test
+    fun aMergeFoldingAFeedOntoAnotherIdTellsTheFetchStateQueries() = runTest {
+        val cloud = FakeCloudStorage()
+        val (a, gen) = seeded(cloud)
+        a.db.insertFeed("fq", now = 1, url = "https://fp")
+        a.driver.execute(null, "INSERT INTO feed_fetch_state (feed_id, error_count, last_error) VALUES ('fq', 2, 'boom')", 0)
+        val (name, bytes) = SyncFiles.transportFile(TransportMeta(gen, TransportFileKind.DELTA, ids(), 1, now), feedRow("fp"))
+        cloud.put(name.fileName, bytes)
+        var fetchStateNotified = false
+        val listener = app.cash.sqldelight.Query.Listener { fetchStateNotified = true }
+        a.driver.addListener("feed_fetch_state", listener = listener)
+
+        a.syncOk()
+
+        a.driver.removeListener("feed_fetch_state", listener = listener)
+        assertTrue(fetchStateNotified, "the fetch-state queries hear of the merge")
+        assertEquals(
+            listOf("fp" to 2L),
+            a.db.feed_fetch_stateQueries.watchProblems("gone").executeAsList().map { it.feed_id to it.error_count },
+        )
     }
 
     // ---- Sending: interruptions at every step ----
@@ -1185,6 +1212,25 @@ class SyncRepositoryTest {
 
         a.db.insertFeed("f3", now = 6)
         assertTrue(a.outbox().isEmpty(), "nothing is recorded while local-only")
+    }
+
+    @Test
+    fun clearSyncFailureStateKeepsTheFeedAndTagFolderIdentityEdges() = runTest {
+        val cloud = FakeCloudStorage()
+        val a = device("a", cloud)
+        a.syncOk()
+        a.driver.execute(null, "INSERT INTO ks_feed_edge (a, b) VALUES ('fa', 'fb')", 0)
+        a.driver.execute(null, "INSERT INTO ks_v2_edge (kind, v2_id, id) VALUES ('tag', 'p', 't1')", 0)
+        assertTrue(a.outbox().any { it.tbl == "feed_edges" })
+
+        a.repo.clearSyncFailureState()
+
+        assertTrue(a.outbox().isEmpty())
+        fun count(table: String): Long = a.driver.executeQuery(null, "SELECT COUNT(*) FROM $table", { c ->
+            QueryResult.Value(if (c.next().value) c.getLong(0) else null)
+        }, 0).value!!
+        assertEquals(1L, count("ks_feed_edge"), "an edge is a fact about two ids, not about the connection")
+        assertEquals(1L, count("ks_v2_edge"))
     }
 
     @Test

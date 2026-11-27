@@ -725,6 +725,79 @@ class ArticleRepositoryTest {
     }
 
     /**
+     * `updateReadStatusByIds` binds its id list twice, so the repository chunks at 450 ids. Every id
+     * must still be marked across the chunk boundary (450 fits one chunk, 451 needs two, 900+ needs
+     * three).
+     */
+    @Test
+    fun markArticlesAsReadMarksEveryIdAtEachChunkSizeBoundary() {
+        for (count in listOf(449, 450, 451, 900, 901, 1351)) {
+            val (driver, db) = inMemoryDb()
+            try {
+                db.insertFeed("f1")
+                val ids = (1..count).map { "a$it" }
+                db.transaction { ids.forEach { db.insertArticle(it, "f1") } }
+                db.insertArticle("untouched", "f1")
+                val repo = newRepo(db, driver)
+
+                repo.markArticlesAsRead(ids)
+
+                val unread = db.articlesQueries.getById("untouched").executeAsOne().is_read
+                assertEquals(0L, unread)
+                assertEquals(0, ids.count { db.articlesQueries.getById(it).executeAsOne().is_read != 1L }, "all $count ids marked read")
+            } finally {
+                driver.close()
+            }
+        }
+    }
+
+    /**
+     * The statement-level bound the chunking exists for: no single `updateReadStatusByIds` statement
+     * binds more parameters than SQLite's default limit (999) — the desktop test driver would accept
+     * more, so the row states alone cannot tell a chunked write from an unchunked one — and the ids
+     * are split into the documented chunks of 450 (each id is bound twice).
+     */
+    @Test
+    fun markArticlesAsReadBindsNoMoreThanTheParameterLimitInAnySingleStatement() {
+        for (count in listOf(449, 450, 451, 900, 901, 1351)) {
+            val (rawDriver, _) = inMemoryDb()
+            val driver = ParameterCountingDriver(rawDriver)
+            val db = KeryxDatabase(driver)
+            try {
+                db.insertFeed("f1")
+                val ids = (1..count).map { "a$it" }
+                db.transaction { ids.forEach { db.insertArticle(it, "f1") } }
+                driver.statements.clear()
+
+                newRepo(db, driver).markArticlesAsRead(ids)
+
+                val updates = driver.statements.filter { (sql, _) -> "UPDATE articles" in sql && "IN (" in sql }
+                assertEquals((count + 449) / 450, updates.size, "one statement per 450 ids, count=$count")
+                assertTrue(updates.all { (_, parameters) -> parameters <= 999 }, "parameters per statement: ${updates.map { it.second }}")
+                assertEquals(0, ids.count { db.articlesQueries.getById(it).executeAsOne().is_read != 1L }, "all $count ids marked read")
+            } finally {
+                rawDriver.close()
+            }
+        }
+    }
+
+    /** Passes every statement through, recording each `execute`'s SQL and bound-parameter count. */
+    private class ParameterCountingDriver(private val delegate: app.cash.sqldelight.db.SqlDriver) :
+        app.cash.sqldelight.db.SqlDriver by delegate {
+        val statements = java.util.concurrent.CopyOnWriteArrayList<Pair<String, Int>>()
+
+        override fun execute(
+            identifier: Int?,
+            sql: String,
+            parameters: Int,
+            binders: (app.cash.sqldelight.db.SqlPreparedStatement.() -> Unit)?,
+        ): app.cash.sqldelight.db.QueryResult<Long> {
+            statements += sql to parameters
+            return delegate.execute(identifier, sql, parameters, binders)
+        }
+    }
+
+    /**
      * The ids can come from optimistic in-memory pins that outrun the DB, so the write itself must
      * leave a tombstoned or already-read row alone rather than stamp a read event the user never
      * made (its read_at/updated_at would ride the next sync).
@@ -1217,6 +1290,46 @@ class ArticleRepositoryTest {
             assertEquals(folderEmissions.last(), repo.watchArticles(ArticleFilter.Folder("d-new")).first().map { it.id })
             assertEquals(tagEmissions.last(), repo.watchArticles(ArticleFilter.Tag("t-new")).first().map { it.id })
             jobs.forEach { it.cancel() }
+        } finally {
+            driver.close()
+        }
+    }
+
+    // ---- Article ids a feed merge moved (ks_id_remap, kind 'article') ----
+
+    /**
+     * Two feeds holding the same article (one guid) are merged: the article moves onto the smaller id of
+     * its (feed, guid) key. An id held from before resolves to the row it became, one id at a time, and
+     * the batch reads tell a moved id from a live or unknown one in both directions.
+     */
+    @Test
+    fun anArticleIdAFeedMergeMovedResolvesToTheRowItBecame() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("fa", url = "https://ex.com/a")
+            db.insertFeed("fb", url = "https://ex.com/b")
+            for ((id, feed) in listOf("a-1" to "fa", "b-1" to "fb", "b-2" to "fb")) {
+                db.articlesQueries.insert(
+                    id = id, feed_id = feed, guid = if (id == "b-2") "other" else "same", url = "https://article/$id",
+                    title = "Title $id", summary = null, content = null, author = null, published_at = null,
+                    thumbnail_url = null, is_read = 0L, read_at = null, is_starred = 0L, starred_at = null,
+                    cached_at = 0L, search_text = "", updated_at = 0L, created_at = 0L,
+                )
+            }
+            db.transaction { FeedIdentitySql.mergeLocally(driver, "fb", "fa") }
+            val repo = newRepo(db, driver)
+
+            assertNull(repo.getArticleById("b-1"), "precondition: b-1 was folded into a-1")
+            assertEquals("a-1", repo.resolveArticleId("b-1"))
+            assertEquals("a-1", repo.getArticleByIdResolved("b-1")?.id)
+            assertEquals("b-2", repo.resolveArticleId("b-2"), "a live id resolves to itself")
+            assertEquals("missing", repo.resolveArticleId("missing"))
+            assertNull(repo.getArticleByIdResolved("missing"))
+
+            assertEquals(mapOf("b-1" to "a-1"), repo.movedArticleIds(listOf("b-1", "b-2", "a-1", "missing")))
+            assertEquals(mapOf("b-1" to "a-1"), repo.articleRekeysOnto(listOf("a-1", "b-2")))
+            assertEquals(emptyMap(), repo.movedArticleIds(emptyList()))
+            assertEquals(emptyMap(), repo.articleRekeysOnto(emptyList()))
         } finally {
             driver.close()
         }

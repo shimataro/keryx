@@ -153,11 +153,12 @@ class V2IdentityEdgeTest {
     fun aVersionOneTransportFileIsMergedThroughTheRealMerger() {
         val local = localDb()
         val cloud = transportFile(deltaName(DEV_A, 1), folder("d1", "Work"), tag("t1", "news"))
-        // Down to version 1: no edge tables and no v2_id columns.
+        // Down to version 1: no edge tables (feed_edges included) and no v2_id columns.
         exec(
             cloud,
             "DROP TABLE folder_v2_edges",
             "DROP TABLE tag_v2_edges",
+            "DROP TABLE feed_edges",
             "ALTER TABLE folders DROP COLUMN v2_id",
             "ALTER TABLE tags DROP COLUMN v2_id",
             "PRAGMA user_version = 1",

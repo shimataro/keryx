@@ -70,7 +70,10 @@ object DeltaExportSql {
     /** A feed's folder columns, which a file carries from the feed's raw assignment. */
     private val FEED_FOLDER_COLUMNS = setOf("folder_id", "folder_updated_at")
 
-    /** `(ks_v2_edge.kind, transport edge table)` of the two kinds of identity edge. */
+    /** The transport table of feed identity edges (and the `sync_outbox.tbl` of a captured one). */
+    private const val FEED_EDGES = "feed_edges"
+
+    /** `(ks_v2_edge.kind, transport edge table)` of the two kinds of tag / folder identity edge. */
     private val EDGE_KIND_TABLES = listOf(
         ID_REMAP_KIND_FOLDER to "folder_v2_edges",
         ID_REMAP_KIND_TAG to "tag_v2_edges",
@@ -136,14 +139,18 @@ object DeltaExportSql {
     }
 
     /**
-     * The identity edges recorded in the outbox up to [s] (`tbl` `folder_v2_edges` / `tag_v2_edges`, `pk` the
-     * pre-upgrade id and `pk2` the row id — see `ks_capture_v2_edge_insert`), written into the edge tables of an
-     * ordinary delta. `OR IGNORE`: [closureStatements] may already have written the same edge.
+     * The identity edges recorded in the outbox up to [s], written into the edge tables of an ordinary
+     * delta: tag / folder edges (`tbl` `folder_v2_edges` / `tag_v2_edges`, `pk` the pre-upgrade id and
+     * `pk2` the row id — see `ks_capture_v2_edge_insert`) and feed edges (`tbl` `feed_edges`, `pk` `a` and
+     * `pk2` `b` — see `ks_capture_feed_edge_insert`, which records inside a merge too). `OR IGNORE`:
+     * [closureStatements] may already have written the same tag / folder edge, and the outbox can hold
+     * one edge more than once.
      */
     private fun capturedEdgeStatements(s: Long): List<String> = EDGE_KIND_TABLES.map { (_, edgeTable) ->
         "INSERT OR IGNORE INTO main.$edgeTable (v2_id, id) " +
             "SELECT pk, pk2 FROM $SOURCE.sync_outbox WHERE tbl = '$edgeTable' AND seq <= $s"
-    }
+    } + ("INSERT OR IGNORE INTO main.$FEED_EDGES (a, b) " +
+        "SELECT pk, pk2 FROM $SOURCE.sync_outbox WHERE tbl = '$FEED_EDGES' AND seq <= $s")
 
     private fun deltaArticles(s: Long): String {
         val spec = table("articles")
@@ -178,18 +185,24 @@ object DeltaExportSql {
 
     /**
      * Every identity edge of the source's `ks_v2_edge`, split by kind into `folder_v2_edges` /
-     * `tag_v2_edges` — less, with [withExcept], those the [EXCEPT] file carries. Written in full by full
+     * `tag_v2_edges`, and of its `ks_feed_edge`, into `feed_edges` — less, with [withExcept], those the
+     * [EXCEPT] file carries. Written in full by full
      * sends (and so by the bases uploaded from one). The v2→v3 re-key creates its edges while capture is
      * still off, and every device makes a full send when it joins, so those reach the cloud that way. An
      * edge a pre-delta merge adds to a device that has already joined is recorded in the outbox
      * (`ks_capture_v2_edge_insert`) and rides in the next ordinary delta ([capturedEdgeStatements]); a
      * transport merge's edges come from a file the other devices receive too. An ordinary delta otherwise
-     * carries only the edges its folder references need ([closureStatements]).
+     * carries only the edges its folder references need ([closureStatements]), and the feed edges in
+     * its outbox. A feed edge is recorded in the outbox whenever it is added while capture is on, a
+     * merge's included, so the full send carries the edges added before this device joined.
      */
     fun edgeStatements(withExcept: Boolean): List<String> = EDGE_KIND_TABLES.map { (kind, edgeTable) ->
         val except = if (withExcept) " EXCEPT SELECT v2_id, id FROM $EXCEPT.$edgeTable" else ""
         // OR IGNORE: the closure may already have written some of them (a folder reference's identity).
         "INSERT OR IGNORE INTO main.$edgeTable (v2_id, id) SELECT v2_id, id FROM $SOURCE.ks_v2_edge WHERE kind = '$kind'$except"
+    } + run {
+        val except = if (withExcept) " EXCEPT SELECT a, b FROM $EXCEPT.$FEED_EDGES" else ""
+        "INSERT INTO main.$FEED_EDGES (a, b) SELECT a, b FROM $SOURCE.ks_feed_edge$except"
     }
 
     /**

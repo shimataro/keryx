@@ -4,6 +4,25 @@ import works.merc.keryx.app.domain.ArticleListRow
 import works.merc.keryx.app.domain.ArticleSearchResult
 
 /**
+ * These pins with each article a feed merge moved onto another id ([moved]: old id -> id it has now)
+ * keyed, and its row rewritten by [move], under that id. A pin already under the new id stands over the
+ * moved one (it is the newer write). The same map when nothing moves.
+ */
+internal fun Map<String, ArticleListRow>.withMovedKeys(
+    moved: Map<String, String>,
+    move: (ArticleListRow) -> ArticleListRow,
+): Map<String, ArticleListRow> {
+    if (keys.none { it in moved }) return this
+    val result = LinkedHashMap<String, ArticleListRow>(size)
+    for ((id, row) in this) if (id !in moved) result[id] = row
+    for ((id, row) in this) {
+        val target = moved[id] ?: continue
+        if (target !in result) result[target] = move(row)
+    }
+    return result
+}
+
+/**
  * The unread pins among a read-state pin map. Always kept by a re-trim: an unread pin never keeps
  * a row on screen by membership (its row passes the unread-only filter on its own is_read == 0),
  * but until its "mark as unread" write lands the raw query still says read, and dropping it would

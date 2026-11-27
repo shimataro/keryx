@@ -102,6 +102,18 @@ CREATE INDEX folders_name ON folders(name);
 ALTER TABLE articles ADD COLUMN body_updated_at INTEGER;
 UPDATE articles SET body_updated_at = updated_at;
 
+-- 2c. A row both starred and deleted is recorded as unstarred at its deletion. Version 2 writes such
+--     a row when another device's cache cleanup is newer than the star (its merge takes the two by
+--     their own stamps), and version 2 hides it: it shows only rows with deleted_at IS NULL. Version 3
+--     shows a starred row whatever its deletion says (docs/db-schema.md "articles"), so without this
+--     the row would reappear on upgrade. Decided by the row's values alone, so every device, and a
+--     pre-delta cloud file migrated by the merge with this same file, converts it the same way. Run
+--     before the capture triggers exist, so nothing is recorded in sync_outbox.
+UPDATE articles
+SET is_starred = 0,
+    starred_at = MAX(COALESCE(starred_at, 0), COALESCE(deleted_updated_at, 0))
+WHERE is_starred = 1 AND deleted_at IS NOT NULL;
+
 -- 3. Sync bookkeeping tables (sync_bookkeeping.sq).
 CREATE TABLE sync_outbox (
     seq   INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -171,6 +183,12 @@ CREATE TABLE ks_v2_edge (
     id    TEXT NOT NULL,
     PRIMARY KEY (kind, v2_id, id)
 );
+
+CREATE TABLE ks_feed_edge (
+    a TEXT NOT NULL,
+    b TEXT NOT NULL,
+    PRIMARY KEY (a, b)
+) WITHOUT ROWID;
 
 -- 4. Articles whose search_text still equals their raw content / summary (written before HTML
 --    stripping) get it recomputed.
@@ -332,6 +350,20 @@ BEGIN
     VALUES (CASE new.kind WHEN 'folder' THEN 'folder_v2_edges' ELSE 'tag_v2_edges' END, new.v2_id, new.id);
 END;
 
+-- A feed identity edge (two feed ids that shared a url, a < b) is recorded like a row: tbl names the
+-- transport edge table, pk is a and pk2 is b. Unlike every other capture trigger it deliberately has no
+-- sync_merging guard, the one exception to "a merge never records what it writes": whether a device
+-- sees two feed ids share a url depends on when each url changed (one device may see feed a move off a
+-- url before feed b takes it), so an edge only this device discovered during a merge must still reach
+-- the other devices, or their identities would diverge. An edge already in ks_feed_edge is added with
+-- INSERT OR IGNORE, which inserts nothing and fires nothing, so each edge is re-sent at most once per
+-- device.
+CREATE TRIGGER ks_capture_feed_edge_insert AFTER INSERT ON ks_feed_edge
+WHEN (SELECT enabled FROM sync_capture WHERE id = 1) = 1
+BEGIN
+    INSERT INTO sync_outbox (tbl, pk, pk2) VALUES ('feed_edges', new.a, new.b);
+END;
+
 -- 6. A feed's raw folder assignment (sync_bookkeeping.sq): the triggers that create it with every new
 --    feed and resolve feeds.folder_id / folder_updated_at from it, then one raw row per existing feed
 --    from its current folder_id / folder_updated_at. A folder_id naming no folder row (written before
@@ -425,3 +457,11 @@ INSERT INTO ks_feed_folder_raw (feed_id, folder_updated_at, folder_id)
 SELECT f.id, f.folder_updated_at,
     CASE WHEN EXISTS (SELECT 1 FROM folders d WHERE d.id = f.folder_id) THEN f.folder_id END
 FROM feeds f;
+
+-- 7. A url change drops the feed's validators (feed_fetch_state.sq).
+CREATE TRIGGER ks_fetch_state_validators_url_change AFTER UPDATE ON feeds
+WHEN old.url IS NOT new.url
+BEGIN
+    UPDATE feed_fetch_state SET etag = NULL, last_modified = NULL
+    WHERE feed_id = new.id AND (etag IS NOT NULL OR last_modified IS NOT NULL);
+END;

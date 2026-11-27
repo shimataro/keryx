@@ -74,6 +74,7 @@ class StartupTasksTest {
             db, FeedFetcher(client), FaviconResolver(client), articleRepository, ftsManagerIndexed(driver),
             SyncScheduler {}, NotificationCenter(), clock, Dispatchers.Unconfined,
             faviconMisses = InMemoryFaviconMissStore(),
+            driver = driver,
         )
         val folderRepository = FolderRepository(db, feedRepository, SyncScheduler {}, clock, Dispatchers.Unconfined)
         val tagRepository = TagRepository(db, SyncScheduler {}, clock, Dispatchers.Unconfined)

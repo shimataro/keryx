@@ -25,6 +25,12 @@ import works.merc.keryx.app.data.remote.ParsedArticle
 private const val ID_FETCH_CHUNK = 900
 
 /**
+ * Max ids per `updateReadStatusByIds` call: that statement binds its id list twice (the ids
+ * themselves and their `ks_id_remap` entries), so it takes half of [ID_FETCH_CHUNK].
+ */
+private const val READ_BY_IDS_CHUNK = ID_FETCH_CHUNK / 2
+
+/**
  * Runs [query] over these ids, deduplicated and split into [ID_FETCH_CHUNK]-sized chunks, and
  * collects every id it returns; empty (without querying) when there are no ids.
  */
@@ -185,6 +191,38 @@ class ArticleRepository(
     fun getArticleById(id: String): Articles? = articles.getById(id).executeAsOneOrNull()
 
     /**
+     * The row the article [id] is now: [getArticleById], except that an id a feed merge moved onto
+     * another article (`ks_id_remap`, kind `article`) gives the row it became — whose id then differs
+     * from [id]. For an id held from before such a merge (`articles.getByIdResolved`).
+     */
+    fun getArticleByIdResolved(id: String): Articles? = articles.getByIdResolved(id).executeAsOneOrNull()
+
+    /** The id the article [id] has now: [id] itself unless a feed merge moved it (`articles.resolveId`). */
+    fun resolveArticleId(id: String): String = articles.resolveId(id).executeAsOne()
+
+    /**
+     * Of [ids], the ones a feed merge moved onto another article, each mapped to the id it has now.
+     * Empty (without querying) when [ids] is empty; an id still live never appears.
+     */
+    fun movedArticleIds(ids: Collection<String>): Map<String, String> {
+        if (ids.isEmpty()) return emptyMap()
+        return ids.distinct().chunked(ID_FETCH_CHUNK)
+            .flatMap { chunk -> articles.movedIdsIn(chunk).executeAsList().map { it.old_id to it.new_id } }
+            .toMap()
+    }
+
+    /**
+     * Of [ids], the ones a feed merge moved an article onto, each mapped from the id it moved from
+     * (old id -> one of [ids]). Empty (without querying) when [ids] is empty.
+     */
+    fun articleRekeysOnto(ids: Collection<String>): Map<String, String> {
+        if (ids.isEmpty()) return emptyMap()
+        return ids.distinct().chunked(ID_FETCH_CHUNK)
+            .flatMap { chunk -> articles.rekeysOnto(chunk).executeAsList().map { it.old_id to it.new_id } }
+            .toMap()
+    }
+
+    /**
      * Determines which requested article IDs still refer to existing articles, and their current
      * read/starred flags. Used to revalidate an optimistic pin against the DB's current state,
      * rather than just its continued existence.
@@ -266,7 +304,7 @@ class ArticleRepository(
         // One `id IN (...)` UPDATE per chunk instead of a per-id UPDATE, kept inside a single
         // transaction so the batch stays atomic (chunked only to stay under the bound-parameter limit).
         db.transaction {
-            for (chunk in ids.chunked(ID_FETCH_CHUNK)) {
+            for (chunk in ids.chunked(READ_BY_IDS_CHUNK)) {
                 articles.updateReadStatusByIds(read_at = now, updated_at = now, id = chunk)
             }
         }
@@ -362,6 +400,17 @@ class ArticleRepository(
         val seenGuids = HashSet(articles.getGuidsByFeed(feedId).executeAsList())
         val newCount = rows.count { seenGuids.add(it.parsed.guid) }
         return PreparedArticles(feedId, rows, newCount, clock.nowMillis())
+    }
+
+    /**
+     * [prepared] counted again against [feedId] — the feed its articles land in once a refresh's
+     * permanent redirect merged the refreshed feed into another ([FeedIdentitySql.mergeLocally]) —
+     * so an article the merged feed already held is not counted as new. Read in the caller's
+     * transaction, after the merge.
+     */
+    internal fun recountPrepared(prepared: PreparedArticles, feedId: String): PreparedArticles {
+        val seenGuids = HashSet(articles.getGuidsByFeed(feedId).executeAsList())
+        return prepared.copy(feedId = feedId, newCount = prepared.rows.count { seenGuids.add(it.parsed.guid) })
     }
 
     /**

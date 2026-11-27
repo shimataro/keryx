@@ -95,4 +95,22 @@ class SelectionReadIntentsTest {
         intents.end()
         assertEquals(emptyMap(), intents.state.value)
     }
+
+    /** A feed merge moving an article carries its intent over; of two meeting on one id the newer stands. */
+    @Test
+    fun remapMovesIntentsOntoTheNewIdKeepingTheNewer() {
+        val intents = SelectionReadIntents()
+        val seq = intents.begin()
+        intents.record("old", read = false)
+        intents.record("other", read = true)
+        intents.record("new", read = true)
+        intents.record("old2", read = false)
+
+        intents.remap(mapOf("old" to "new", "old2" to "new"))
+
+        assertEquals(false, intents.since("new", seq), "old2's intent is the newest of the three")
+        assertNull(intents.since("old", seq))
+        assertEquals(true, intents.since("other", seq))
+        intents.end()
+    }
 }

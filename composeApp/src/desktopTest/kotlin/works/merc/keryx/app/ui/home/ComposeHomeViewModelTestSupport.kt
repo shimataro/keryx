@@ -10,7 +10,7 @@ import works.merc.keryx.app.data.cloud.TokenStorage
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.domain.ActivityCenter
 import works.merc.keryx.app.domain.SyncScheduler
-import works.merc.keryx.app.domain.TagFolderIdRemaps
+import works.merc.keryx.app.domain.IdRemaps
 import works.merc.keryx.app.presentation.home.HomeViewModel
 import works.merc.keryx.app.presentation.home.HomeViewModelFixture
 import works.merc.keryx.app.presentation.home.HomeViewModelFixtureTokenStorage
@@ -45,7 +45,7 @@ internal suspend fun <T> ComposeUiTest.useHomeViewModel(
     // See newHomeViewModel's own parameter: lets a test hold a selection's body lookup.
     dispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
     // See newHomeViewModel's own parameter: lets a test publish a tag/folder id re-key.
-    idRemaps: TagFolderIdRemaps = TagFolderIdRemaps(db, Dispatchers.Unconfined),
+    idRemaps: IdRemaps = IdRemaps(db, Dispatchers.Unconfined),
     // See newHomeViewModel's own parameter: models a process restart over the same saved settings.
     settingsDir: String? = null,
     // Whether teardown closes [driver] too ([HomeViewModelFixture.close]) or only stops the fixture

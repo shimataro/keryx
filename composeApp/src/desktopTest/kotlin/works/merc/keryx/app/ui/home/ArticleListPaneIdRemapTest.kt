@@ -15,7 +15,7 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.data.local.db.KeryxDatabase
-import works.merc.keryx.app.domain.TagFolderIdRemaps
+import works.merc.keryx.app.domain.IdRemaps
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
 import works.merc.keryx.app.insertFeedTag
@@ -31,7 +31,7 @@ import kotlin.test.assertTrue
 /**
  * `ArticleListPane` scrolls to the top when the user switches lists, not when a sync merge re-keys the
  * selected tag or folder onto another id (external-spec §9, "Least surprise": nothing moves unprompted).
- * The re-key is simulated as the merge will do it and published through [TagFolderIdRemaps], which
+ * The re-key is simulated as the merge will do it and published through [IdRemaps], which
  * `HomeViewModel` follows by replacing the filter and keeping its selection generation.
  */
 @OptIn(ExperimentalTestApi::class)
@@ -62,7 +62,7 @@ class ArticleListPaneIdRemapTest {
             db.insertFeed("fa", folderId = "d-old")
             db.insertFeedTag("fa", "t-old")
             repeat(40) { db.insertArticleRow("a$it", "fa", createdAt = it.toLong()) }
-            val remaps = TagFolderIdRemaps(db, Dispatchers.Unconfined)
+            val remaps = IdRemaps(db, Dispatchers.Unconfined)
             useHomeViewModel(driver, db, idRemaps = remaps) { fixture ->
                 val vm = fixture.vm
                 setContent { ArticleListPane(vm = vm, focused = true, onActivated = {}, modifier = Modifier.size(360.dp, 400.dp)) }

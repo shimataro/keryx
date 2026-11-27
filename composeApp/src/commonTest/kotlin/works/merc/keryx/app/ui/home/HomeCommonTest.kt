@@ -5,12 +5,13 @@ import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.data.local.db.Folders
 import works.merc.keryx.app.data.local.db.Tags
 import works.merc.keryx.app.domain.ArticleListRow
-import works.merc.keryx.app.domain.TagFolderIdRemap
+import works.merc.keryx.app.domain.IdRemap
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 import works.merc.keryx.app.presentation.home.FeedListRowSelection
 import works.merc.keryx.app.presentation.home.FeedListSelectionTarget
@@ -665,7 +666,7 @@ class HomeCommonTest {
     }
 
     // a → b → c, folded: the map already moves both a and b straight to c.
-    private val chainedRemap = TagFolderIdRemap(
+    private val chainedRemap = IdRemap(
         tagIds = mapOf("a" to "c", "b" to "c"),
         folderIds = mapOf("a" to "c", "b" to "c"),
     )
@@ -675,7 +676,7 @@ class HomeCommonTest {
         // The lists lag the map: they still carry b, which neither a nor its remapped c would find.
         assertEquals(
             InlineEditTarget.Tag("b"),
-            InlineEditTarget.Tag("a").resolvedIn(emptyList(), listOf(tag("x"), tag("b")), chainedRemap),
+            InlineEditTarget.Tag("a").resolvedIn(emptyList(), emptyList(), listOf(tag("x"), tag("b")), chainedRemap),
         )
     }
 
@@ -683,30 +684,31 @@ class HomeCommonTest {
     fun resolvedInFindsATagUnderTheStartedOrTheRemappedId() {
         assertEquals(
             InlineEditTarget.Tag("c"),
-            InlineEditTarget.Tag("a").resolvedIn(emptyList(), listOf(tag("c")), chainedRemap),
+            InlineEditTarget.Tag("a").resolvedIn(emptyList(), emptyList(), listOf(tag("c")), chainedRemap),
         )
         assertEquals(
             InlineEditTarget.Tag("a"),
-            InlineEditTarget.Tag("a").resolvedIn(emptyList(), listOf(tag("a")), TagFolderIdRemap.EMPTY),
+            InlineEditTarget.Tag("a").resolvedIn(emptyList(), emptyList(), listOf(tag("a")), IdRemap.EMPTY),
         )
     }
 
     @Test
     fun resolvedInIsNullWhenTheListsHoldNoRowOfTheIdentity() {
-        assertNull(InlineEditTarget.Tag("a").resolvedIn(emptyList(), listOf(tag("x")), chainedRemap))
-        assertNull(InlineEditTarget.Folder("a").resolvedIn(listOf(folder("x")), emptyList(), chainedRemap))
-        assertNull(InlineEditTarget.Feed("f", tagId = "a").resolvedIn(emptyList(), listOf(tag("x")), chainedRemap))
+        assertNull(InlineEditTarget.Tag("a").resolvedIn(emptyList(), emptyList(), listOf(tag("x")), chainedRemap))
+        assertNull(InlineEditTarget.Folder("a").resolvedIn(emptyList(), listOf(folder("x")), emptyList(), chainedRemap))
+        assertNull(InlineEditTarget.Feed("f", tagId = "a").resolvedIn(listOf(feed("f")), emptyList(), listOf(tag("x")), chainedRemap))
+        assertNull(InlineEditTarget.Feed("f").resolvedIn(listOf(feed("x")), emptyList(), emptyList(), chainedRemap))
     }
 
     @Test
     fun resolvedInResolvesAFolderTheSameWay() {
         assertEquals(
             InlineEditTarget.Folder("b"),
-            InlineEditTarget.Folder("a").resolvedIn(listOf(folder("b")), emptyList(), chainedRemap),
+            InlineEditTarget.Folder("a").resolvedIn(emptyList(), listOf(folder("b")), emptyList(), chainedRemap),
         )
         assertEquals(
             InlineEditTarget.Folder("c"),
-            InlineEditTarget.Folder("b").resolvedIn(listOf(folder("c")), emptyList(), chainedRemap),
+            InlineEditTarget.Folder("b").resolvedIn(emptyList(), listOf(folder("c")), emptyList(), chainedRemap),
         )
     }
 
@@ -714,14 +716,46 @@ class HomeCommonTest {
     fun resolvedInResolvesATagNestedFeedThroughItsTag() {
         assertEquals(
             InlineEditTarget.Feed("f", tagId = "b"),
-            InlineEditTarget.Feed("f", tagId = "a").resolvedIn(emptyList(), listOf(tag("b")), chainedRemap),
+            InlineEditTarget.Feed("f", tagId = "a").resolvedIn(listOf(feed("f")), emptyList(), listOf(tag("b")), chainedRemap),
         )
     }
 
     @Test
-    fun resolvedInReturnsAFolderGroupFeedAsIs() {
+    fun resolvedInReturnsAFolderGroupFeedTheListsShowAsIs() {
         val target = InlineEditTarget.Feed("f")
-        assertEquals(target, target.resolvedIn(emptyList(), emptyList(), chainedRemap))
+        assertEquals(target, target.resolvedIn(listOf(feed("f")), emptyList(), emptyList(), chainedRemap))
+    }
+
+    // f1 merged into f0, and an older f2 merged into f1 first: the folded map sends both to f0.
+    private val feedRemap = IdRemap(
+        tagIds = mapOf("a" to "c", "b" to "c"),
+        folderIds = emptyMap(),
+        feedIds = mapOf("f1" to "f0", "f2" to "f0"),
+    )
+
+    /** A feed a merge moved onto another id is found under whichever of its ids the list still shows. */
+    @Test
+    fun resolvedInFindsAMergedFeedUnderTheIdTheListShows() {
+        assertEquals(
+            InlineEditTarget.Feed("f0"),
+            InlineEditTarget.Feed("f1").resolvedIn(listOf(feed("f0")), emptyList(), emptyList(), feedRemap),
+        )
+        assertEquals(
+            InlineEditTarget.Feed("f2"),
+            InlineEditTarget.Feed("f1").resolvedIn(listOf(feed("f2")), emptyList(), emptyList(), feedRemap),
+        )
+        assertEquals(
+            InlineEditTarget.Feed("f0", tagId = "b"),
+            InlineEditTarget.Feed("f1", tagId = "a").resolvedIn(listOf(feed("f0")), emptyList(), listOf(tag("b")), feedRemap),
+        )
+    }
+
+    @Test
+    fun remappedByMovesAFeedTargetsFeedAndTag() {
+        assertEquals(InlineEditTarget.Feed("f0", tagId = "c"), InlineEditTarget.Feed("f1", tagId = "a").remappedBy(feedRemap))
+        assertEquals(InlineEditTarget.Feed("f0"), InlineEditTarget.Feed("f2").remappedBy(feedRemap))
+        val untouched = InlineEditTarget.Feed("live")
+        assertSame(untouched, untouched.remappedBy(feedRemap))
     }
 
 }

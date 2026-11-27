@@ -20,21 +20,33 @@ pre-delta migration and the legacy watch), `domain/MergeSql.kt`,
   arrive in does not matter) and **associative** (merging files one by one or after folding them together gives the
   same result). Duplicate files, files arriving out of order, and re-applying a file after a crash are therefore all
   harmless — the rest of this document relies on that.
-  A known exception, not yet closed, is recorded in [known-issues.md](known-issues.md): feeds sharing one URL under
-  different ids. (A former second — a feed left pointing at a folder across the folder's deletion and revival —
-  closed when a feed's raw folder assignment became the source of truth and `feeds.folder_id` a cache resolved from
-  it and the folders' final state; see "Merge". A former third —
-  rows that shared a name under different ids — closed when the tag and folder ids became name-derived:
-  `IdGenerator.tagId` / `folderId`, re-keyed once by the v2→v3 migration, so the same name created on two devices
-  carries the same id and the merge matches tags and folders by id alone. A row re-keyed by that migration also
-  keeps its pre-upgrade id in `v2_id`; rows renamed differently on two devices before they upgraded are linked by
-  that shared id as one identity, and every merge moves both sides onto the identity's canonical id — the smallest
-  row id of the identity, never a pre-upgrade id — so the id a device keeps never depends on the order files arrived in.
-  Version 3 is
-  unreleased, but a development environment that already ran it with the interim random ids is not re-keyed — the
-  callback fires only when crossing version 2 — and needs its cloud sync data reset once.)
+  This holds where one thing is held under different ids or references, too:
+  - A feed's folder assignment is stored raw, and `feeds.folder_id` is a cache resolved from it and the folders'
+    final state, so a feed assigned to a folder across the folder's deletion and revival ends the same everywhere
+    (see "Merge").
+  - Tag and folder ids are name-derived (`IdGenerator.tagId` / `folderId`, re-keyed once by the v2→v3 migration), so
+    the same name created on two devices carries the same id and the merge matches tags and folders by id alone. A row
+    re-keyed by that migration also keeps its pre-upgrade id in `v2_id`; rows renamed differently on two devices
+    before they upgraded are linked by that shared id as one identity, and every merge moves both sides onto the
+    identity's canonical id — the smallest row id of the identity, never a pre-upgrade id — so the id a device keeps
+    never depends on the order files arrived in. Version 3 is unreleased, but a development environment that already
+    ran it with the interim random ids is not re-keyed — the callback fires only when crossing version 2 — and needs
+    its cloud sync data reset once.
+  - Feeds that held one URL under different ids are one feed ("Identities of feeds and articles" under "Merge").
+    Whether a device observes such a collision can depend on the order files arrive in — on one device a feed may
+    move off a URL before the other takes it, on another not — so which device discovers an identity, and when, can
+    differ. But every collision observed is recorded as an identity edge and sent to every other device (from inside
+    a merge too), edges are only ever unioned, and the canonical id depends on the set of edges alone, so once the
+    same edges have arrived every device ends in the same state. Nothing is lost: the articles, read and star state
+    and tag links of both feeds end on the canonical feed. The merged feed takes each field from the newer version,
+    so it can come out in the other feed's folder (or, by a newer unsubscribe, unsubscribed). A collision no device
+    ever observes — both feeds always seen holding the URL at different times — is missed everywhere (see
+    [known-issues.md](known-issues.md)).
 - **Only local changes are sent.** A change that arrived through a merge is never re-sent, so changes do not echo
-  back and forth between devices.
+  back and forth between devices. The one exception is a feed identity edge a merge discovers (a URL collision
+  between main and the file): it is recorded for sending even inside the merge, since another device may never
+  observe it itself (see "Identities of feeds and articles"). An edge is added only once per device, so it does not
+  echo either.
 - **No change is ever unreachable.** Every change is, at every moment, in at least one delta file or base in the
   cloud. Files are deleted only under the garbage-collection rules that keep this true (see "Bases and Garbage
   Collection").
@@ -112,6 +124,13 @@ Each file carries `PRAGMA user_version` and:
   `(v2_id, id)` of every input tag or folder row that carries a `v2_id` (a row keeps only one `v2_id` per id, so a
   link would otherwise be lost when two files carry the same id with different `v2_id`s). No reference check
   applies to the edges themselves: an edge means something without its rows. The 1→2 transport migration creates them empty;
+- `feed_edges(a, b)` (version 3) — feed identity edges: two feed ids that held the same `url` at some point,
+  normalized `a < b`, the sender's `ks_feed_edge` (see "Local Bookkeeping"). Feeds connected by edges are one feed
+  (see "Identities of feeds and articles" under "Merge"). Filled in full by a full send (less the edges its except file
+  already carries); an ordinary delta carries the feed edges recorded in the outbox up to its high-water mark; a fold
+  unions them and adds every URL collision it sees between its inputs (`ReduceSql.feedUrlEdges`, recorded before a
+  feed's `url` can change in the fold). No reference check applies to them either. The 2→3 transport migration
+  creates it empty;
 
 - `ks_meta(key, value)` — `format`, `generation`, `device` (the writing device), `created_at`, `kind` (`delta`/`base`)
   and `number` (the delta's `seq` or the base's `n`); generation, device, kind, number and creation time must match
@@ -139,7 +158,7 @@ extend).
 
 | Object | Purpose |
 | --- | --- |
-| `sync_outbox(seq INTEGER PRIMARY KEY AUTOINCREMENT, tbl, pk, pk2, heavy)` | Every local change to a synced row, in order, and every identity edge a merge run with capture on adds to `ks_v2_edge` (`tbl` `folder_v2_edges` / `tag_v2_edges`, `pk` the pre-upgrade id, `pk2` the row id) |
+| `sync_outbox(seq INTEGER PRIMARY KEY AUTOINCREMENT, tbl, pk, pk2, heavy)` | Every local change to a synced row, in order, every identity edge a merge run with capture on adds to `ks_v2_edge` (`tbl` `folder_v2_edges` / `tag_v2_edges`, `pk` the pre-upgrade id, `pk2` the row id), and every feed identity edge added to `ks_feed_edge` while capture is on, a merge's included (`tbl` `feed_edges`, `pk` `a`, `pk2` `b`) |
 | `sync_capture(id = 1, enabled, full_pending)` | Whether changes are recorded (only while connected), and whether a full send is due |
 | `sync_merging(flag)` | Present only inside a merge transaction (inserted first, deleted just before `COMMIT`), so no other connection ever sees it |
 | `sync_applied(name)` | Cloud files already merged (including this device's own) |
@@ -148,13 +167,15 @@ extend).
 | `ks_search_awaiting_body(id)` | Articles a merge inserted without a body (a light row), kept out of the search index until one arrives (see "FTS5 Handling") |
 | `ks_feed_folder_raw(feed_id, folder_updated_at, folder_id)` | Per feed, its raw folder assignment — the folder id and stamp as the winning version wrote them, whether or not that folder is alive here. The source of truth for a feed's folder: every local move writes it, the merge records the winner into it, and a send carries it; `feeds.folder_id` / `folder_updated_at` are a cache resolved from it (see "Merge"). Every feed has exactly one row, created with the feed. Its `folder_id` is kept exactly as written — never mapped or replaced afterwards — so it can name an alias of a folder identity this device holds no row for (resolved through `ks_id_remap`); only a pre-delta file's orphan reference is recorded as NULL. This device's data, kept across joining and disconnect |
 | `ks_feed_folder_resolved` (view) | The one definition of a feed's resolved folder: the raw `folder_id` mapped one hop through `ks_id_remap`, while that folder exists and is alive, else NULL, with the raw stamp. Triggers write it into `feeds` whenever a raw row changes, a folder is inserted, deleted or revived, or a folder entry of `ks_id_remap` is added, changed or removed — in every transaction, the merge's included |
-| `ks_id_remap(kind, old_id, new_id)` | Every tag/folder re-key — the v2→v3 migration's (`domain/TagFolderIdRekey.kt`) and any a merge makes, which records every alias of an identity it maps onto the canonical id, including aliases only another device's file used (a feed's raw folder assignment can name one, and `ks_feed_folder_resolved` resolves it through this table) — recorded through `domain/IdRemapSql.kt`, which folds chains so an old id maps in one hop to the id its row has now. Ids held outside the database follow it: `SettingsRepository` rewrites the same ids in `local_settings.json` once `domain/TagFolderIdRemaps.kt` has loaded the table in the background after startup and, while the app runs, whenever `domain/TagFolderIdRemaps.kt` republishes the table after a merge's commit (`HomeViewModel` rewrites its selection and expansion from the same value); every write taking a tag or folder id resolves it through the table in the same statement. Kept indefinitely, so re-applying it is a no-op. The merge's identity step reads its moves as identity edges too, which normally duplicate edges already in `ks_v2_edge` (see "Identities of tags and folders" under "Merge") |
+| `ks_id_remap(kind, old_id, new_id)` | Every re-key, by `kind`: `tag` / `folder` — the v2→v3 migration's (`domain/TagFolderIdRekey.kt`) and any a merge makes, which records every alias of an identity it maps onto the canonical id, including aliases only another device's file used (a feed's raw folder assignment can name one, and `ks_feed_folder_resolved` resolves it through this table) —, and `feed` / `article` — a merge's or a refresh's redirect merge's move of a feed, and of each article of the folded feeds, onto its canonical id (see "Identities of feeds and articles"). Recorded through `domain/IdRemapSql.kt`, which folds chains within a kind so an old id maps in one hop to the id its row has now. Ids held outside the database follow it: `domain/IdRemaps.kt` loads the tag, folder and feed moves (not the article ones) in the background after startup and republishes them after every merge's commit, and from that value `SettingsRepository` rewrites the same ids in `local_settings.json` and `HomeViewModel` its selection and expansion; an article id held across a move is resolved one at a time from this table instead. Every write taking a tag, folder, feed or article id resolves it through the table in the same statement. Kept indefinitely, so re-applying it is a no-op. The merges' identity steps read its moves as identity edges too, which normally duplicate edges already in `ks_v2_edge` / `ks_feed_edge` (see "Identities of tags and folders" and "Identities of feeds and articles" under "Merge") |
 | `ks_v2_edge(kind, v2_id, id)` | The identity edges of tags and folders (`kind` `tag` / `folder`): a pre-upgrade id and a row id the row carrying it was re-keyed to; rows connected by edges are one identity. A grow-only set: the v2→v3 re-key records the edge of every row carrying a `v2_id`, and every merge adds the cloud file's edge tables (transport files only) and the `(v2_id, id)` of its and main's rows that carry a `v2_id`; never deleted. Full sends carry it, and an edge added while capture is on and no `sync_merging` row exists — only the pre-delta merge's — is also recorded in `sync_outbox` by a trigger and rides in the next ordinary delta (see "Transport schema"); the re-key (capture off) and a transport merge (`sync_merging`) record nothing. Unlike `sync_applied` it is not cleared on joining or disconnecting: an edge is a fact about two ids, not about the connection |
+| `ks_feed_edge(a, b)` | The identity edges of feeds: two feed ids that held the same `url` at some point, normalized `a < b`; feeds connected by edges are one feed. A grow-only set: every merge adds the URL collisions it observes (between main and the file, and inside the file) and, for a transport file, its `feed_edges`; a refresh whose same-host permanent redirect lands on another feed's URL adds that pair. Never deleted. A trigger records every edge added while capture is on in `sync_outbox` — inside a merge too, the one exception to "a merge never records what it writes" — so the next ordinary delta carries it, and full sends carry the whole table (see "Transport schema"). Not cleared on joining or disconnecting, like `ks_v2_edge` |
 | `feed_fetch_state(feed_id, etag, last_modified, error_count, last_error)` | A feed's fetch state on this device — never synced |
 
 **Triggers** on the six synced tables append to `sync_outbox` (`AFTER INSERT` / `AFTER UPDATE`), guarded by
 `WHEN (SELECT enabled FROM sync_capture) = 1 AND NOT EXISTS (SELECT 1 FROM sync_merging)` — so a merge never
-records what it writes. An `UPDATE` is recorded only when a synced column actually changed (`OLD.x IS NOT NEW.x OR
+records what it writes (the feed identity edge trigger on `ks_feed_edge` alone has no `sync_merging` guard, see
+"Identities of feeds and articles"). An `UPDATE` is recorded only when a synced column actually changed (`OLD.x IS NOT NEW.x OR
 …`), so a refresh that rewrites an unchanged row records nothing. For articles:
 
 - a change to `content`, `summary`, `title`, `url`, `author`, `published_at`, `thumbnail_url` or the body's stamp
@@ -172,8 +193,10 @@ assignment as the feed's own entry. A re-resolution alone — a folder deleted o
 assigned to it — changes nothing a send carries for those feeds and records nothing for them (the folder's own
 change is recorded).
 
-No row of a synced table is ever physically deleted (every delete is a tombstone), so there are no `DELETE`
-triggers.
+No row of a synced table is ever physically deleted by a local change (every delete is a tombstone), so there are no
+`DELETE` triggers. Only the identity steps delete rows — a merge's, and a refresh's redirect merge — removing the old
+row of a tag, folder, feed or article moved onto its canonical id; that is not sent, since every device makes the same
+move from the same edges.
 
 `sync_state` keys: `last_synced_at`, `ks_device_id`, `ks_generation`, `ks_last_seq`, `ks_attempt` (the file being
 sent: its number, name, outbox high-water mark, and whether it is the full send), `ks_pointer_rev` (the pointer
@@ -182,8 +205,8 @@ clock), `ks_bases` (what this device knows of its generation's bases — each on
 time — so it can tell what a base covers without downloading it), `ks_legacy_stub_rev`, `sync_index_pending` (present
 from a merge's commit until the search index has caught up with it — see "Receiving"; without the `ks_` prefix, since
 that work belongs to the local search index and survives a disconnect). `sync_state` and the tables
-above are device-local and never leave the device — except that a full send copies `ks_v2_edge`'s edges into its
-edge tables, an ordinary delta carries the edges recorded in the outbox, and an ordinary delta whose raw folder assignment names an alias copies the folder edges of that alias's
+above are device-local and never leave the device — except that a full send copies `ks_v2_edge`'s and
+`ks_feed_edge`'s edges into its edge tables, an ordinary delta carries the edges recorded in the outbox, and an ordinary delta whose raw folder assignment names an alias copies the folder edges of that alias's
 connected component (see "Sending").
 
 ## Sync Flow (`SyncRepository.sync()`)
@@ -267,7 +290,8 @@ only the retries of a revision-checked write (the pointer, the stub); delta and 
    name a merged base lists explicitly, whether listed or not (garbage-collected meanwhile). Merging and recording what was merged
    therefore commit together or not at all — a crash in between re-merges the same files next time, which the
    merge's idempotence makes harmless.
-5. Right after the commit: `driver.notifyListeners(...)` for every synced table — the merge wrote through its own
+5. Right after the commit: `driver.notifyListeners(...)` for every synced table and `feed_fetch_state` (which the
+   feed identity step moves onto a canonical feed) — the merge wrote through its own
    connection, so SQLDelight's flows must be re-triggered for the UI to reflect it, whatever happens next. Then
    `ftsManager.indexMissing()`, which first recomputes `search_text` for `ks_search_pending` ("FTS5 Handling"),
    `articles`' listeners once more (a search showing then finds the merged rows indexed), and `sync_index_pending` is
@@ -293,8 +317,9 @@ only the retries of a revision-checked write (the pointer, the stub); delta and 
      only another device's file used (see "Merge") — and then the file also carries that id's identity: every folder
      edge of its connected component in `ks_v2_edge`, and the folder rows this device holds in that component, so
      the receiver can resolve it (check 9 accepts that). Besides these, an ordinary delta carries the identity edges recorded in the outbox up to `S` (`INSERT OR IGNORE`
-     into `folder_v2_edges` / `tag_v2_edges`), so an edge only a pre-delta merge brought reaches the devices that
-     receive just deltas; an outbox holding only edges still yields a delta.
+     into `folder_v2_edges` / `tag_v2_edges` / `feed_edges`), so an edge only a pre-delta merge brought, and a feed
+     edge this device discovered — in a merge or a refresh's redirect —, reaches the devices that receive just deltas;
+     an outbox holding only edges still yields a delta.
      Because `S` and the rows come from one snapshot, any write
      after it carries a `seq > S` and goes into the next delta.
    - **Full send** (when joining) — from a `VACUUM INTO` copy, as the pre-delta upload did, so the live database's
@@ -302,8 +327,9 @@ only the retries of a revision-checked write (the pointer, the stub); delta and 
      (`EXCEPT`) are left out — a fresh device with an empty database sends almost nothing — and, after the
      filtering, the rows the kept rows reference are added back (the feed of every kept article, the folder of
      every kept feed — with an alias's identity edges and rows as above —, the tag and feed of every kept `feed_tags`
-     row), so the file passes validation check 9 even when a kept article's feed is identical to the merged base. Every edge of `ks_v2_edge` the merged base does not
-     carry is written to the edge tables, and counts as a row: a full send left with only edges is still uploaded.
+     row), so the file passes validation check 9 even when a kept article's feed is identical to the merged base. Every edge of `ks_v2_edge` and `ks_feed_edge` the merged
+     base does not carry is written to the edge tables, and counts as a row: a full send left with only edges is
+     still uploaded.
 2. **Record before uploading**: the file is named by the hash of the exporter's own output (never opened for writing
    again — on Android that would add `android_metadata` and change its bytes), written compressed to the app's data
    directory as `pending-<n>.db.gz`, and `ks_attempt = (n = ks_last_seq + 1, name, S, full)` is recorded. A file with no
@@ -403,7 +429,7 @@ temporary file.
 | 6 | An older version is migrated up (`TransportSchema` migrations; `KeryxDatabase.Schema.migrate` for a pre-delta database) | An SQLite error while migrating → corrupt |
 | 7 | Types and value ranges, by a query generated from the expected schema: ids are non-empty text, stamps are integer or NULL, booleans are 0 or 1, NOT NULL columns hold no NULL | Any violating row → corrupt |
 | 8 | `ks_meta` (generation, kind, device, number, creation time) matches the file name; a base's `ks_vector`/`ks_covered` types | Corrupt |
-| 9 | References are closed: every feed's folder, every article's feed, every `feed_tags` row's tag and feed is in the same file. In a transport file, a feed's folder may instead reach a folder row of the file through the file's folder edges (`folder_v2_edges`, either direction, transitively) — an alias of a folder identity, carried with its identity (see "Sending") | Corrupt |
+| 9 | References are closed: every feed's folder, every article's feed, every `feed_tags` row's tag and feed is in the same file. In a transport file, a feed's folder may instead reach a folder row of the file through the file's folder edges (`folder_v2_edges`, either direction, transitively) — an alias of a folder identity, carried with its identity (see "Sending"). The identity edge tables (`folder_v2_edges`, `tag_v2_edges`, `feed_edges`) are not checked for references: an edge means something without its rows | Corrupt |
 
 "Corrupt" is `CloudDataIncompatibleException`, handled as before: automatic syncing is suspended, and the
 notification center offers a reset (a new generation). A reset recovers even the corrupt file's content as long as
@@ -545,31 +571,32 @@ Merge SQL (`MergeSql`) key points:
 
 - **Explicitly specify columns**, and only columns present both in the transport schema and in a pre-delta database
   migrated to the current schema, so one statement set (`MergeSql.all`) serves deltas, bases and the migration. A
-  transport file's merge (`MergeSql.transport`) runs two more statements first, which add its edge tables
-  (`folder_v2_edges`, `tag_v2_edges`) to `main.ks_v2_edge`; a pre-delta database has no edge tables, and its rows'
-  `v2_id` — set by the migration's re-key — carry the same edges.
+  transport file's merge (`MergeSql.transport`) runs three more statements first, which add its edge tables
+  (`folder_v2_edges`, `tag_v2_edges`) to `main.ks_v2_edge` and its `feed_edges` to `main.ks_feed_edge`; a pre-delta
+  database has no edge tables, and its rows' `v2_id` — set by the migration's re-key — carry the same tag/folder
+  edges, while its feed URL collisions are observed by the feed identity step like any file's.
 - **Identity edges are recorded in every merge**: before anything else, the `(v2_id, id)` of every cloud tag or folder
   row that carries a `v2_id`, and of main's own rows (again at the very end, for a `v2_id` the merge brought in) — all
   `INSERT OR IGNORE` into `ks_v2_edge`. The identity step below reads them.
 - **A tie is decided by value, in every statement.** When both sides carry the same stamp, the group whose
   normalized values compare greater wins. Precisely (`SyncLww`), each version of a field group gets the rank row
   value `(stamp IS NOT NULL, COALESCE(stamp, 0), c1 IS NOT NULL, COALESCE(c1, 0), c2 IS NOT NULL, COALESCE(c2, 0),
-  …)`, where `c1, c2, …` are every column of the group — its stamp column(s), then its values — and the two ranks are
+  …)`, where `c1, c2, …` are every column of the group — its stamp column, then its values — and the two ranks are
   compared with SQLite's row-value `>` (BINARY collation). A version replaces the other only when its rank is
   strictly greater. So a stamped version beats an unstamped one (NULL means "no such event"), the greater stamp wins,
   and at an equal stamp the values decide in column order: NULL lowest, then SQLite's own ordering (integers
   numerically and below text, text byte by byte). Every element is non-NULL, so the comparison is never NULL, and
-  identical versions never replace each other. A group with two stamps (an article's retention group, below) ranks
-  by `any stamp IS NOT NULL, MAX(COALESCE(s1, 0), COALESCE(s2, 0))` in place of the first two elements; an article's
+  identical versions never replace each other. Every group has exactly one stamp; an article's
   body group puts two elements in front of all of these (below). The pre-delta rule ("a tie goes to the cloud") converged only because the
   cloud held a single file; with deltas, devices merge files in different orders, and a side-based rule would let
   that order decide. A device's own write always stamps above what its row already holds (see "Design Philosophy"
   in [db-schema.md](db-schema.md)), so a tie only arises between writes made independently on two devices in the
   same millisecond.
-- **Duplicates inside `cloud` are resolved deterministically.** A folded file can hold two rows with the same key
-  (`feeds.url`, `articles(feed_id, guid)`) from different devices. Statements that match
-  by such a key consider only the winner among them — greatest `updated_at`, then greatest id. Statements that
-  resolve a reference by id (`mergeFeedFolder`, `feedTags`) still see every row. (Tag and folder names are no
+- **Duplicates inside `cloud` are folded onto one id.** A folded file can hold two rows of one feed (the same
+  `url` under different ids) or of one article (the same `(feed_id, guid)` under different ids) from different
+  devices. The feed identity step records the first as an edge and reads the cloud side folded onto canonical ids —
+  one row per canonical feed id and per canonical article id, by the ordinary per-group rules — so every statement
+  after it matches rows by id alone and never has to pick one of two rows. (Tag and folder names are no
   longer unique keys: their ids derive from the creation-time name, so independently-created same-named rows converge
   to the same id, but renames can leave different ids sharing the same current name. The UI numbers such rows.)
 - **Rows absent from `cloud` mean nothing.** A delta holds only some rows; the statements whose outcome depends on a
@@ -603,8 +630,10 @@ Merge SQL (`MergeSql`) key points:
   assignment, the identity map and the folder state — a folder deleted by one file and revived by a later one puts
   its feeds back, in any order — and never names a folder that does not exist, so it cannot violate the foreign key.
   A feed's fetch state (`feed_fetch_state`) is device-local and never merged.
-  feeds are matched by **`id`**, which is deterministically generated from `url` as **UUIDv5**
-  (`IdGenerator.feedId`), so the same feed has the same id on every device.
+  feeds are matched by **`id`**, which is deterministically generated as **UUIDv5** from the `url` a feed was first
+  subscribed at (`IdGenerator.feedId`), so the same feed subscribed on two devices has the same id; a feed whose URL
+  a permanent redirect changed keeps its id, and the feed identity step below brings it together with a feed
+  subscribed anew at its URL.
 - **tags / folders: per-field last-write-wins**, like feeds: name (`name_updated_at`), color (`color_updated_at`,
   tags), sort order (`sort_order_updated_at`) each by its own stamp; `updated_at` stamps creation, deletion and
   reactivation. Two devices changing different fields of the same tag both keep their change. Rows are matched by
@@ -645,7 +674,7 @@ Merge SQL (`MergeSql`) key points:
      recorded in `ks_id_remap` (`domain/IdRemapSql.kt`, chains folded; an unchanged entry is not rewritten). For
      folders, that table's triggers re-resolve every feed whose raw assignment names a moving id onto the canonical
      folder, while the raw assignment itself stays as it was. Then the old rows are deleted. Once the merge has committed — never inside it —
-     `DeltaSync` republishes `ks_id_remap` (`TagFolderIdRemaps.publishFromDb`), for a receive's merge and the
+     `DeltaSync` republishes `ks_id_remap` (`IdRemaps.publishFromDb`), for a receive's merge and the
      pre-delta migration's alike, so the selection, the feed list's expansion and `local_settings.json` follow the
      move; a failure to publish is logged and does not fail the sync, since the database is the source of truth
      (every write resolves a stale id itself, and the next merge or launch publishes again). A delta or base merge
@@ -663,7 +692,68 @@ Merge SQL (`MergeSql`) key points:
   their edges join them into one identity and they become one tag or folder holding both rows' feeds. This is
   accepted as intended: such links can only come from migrating v2-era data (a device's own upgrade, or absorbing a
   pre-delta file an older build wrote), never from anything a version-3 device does.
-- articles, three groups:
+- **Identities of feeds and articles (every merge).** A feed's id is derived from the URL it was first subscribed at
+  and kept across a permanent redirect, so a feed subscribed anew at a moved feed's URL — on another device, or here
+  before the redirect was seen — holds the same URL under another id. `FeedIdentitySql` runs right after the
+  tag/folder step in every merge — delta, base and pre-delta — so tag ids are already canonical when feeds' links move:
+  1. **Edges.** Two feed ids that held the same `url` form an edge `(a, b)`, `a < b`, in `ks_feed_edge`, a grow-only
+     set that is never cleared. The merge adds every URL collision it can see — between main's feeds and the file's,
+     and inside the file — and a transport file's own `feed_edges` (`INSERT OR IGNORE`, so a known edge adds
+     nothing). `ks_id_remap`'s feed moves are read as edges too. Edges come only from two ids holding one URL at the
+     same time, never from a URL's history: a feed's earlier URL may since have been subscribed by an unrelated feed.
+  2. **The canonical feed id** is the smallest (byte-wise) id of the connected component. It depends only on the set
+     of edges, which only grows, so it only moves to a smaller id, and every device reaches the same one once the same
+     edges have arrived. Whether a collision is observed at all can depend on the order files arrive in, so **an edge
+     this device found is recorded for sending even inside a merge** (`ks_capture_feed_edge_insert` has no
+     `sync_merging` guard — the one exception to "only local changes are sent"); full sends, bases and deltas carry
+     the edges, so once observed anywhere an edge reaches every device.
+  3. **Article identity** needs no edges: an article's key is `(canonical feed id of its feed, guid)`, and its
+     canonical id is the smallest id among main's and the file's rows with that key. An id main holds keeps main's key,
+     even when the file carries it under a feed this device does not yet know to be the same one: the file's row is
+     then merged into main's row of that id (its read, star, deletion and body groups by their own stamps, never its
+     `feed_id` / `guid`), so nothing it carries waits for the edge — the file is recorded as applied and is not merged
+     again, and the edge's later arrival only moves the row onto its identity's id.
+  4. **The cloud side** is read, not rewritten: `cloud.feeds` mapped onto canonical ids and folded into one row per id
+     by the per-group last-write-wins (content, sort order, custom title, subscription state and the raw folder
+     assignment, kept as the file wrote it; `created_at` the earliest), and the touched `cloud.articles` likewise
+     folded by canonical id exactly as `ReduceSql` folds them (`RowFold`); articles the identity does not touch are
+     read straight from the file, so a merge whose file holds no collision copies no body.
+  5. **Main is re-keyed**, in an order that cannot fail on main's own state with foreign keys enforced: (a) the feeds —
+     each moving row's `url` is parked on a value no subscription can have, the canonical row is created from the
+     moving rows or folded into by the same per-group rules, and the moving rows' raw folder assignments fold into the
+     canonical feed's raw row by `SyncLww.FEED_FOLDER`, from which the triggers resolve `feeds.folder_id`; (b) the
+     articles — of several main rows of one key, the one with the **largest rowid** survives, the others are folded
+     into it and deleted, every remaining row whose id is not its key's canonical id takes it in place (the rowid
+     stays), and the articles of moving feeds take the canonical feed id; (c) `feed_tags` move to the canonical feed,
+     a link colliding with one it already has folding into it by last-write-wins, and `feed_fetch_state` (device-local)
+     keeps the canonical feed's row if it has one, else the smallest moving id's — without its validators, which belong to the url they were fetched from and are dropped by any change of a feed's `url` (see "feed_fetch_state" in [db-schema.md](db-schema.md)); (d) the unsent `sync_outbox` entries
+     naming a moving feed or article id are rewritten; (e) every feed and article id whose canonical id is another one
+     — main's, and aliases only the file used or only an edge names — is recorded in `ks_id_remap` as kind `feed` /
+     `article` (chains folded); (f) the old feed rows are deleted, every child having moved off them.
+     `ks_search_pending` and `ks_search_awaiting_body` follow (see "FTS5 Handling").
+
+  Running the step twice changes nothing. A delta or base merge records none of the re-key in the outbox
+  (`sync_merging`), and none needs sending: every device reaches the same canonical ids from the same edges. The
+  pre-delta merge runs with capture on, so what it writes is sent like any other row it changes. **Subscription state
+  stays plain last-write-wins**: a feed folded with a tombstone carrying a newer `deleted_updated_at` comes out
+  unsubscribed, exactly as when two devices hold one URL under the same id; the identity step only puts rows of one
+  feed on one id and invents no rule of its own. Once the merge has committed, `DeltaSync` republishes `ks_id_remap`
+  (`IdRemaps.publishFromDb`) as for tags and folders, and the merge's listener notification includes
+  `feed_fetch_state`.
+
+  **A refresh's permanent redirect** runs the main-only half of the step (`FeedIdentitySql.mergeLocally`, inside
+  `FeedRepository.applyFetch`'s transaction) when the redirect target is another feed's URL **on the same host** —
+  compared case-insensitively, scheme and port ignored. Its first statement is a write (`feeds.recordRedirectEdge`,
+  which records the edge only when another feed holds the target), so the reads after it run under the write lock.
+  The two feeds are then merged onto the canonical id with `sync_merging` set, so the re-key records nothing while the
+  new edge is still recorded for sending — which brings every other device to the same merge. A merged feed that came
+  out deleted while the user still had either feed is revived as a stamped re-subscribe (`feeds.reviveAfterMerge`),
+  so a redirect never unsubscribes a feed silently (two tombstones stay deleted); the fetched articles land in the
+  canonical feed, and the new-article count is recounted against it. After the commit the re-keys are published
+  (a failure is logged, not thrown) and the lists are told in a `finally`. A redirect to **another host** is no proof
+  the two feeds are one: the URL is left alone (`feeds.updateUrl` writes nothing while another feed holds the target),
+  no URL change is announced, and the refresh succeeds rather than failing `UNIQUE(url)` on every cycle.
+- articles, four groups:
   - **Body** — `content`, `summary`, `title`, `url`, `author`, `published_at`, `thumbnail_url` (and `feed_id` /
     `guid`, which the local merge never rewrites on an existing row), stamped by `body_updated_at`. A version with
     `content` outranks one without, and one with any body (`content` or `summary`) outranks one with none, before the
@@ -674,32 +764,47 @@ Merge SQL (`MergeSql`) key points:
     leaves it), never on a read, star or deletion — so a device that merely opened an article cannot make its older
     body beat another device's newer one.
   - **Read** — `is_read` by `read_at`.
-  - **Retention** — `is_starred`, `starred_at`, `deleted_at` and `deleted_updated_at` as one group, ranked by
-    `MAX(COALESCE(starred_at, 0), COALESCE(deleted_updated_at, 0))`: **the newer operation wins**, and the whole group
-    comes from the version that holds it. A star clears the deletion locally (`updateStarStatus`), and both a star
-    and a cleanup stamp above both stamps of their row, so the newest event always wins its group. (The earlier rule
-    — separate star and deletion groups, plus "a star newer than the deletion revives the article" — was not
-    commutative: a deletion, a later star and a still later unstar, merged in different orders, gave different
-    results.) As a consequence, an article revived by a star on another device and then unstarred stays visible
-    until the next cache cleanup deletes it again.
+  - **Star** — `is_starred` by `starred_at`.
+  - **Deletion** — `deleted_at` by `deleted_updated_at` (a cache cleanup, or the undelete an unstar of a deleted
+    article stamps).
+
+  The star and the deletion are **independent**: no rule in the merge or the fold crosses the two groups, so a row
+  can come out both starred and deleted — a star from one device, a cache cleanup from another, or the star of one
+  row and the cleanup of another row that a feed or article identity merged into it. **Whether an article is shown is
+  decided when it is read: an article is visible while it is not deleted or is starred**
+  (`(deleted_at IS NULL OR is_starred = 1)`, the predicate every article list, count, search and mark-all-read uses —
+  `articles.sq`, `data/local/ArticleVisibility.kt`). So a star is never lost to a cleanup made anywhere, in any order.
+  Locally a star touches only its own group; an unstar of an article already deleted here also stamps an undelete, so
+  the article stays on screen until the next cache cleanup deletes it again. An unstar of an article not deleted
+  leaves the deletion group alone, so an older deletion from another device that arrives afterwards still wins it and
+  the unstarred article is hidden, as in version 2. Version 2 already wrote rows both starred and deleted
+  (a star older than another device's cleanup) and hid them; `2.sqm` records each one's star as removed at its
+  deletion — for the local database and for a pre-delta cloud file the merge migrates with it alike — so they stay
+  hidden after the upgrade. Why: with no rule across the groups, each is a plain last-write-wins of its own, so the
+  merge and the fold stay idempotent, commutative and associative; and since visibility is decided when an article is
+  read, a cache cleanup never erases a star.
 
   `cached_at` and `updated_at` take the newer value (`updated_at` is the row's generic stamp, no group's key), and
   `created_at` the earlier. `search_text` is not merged: an article whose body the merge
   filled in or changed is registered in `ks_search_pending`, a newly inserted article starts with `''`, and one inserted
   without a body is recorded in `ks_search_awaiting_body` (see
-  "FTS5 Handling"). Articles are matched by **`id`** (UUIDv5 of `(feed_id, guid)`, `IdGenerator.articleId`).
+  "FTS5 Handling"). Articles are matched by **`id`** (UUIDv5 of `(feed_id, guid)`, `IdGenerator.articleId`), after the
+  feed identity step has put every article of one key on one id.
 - feed_tags: last-write-wins. A link is imported only if its feed and its tag exist in main (both by id — a tag's
   id is name-derived, so the same tag carries the same id on every device); a link whose tag main entirely lacks is
   an orphan and is skipped. A link to a tag main holds only as a tombstone is imported like any other: it rides its
   own `updated_at`.
 - `NOT EXISTS` / `EXISTS` guards skip rows colliding with main (a feed's URL or an article's `(feed_id, guid)` under
-  a different id, a referenced row main lacks) so UNIQUE / FK violations do not fail the whole transaction. Tag and
+  a different id — which the feed identity step leaves none of, so these are defensive — or a referenced row main
+  lacks) so UNIQUE / FK violations do not fail the whole transaction — except that an article main already holds by
+  id is always merged into that row, whatever key the file carries it under (see "Identities of feeds and articles"). Tag and
   folder rows carry no extra guard: a name main holds under another id is allowed through, and same-named rows
   coexist.
-- `MergeSql.all` order: the cloud rows' and main's rows' identity edges, the identity step (`V2IdentitySql`), folders
-  (per-field statements by id, then the insert), feeds, the folder merge and the other three `mergeFeed*`,
-  tags (per field, insert), articles, feed_tags, global_settings, and main's own rows' identity edges
-  (`MergeSql.transport` puts the edge tables' two statements in front). Folders precede feeds (for
+- `MergeSql.all` order: the cloud rows' and main's rows' identity edges, the tag/folder identity step
+  (`V2IdentitySql`), the feed/article identity step (`FeedIdentitySql`), folders (per-field statements by id, then
+  the insert), feeds, the folder merge and the other three `mergeFeed*`, tags (per field, insert), articles,
+  feed_tags, global_settings, and main's own rows' identity edges (`MergeSql.transport` puts the edge tables' three
+  statements in front: `folder_v2_edges` and `tag_v2_edges` into `ks_v2_edge`, `feed_edges` into `ks_feed_edge`). Folders precede feeds (for
   `feeds.folder_id`), and the `mergeFeed*` statements follow both.
 - The bookkeeping tables (`sync_outbox`, `ks_search_pending`, `ks_feed_folder_raw`, `sync_merging`, …) carry no
   constraints beyond their primary keys, and the triggers on them and on `feeds` / `folders` only append to the
@@ -708,8 +813,12 @@ Merge SQL (`MergeSql`) key points:
 
 `ReduceSql` folds transport files into one with the same per-field rules and tie-break, keyed by primary key only —
 no local guards, which belong to each device's own merge. The edge tables fold by union (`INSERT OR IGNORE`), plus
-the `(v2_id, id)` of each input's tag and folder rows that carry a `v2_id`, so a base built by folding keeps every
-input's edges.
+the `(v2_id, id)` of each input's tag and folder rows that carry a `v2_id`, and, for `feed_edges`, every URL collision
+between an input's feeds and the accumulator's or within an input — recorded before the feeds upsert can change a
+`url`, since the fold still matches feeds by primary key and keeps one `url` per id — so a base built by folding keeps
+every edge a merge of its inputs one by one would see. The fold rules the merge's identity steps share (the earliest
+`created_at`, the article and feed-row groups, the summary normalization, the greatest `v2_id`) live in one place,
+`domain/RowFold.kt`, so a folded base and the merge of its inputs cannot disagree.
 
 ### Merge Failure Classification
 
@@ -724,7 +833,7 @@ Before attaching, the Apple `migrateCloudIfOlder` brings an older cloud file up 
 | SQLite primary result code | Classification |
 | --- | --- |
 | `SQLITE_NOTADB`, `SQLITE_CORRUPT`, `SQLITE_FORMAT`, `SQLITE_EMPTY` | **Permanent only once the cloud file is shown to be broken.** After the rollback, the downloaded cloud file — a temp file nothing else writes — is opened without creating it and checked with `PRAGMA quick_check`: problems reported, or opening/checking it fails with `SQLITE_NOTADB`/`SQLITE_CORRUPT` → `CloudDataIncompatibleException`; `ok` → the corruption is in the *local* DB, so rethrown unchanged; anything else (undetermined) → rethrown unchanged. A corrupt local DB is therefore never answered with a cloud-data reset. |
-| `SQLITE_CONSTRAINT` (covers every extended `SQLITE_CONSTRAINT_*` variant — `_UNIQUE`, `_NOTNULL`, `_FOREIGNKEY`, etc. — since an extended code's low byte is always its primary code) | **Permanent only once *main* is ruled out** → `CloudDataIncompatibleException`. `MergeSql`'s `NOT EXISTS`/`EXISTS` guards already rule out every collision with *main*'s own rows (see above), and UNIQUE / NOT NULL are always enforced on main, so what remains is the cloud DB's own row set violating a constraint — a duplicate `url` inside the cloud DB, a NULL where the cloud's own (laxer) schema allowed one, etc. — or a **foreign-key violation already present in main** (data from before foreign keys were enforced, or a migration), which the merge's `PRAGMA foreign_keys=ON` would expose if a statement modified that row. Today a merge only ever writes a foreign-key column with a value guarded to exist in main, or NULL (the resolution triggers' `feeds.folder_id`, from `ks_feed_folder_resolved`), and deletes a parent only in the identity step (a tag or folder row moved onto its canonical id), after every child has moved off it, so this guards statements added later. A failure the driver reports, by its extended result code, as a UNIQUE, PRIMARY KEY or NOT NULL violation cannot come from main's existing state — those are enforced on every write — so it is classified at once, without the check or the re-run below, which could only reach the same verdict while holding the merge's write lock longer. Desktop and Apple read that code; Android's requery exposes none, so Android always takes the full path. (main can only already violate FOREIGN KEY constraints; adding CHECK constraints or triggers to the schema must revisit this. The existing triggers were checked against it: they append to the outbox, create a feed's raw folder row, or write a resolved folder that exists, none of which can fail on main's state.) Everything below runs on the merge's connection **inside the failed merge's still-open transaction**, so no other writer can change main in between (a re-subscribe supplying an orphaned article's missing parent, say). (1) `PRAGMA main.foreign_key_check` gives V0, what main already held — earlier statements ran under immediate FK checking, so they added nothing. An empty V0 rules main out → `CloudDataIncompatibleException`. (2) Otherwise it sets `PRAGMA defer_foreign_keys=ON` and re-runs the failed statement and every one after it (`MergeFailureClassifier.remainingStatements`) in the same transaction, so only a non-FK constraint fails immediately. Continuing from the failed statement reaches the same state as starting over — the statements before it already passed immediate FK checking, and a constraint failure undoes the failed statement's own changes — and it is the only option on Android, where requery turns any statement starting with `ROLLBACK` into a rollback of its whole transaction, so a `ROLLBACK TO` savepoint cannot be issued (the reasoning is in `MergeFailureClassifier.mainRuledOut`'s KDoc). A constraint failure in the re-run → a non-FK constraint from the cloud rows → `CloudDataIncompatibleException`. A clean re-run whose `foreign_key_check` (V1) holds a row V0 did not → the cloud rows brought in a new FK violation → `CloudDataIncompatibleException`. A clean re-run with nothing new in V1 → the failure came from a pre-existing local violation → rethrown unchanged. Anything else — another failure, a transaction SQLite had already ended, a check that fails — → rethrown unchanged. Either way the whole transaction is then rolled back; nothing is committed. A local orphan therefore never hides a constraint violation that comes from the cloud. A constraint failure from `migrateCloudIfOlder`, which touches only the cloud file, has main ruled out by construction and is classified. |
+| `SQLITE_CONSTRAINT` (covers every extended `SQLITE_CONSTRAINT_*` variant — `_UNIQUE`, `_NOTNULL`, `_FOREIGNKEY`, etc. — since an extended code's low byte is always its primary code) | **Permanent only once *main* is ruled out** → `CloudDataIncompatibleException`. `MergeSql`'s `NOT EXISTS`/`EXISTS` guards already rule out every collision with *main*'s own rows (see above), and UNIQUE / NOT NULL are always enforced on main, so what remains is the cloud DB's own row set violating a constraint — a duplicate `url` inside the cloud DB, a NULL where the cloud's own (laxer) schema allowed one, etc. — or a **foreign-key violation already present in main** (data from before foreign keys were enforced, or a migration), which the merge's `PRAGMA foreign_keys=ON` would expose if a statement modified that row. Today a merge only ever writes a foreign-key column with a value guarded to exist in main, or NULL (the resolution triggers' `feeds.folder_id`, from `ks_feed_folder_resolved`), and deletes a parent only in the identity steps (a tag, folder or feed row moved onto its canonical id), after every child has moved off it, so this guards statements added later. A failure the driver reports, by its extended result code, as a UNIQUE, PRIMARY KEY or NOT NULL violation cannot come from main's existing state — those are enforced on every write — so it is classified at once, without the check or the re-run below, which could only reach the same verdict while holding the merge's write lock longer. Desktop and Apple read that code; Android's requery exposes none, so Android always takes the full path. (main can only already violate FOREIGN KEY constraints; adding CHECK constraints or triggers to the schema must revisit this. The existing triggers were checked against it: they append to the outbox, create a feed's raw folder row, or write a resolved folder that exists, none of which can fail on main's state.) Everything below runs on the merge's connection **inside the failed merge's still-open transaction**, so no other writer can change main in between (a re-subscribe supplying an orphaned article's missing parent, say). (1) `PRAGMA main.foreign_key_check` gives V0, what main already held — earlier statements ran under immediate FK checking, so they added nothing. An empty V0 rules main out → `CloudDataIncompatibleException`. (2) Otherwise it sets `PRAGMA defer_foreign_keys=ON` and re-runs the failed statement and every one after it (`MergeFailureClassifier.remainingStatements`) in the same transaction, so only a non-FK constraint fails immediately. Continuing from the failed statement reaches the same state as starting over — the statements before it already passed immediate FK checking, and a constraint failure undoes the failed statement's own changes — and it is the only option on Android, where requery turns any statement starting with `ROLLBACK` into a rollback of its whole transaction, so a `ROLLBACK TO` savepoint cannot be issued (the reasoning is in `MergeFailureClassifier.mainRuledOut`'s KDoc). A constraint failure in the re-run → a non-FK constraint from the cloud rows → `CloudDataIncompatibleException`. A clean re-run whose `foreign_key_check` (V1) holds a row V0 did not → the cloud rows brought in a new FK violation → `CloudDataIncompatibleException`. A clean re-run with nothing new in V1 → the failure came from a pre-existing local violation → rethrown unchanged. Anything else — another failure, a transaction SQLite had already ended, a check that fails — → rethrown unchanged. Either way the whole transaction is then rolled back; nothing is committed. A local orphan therefore never hides a constraint violation that comes from the cloud. A constraint failure from `migrateCloudIfOlder`, which touches only the cloud file, has main ruled out by construction and is classified. |
 | `SQLITE_ERROR` (`no such table`, `no such column`) | **Ambiguous** — this is what a foreign/legacy cloud schema looks like, but also what a broken *local* schema (an unrelated app bug) looks like. Resolved by calling `validateSchema` against the downloaded cloud file: `false` → `CloudDataIncompatibleException`; `true` or `null` (undetermined) → rethrown unchanged, since neither confidently pins the failure on the cloud. |
 | Anything else (`SQLITE_CANTOPEN`, `SQLITE_IOERR`, `SQLITE_FULL`, `SQLITE_BUSY`, `SQLITE_LOCKED`, `SQLITE_READONLY`, no `SQLiteException` found, …) | **Transient / app-side** — rethrown unchanged. |
 
@@ -792,6 +901,13 @@ Index maintenance is two-tier:
   next daily rebuild, which clears the table. A body that arrives only after that rebuild leaves the row with its
   earlier tokens again — see "Delta sync: a row's search tokens are not replaced when its text changes" in
   [known-issues.md](known-issues.md).
+- **Articles a feed merge re-keys.** The feed identity step ("Identities of feeds and articles") keeps the index
+  valid without touching it. An article that takes its canonical id keeps its rowid (the id is updated in place), and
+  `articles_fts` keys on the rowid, so its index entry stays its own. Of several rows of one article, the one with the
+  largest rowid survives and the others are deleted, so a deleted rowid is never the table's largest and is never
+  handed out again: the deleted rows' leftover index entries are never matched to another article (the search joins
+  `articles` by rowid) and the daily rebuild drops them. A survivor whose body the fold changed is registered in
+  `ks_search_pending`, the deleted rows' rowids leave it, and `ks_search_awaiting_body` follows the moved ids.
 - **Healing full rebuild (`rebuildIndex()` = `'rebuild'`)**:
   Executed only in the daily idle pass (`domain/StartupMaintenanceTasks.kt`'s `maybeRebuildFtsIndex`, shared by
   desktop and Android, gated by `local_settings.lastFtsRebuiltAt` 24h gate + `ActivityCenter` idle — no sync, no feed
@@ -1227,7 +1343,7 @@ Nextcloud is not reached through OAuth and has no app-only folder; everything ab
 
 Startup cache cleanup **soft-deletes** articles past the retention period (stamps `deleted_at` / `deleted_updated_at`)
 rather than physically removing them. The tombstones travel as light rows and propagate via the merge
-(the retention group's last-write-wins), so a device that missed the deletion converges instead of re-adding the
+(the deletion group's last-write-wins), so a device that missed the deletion converges instead of re-adding the
 article. Tombstones are not physically reclaimed yet (future work).
 
 Cleanup decides by `cached_at`, the last time an article was seen in its feed. The merge still keeps the newest

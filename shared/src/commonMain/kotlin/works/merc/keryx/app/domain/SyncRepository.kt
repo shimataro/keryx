@@ -116,8 +116,8 @@ class SyncRepository(
     /** Issues generation and device ids; [IdGenerator.newId] in production, deterministic in tests. */
     newId: () -> String = IdGenerator::newId,
     /**
-     * Republishes the tag/folder id re-keys after a merge commits ([TagFolderIdRemaps.publishFromDb]);
-     * the app's one [TagFolderIdRemaps] in production. A lambda, like [cloudProvider], so resolving it
+     * Republishes the tag/folder id re-keys after a merge commits ([IdRemaps.publishFromDb]);
+     * the app's one [IdRemaps] in production. A lambda, like [cloudProvider], so resolving it
      * stays lazy. The default (nothing) is for tests that do not observe re-keys.
      */
     publishIdRemaps: suspend () -> Unit = {},

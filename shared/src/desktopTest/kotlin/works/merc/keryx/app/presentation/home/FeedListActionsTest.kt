@@ -22,7 +22,7 @@ import works.merc.keryx.app.domain.FeedRepository
 import works.merc.keryx.app.domain.FolderRepository
 import works.merc.keryx.app.domain.NotificationCenter
 import works.merc.keryx.app.domain.SettingsRepository
-import works.merc.keryx.app.domain.TagFolderIdRemap
+import works.merc.keryx.app.domain.IdRemap
 import works.merc.keryx.app.domain.SyncScheduler
 import works.merc.keryx.app.domain.TagRepository
 import works.merc.keryx.app.ftsManagerIndexed
@@ -86,6 +86,7 @@ class FeedListActionsTest {
             articleRepository, ftsManagerIndexed(driver), scheduler, NotificationCenter(),
             clock, Dispatchers.Unconfined,
             faviconMisses = InMemoryFaviconMissStore(),
+            driver = driver,
         )
         val settings = SettingsRepository(
             db, LocalSettingsStore(dirOverride = dir), scheduler, clock, writeDispatcher = Dispatchers.Unconfined,
@@ -109,7 +110,7 @@ class FeedListActionsTest {
             // No feed-list flow here to wait on: falls back as soon as the write has landed.
             fallBackOnceHidden = { _, fallback -> fallback() },
             // Nothing is re-keyed in these tests.
-            currentIdRemap = { TagFolderIdRemap.EMPTY },
+            currentIdRemap = { IdRemap.EMPTY },
         )
     }
 

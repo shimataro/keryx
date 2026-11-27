@@ -300,6 +300,48 @@ class FtsManagerTest {
         }
     }
 
+    /**
+     * A starred article another device's cache cleanup deleted is still visible, so both index writers
+     * must index it: the hot path's `indexMissing` and the daily `rebuildIndex`. Pins that neither
+     * filters articles on `deleted_at` alone (see docs/testing.md, "Article visibility").
+     */
+    @Test
+    fun indexMissingAndTheDailyRebuildIndexAStarredDeletedArticle() {
+        fun starredDeletedDb(): Pair<SqlDriver, KeryxDatabase> {
+            val (driver, db) = inMemoryDb()
+            db.insertFeed("f1")
+            db.insertArticle("a1", "f1", "Kotlin Starred", "kept by its star")
+            driver.execute(
+                null,
+                "UPDATE articles SET is_starred = 1, starred_at = 100, deleted_at = 200, deleted_updated_at = 200 WHERE id = 'a1'",
+                0,
+            )
+            return driver to db
+        }
+
+        val (incrementalDriver, _) = starredDeletedDb()
+        try {
+            val manager = ftsManager(incrementalDriver)
+            manager.createTable()
+            runBlocking { manager.indexMissing() }
+            assertTrue(incrementalDriver.isIndexed("a1"))
+            assertEquals(listOf("a1"), FtsSearch(incrementalDriver).search("Kotlin", ArticleFilter.All).map { it.id })
+        } finally {
+            incrementalDriver.close()
+        }
+
+        val (rebuildDriver, _) = starredDeletedDb()
+        try {
+            val manager = ftsManager(rebuildDriver)
+            manager.createTable()
+            runBlocking { manager.rebuildIndex() }
+            assertTrue(rebuildDriver.isIndexed("a1"))
+            assertEquals(listOf("a1"), FtsSearch(rebuildDriver).search("Kotlin", ArticleFilter.All).map { it.id })
+        } finally {
+            rebuildDriver.close()
+        }
+    }
+
     @Test
     fun indexMissingAddsNewRowsWithoutWipingExisting() {
         val (driver, db) = inMemoryDb()
