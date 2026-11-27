@@ -27,8 +27,15 @@ package works.merc.keryx.app.domain
  * well, plus every URL collision the fold sees ([feedUrlEdges]): two distinct feed ids sharing a `url`
  * between `src` and the accumulator, or within `src`. They are recorded before the feeds upsert can
  * change a `url`, since the fold still matches feeds by primary key only and keeps one `url` per id —
- * without them, folding `a@X`, then `a@Y`, then `b@X` would lose the collision a merge of the same
- * files one by one sees.
+ * without that, an accumulator holding `a@X` folding a file that carries both `a@Y` and `b@X` would
+ * have moved `a` away from `X` before the collision with `b@X` could be seen.
+ *
+ * A collision is seen only while both feeds still hold the url at the moment the fold (or a merge)
+ * meets them: folding `a@X`, `a@Y` and `b@X` in that order records no edge, in the order `a@X`,
+ * `b@X`, `a@Y` it does. This is the documented limit of feed identity discovery (see "Identities of
+ * feeds and articles" in `docs/sync-architecture.md`), not something the fold can add: an edge comes
+ * from two ids holding one url at the same time, never from a url's history. A fold and a merge of the
+ * same files one by one in the same order agree either way.
  *
  * Columns are listed explicitly; both sides must be transport files of [TransportSchema.VERSION].
  */

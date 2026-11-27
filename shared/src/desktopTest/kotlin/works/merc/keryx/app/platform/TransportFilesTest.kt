@@ -648,6 +648,31 @@ class TransportFilesTest {
         assertEquals(emptySet(), feedEdges(TransportFixtures.fold(f1, f3, f2)))
     }
 
+    /**
+     * Whatever a fold sees or misses of a collision, merging its result equals merging its inputs one at a
+     * time in the same order — the three files of the limitation above included, in every order, nested or
+     * not. (Different orders may end differently only where a collision is seen in one and missed in the
+     * other, which is the limit itself.)
+     */
+    @Test
+    fun mergingAFoldEqualsMergingItsInputsOneByOneInTheSameOrder() {
+        val files = listOf(
+            transportFile(delta, feed("fa", url = "https://x/", updatedAt = 100)) to delta,
+            transportFile(deltaB, feed("fa", url = "https://y/", updatedAt = 200)) to deltaB,
+            transportFile(deltaC, feed("fb", url = "https://x/", updatedAt = 150)) to deltaC,
+        )
+        for (order in permutations(files.indices.toList())) {
+            val ordered = order.map { files[it] }
+            val oneByOne = TransportFixtures.localDb().also { local -> ordered.forEach { (file, _) -> TransportFixtures.merge(local, file) } }
+            val viaFold = TransportFixtures.localDb().also { TransportFixtures.merge(it, TransportFixtures.fold(*ordered.toTypedArray())) }
+            assertEquals(TransportFixtures.identityState(oneByOne), TransportFixtures.identityState(viaFold), "order $order")
+            // Nested: the first two folded, then folded with the third.
+            val nested = TransportFixtures.fold(TransportFixtures.fold(*ordered.take(2).toTypedArray()) to baseName(DEV_A, 1), ordered[2])
+            val viaNested = TransportFixtures.localDb().also { TransportFixtures.merge(it, nested) }
+            assertEquals(TransportFixtures.identityState(viaFold), TransportFixtures.identityState(viaNested), "nested, order $order")
+        }
+    }
+
     /** The feed edges of a fold do not depend on the order, the grouping, or on folding again. */
     @Test
     fun feedEdgesFoldCommutativelyAssociativelyAndIdempotently() {
