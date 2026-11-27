@@ -328,6 +328,9 @@ private class ContentionSignallingMutex(private val inner: Mutex = Mutex()) : Mu
 
 class FeedRepositoryTest {
 
+    /** SQLite's primary result code `SQLITE_BUSY`. */
+    private val SQLITE_BUSY_CODE = 5
+
     private fun fetcherWith(handler: MockRequestHandler): FeedFetcher {
         val client = HttpClient(MockEngine(handler)) {
             followRedirects = false
@@ -3473,10 +3476,14 @@ class FeedRepositoryTest {
             driver.afterFirstStatementOfNextTransaction = { sql ->
                 firstStatement = sql
                 otherGotTheWriteLock = try {
+                    // A successful BEGIN IMMEDIATE is the write lock; it is ended at once, so the probe
+                    // never keeps the refresh waiting.
                     other.createStatement().use { it.execute("BEGIN IMMEDIATE") }
-                    other.createStatement().use { it.execute("INSERT INTO sync_state (key, value) VALUES ('probe', '1')") }
+                    other.createStatement().use { it.execute("ROLLBACK") }
                     true
                 } catch (e: java.sql.SQLException) {
+                    // Only a busy database says the refresh holds the lock; anything else is a failure of the probe.
+                    if ((e.errorCode and 0xFF) != SQLITE_BUSY_CODE) throw e
                     false
                 }
             }
