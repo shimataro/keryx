@@ -231,6 +231,17 @@ fun KeryxDatabase.insertTag(id: String, name: String, now: Long = 0L, deletedAt:
     )
 }
 
+/**
+ * Stores [etag] / [lastModified] as the validators of the feed [feedId] (a stale id resolves), as
+ * if they had been fetched from [url] — the url the feed holds now when it is not given. Writes nothing
+ * for a feed that does not exist, or that holds another url than [url]. Pass [url] from inside a
+ * transaction that must not read before its first write (SQLite's deferred BEGIN).
+ */
+fun KeryxDatabase.putValidators(feedId: String, etag: String?, lastModified: String?, url: String? = null) {
+    val fetchedFrom = url ?: feedsQueries.getByIdResolved(feedId).executeAsOneOrNull()?.url ?: return
+    feed_fetch_stateQueries.upsertValidators(etag = etag, last_modified = lastModified, feed_id = feedId, url = fetchedFrom)
+}
+
 /** Attaches (or updates) a feed-tag link. */
 fun KeryxDatabase.insertFeedTag(feedId: String, tagId: String, now: Long = 0L, deletedAt: Long? = null) {
     feed_tagsQueries.upsert(feed_id = feedId, tag_id = tagId, deleted_at = deletedAt, updated_at = now)

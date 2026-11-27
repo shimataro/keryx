@@ -60,10 +60,17 @@ SELECT feed_id, error_count, last_error FROM feed_fetch_state
 WHERE error_count > 0 OR last_error = :goneMarker;
 
 -- Writes the validators of the response just stored, leaving the error columns of an existing row
--- alone (a new row starts with no errors).
+-- alone (a new row starts with no errors) — but only while the feed still holds :url, the url they
+-- were fetched from. A refresh works from a snapshot, and a sync merge can have moved the feed onto
+-- another url since (or another feed's row onto it): the validators then describe a url this row no
+-- longer holds, and the url-change trigger above has already run, so it would not drop them again.
+-- Nothing is written then (the next fetch is unconditional). The check is in the statement, so a merge
+-- committing between a read of the url and this write cannot slip in.
 upsertValidators:
 INSERT INTO feed_fetch_state (feed_id, etag, last_modified)
-VALUES (COALESCE((SELECT id FROM feeds WHERE id = :feed_id), (SELECT new_id FROM ks_id_remap WHERE kind = 'feed' AND old_id = :feed_id), :feed_id), :etag, :last_modified)
+SELECT f.id, :etag, :last_modified FROM feeds f
+WHERE f.id = COALESCE((SELECT id FROM feeds WHERE id = :feed_id), (SELECT new_id FROM ks_id_remap WHERE kind = 'feed' AND old_id = :feed_id), :feed_id)
+  AND f.url = :url
 ON CONFLICT(feed_id) DO UPDATE SET
     etag = excluded.etag,
     last_modified = excluded.last_modified;

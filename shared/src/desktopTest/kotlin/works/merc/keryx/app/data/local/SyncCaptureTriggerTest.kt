@@ -5,6 +5,7 @@ import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.data.local.db.Sync_outbox
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
+import works.merc.keryx.app.putValidators
 import works.merc.keryx.app.insertFeedTag
 import works.merc.keryx.app.insertFolder
 import works.merc.keryx.app.insertGlobalSetting
@@ -135,7 +136,7 @@ class SyncCaptureTriggerTest {
         db.insertFeed("f1")
         enableCapture()
 
-        db.feed_fetch_stateQueries.upsertValidators("f1", "\"e\"", null)
+        db.putValidators("f1", "\"e\"", null)
         db.feed_fetch_stateQueries.incrementErrorCount("f1", "boom")
         db.feed_fetch_stateQueries.resetErrorCount("f1")
 

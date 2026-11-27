@@ -612,7 +612,7 @@ class FeedRepository(
             // The validators describing the content just written (kept or fetched, together), in the
             // feed's device-local fetch state. A new row starts with no errors; an existing row's
             // error state is left alone, as the feed row's upsert used to leave it.
-            fetchStates.upsertValidators(feedId, values.etag, values.lastModified)
+            fetchStates.upsertValidators(etag = values.etag, last_modified = values.lastModified, feed_id = feedId, url = effectiveUrl)
             // Files a brand-new feed into the folder selected in the feed list at add time. A
             // re-subscribed feed (current != null) keeps its prior folder instead — upsert never
             // touches folder_id, so there's nothing to do for that case.
@@ -827,13 +827,6 @@ class FeedRepository(
                 fetchStates.resetErrorCount(feed.id)
             }
 
-            // A 304 carries no validators, so writing them back would erase the ones that produced it.
-            if (!fetched.notModified &&
-                (fetched.etag != state?.etag || fetched.lastModified != state?.last_modified)
-            ) {
-                fetchStates.upsertValidators(feed.id, fetched.etag, fetched.lastModified)
-            }
-
             if (fetched.title != null || fetched.description != null) {
                 // Refresh only writes the content columns it owns. It must NOT touch deleted_at /
                 // sort_order / custom_title / favicon_url: refreshAll fetches from a snapshot that can be
@@ -856,6 +849,21 @@ class FeedRepository(
 
             // Read only after the redirect's first write, never in a transaction without one.
             val redirect = redirectTarget?.let { completeRedirect(feed.id, it, sameHostRedirect, now, prepared) }
+
+            // After the redirect's handling, so a merge that moved this feed's fetch state onto the canonical
+            // feed has already run and the validators go to the row that is left. A 304 carries no
+            // validators, so writing them back would erase the ones that produced it. They belong to the url
+            // the feed holds now when it moved onto the redirect's target, and otherwise to the url it was
+            // fetched from; the write itself checks that the row still holds that url (upsertValidators), so
+            // a merge that moved the feed onto another url since the snapshot leaves them unwritten.
+            if (!fetched.notModified &&
+                (fetched.etag != state?.etag || fetched.lastModified != state?.last_modified)
+            ) {
+                val validatorsUrl = redirectTarget?.takeIf { redirect?.urlMoved == true } ?: feed.url
+                fetchStates.upsertValidators(
+                    etag = fetched.etag, last_modified = fetched.lastModified, feed_id = feed.id, url = validatorsUrl,
+                )
+            }
             AppliedFetch(
                 newCount = articleRepository.insertPrepared(redirect?.merge?.recounted ?: prepared),
                 mergedInto = redirect?.merge?.canonicalId,

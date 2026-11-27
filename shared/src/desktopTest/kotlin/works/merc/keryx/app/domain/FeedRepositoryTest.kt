@@ -43,6 +43,7 @@ import works.merc.keryx.app.awaitConditionBlocking
 import works.merc.keryx.app.fileDb
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
+import works.merc.keryx.app.putValidators
 import works.merc.keryx.app.insertFeedTag
 import works.merc.keryx.app.setFeedFetchState
 import works.merc.keryx.app.insertFolder
@@ -1281,6 +1282,63 @@ class FeedRepositoryTest {
         }
     }
 
+    /**
+     * A refresh works from a snapshot, and a sync merge can move the feed onto another url while its fetch
+     * is out. The response's validators describe the url it was fetched from, which the row no longer
+     * holds, so none are stored: the next fetch is unconditional rather than a conditional request that a
+     * 304 from the new url could answer for content this device never fetched there.
+     */
+    @Test
+    fun aRefreshStoresNoValidatorsForAUrlTheFeedLeftWhileItsFetchWasOut(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f1", now = 100L, url = "https://ex.com/feed")
+            val snapshot = db.feedsQueries.getById("f1").executeAsOne()
+            val repo = newRepo(db, driver, fetcherWith {
+                // The merge lands while the response is on its way back.
+                db.feedsQueries.updateUrl("https://ex.com/moved", 200L, "f1")
+                respond(RSS, HttpStatusCode.OK, headersOf(HttpHeaders.ETag, "old-url-etag"))
+            })
+
+            repo.refreshFeed(snapshot)
+
+            assertEquals("https://ex.com/moved", db.feedsQueries.getById("f1").executeAsOne().url)
+            assertNull(db.fetchStateOf("f1")?.etag)
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
+     * A same-host permanent redirect onto another feed's url merges the two onto the smaller id. The
+     * validators of the response that followed the redirect belong to the target url the canonical feed
+     * now holds, so they land on its row, which the merge has left, and not on the one it dropped.
+     */
+    @Test
+    fun aRedirectMergeStoresTheTargetsValidatorsOnTheCanonicalFeed(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f-p", now = 100, url = "https://ex.com/new")
+            db.insertFeed("f-q", now = 100, url = "https://ex.com/old")
+            db.putValidators("f-p", "p-etag", null)
+            val repo = newRepo(db, driver, fetcherWith { request ->
+                if (request.url.toString() == "https://ex.com/old") {
+                    respond("", HttpStatusCode.MovedPermanently, headersOf(HttpHeaders.Location, "https://ex.com/new"))
+                } else {
+                    respond(RSS, HttpStatusCode.OK, headersOf(HttpHeaders.ETag, "new-url-etag"))
+                }
+            })
+
+            assertIs<Result.Ok<Int>>(repo.refreshFeed(db.feedsQueries.getById("f-q").executeAsOne()))
+
+            assertEquals(listOf("f-p|https://ex.com/new"), driver.rows("SELECT id, url FROM feeds"))
+            assertEquals("new-url-etag", db.fetchStateOf("f-p")?.etag)
+            assertNull(db.fetchStateOf("f-q"))
+        } finally {
+            driver.close()
+        }
+    }
+
     /** A feed with no fetch state yet (one a sync merge brought in) fetches without validators. */
     @Test
     fun aFeedWithoutFetchStateIsFetchedUnconditionally(): Unit = runBlocking {
@@ -2105,7 +2163,7 @@ class FeedRepositoryTest {
             val prefetched = repo.prefetchSubscription(url) // fetch starts at 1000
             // A refresh of the same feed lands afterwards, with newer values and a failure on record.
             now = 2000L
-            db.feed_fetch_stateQueries.upsertValidators("f1", "refreshed-etag", "refreshed-lm")
+            db.putValidators("f1", "refreshed-etag", "refreshed-lm")
             db.feedsQueries.updateContent("https://refreshed.site", "Refreshed title", "Refreshed desc", 2000L, "f1")
             db.feed_fetch_stateQueries.incrementErrorCount("f1", "boom")
             now = 3000L
@@ -2167,7 +2225,7 @@ class FeedRepositoryTest {
                 // must not be able to commit while the subscribe's transaction holds the write lock.
                 refresh = Thread {
                     rawDb.transaction {
-                        rawDb.feed_fetch_stateQueries.upsertValidators("f1", "E2", null)
+                        rawDb.putValidators("f1", "E2", null, url)
                         refreshArticles.upsertParsed("f1", listOf(ParsedArticle(guid = "g1", title = "Post", content = "refreshed body")))
                     }
                     refreshDone.countDown()
@@ -2201,7 +2259,7 @@ class FeedRepositoryTest {
             articles.upsertParsed("f1", listOf(ParsedArticle(guid = "g1", title = "Post", content = "old body")))
             val prefetched = repo.prefetchSubscription(url)
             // A refresh of the same feed lands afterwards, with newer validators and a newer body.
-            db.feed_fetch_stateQueries.upsertValidators("f1", "refreshed-etag", null)
+            db.putValidators("f1", "refreshed-etag", null)
             articles.upsertParsed("f1", listOf(ParsedArticle(guid = "g1", title = "Post", content = "refreshed body")))
 
             repo.writePrefetchedSubscription(prefetched)
@@ -2251,7 +2309,7 @@ class FeedRepositoryTest {
                 clock = Clock { 1000L },
             )
             db.insertFeed("f1", now = 500L, url = url)
-            db.feed_fetch_stateQueries.upsertValidators("f1", "stored-etag", null)
+            db.putValidators("f1", "stored-etag", null)
             val prefetched = repo.prefetchSubscription(url)
             db.feedsQueries.updateFaviconUrlIfMissing("https://ex.com/stored.ico", 2000L, "f1")
 
@@ -2292,7 +2350,7 @@ class FeedRepositoryTest {
             val target = "https://ex.com/feed"
             val repo = newRepo(db, driver, aliasFetcher(alias, target), clock = Clock { 1000L })
             db.insertFeed("f1", now = 500L, url = target)
-            db.feed_fetch_stateQueries.upsertValidators("f1", "v0", null)
+            db.putValidators("f1", "v0", null)
             val batch = SubscribeBatch()
             val viaAlias = repo.prefetchSubscription(alias) // v1
             val direct = repo.prefetchSubscription(target) // v2, baseline read before the alias's write
@@ -2319,13 +2377,13 @@ class FeedRepositoryTest {
             val target = "https://ex.com/feed"
             val repo = newRepo(db, driver, aliasFetcher(alias, target), clock = Clock { 1000L })
             db.insertFeed("f1", now = 500L, url = target)
-            db.feed_fetch_stateQueries.upsertValidators("f1", "v0", null)
+            db.putValidators("f1", "v0", null)
             val batch = SubscribeBatch()
             val viaAlias = repo.prefetchSubscription(alias)
             val direct = repo.prefetchSubscription(target)
 
             repo.writePrefetchedSubscription(viaAlias, batch = batch)
-            db.feed_fetch_stateQueries.upsertValidators("f1", "refreshed", null)
+            db.putValidators("f1", "refreshed", null)
             repo.writePrefetchedSubscription(direct, batch = batch)
 
             assertEquals("refreshed", db.fetchStateOf("f1")?.etag)
@@ -2347,14 +2405,14 @@ class FeedRepositoryTest {
             val target = "https://ex.com/feed"
             val repo = newRepo(db, driver, aliasFetcher(alias, target), clock = Clock { 1000L })
             db.insertFeed("f1", now = 500L, url = target)
-            db.feed_fetch_stateQueries.upsertValidators("f1", "v0", null)
+            db.putValidators("f1", "v0", null)
             val batch = SubscribeBatch()
             val viaAlias = repo.prefetchSubscription(alias) // v1
             val second = repo.prefetchSubscription(target) // v2
             val third = repo.prefetchSubscription(target) // v3
 
             repo.writePrefetchedSubscription(viaAlias, batch = batch)
-            db.feed_fetch_stateQueries.upsertValidators("f1", "refreshed", null)
+            db.putValidators("f1", "refreshed", null)
             repo.writePrefetchedSubscription(second, batch = batch)
             assertEquals("refreshed", db.fetchStateOf("f1")?.etag)
             repo.writePrefetchedSubscription(third, batch = batch)
@@ -2379,12 +2437,12 @@ class FeedRepositoryTest {
             val target = "https://ex.com/feed"
             val repo = newRepo(db, driver, aliasFetcher(alias, target), clock = Clock { 1000L })
             db.insertFeed("f1", now = 500L, url = target)
-            db.feed_fetch_stateQueries.upsertValidators("f1", "v0", null)
+            db.putValidators("f1", "v0", null)
             val batch = SubscribeBatch()
             val viaAlias = repo.prefetchSubscription(alias, batch) // v1
 
             repo.writePrefetchedSubscription(viaAlias, batch = batch)
-            db.feed_fetch_stateQueries.upsertValidators("f1", "refreshed", null)
+            db.putValidators("f1", "refreshed", null)
             val direct = repo.prefetchSubscription(target, batch) // v2, read after both writes
             repo.writePrefetchedSubscription(direct, batch = batch)
 
@@ -2410,7 +2468,7 @@ class FeedRepositoryTest {
             val target = "https://ex.com/feed"
             val repo = newRepo(db, driver, aliasFetcher(alias, target), clock = Clock { 1000L })
             rawDb.insertFeed("f1", now = 500L, url = target)
-            rawDb.feed_fetch_stateQueries.upsertValidators("f1", "v0", null)
+            rawDb.putValidators("f1", "v0", null)
             val batchLock = ContentionSignallingMutex()
             val batch = SubscribeBatch(batchLock)
             val viaAlias = repo.prefetchSubscription(alias, batch) // v1
@@ -2431,7 +2489,7 @@ class FeedRepositoryTest {
                 writer.join(200)
                 assertTrue(writer.isAlive, "the alias write finished while the prefetch held the batch lock")
                 assertEquals("v0", rawDb.fetchStateOf("f1")?.etag)
-                rawDb.feed_fetch_stateQueries.upsertValidators("f1", "refreshed", null)
+                rawDb.putValidators("f1", "refreshed", null)
             }
 
             val direct = repo.prefetchSubscription(target, batch) // v2
@@ -2454,7 +2512,7 @@ class FeedRepositoryTest {
             val target = "https://ex.com/feed"
             val repo = newRepo(db, driver, aliasFetcher(alias, target), clock = Clock { 1000L })
             db.insertFeed("f1", now = 500L, url = target)
-            db.feed_fetch_stateQueries.upsertValidators("f1", "v0", null)
+            db.putValidators("f1", "v0", null)
             val batch = SubscribeBatch()
             val viaAlias = repo.prefetchSubscription(alias) // v1
             val second = repo.prefetchSubscription(target) // v2
@@ -2485,7 +2543,7 @@ class FeedRepositoryTest {
                 clock = Clock { 1000L },
             )
             db.insertFeed("f1", now = 500L, url = url)
-            db.feed_fetch_stateQueries.upsertValidators("f1", "stored-etag", null)
+            db.putValidators("f1", "stored-etag", null)
             val prefetched = repo.prefetchSubscription(url)
 
             repo.writePrefetchedSubscription(prefetched)
@@ -2524,7 +2582,7 @@ class FeedRepositoryTest {
             val write = launch(start = CoroutineStart.UNDISPATCHED) { repo.writePrefetchedSubscription(prefetched) }
             now = 3000L
             // A refresh of the same feed commits meanwhile: its validators, and its content stamp.
-            db.feed_fetch_stateQueries.upsertValidators("f1", "refreshed", null)
+            db.putValidators("f1", "refreshed", null)
             db.feedsQueries.updateContent(null, "Refreshed f1", null, 3000L, "f1")
             now = 4000L
 
@@ -3422,8 +3480,8 @@ class FeedRepositoryTest {
             db.insertFeed("f-p", now = 100, url = "https://ex.com/old")
             db.insertFeed("f-q", now = 100, url = "https://ex.com/new")
             db.seedArticle("aq1", "f-q", "g1", isRead = 1, readAt = 500)
-            db.feed_fetch_stateQueries.upsertValidators("f-p", "p-etag", null)
-            db.feed_fetch_stateQueries.upsertValidators("f-q", "q-etag", null)
+            db.putValidators("f-p", "p-etag", null)
+            db.putValidators("f-q", "q-etag", null)
             val center = NotificationCenter()
             val repo = newRepo(db, driver, redirectOldToNew(), notificationCenter = center)
 

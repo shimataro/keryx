@@ -134,7 +134,10 @@ the sync bookkeeping tables / `articles_fts` (virtual).
   taking another device's url, a feed identity merge giving the canonical feed the other feed's url or moving the other
   feed's fetch state onto it, a permanent redirect — the next fetch is unconditional rather than a conditional request
   that a `304` could answer for content never fetched from the new url. A refresh stores its response's validators after
-  its own url write, so those of a redirect's target survive.
+  its own url write and any redirect merge, so those of a redirect's target survive on the row that is left — and only
+  while that row still holds the url they were fetched from (`upsertValidators` takes the url and checks it in the
+  statement): a refresh works from a snapshot, so a sync merge that moved the feed onto another url while its fetch was
+  out leaves them unwritten, and the next fetch is unconditional.
 - The feed list flags a feed as erroring whenever `error_count > 0` (or the feed is gone, see below) — that is,
   when fetching it failed **on this device**. `FEED_TIMEOUT_RETRY_COUNT` is a separate, unrelated constant — the
   fetch-attempt retry budget `FeedFetcher` spends before giving up on a single fetch (`core/Constants.kt`).

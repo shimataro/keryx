@@ -4,6 +4,7 @@ import app.cash.sqldelight.db.SqlDriver
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
+import works.merc.keryx.app.putValidators
 import works.merc.keryx.app.insertFeedTag
 import works.merc.keryx.app.insertFolder
 import works.merc.keryx.app.insertTag
@@ -167,7 +168,7 @@ class StaleFeedArticleIdWriteTest {
         staleFeed(driver, db)
         val q = db.feed_fetch_stateQueries
 
-        q.upsertValidators("f-old", "etag-1", "lm-1")
+        db.putValidators("f-old", "etag-1", "lm-1")
         q.incrementErrorCount("f-old", "boom")
         q.incrementErrorCount("f-old", "boom2")
         val state = q.getByFeedId("f-new").executeAsOne()
@@ -322,7 +323,7 @@ class StaleFeedArticleIdWriteTest {
         db.feedsQueries.updateSortOrder(4L, 600L, 600L, "f1")
         db.feedsQueries.updateCustomTitle("T", 600L, 600L, "f1")
         db.articlesQueries.updateReadStatus(1L, 500L, 500L, "a1")
-        db.feed_fetch_stateQueries.upsertValidators("f1", "e", "m")
+        db.putValidators("f1", "e", "m")
 
         assertEquals(4L, db.feedsQueries.getById("f1").executeAsOne().sort_order)
         assertEquals("T", db.feedsQueries.getById("f1").executeAsOne().custom_title)
