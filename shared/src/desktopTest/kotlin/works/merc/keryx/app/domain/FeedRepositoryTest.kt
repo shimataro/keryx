@@ -328,6 +328,9 @@ private class ContentionSignallingMutex(private val inner: Mutex = Mutex()) : Mu
 
 class FeedRepositoryTest {
 
+    /** Thrown by a test hook, so a test can tell it from any other failure of the code under test. */
+    private class SimulatedMergeFailure : RuntimeException("simulated merge failure")
+
     /** SQLite's primary result code `SQLITE_BUSY`. */
     private val SQLITE_BUSY_CODE = 5
 
@@ -3567,12 +3570,15 @@ class FeedRepositoryTest {
             driver.execute(null, "DELETE FROM sync_outbox", 0)
             val repo = newRepo(db, driver, redirectOldToNew())
             // The merge's last statement: everything before it in the transaction has run.
-            driver.before = { sql -> if (sql == "DELETE FROM main.sync_merging") error("simulated merge failure") }
+            driver.before = { sql -> if (sql == "DELETE FROM main.sync_merging") throw SimulatedMergeFailure() }
 
             val failure = runCatching { repo.refreshFeed(db.feedsQueries.getById("f-q").executeAsOne()) }
 
             driver.before = {}
-            assertTrue(failure.isFailure, "the failure propagates")
+            // The failure injected after every merge statement ran reached the caller (its own type: a
+            // refresh failing earlier would not throw it), so the unchanged state below is a rollback of
+            // completed writes, not a refresh that never got there.
+            assertIs<SimulatedMergeFailure>(failure.exceptionOrNull(), "result: $failure")
             assertEquals(
                 listOf("f-p|https://ex.com/new", "f-q|https://ex.com/old"),
                 driver.rows("SELECT id, url FROM feeds ORDER BY id"),
