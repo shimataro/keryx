@@ -688,8 +688,12 @@ class FeedRepository(
         return refreshFeed(feed)
     }
 
-    /** Outcome of [applyFetch]: the article-count result, plus whether any articles were fetched. */
-    private data class RefreshOutcome(val result: Result<Int>, val hadArticles: Boolean)
+    /**
+     * Outcome of [applyFetch]: the article-count result, plus whether the search index is due — articles
+     * were fetched, or a redirect merge ran, which registers the surviving articles whose body changed in
+     * `ks_search_pending` whether or not this response carried any article.
+     */
+    private data class RefreshOutcome(val result: Result<Int>, val indexingDue: Boolean)
 
     /** What [refreshFeeds]' fetches hand to its single writer, in the order they happen. */
     private sealed interface RefreshStep {
@@ -790,7 +794,7 @@ class FeedRepository(
                         coalesce = true,
                     )
                 }
-                return RefreshOutcome(r, hadArticles = false)
+                return RefreshOutcome(r, indexingDue = false)
             }
         }
         val fetched = ok.fetched
@@ -903,7 +907,7 @@ class FeedRepository(
         // per feed and could fire a whole-DB upload mid-refresh. RefreshCycleRunner covers the batch
         // (it syncs right after, or schedules one when the cycle synced first); the single-feed
         // refreshFeed() schedules its own.
-        return RefreshOutcome(Result.Ok(applied.newCount), fetched.articles.isNotEmpty())
+        return RefreshOutcome(Result.Ok(applied.newCount), indexingDue = fetched.articles.isNotEmpty() || applied.mergedInto != null)
     }
 
     /** What [applyFetch]'s transaction did: the new-article count, the merge's canonical id, whether the URL moved. */
@@ -1185,7 +1189,7 @@ class FeedRepository(
             when (step) {
                 is RefreshStep.Fetched -> {
                     val outcome = applyFetch(step.feed, step.fetchState, step.fetch)
-                    val wasLast = state.recordFetched(step.feed.id, outcome.result, outcome.hadArticles)
+                    val wasLast = state.recordFetched(step.feed.id, outcome.result, outcome.indexingDue)
                     step.committed.complete(Unit)
                     if (wasLast) indexIfNeeded(state)
                 }
@@ -1194,7 +1198,7 @@ class FeedRepository(
         }
     }
 
-    /** Brings the search index up to date once, if any applied feed had articles. */
+    /** Brings the search index up to date once, if any applied feed had articles or merged with another. */
     private suspend fun indexIfNeeded(state: RefreshApplyState) {
         if (state.takeIndexingDue()) ftsManager.indexMissing()
     }
@@ -1218,19 +1222,19 @@ class FeedRepository(
     private class RefreshApplyState(private val total: Int) {
         private val results = HashMap<String, Result<Int>>(total)
         private var applied = 0
-        private var anyHadArticles = false
+        private var anyIndexingDue = false
         private var indexed = false
 
         /** Records a feed's outcome; returns whether it was the last feed to be applied. */
-        fun recordFetched(feedId: String, result: Result<Int>, hadArticles: Boolean): Boolean {
+        fun recordFetched(feedId: String, result: Result<Int>, indexingDue: Boolean): Boolean {
             results[feedId] = result
-            if (hadArticles) anyHadArticles = true
+            if (indexingDue) anyIndexingDue = true
             return ++applied == total
         }
 
-        /** Whether the search index is due — some feed had articles and it hasn't run — claiming it. */
+        /** Whether the search index is due — some feed had articles or merged and it hasn't run — claiming it. */
         fun takeIndexingDue(): Boolean {
-            if (!anyHadArticles || indexed) return false
+            if (!anyIndexingDue || indexed) return false
             indexed = true
             return true
         }

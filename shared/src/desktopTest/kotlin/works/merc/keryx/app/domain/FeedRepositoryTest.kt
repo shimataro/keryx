@@ -3916,6 +3916,32 @@ class FeedRepositoryTest {
         }
     }
 
+    /**
+     * The same merge when the redirect's target answers with no article at all: the survivor's changed body
+     * is still registered in `ks_search_pending`, so the refresh catches the index up even though nothing
+     * it fetched would have asked for that — otherwise the old text stays searchable until some later
+     * refresh happens to fetch an article.
+     */
+    @Test
+    fun aRedirectMergeCatchesTheSearchIndexUpEvenWhenTheResponseCarriesNoArticle(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f-p", now = 100, url = "https://ex.com/new")
+            db.insertFeed("f-q", now = 100, url = "https://ex.com/old")
+            db.seedArticle("aq7", "f-q", "g7")
+            driver.execute(null, "UPDATE articles SET content = 'fresh words', body_updated_at = 500 WHERE id = 'aq7'", 0)
+            db.seedArticle("ap7", "f-p", "g7")
+            val repo = newRepo(db, driver, redirectFetcher(from = "https://ex.com/old", to = "https://ex.com/new", body = RSS_NO_ITEMS))
+
+            assertIs<Result.Ok<Int>>(repo.refreshFeed(db.feedsQueries.getById("f-q").executeAsOne()))
+
+            assertEquals(listOf("f-p|fresh words|fresh words"), driver.rows("SELECT feed_id, content, search_text FROM articles WHERE guid = 'g7'"))
+            assertEquals(emptyList(), driver.rows("SELECT rowid FROM ks_search_pending"))
+        } finally {
+            driver.close()
+        }
+    }
+
     private fun reviveSetup(
         refreshedId: String, holderId: String, refreshedDeletedAt: Long?, holderDeletedAt: Long?,
     ): Triple<SqlDriver, works.merc.keryx.app.data.local.db.KeryxDatabase, FeedRepository> {
