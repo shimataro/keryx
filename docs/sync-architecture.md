@@ -43,9 +43,10 @@ pre-delta migration and the legacy watch), `domain/MergeSql.kt`,
     ever observes — both feeds always seen holding the URL at different times — is missed everywhere (see
     [known-issues.md](known-issues.md)).
 - **No data is lost by a sync.** A merge, fold or garbage collection never removes a row, a field value, an article
-  body or a link (tag attachment, folder assignment) unless a newer version of the same field group supersedes it or a
-  logical deletion removes it. Losing a concurrent write to last-write-wins is not a loss; a row, child row or value
-  that no rule supersedes disappearing from any device is. Identity merges (feeds, articles, tags, folders) move
+  body or a link (tag attachment, folder assignment) unless its field group's own rule supersedes it — last-write-wins,
+  or an article body's precedence of `content` (a version with `content` beats one with only a `summary`, and `summary`
+  is dropped once there is `content`) — or a logical deletion removes it. Losing a concurrent write to such a rule is
+  not a loss; a row, child row or value that no rule supersedes disappearing from any device is. Identity merges (feeds, articles, tags, folders) move
   children onto the surviving id instead of dropping them.
 - **Every device ends with the same data and the same display.** Once the same files have been merged, every device
   holds the same synced rows, and everything a user sees that derives from them — names, order, folder assignment, the
