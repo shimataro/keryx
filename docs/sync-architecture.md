@@ -50,11 +50,11 @@ pre-delta migration and the legacy watch), `domain/MergeSql.kt`,
   children onto the surviving id instead of dropping them.
 - **Every device ends with the same data and the same display.** Once the same files have been merged — including
   the deltas that carry the identity edges merges discovered (see the feeds bullet above) — every device holds the same
-  synced rows, and everything a user sees that derives from them — names, order, folder assignment, the
-  numbering of same-named rows — is identical. No row exists on only some devices and no name differs between devices.
-  Device-local data (fetch state, the search index, `local_settings.json`) never feeds a synced value or what is
-  displayed from synced data; the feed list's fetch-problem indicator and search results are per-device status, outside
-  this guarantee. The only exception is an identity collision no device ever observes (see the feeds bullet above).
+  synced rows, and everything a user sees that derives from them — names, the sort order of feeds, folders and tags,
+  folder assignment, the numbering of same-named rows — is identical. No row exists on only some devices and no name
+  differs between devices. Device-local data (fetch state, the search index, `local_settings.json`) never feeds a synced
+  value or what is displayed from synced data; the feed list's fetch-problem indicator, search results and view
+  preferences such as the article list's sort direction are per-device, outside this guarantee. The only exception is an identity collision no device ever observes (see the feeds bullet above).
 - **Only local changes are sent.** A change that arrived through a merge is never re-sent, so changes do not echo
   back and forth between devices. The one exception is a feed identity edge a merge discovers (a URL collision
   between main and the file): it is recorded for sending even inside the merge, since another device may never
