@@ -1125,6 +1125,7 @@ class HomeViewModel(
         filter: ArticleFilter,
         instance: FeedListRowSelection = FeedListRowSelection.canonicalFor(filter),
     ) {
+        filterRequestSeq++
         // A row the feed list rendered before a merge re-keyed its tag or folder still carries the old
         // id; select the row it became (see [IdRemapping]). The selection itself is caught up first,
         // so both sides of the comparison below are in the same id space.
@@ -1165,11 +1166,24 @@ class HomeViewModel(
      * feed onto another id since — possibly committed but not yet published, so the re-key map is first
      * caught up from the database ([catchUpIdRemapFromDb]); [selectFilter] then resolves the id through
      * it. A catch-up that fails is logged there and the published map is used as it stands.
+     *
+     * A selection the user makes while the catch-up is out — or a later "show feed" — is newer, and wins:
+     * this one then selects nothing ([filterRequestSeq]), rather than taking the feed list back to the
+     * notification's feed and dropping the article selection made under the newer one.
      */
     suspend fun showFeedDetail(feedId: String) {
+        val request = ++filterRequestSeq
         catchUpIdRemapFromDb()
+        if (request != filterRequestSeq) return
         selectFilter(ArticleFilter.Feed(feedId))
     }
+
+    /**
+     * Counts the filter selection requests: [selectFilter] calls, and [showFeedDetail]s before their
+     * catch-up. A [showFeedDetail] whose number is no longer the latest once its catch-up returns was
+     * overtaken by a newer request. Only ever touched on the ViewModel's (main) context.
+     */
+    private var filterRequestSeq = 0L
 
     private val articleContentCache = ArticleContentCache(
         scope = viewModelScope,

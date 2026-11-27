@@ -17,6 +17,7 @@ import works.merc.keryx.app.domain.LocalWriteFailureReporter
 import works.merc.keryx.app.domain.NotificationCenter
 import works.merc.keryx.app.domain.FeedIdentitySql
 import works.merc.keryx.app.domain.IdRemaps
+import works.merc.keryx.app.HoldingDispatcher
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
 import works.merc.keryx.app.insertFeedTag
@@ -665,5 +666,28 @@ class HomeViewModelIdRemapTest {
 
         assertEquals(ArticleFilter.Feed("f0"), vm.filter.value)
         assertEquals(FeedListRowSelection.FeedInFolderGroup("f0"), vm.selectedRowInstance.value)
+    }
+
+    /**
+     * A feed the user selects while a "show feed" is still catching the map up is the newer request:
+     * the notification's action then selects nothing, rather than taking the list back to its feed.
+     */
+    @Test
+    fun showFeedDetailSelectsNothingOnceANewerSelectionWasMadeDuringItsCatchUp() = runVmTest {
+        db.insertFeed("f2")
+        val held = HoldingDispatcher()
+        val vm = newViewModel(dispatcher = held).vm
+
+        held.hold()
+        val show = launch { vm.showFeedDetail("f1") }
+        testScheduler.runCurrent()
+        assertEquals(true, show.isActive, "precondition: the catch-up is held")
+        vm.selectFilter(ArticleFilter.Feed("f2"))
+        held.release()
+        show.join()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(ArticleFilter.Feed("f2"), vm.filter.value)
+        assertEquals(FeedListRowSelection.FeedInFolderGroup("f2"), vm.selectedRowInstance.value)
     }
 }
