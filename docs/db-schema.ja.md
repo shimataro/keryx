@@ -105,7 +105,10 @@
   `upsertValidators`、`incrementErrorCount`、`resetErrorCount`、`markGone`。`feed_tags.sq`: `upsert`。`articles.sq`:
   `insert`、`insertIfAbsent`、`markAllReadByFeed`（と一覧のクエリ `watchByFeed`）。`feeds.resolveId` は同じ解決を
   読み取りとして行い（`FeedRepository.resolveFeedId`）、公開された振り直しの対応表が読み込まれる前に復元する保存済みの
-  フィードのフィルターや、移動の前に描画された行からのフィード更新に使う。`feeds.reviveAfterMerge` は、利用者が
+  フィードのフィルターや、移動の前に描画された行からのフィード更新に使う。行も要る読み取りは、同じ文の中で解決する——
+  間にコミットされた merge が、削除したばかりの行の id を返さないようにするため: `feeds.getByIdResolved`
+  （`FeedRepository.getFeedByIdResolved`、id 指定の更新）と `feeds.groupForMove`（移動先のグループ。移動するフィードと
+  目標の id を、その行の中で解決する——`moveFeed`）。`feeds.reviveAfterMerge` は、利用者が
   どちらかのフィードをまだ購読していたのにリダイレクトの統合で削除済みになったフィードを、打刻した再購読として復活させる。
 - `updated_at` は内容グループの後勝ちのスタンプで、capture のトリガーはこれを見ないので、既存の行では記録される
   変更と一緒にしか動かさない: `upsert` は書く列が変わったときだけこれを動かし、`updateUrl` は URL が変わるとき

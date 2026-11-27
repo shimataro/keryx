@@ -436,11 +436,14 @@ class FeedRepository(
         if (afterFeedId == null && beforeFeedId == null) return feeds.nextSortOrderInGroup(folderId).executeAsOne()
         val group = feeds.getByFolder(folderId).executeAsList()
         val groupIds = group.map { it.id }
-        val afterIndex = afterFeedId?.let { groupIds.indexOf(it) } ?: -1
+        // The anchors may be held from before a merge moved a feed onto another id; this runs inside the
+        // subscribe transaction, so resolving them is consistent with the group read just above.
+        val afterIndex = afterFeedId?.let { groupIds.indexOf(resolveFeedId(it)) } ?: -1
+        val resolvedBeforeId = beforeFeedId?.let(::resolveFeedId)
         // The feed the new one is placed *before* (reorderIds' insertion target); null = append.
         val targetFeedId = when {
             afterIndex >= 0 -> groupIds.getOrNull(afterIndex + 1)
-            beforeFeedId != null && beforeFeedId in groupIds -> beforeFeedId
+            resolvedBeforeId != null && resolvedBeforeId in groupIds -> resolvedBeforeId
             else -> return feeds.nextSortOrderInGroup(folderId).executeAsOne()
         }
         val newOrder = reorderIds(groupIds, feedId, targetFeedId)
@@ -467,13 +470,21 @@ class FeedRepository(
             // reads and then writes has to upgrade its lock, which SQLite can refuse with an
             // immediate SQLITE_BUSY (see docs/known-issues.md). The mutex serializes the read and
             // the write against every other placement in this process instead.
-            val current = feeds.getByFolder(folderId).executeAsList()
+            //
+            // The feed ids may be held from before a merge that moved a feed onto another id: the group
+            // read resolves them in the same statement (`groupForMove`), so the order is computed over
+            // the surviving rows — never with a stale id inserted beside the row it became, or a stale
+            // target not found. With no group there is nothing to order among, and the writes resolve
+            // the moved id themselves.
+            val current = feeds.groupForMove(folderId = folderId, moved = feedId, target = targetFeedId).executeAsList()
+            val movedId = current.firstOrNull()?.moved_id ?: feedId
+            val resolvedTargetId = current.firstOrNull()?.target_id
             val sortOrderOf = current.associate { it.id to it.sort_order }
-            val newOrder = reorderIds(current.map { it.id }, feedId, targetFeedId)
+            val newOrder = reorderIds(current.map { it.id }, movedId, resolvedTargetId)
             val now = clock.nowMillis()
             db.transaction {
-                applyReorderUpdates(newOrder, sortOrderOf, feedId, now, feeds) { index ->
-                    feeds.updateFolderAndSortOrder(folderId = folderId, sortOrder = index.toLong(), updatedAt = now, folderUpdatedAt = now, sortOrderUpdatedAt = now, id = feedId)
+                applyReorderUpdates(newOrder, sortOrderOf, movedId, now, feeds) { index ->
+                    feeds.updateFolderAndSortOrder(folderId = folderId, sortOrder = index.toLong(), updatedAt = now, folderUpdatedAt = now, sortOrderUpdatedAt = now, id = movedId)
                 }
             }
         }

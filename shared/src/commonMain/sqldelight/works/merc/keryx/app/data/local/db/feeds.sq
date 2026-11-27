@@ -222,6 +222,20 @@ updateFolderAndSortOrder {
 getByFolder:
 SELECT * FROM feeds WHERE deleted_at IS NULL AND (folder_id = COALESCE((SELECT id FROM folders WHERE id = :folderId), (SELECT new_id FROM ks_id_remap WHERE kind = 'folder' AND old_id = :folderId), :folderId) OR (folder_id IS NULL AND :folderId IS NULL)) ORDER BY sort_order ASC, title COLLATE NOCASE ASC;
 
+-- The group getByFolder reads, for placing the feed :moved before the feed :target (NULL = last), each
+-- row also carrying the ids :moved and :target resolve to now (the id itself while a row has it, else the
+-- id ks_id_remap maps it to). One statement, so the group and both resolutions come from the same
+-- committed state: a feed merge that commits around it is either wholly before it or wholly after it,
+-- and the order computed from the rows never mixes an id of one state with an id of the other
+-- (FeedRepository.moveFeed). The two ids repeat on every row; no row, no group to order.
+groupForMove:
+SELECT id, sort_order,
+    COALESCE((SELECT f.id FROM feeds f WHERE f.id = :moved), (SELECT new_id FROM ks_id_remap WHERE kind = 'feed' AND old_id = :moved), :moved) AS moved_id,
+    CAST(CASE WHEN :target IS NULL THEN NULL
+        ELSE COALESCE((SELECT f.id FROM feeds f WHERE f.id = :target), (SELECT new_id FROM ks_id_remap WHERE kind = 'feed' AND old_id = :target), :target)
+    END AS TEXT) AS target_id
+FROM feeds WHERE deleted_at IS NULL AND (folder_id = COALESCE((SELECT id FROM folders WHERE id = :folderId), (SELECT new_id FROM ks_id_remap WHERE kind = 'folder' AND old_id = :folderId), :folderId) OR (folder_id IS NULL AND :folderId IS NULL)) ORDER BY sort_order ASC, title COLLATE NOCASE ASC;
+
 -- The next sort_order value to append to the end of the given folder's group (NULL = "no folder"),
 -- the folder id resolved as in getByFolder.
 nextSortOrderInGroup:

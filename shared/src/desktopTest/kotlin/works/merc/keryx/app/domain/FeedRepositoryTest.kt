@@ -2867,6 +2867,78 @@ class FeedRepositoryTest {
         }
     }
 
+    /** A feed id held from before a merge moved that feed onto another id. */
+    private fun SqlDriver.moved(oldId: String, newId: String) {
+        execute(null, "INSERT INTO ks_id_remap (kind, old_id, new_id) VALUES ('feed', ?, ?)", 2) {
+            bindString(0, oldId)
+            bindString(1, newId)
+        }
+    }
+
+    /**
+     * The moved feed's id is one a merge replaced, and the row it became is already in the destination
+     * group: the order is computed over the surviving row, so the feed ends before its target exactly
+     * once — not inserted beside itself and left behind by its own later re-numbering.
+     */
+    @Test
+    fun moveFeedWithAMergedAwayIdPlacesTheFeedItBecameBeforeTheTargetOnce(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f-a", now = 0L, sortOrder = 0L)
+            db.insertFeed("f-b", now = 0L, sortOrder = 1L)
+            db.insertFeed("f-new", now = 0L, sortOrder = 2L)
+            driver.moved("f-old", "f-new")
+            val repo = newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK) })
+
+            repo.moveFeed("f-old", null, targetFeedId = "f-a")
+
+            val ordered = db.feedsQueries.getByFolder(null).executeAsList()
+            assertEquals(listOf("f-new", "f-a", "f-b"), ordered.map { it.id })
+            assertEquals(listOf(0L, 1L, 2L), ordered.map { it.sort_order })
+        } finally {
+            driver.close()
+        }
+    }
+
+    /** A target id a merge replaced is found as the row it became, so the feed lands before it, not at the end. */
+    @Test
+    fun moveFeedBeforeAMergedAwayTargetIdPlacesTheFeedBeforeTheRowItBecame(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f-a", now = 0L, sortOrder = 0L)
+            db.insertFeed("f-new", now = 0L, sortOrder = 1L)
+            db.insertFeed("f-b", now = 0L, sortOrder = 2L)
+            driver.moved("f-old", "f-new")
+            val repo = newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK) })
+
+            repo.moveFeed("f-b", null, targetFeedId = "f-old")
+
+            assertEquals(listOf("f-a", "f-b", "f-new"), db.feedsQueries.getByFolder(null).executeAsList().map { it.id })
+        } finally {
+            driver.close()
+        }
+    }
+
+    /** An anchor id a merge replaced is resolved too: the new feed lands directly after the row it became. */
+    @Test
+    fun subscribeFeedAfterAMergedAwayFeedIdInsertsItDirectlyAfterTheRowItBecame(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f-a", now = 0L, sortOrder = 0L)
+            db.insertFeed("f-new", now = 0L, sortOrder = 1L)
+            db.insertFeed("f-b", now = 0L, sortOrder = 2L)
+            driver.moved("f-old", "f-new")
+            val repo = newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK) }, clock = Clock { 999L })
+
+            val result = repo.subscribeFeed("https://ex.com/feed", afterFeedId = "f-old")
+
+            assertIs<Result.Ok<Feeds>>(result)
+            assertEquals(listOf("f-a", "f-new", result.value.id, "f-b"), db.feedsQueries.getByFolder(null).executeAsList().map { it.id })
+        } finally {
+            driver.close()
+        }
+    }
+
     @Test
     fun subscribeFeedWithAfterFeedIdInsertsNewFeedDirectlyAfterItWithinTheUnfiledGroupAndShiftsLaterSiblings(): Unit = runBlocking {
         val (driver, db) = inMemoryDb()
