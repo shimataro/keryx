@@ -238,7 +238,11 @@ struct HomeView: View {
         // opened), so WebKit can start while the app is idle rather than on the first article.
         .task { await ReaderWebViewWarmUp.scheduleOnce() }
         .onAppear { restoreCompactColumn() }
-        .onChange(of: home.selectedArticleId) { old, new in restoration.selectionChanged(from: old, to: new) }
+        // `old` in the id space of the article moves applied since (`HomeViewModel.currentArticleId`): a
+        // feed merge moving the selected article onto another id is not the user choosing another one.
+        .onChange(of: home.selectedArticleId) { old, new in
+            restoration.selectionChanged(from: old.map { home.viewModel.currentArticleId(id: $0) }, to: new)
+        }
         #endif
         .focusedSceneValue(\.homeFocusedPane, focusedPane)
         #if os(macOS)
@@ -582,7 +586,13 @@ private struct RestoringArticleDetailView: View {
             preferences: preferences,
             focusedPane: focusedPane,
             isOnScreen: isOnScreen,
-            restoredScroll: restoration.readerScroll(articleId: readerScrollArticleId, fraction: readerScrollFraction),
+            // The stored article id is translated through the article moves applied since it was saved
+            // (`HomeViewModel.currentArticleId`): a feed merge can have moved the article onto another id,
+            // which the restored selection already carries.
+            restoredScroll: restoration.readerScroll(
+                articleId: readerScrollArticleId.isEmpty ? "" : home.viewModel.currentArticleId(id: readerScrollArticleId),
+                fraction: readerScrollFraction
+            ),
             onScroll: { id, fraction in
                 // Only the article on screen; a neighbour kept ready for a swipe is not the one to restore.
                 guard id == home.selectedArticleId else { return }

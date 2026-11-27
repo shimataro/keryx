@@ -74,7 +74,8 @@ RSS 2.0 / Atom 1.0 (RSS 1.0/RDF parsed loosely). JSON Feed will come after α.
 
 | Data | Policy |
 | --- | --- |
-| Read / unread, star | Last-write-wins (`read_at` / `starred_at`); a star and a cache-cleanup deletion are decided together — the newer of the two wins |
+| Read / unread, star | Last-write-wins (`read_at` / `starred_at`) |
+| Cache-cleanup deletion of an article | Last-write-wins, separately from the star; a starred article stays visible even if another device's cleanup deleted it |
 | Article body | OR merge (keep if present on either side) |
 | Subscription list (add) | OR merge |
 | Subscription list (remove), tags / folders, global settings | Last-write-wins (propagated via logical deletion) |

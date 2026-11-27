@@ -41,11 +41,11 @@
                   CloudFileTransfer, SecretStoreTokenStorage
     data/cloud/nextcloud/  NextcloudStorage（WebDAV）, NextcloudLoginFlow（Login Flow v2）, NextcloudServerProbe（status.php）, normalizeNextcloudUrl, revokeNextcloudAppPassword — sync-architecture.ja.md の「Nextcloud（Login Flow v2）」参照
     data/opml/    OpmlCodec
-    domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, V2IdentitySql（同期マージの同一性ステップ: 同一のタグ/フォルダーの行をすべて正準 id へ移す）, TagFolderIdRekey（`KERYX_SCHEMA_CALLBACKS`: v2→v3 でタグ/フォルダーを名前から導かれる id へ振り直す。各プラットフォームのデータベースドライバーと `DatabaseMerger` が実行する）, IdRemapSql/TagFolderIdRemaps（タグ/フォルダー id の振り直し——後述の「タグ/フォルダー id の振り直し」を参照）, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport（interface + CustomUri）, AuthorizationLauncher（interface + schemeOf。`OAuthConnectFlow` が認可 URL をどう開くか——デスクトップ/Android は既定でシステムのブラウザ、Apple アプリは Swift に委ねる。下記「KeryxSdk」参照）, LoginPageLauncher（インターフェース + BrowserLoginPageLauncher — Nextcloud の Login Flow v2 がサインインページを表示し、そこから戻る方法）, OAuthCallbackParams, OAuthUriParser（parseOAuthUri。すべての `keryx://`・ループバックのリダイレクト処理が共有）, StartupMaintenanceTasks（runStartupMaintenance/checkForUpdateAndNotify/maybeRebuildFtsIndex）, BackgroundRefreshLoop（backgroundUpdateLoop——デスクトップ版自身のポーリングループ。Apple 版の `KeryxSdk.startMaintenance()` も使う。Android は `WorkManager` でスケジュールするため、これに相当するものはない）, RefreshCycleRunner（すべての更新経路が共有する 更新 → 通知 → 同期 のサイクル）, NetworkUsagePolicy（現在の回線でどの自動通信を許可するか——sync-architecture.ja.md の「ネットワークゲート」参照）, UpdateChecker/UpdateRepository/UpdateAsset/UpdateInstallPolicy/UpdateInstaller（expect 相当の interface）/AvailableUpdate/UpdateState（アプリ内アップデート——下記「アプリ内アップデート」参照）
+    domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, V2IdentitySql（同期マージの同一性ステップ: 同一のタグ/フォルダーの行をすべて正準 id へ移す）, TagFolderIdRekey（`KERYX_SCHEMA_CALLBACKS`: v2→v3 でタグ/フォルダーを名前から導かれる id へ振り直す。各プラットフォームのデータベースドライバーと `DatabaseMerger` が実行する）, FeedIdentitySql（同期マージとリダイレクトの統合のフィード/記事の同一性の処理: 1 つの同一性のフィードとその記事をすべて正規の id へ移す）, RowFold（転送ファイルの畳み込みと同一性の処理が共有する畳み込みの規則）, IdRemapSql/IdRemaps（タグ・フォルダー・フィード・記事 id の振り直し——後述の「id の振り直し」を参照）, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport（interface + CustomUri）, AuthorizationLauncher（interface + schemeOf。`OAuthConnectFlow` が認可 URL をどう開くか——デスクトップ/Android は既定でシステムのブラウザ、Apple アプリは Swift に委ねる。下記「KeryxSdk」参照）, LoginPageLauncher（インターフェース + BrowserLoginPageLauncher — Nextcloud の Login Flow v2 がサインインページを表示し、そこから戻る方法）, OAuthCallbackParams, OAuthUriParser（parseOAuthUri。すべての `keryx://`・ループバックのリダイレクト処理が共有）, StartupMaintenanceTasks（runStartupMaintenance/checkForUpdateAndNotify/maybeRebuildFtsIndex）, BackgroundRefreshLoop（backgroundUpdateLoop——デスクトップ版自身のポーリングループ。Apple 版の `KeryxSdk.startMaintenance()` も使う。Android は `WorkManager` でスケジュールするため、これに相当するものはない）, RefreshCycleRunner（すべての更新経路が共有する 更新 → 通知 → 同期 のサイクル）, NetworkUsagePolicy（現在の回線でどの自動通信を許可するか——sync-architecture.ja.md の「ネットワークゲート」参照）, UpdateChecker/UpdateRepository/UpdateAsset/UpdateInstallPolicy/UpdateInstaller（expect 相当の interface）/AvailableUpdate/UpdateState（アプリ内アップデート——下記「アプリ内アップデート」参照）
     di/           SharedModule（sharedModule + updateModule + presentationModule）と HttpClientFactory［:shared］、AppModule（+ expect platformModule）と ImageLoaderSetup［:composeApp］
     presentation/ ［:shared］すべての UI が共有する、UI フレームワーク非依存の画面状態：home/（HomeViewModel——ホーム画面の
                   フィルタ・選択・記事リスト・検索・未読のみ・新着の状態と操作。ArticleContentCache、HomeRefreshController、
-                  NewArticleTracking。FeedListExpansion——フォルダ・タグの開閉状態（端末ローカルに永続化）。NameOrdinals——同名のタグ/フォルダーを見分ける「(2)」の序数（`tagFolderLabels`）。両 UI のために 1 か所で決める。TagFolderIdRemapping——マージが振り直したタグ/フォルダー id へ、`HomeViewModel` が保持するすべての id を移す。
+                  NewArticleTracking。FeedListExpansion——フォルダ・タグの開閉状態（端末ローカルに永続化）。NameOrdinals——同名のタグ/フォルダーを見分ける「(2)」の序数（`tagFolderLabels`）。両 UI のために 1 か所で決める。IdRemapping——マージが振り直したタグ・フォルダー・フィードの id へ、`HomeViewModel` が保持するすべての id を移す。
                   SelectionReadIntents——選択した記事の本文の読み込み中に行った、既読・未読の明示的な操作の記録（その選択の
                   暗黙の既読より優先させるため）。FeedListModel——FeedListRowSelection とフィードリストの並び・グループ化の規則。
                   ArticleListModel。ReaderPaging——リーダーのページャのページ／選択の規則。ReaderContent——単一（非ページャ）のリーダーが表示するもの
@@ -752,7 +752,8 @@ item 破棄そのものに内在するものだった。`ArticleWebViewCarousel`
     「確定したスワイプの遷移先」として記録していた場合（`pendingSelectionPage` /
     `consumePendingSelection`）にだけ、`HomeViewModel.selectArticle`（既読化するのはここ）へ昇格
     させる。`PagerState` は一覧がその現在ページより縮んだとき自身の現在ページをクランプする
-    ——検索、同期マージによるトゥームストーン、「未読のみ」が今読んだばかりの記事を隠す、など、
+    ——検索、同期マージで記事が表示されなくなる（削除済みでスターなし）、「未読のみ」が今読んだばかりの
+    記事を隠す、など、
     スワイプが一切絡まないケースで起こる——このゲートが無ければ、そのクランプはクランプ先に
     たまたま来た記事を選択し既読化してしまう。未選択のときにも何もしないので、`PaneLayout.Dual`
     で一覧に触れないままページ 0 に居るリーダーが、勝手に先頭記事を開いてしまうこともない。
@@ -791,7 +792,7 @@ HTML 除去済みコピーである `search_text` も含まれ、リーダーは
 保持し続けており、これが選択が隣へ移った後も、直前までスワイプで見ていたページを（空白化・
 再読み込みさせず）描画され続けさせている。`readerPages` は一覧側の対になる仕組みで、選択中の
 記事がまだ `pagerArticles` に載っていない（この Flow は `Eagerly` ではなく `WhileSubscribed` な
-ので最初は空——後述）、あるいはちょうどトゥームストーンされた場合、ページャは空のページャと
+ので最初は空——後述）、あるいはちょうど表示されなくなった（削除済みでスターなし）場合、ページャは空のページャと
 埋まったページャを切り替える代わりに、選択だけから合成した 1 ページのリストを描画する
 （切り替えるとその 1 ページの `WebView` が破棄・再構築されてしまう）。`HomeViewModel.pagerArticles`
 が兄弟の `Eagerly` と違って `WhileSubscribed` なのは、これを購読するのがリーダーのページャだけ
@@ -1080,11 +1081,11 @@ JVM ドライバがステートメントごとに開く接続で読むため、�
 一覧が選択を見える位置までスクロールするのは、`selectedArticleId` ではなく `selectionRevealRequests` の変化で行う。
 これはユーザーが別の記事へ動かした選択（どの経路でも、そのような `selectArticle` 1 回につき 1。すでに選択
 している記事をもう一度選んでも数えない）を数える。カーソルは、ユーザーが操作して
-いなくても動く（同期マージで墓石化された行を選ぶと、直前の記事へカーソルが戻る）ので、そのたびに一覧が勝手に
+いなくても動く（同期マージで選択中の行が表示されなくなる（削除済みでスターなし）と、直前の記事へカーソルが戻る）ので、そのたびに一覧が勝手に
 その記事へスクロールし戻ってはならない。フィルタ切り替えによる選択の解除や、復元された選択は要求に含めない
 （復元された選択は、最初の composition が自分で見える位置に出す）。検索結果リストも同じ規則に従う。
 要求があったときと、結果が最初に届いたときにだけ選択へスクロールし、結果の中身が変わっただけではスクロールしない——
-背景の書き込みで検索が再実行されたり、墓石化された選択が差し戻されたりしても、選択した行まで一覧を引き戻してはならない。クエリを変えるのは、ユーザーが別の一覧を求める操作なので、フィルタを
+背景の書き込みで検索が再実行されたり、表示されなくなった（削除済みでスターなし）選択が差し戻されたりしても、選択した行まで一覧を引き戻してはならない。クエリを変えるのは、ユーザーが別の一覧を求める操作なので、フィルタを
 変えたときと同じく、結果は先頭に戻る（ペインを再マウントしたときは位置を保つ）。
 `toggleStarSelected` も `toggleReadSelected` と同じくカーソルの記事を対象にする。本文の読み込み中に切り替えた
 スターは記録され（2 つ目の `SelectionReadIntents`）、読み込んだ行に重ねられる。この読み込みは
@@ -1099,12 +1100,12 @@ JVM ドライバがステートメントごとに開く接続で読むため、�
 待っているとき——だけ、`hydrateSelection` が起動する猶予タイマーが `Header` を出す。新しい記事の一覧の行から
 タイトル・日付・リンクを空の本文の上に表示するもので、pager が本文未読み込みのページに描く文書と同じである。
 タイマーは読み込みのどの終わり方でも必ず cancel され、発火時には自分の選択が最新で、カーソルが指していて、
-まだ読み込まれていないことを確かめる。ヘッダーは本文が届いたとき、`selectFilter`、tombstone の検出で
+まだ読み込まれていないことを確かめる。ヘッダーは本文が届いたとき、`selectFilter`、記事が表示されなくなったことの検出で
 消える。ヘッダー表示中に新しい選択が行われると、リーダーを前に読み込んだ記事へ戻して猶予期間を待つのではなく、
 そのままヘッダーを新しい記事のものに切り替える。Compose の単体リーダーと macOS の SwiftUI リーダーがこれを
 描画する。iOS の pager は描画しない（本文がまだないページは従来どおりリーダーの背景だけを表示する）。
 
-### タグ/フォルダー id の振り直し
+### id の振り直し
 
 **レイヤリングの例外: `DatabaseDriverFactory` の actual は `domain/` に依存する。** 各プラットフォームの
 `DatabaseDriverFactory` の actual（`data/local/`）は `KERYX_SCHEMA_CALLBACKS` を組み込み、その `TagFolderIdRekey`
@@ -1117,30 +1118,63 @@ JVM ドライバがステートメントごとに開く接続で読むため、�
 
 タグやフォルダーの id は変わりうる。v2→v3 移行はすべての行を名前由来の id へ振り直し、同期マージは行をその同一性の
 正規の id へ移す（`domain/V2IdentitySql.kt`。[sync-architecture.ja.md](sync-architecture.ja.md) の「タグとフォルダーの
-同一性」）。移動はすべて `domain/IdRemapSql.kt` を通して `ks_id_remap` に記録され、連鎖を畳むので、
+同一性」）。フィードと記事の id も変わりうる: 同期マージ、または同じホストへの恒久的なリダイレクトが別のフィードの
+URL に着いたフィード更新は、1 つの同一性のフィードをすべてその正規の id へ、その各記事を `(フィード, guid)` のキーの
+正規の id へ移す（`domain/FeedIdentitySql.kt`。同「フィードと記事の同一性」）。移動はすべて（kind は `tag`・`folder`・
+`feed`・`article`）`domain/IdRemapSql.kt` を通して `ks_id_remap` に記録され、連鎖を畳むので、
 旧 id はその行が今持つ id へ 1 回で写る（[db-schema.ja.md](db-schema.ja.md) を参照）。データベースの外でそうした id を
 保持しているものはこれに追従するので、振り直しによって選択やユーザーの書き込みが宙に浮くことはない:
 
-- **公開。** `domain/TagFolderIdRemaps`（Koin の single）は、畳んだ表全体を `StateFlow` として保持する
-  （`TagFolderIdRemap`: 種類ごとの旧 → 新）。`DeltaSync` は、すべてのマージ（受信のものと差分同期以前からの移行のもの）のコミット後——その中ではなく——に
-  `publishFromDb()` を呼ぶ。失敗はログに残すだけで同期を失敗させない。次のマージか起動時に追いつき、どの書き込みも
-  古い id を自分で解決するため。
+- **公開。** `domain/IdRemaps`（Koin の single）は、畳んだ表のうちタグ・フォルダー・フィードの移動を `StateFlow` として
+  保持する（`IdRemap`: 種類ごとの旧 → 新。`idRemapPublished` で読む）。`DeltaSync` は、すべてのマージ（受信のものと
+  差分同期以前からの移行のもの）のコミット後に、`FeedRepository` はフィード更新のリダイレクトによる統合のコミット後に——
+  どちらもその中ではなく——`publishFromDb()` を呼ぶ。失敗はログに残すだけで同期もフィード更新も失敗させない。次の
+  マージか起動時に追いつき、どの書き込みも古い id を自分で解決するため。リダイレクトの統合では、生成された文が
+  コミット時に、公開より前に一覧へ知らせ、同期マージでも公開より前に別の書き込みが一覧を再実行しうるので、id が
+  消えたと判断する保持側は、まずデータベースから対応表に追いつく（後述）。記事の移動は意図的に含めない: フィードの
+  統合は統合されたフィードの記事をすべて移し、データベースの外で保持されるものよりはるかに多いので、時間をまたいで
+  保持される少数の記事 id は、代わりにデータベースから 1 つずつ解決する（後述の「記事」参照）。
   バッチの流れではなく対応表全体の `StateFlow` にしたのは意図的である: 遅れて収集を始めた保持側もそれまでの振り直しを
   すべて受け取り、置き換えられた値は新しい値に含まれ、同じ値を再適用しても何も変わらない（表は畳んであり、旧 id を
   持つ生きた行はない）ので、取りこぼしも二重適用もない。
-- **ローカル設定。** `SettingsRepository` は、構築時（表そのものを読む）と、公開された値ごとに、`lastFilter`・
-  `collapsedFolderIds`・`expandedTagIds` にこの表を適用する。書き換えは両者で 1 つで、何かが変わったときだけ保存する。
-- **`HomeViewModel`。** 公開された値ごとに、選択中のフィルタと行（`filterSelection`、`_selectedRowInstance`。振り直された
-  タグの下に入れ子になったフィード行も含む）を新しい id へ移す——`selectFilter` を通さず直接移すので、選択が
+- **ローカル設定。** `SettingsRepository` は、公開された値を `lastFilter`（`tag:`・`folder:`・`feed:` のフィルター）、
+  `collapsedFolderIds`、`expandedTagIds`、`faviconMissedAt` のフィードのキー（統合された 2 つのフィードがどちらも記録を
+  持っていれば早いほうを残す）に適用する。書き換えは読み込んだ表とその後のすべての値で 1 つで、何かが変わったときだけ
+  保存する。`lastArticleId` は書き換えない: `HomeViewModel` が復元するときに解決する。
+- **`HomeViewModel`。** 公開された値ごとに（`presentation/home/IdRemapping.kt`）、選択中のフィルタと行（`filterSelection`、
+  `_selectedRowInstance`。フォルダーや振り直されたタグの下に入れ子になったフィード行も含む）を新しい id へ移す——`selectFilter` を通さず直接移すので、選択が
   「すべてのフィード」に戻ることはなく、記事・ピン・カーソルもそのまま残る（外部仕様 §9「Least surprise」）——。
   進行中のプルのフィルタも一緒に移す（`HomeRefreshController.remapPulls`。プルはそれぞれのトークンで追うので、
   プルの終わりは今も自分を取り除く）。
   さらに `FeedListExpansion` の折りたたみ/展開の集合を書き換え、保留中の削除フォールバック
   （`DeletedItemFallback.remapPending`）を削除対象が今持つ id へ移す。そのフォールバックは、その id で比較し、忘れる。
   振り直し前にフィードリストが描画した行は古い id のままクリックされうるので、`selectFilter`、フォルダー/タグの
-  開閉、`revealFeedListRow` も、受け取った id を現在の値で解決する。
-- **書き込み。** タグ/フォルダー id を受け取るリポジトリの書き込みはすべて、書き込み文そのものの中で id を解決する
-  （`tags.sq` / `folders.sq` / `feeds.sq` / `feed_tags.sq` / `articles.sq`）。そのため、開いたままのリネーム欄、
+  開閉、`revealFeedListRow` も、受け取った id を現在の値で解決する。フィード id は、選択中の記事のフィード名と
+  ファビコン、行ごとの更新スピナー（フィード更新は始めたときの id でフィードを数える）でも追従する。保存済みの
+  フィードのフィルターは `feeds.resolveId` を通して復元するので、アプリを閉じている間に行われたマージも、公開された
+  対応表が読み込まれる前から生き延びる。移動の前に描画された行から始めたフィード更新も、その id を解決する
+  （`FeedRepository.resolveFeedId`）。保持しているタグ・フォルダー・フィードが消えたと判断する前——保留中の削除の
+  フォールバック、インラインリネームの行——には、データベースから対応表に追いつく（`catchUpIdRemapFromDb`）。一覧が
+  対応表より先に届くことがあるため。
+- **記事。** 時間をまたいで保持される記事 id は、公開された対応表ではなく、行を指さなくなった時点でデータベースから
+  解決する。`articles` への書き込みのたびに走るピンと選択の照合が、表示される行の無い保持中の id を見つけると、
+  まずそのうちどれが移ったかを問い（`articles.movedIdsIn`。`ArticleRepository.movedArticleIds` を通して）、すべての
+  保持側を各 id が今持つ id へ移す（`remapHeldArticleIds`）: 既読状態とスター解除のピン、選択、そのカーソル（選択とは
+  数えないので一覧はスクロールしない）、保留中の行とヘッダー、既読/スターの意図と書き込みの世代、新着の追跡とその
+  表示範囲、保存済みの記事——それが済んでから、残りを削除されたものとみなす。各移動はセッションの間、畳んで保持し、
+  その前に始まった操作（本文の読み込み、既読/スターの書き込みの完了や巻き戻し）は、捕まえた id を `currentArticleId`
+  で読み替える。これは公開してあり、SwiftUI のリーダーが保存したスクロール位置の記事を選択と比べるのにも使う。選択の
+  本文の読み込みと起動時の復元は `articles.getByIdResolved` で行を読むので、マージと競合した読み込みも移った先の記事に
+  着く。記事一覧の新着の差分は、候補の id のうち移動が着いたものを `articles.rekeysOnto` に問い、それらをすでに表示して
+  いた記事として扱ってまだ見ていない状態を引き継ぐので、統合された記事を新着と数えることはない。
+- **「フィードを表示」。** 通知の `ShowFeedDetail` は、通知が出たときにフィードが持っていた id を保つ。
+  `HomeViewModel.showFeedDetail`——両 UI が呼ぶ 1 つの実装で、その後それぞれが自分のペインにフォーカスする——は、まず
+  データベースから振り直しの対応表に追いつき、それから `selectFilter` でフィードを選ぶので、その後マージがフィードを
+  移してまだ公開していなくても、フィードの正規の行に着く。
+- **書き込み。** タグ・フォルダー・フィード・記事の id を受け取るリポジトリの書き込みはすべて、書き込み文そのものの
+  中で id を解決する（`tags.sq` / `folders.sq` / `feeds.sq` / `feed_fetch_state.sq` / `feed_tags.sq` / `articles.sq`。文の
+  一覧は [db-schema.ja.md](db-schema.ja.md) にある）。そのため、マージがその間に移したフィード id のもとで取得したフィード
+  更新、開いたままのリネーム欄、
   `SerialWriteQueue` に積まれた項目、振り直し前に始まったドラッグも、移った先の行に適用され、何にも当たらずに
   終わることも外部キー違反（ローカル書き込みの失敗になる）になることもない。解決は文の一部なので、トランザクションの
   最初の書き込みより前の読み取りは増えない。`FolderRepository.reorderFolders` は、新しい並びを計算する前に
@@ -1162,14 +1196,18 @@ JVM ドライバがステートメントごとに開く接続で読むため、�
 - **フィードリストもそのまま。** `HomeViewModel.selectedRowGeneration` はユーザーが行を選んだ回数を数える。フィード
   リストのスクロール追従（Compose の `FeedListPane`、macOS の `FeedListView`）は、振り直しで id が置き換わる
   `selectedRowInstance` ではなく、これで判断する。インラインリネームは、始めたときの id で行を指し続け、行との
-  比較は `HomeViewModel.tagFolderIdRemap` を通して行う（一覧と表は別の flow で UI に届き、順序は不定）。そこまでに
+  比較は、タグ・フォルダー・フィードの行のどれでも `HomeViewModel.idRemap` を通して行う（Compose の
+  `InlineEditTarget.remappedBy` / `resolvedIn`。一覧と表は別の flow で UI に届き、順序は不定）。そこまでに
   入力した文字はペイン側（`InlineEditState`、`SidebarDialogState.renamingDraft`）が持つので、新しい id で作り直された行は
   その続きから始まる。振り直しで composition から外れたエディタはフォーカスを失ったことにならず、何も確定しない。
   タグとフォルダーの名前は `HomeViewModel.tagFolderLabels`——各行の名前とその序数を 1 つにした flow——からだけ描画する
   ので、名前と序数が別々のスナップショットから来ることはない。
 
 Apple アプリは、`HomeViewModel` から読むものと一時的な UI 状態（インラインリネームの行キー、削除確認中の行、
-ドラッグ）以外に、タグやフォルダーの id を独自に保持しない。一時的な状態からの操作は、上の解決付きの書き込みを通る。
+ドラッグ）以外に、タグ・フォルダー・フィードの id を独自に保持しない。一時的な状態からの操作は、上の解決付きの書き込みを
+通る。サイドバーは、保持した行キーと行を `SidebarIdRemap`（`HomeViewModel.idRemap` のタグ・フォルダー・フィードの
+振り直しを持つ）を通して比べる。独自に持つ唯一の記事 id である iOS のリーダーの保存したスクロール位置は
+`HomeViewModel.currentArticleId` を通して選択と比べ、通知の行の「フィードを表示」は `HomeViewModel.showFeedDetail` を呼ぶ。
 
 ## ナビゲーション
 
@@ -1423,8 +1461,8 @@ iOS / iPadOS アプリは SwiftUI アプリなので、この Compose のレイ�
 
 したがってこれらのピンは、意図的に DB を先回りしうる楽観的キャッシュである
 — しかし、ピンを立てる操作自体は「その後 DB が実際に追いついたか」を再確認しないため、
-再検証なしでは、外部からの変更（他端末の同期による「未読にする」・再スター、または論理削除の
-tombstone）を、書き込みが in-flight の短い間だけでなく**永久に**隠し続けてしまいかねない。
+再検証なしでは、外部からの変更（他端末の同期による「未読にする」・再スター、またはスターなしの記事の
+削除）を、書き込みが in-flight の短い間だけでなく**永久に**隠し続けてしまいかねない。
 
 `HomeViewModel.reconcilePinnedArticlesAndSelection` はこの隙間を埋める: `articleChangeSignal` コレクタ経由で
 `articles` への書き込みのたびに走り、ピン留め済みの全 ID — および現在の選択のキャッシュされた
@@ -1482,9 +1520,10 @@ intent（新しく記録し直すので、本文を読み込み中の選択は D
 表示の一覧からその行が消えてしまう。選択中の記事のピンは 1 回の `update` の中で、更新対象の map に
 対して決めるので、再トリムは並行する reconcile と合成される。その間に reconcile が外したピンは
 外れたままにし、既存のピンはそのまま残す。reconcile はピンの後で選択記事を更新するため、既存の
-ピンを選択記事から作り直すことはしない。選択中の記事がまだ存在するか（同期マージで tombstone に
-なっていないか）は、その後で、呼び出し元の（main）スレッドではなく `dbWriteDispatcher` 上の読み取りで
-確認する。そのため、マージが書き込みロックを持っていても UI が止まらない。tombstone になっていた
+ピンを選択記事から作り直すことはしない。選択中の記事がまだ表示されるか（同期マージで削除されて
+いないか。スター付きの記事は削除されても表示される——[db-schema.ja.md](db-schema.ja.md) の `articles` 参照）は、
+その後で、呼び出し元の（main）スレッドではなく `dbWriteDispatcher` 上の読み取りで
+確認する。そのため、マージが書き込みロックを持っていても UI が止まらない。表示されなくなっていた
 場合は、そのピンが再トリムで残したピンそのものである場合に限って外す。
 
 これを呼び出す箇所はどれも、既読状態ピンに削るだけの価値がある

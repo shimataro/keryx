@@ -427,7 +427,8 @@ Confirmed by inspection (not by triggering each one) — a transaction reads bef
 opening `db.transaction {}`, so they don't have this shape. (`moveFeed` holds `feedPlacementMutex`
 across that read and its transaction, so it cannot interleave with a subscribe placing a feed in the
 same group, while keeping the read outside the transaction.) Neither does the feed-refresh apply
-transaction (`FeedRepository.kt`, around `applyFetch`), which only writes.
+transaction (`FeedRepository.kt`, around `applyFetch`), which only writes — its first statement is
+a write even for a redirect (the redirect's own reads come after it).
 `TagRepository.createTagAndAttach` and `FolderRepository.createFolderAndMoveFeed` write first (the
 name's `upsertByName`) and read only after it, so their transactions hold the write lock from their
 first statement.
@@ -487,63 +488,56 @@ Classification" in [sync-architecture.md](sync-architecture.md) — including th
 in-transaction checks — and the FTS rule that the merge is followed by the `search_text` recomputation and
 `indexMissing()`.
 
-## Feeds sharing one URL under different ids keep whichever arrived first
+## A refresh's content write can move `feeds.updated_at` without sending it
 
-**Status**: not fixed — closing it needs re-keying a feed and everything that references it onto a canonical id,
-a redesign outside the scope of the change that found it (see "What a real fix would need"). It breaks the
-merge's commutativity and associativity (see "Design Philosophy" in [sync-architecture.md](sync-architecture.md))
-for these feeds.
+**Status**: not fixed — the guard that closes it changes what a refresh writes when its snapshot is stale, and
+the tests and the sync notes that describe a refresh as rewriting a feed's content on every cycle assume the
+current behavior (see "What a real fix would need").
 
 ### Symptom
 
-Two feeds with the same URL but different ids reach a device in separate files. Whichever is merged first is
-kept, together with its articles; the other, and every article and tag link that belongs to it, is skipped for
-good. Merged in the other order, the other feed is kept; merged after folding both files, the one with the
-greater `updated_at` (then id) is kept. Devices that received the files in different orders keep different
-feeds, and the articles read or starred under the dropped one stay missing on them.
+`feeds.updated_at` is the content group's last-write-wins stamp, and the capture trigger does not watch it
+(`SyncCaptureTriggerTest.aFeedUpdateIsRecordedOnlyWhenASyncedColumnOtherThanUpdatedAtChanges`). A refresh that
+writes content identical to what the row already holds moves the stamp and records nothing to send, so this
+device holds a content stamp no other device has. A peer's later title or description change stamped between the
+two then loses here and wins there, and the devices stop agreeing on that feed's content until a newer change
+reaches both.
 
 ### Diagnosis
 
-A feed's id is `IdGenerator.feedId(url)` (UUIDv5) at subscription, but a 301/308 redirect updates the URL and
-keeps the id (`feeds.sq`'s `updateUrl`), so a redirected feed and a fresh subscription of its new URL share a
-URL under different ids. The merge's guard (`NOT EXISTS … l2.url = c.url AND l2.id <> c.id`) skips a cloud feed
-whose URL main already holds under another id, and `winnerAmong` picks among cloud duplicates by `updated_at`,
-which differs between the files and main — so the survivor depends on the order.
+`FeedRepository.applyFetch` decides whether to call `feeds.updateContent` by comparing the fetched values with
+the `Feeds` row it was handed — a snapshot `refreshFeeds` took before the fetch phase — not with the row as it
+is now. When a sync merge (or another refresh) stored the same content meanwhile, the snapshot differs from the
+fetched values, `updateContent` runs, and it sets `updated_at` with nothing else changing. `feeds.upsert` and
+`feeds.updateUrl` are guarded on a real change in the statement itself; `updateContent` is not.
 
 ### What a real fix would need
 
-- A canonical id per URL that does not depend on the order: the id equal to `IdGenerator.feedId(url)` if one
-  exists, else the greatest id.
-- Re-keying the losing feed onto it inside the merge, both in `main` and among the cloud rows: its articles
-  move to `IdGenerator.articleId(canonical, guid)`, which SQLite cannot compute, so a deterministic SQL function
-  would have to be registered on every merge connection (desktop JDBC, Android requery, Apple
-  `RawSqliteConnection`). Its `feed_tags`, `feed_fetch_state` and unsent `sync_outbox` entries, the search index,
-  and `local_settings.lastFilter` move with it, and the old feed row is physically deleted after its children
-  have moved.
-
-Even then, a loser whose URL changes again after the re-key comes back as a separate feed, and a pre-delta cloud
-file cannot be rewritten, so devices can still diverge in those cases.
+Make `updateContent` write only when a value actually changes, in the statement (a `WHERE` on the three columns
+differing from the row, as `updateUrl` does for the URL), so a stale snapshot cannot move the stamp alone — and
+update the tests and the notes that expect a refresh to rewrite the content every cycle.
 
 ## Home reads the database on the main thread while it is constructed
 
 **Status**: not fixed — moving the first database open and the first reads off the main thread needs the
 whole startup flow redesigned, which is outside the scope of the change that found it (see "What a real fix
-would need"). The tag/folder re-key map's own load (`TagFolderIdRemaps`) was moved to the background; the
+would need"). The re-key map's own load (`IdRemaps`) was moved to the background; the
 reads below remain.
 
 ### Symptom
 
 `HomeViewModel`'s construction runs on the main thread (`koinViewModel` during the first composition) and
 reads the database synchronously: the restored selected article (`restoredArticle`, the
-`ArticleRepository.getArticleById` of `lastArticleId`) and, for a feed filter or a tag/folder filter whose
-re-key map has already loaded, the filter's target (`validateFilterTarget`). On Android the driver opens the
+`ArticleRepository.getArticleByIdResolved` of `lastArticleId`) and the filter's target
+(`validateFilterTarget`) — for a feed filter always, since the feed id is resolved from the database whether or not
+the re-key map has loaded, and for a tag/folder filter whose map has already loaded. On Android the driver opens the
 file, and runs its schema migration, lazily on the first query, so a first launch after an update can do that
 work on the main thread, where a long migration shows as a frozen start or an ANR.
 
 ### Diagnosis
 
 Found while tracing the re-key map's load (`App.kt` → `koinInject<SettingsRepository>()` →
-`TagFolderIdRemaps`), which read `ks_id_remap` in its constructor on the same thread. The reads in
+`IdRemaps`), which read `ks_id_remap` in its constructor on the same thread. The reads in
 `HomeViewModel` are older than the re-key work. Nothing on the path switches dispatchers before the first
 query. The ViewModel needs the restored filter and article at construction because `filterRestoredOnLaunch`,
 `articleRestoredOnLaunch` and `initialHomePane` are fixed from them, and the article list's first emission
