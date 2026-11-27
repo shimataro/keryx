@@ -652,6 +652,47 @@ class HomeViewModelIdRemapTest {
     }
 
     /**
+     * A merge that commits between the two reads a saved feed filter's validation used to make (resolve
+     * the id, then read the row) left the resolved id naming a row the merge had just deleted, and the
+     * restore fell back to All although the feed is still subscribed. Resolved and read in one statement,
+     * there is no gap for the merge to land in.
+     */
+    @Test
+    fun aSavedFeedFilterSurvivesAMergeCommittingWhileItsTargetIsValidated() = runVmTest {
+        db.insertFeed("f0")
+        val hooked = AfterFeedIdResolveDriver(driver)
+        // The merge lands right after the saved id has been resolved, before anything reads its row.
+        hooked.afterResolve = { db.transaction { FeedIdentitySql.mergeLocally(driver, "f1", "f0") } }
+        val dir = works.merc.keryx.app.platform.FileIO.join(works.merc.keryx.app.platform.AppDirs.tempDir(), "home-vm-remap-${kotlin.random.Random.nextInt()}")
+        works.merc.keryx.app.data.local.LocalSettingsStore(dirOverride = dir)
+            .save(works.merc.keryx.app.data.local.LocalSettings(lastFilter = "feed:f1"))
+        val neverLoaded = IdRemaps({ error("not loaded") }, StandardTestDispatcher(TestCoroutineScheduler()))
+
+        val vm = newHomeViewModel(hooked, KeryxDatabase(hooked), clock = Clock { 100L }, idRemaps = neverLoaded, settingsDir = dir)
+            .also { fixtures += it }.vm
+
+        assertNotEquals(ArticleFilter.All, vm.filter.value)
+        assertEquals(true, vm.filterRestoredOnLaunch)
+    }
+
+    /** A saved feed filter whose feed is gone, or unsubscribed, still falls back to All Feeds. */
+    @Test
+    fun aSavedFeedFilterOfAnUnknownOrUnsubscribedFeedFallsBackToAll() = runVmTest {
+        db.insertFeed("f-gone", deletedAt = 50L)
+        for (saved in listOf("feed:f-gone", "feed:f-unknown")) {
+            val dir = works.merc.keryx.app.platform.FileIO.join(works.merc.keryx.app.platform.AppDirs.tempDir(), "home-vm-remap-${kotlin.random.Random.nextInt()}")
+            works.merc.keryx.app.data.local.LocalSettingsStore(dirOverride = dir)
+                .save(works.merc.keryx.app.data.local.LocalSettings(lastFilter = saved))
+            val neverLoaded = IdRemaps({ error("not loaded") }, StandardTestDispatcher(TestCoroutineScheduler()))
+
+            val vm = newHomeViewModel(driver, db, clock = Clock { 100L }, idRemaps = neverLoaded, settingsDir = dir)
+                .also { fixtures += it }.vm
+
+            assertEquals(ArticleFilter.All, vm.filter.value, saved)
+        }
+    }
+
+    /**
      * A notification's "show feed" names the id the feed had when it was raised; a merge committed since
      * but not yet published moved it. The action catches the map up from the database first, so it
      * selects the feed it became rather than a feed that no longer exists.
@@ -689,5 +730,28 @@ class HomeViewModelIdRemapTest {
 
         assertEquals(ArticleFilter.Feed("f2"), vm.filter.value)
         assertEquals(FeedListRowSelection.FeedInFolderGroup("f2"), vm.selectedRowInstance.value)
+    }
+}
+
+/**
+ * Passes every statement through to [delegate]; [afterResolve], when set, runs once, right after the next
+ * `feeds.resolveId` statement has returned its id — the one point at which a test can put another
+ * connection's commit between a feed id's resolution and the read of its row.
+ */
+private class AfterFeedIdResolveDriver(private val delegate: SqlDriver) : SqlDriver by delegate {
+    @kotlin.concurrent.Volatile var afterResolve: (() -> Unit)? = null
+
+    override fun <R> executeQuery(
+        identifier: Int?,
+        sql: String,
+        mapper: (app.cash.sqldelight.db.SqlCursor) -> app.cash.sqldelight.db.QueryResult<R>,
+        parameters: Int,
+        binders: (app.cash.sqldelight.db.SqlPreparedStatement.() -> Unit)?,
+    ): app.cash.sqldelight.db.QueryResult<R> {
+        val result = delegate.executeQuery(identifier, sql, mapper, parameters, binders)
+        if (sql.trimStart().startsWith("SELECT COALESCE((SELECT id FROM feeds WHERE id")) {
+            afterResolve?.also { afterResolve = null }?.invoke()
+        }
+        return result
     }
 }

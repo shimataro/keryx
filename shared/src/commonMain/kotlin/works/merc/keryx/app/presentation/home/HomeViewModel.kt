@@ -263,18 +263,19 @@ class HomeViewModel(
      * exists (soft-deleted locally, or since [restoreFilter] read it). Filters with no target of
      * their own pass through unchanged.
      *
-     * A feed id is resolved from the database first ([FeedRepository.resolveFeedId]), so a feed a
-     * merge moved onto another id is restored under that id even before the published re-key map has
-     * loaded: the merged-away row is gone, and checking the saved id alone would fall back to All.
+     * A feed id is resolved from the database ([FeedRepository.getFeedByIdResolved], which resolves the id
+     * and reads the row in one statement, so a merge committing in between cannot leave the resolved id
+     * naming a row it has just deleted), so a feed a merge moved onto another id is restored under that id
+     * even before the published re-key map has loaded: the merged-away row is gone, and checking the saved
+     * id alone would fall back to All.
      */
     private fun validateFilterTarget(filter: ArticleFilter): ArticleFilter = when (filter) {
         is ArticleFilter.Feed -> {
-            val id = feedRepository.resolveFeedId(filter.feedId)
-            val feed = feedRepository.getFeedById(id)
+            val feed = feedRepository.getFeedByIdResolved(filter.feedId)
             when {
                 feed == null || feed.deleted_at != null -> ArticleFilter.All
-                id == filter.feedId -> filter
-                else -> ArticleFilter.Feed(id)
+                feed.id == filter.feedId -> filter
+                else -> ArticleFilter.Feed(feed.id)
             }
         }
         is ArticleFilter.Tag -> {
