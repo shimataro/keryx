@@ -581,7 +581,8 @@ and the ambiguous `SQLITE_ERROR` case of the classification below is checked aga
 display on every device) hold for any statement added or changed:
 
 - Every synced column belongs to exactly one field group with one stamp (or an explicit OR rule); a column in no group
-  is never overwritten after insert and so diverges between devices.
+  changes only through an explicit fold rule (`RowFold`: the earliest `created_at`, an article's latest `cached_at` /
+  `updated_at`, the greatest non-NULL `v2_id`), and one with neither diverges between devices.
 - The tie rule is a total order on values (`SyncLww`), so arrival order never decides the result.
 - A statement that drops, folds or re-keys rows moves their children (articles, `feed_tags`, fetch state, raw folder
   assignment) first.
