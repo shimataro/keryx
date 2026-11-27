@@ -816,7 +816,8 @@ beyond a shared URL, which is a redesign of feed identity discovery.
 ### Symptom
 
 One feed shows as two rows in the feed list, each with its own copy of the articles, and the read and star state
-of an article split between the two. Every device shows the same two rows.
+of an article split between the two. Once every device has synced the same changes, every device shows the same two
+rows.
 
 ### Diagnosis
 
@@ -829,8 +830,9 @@ depends on the order the two meet: `a@X`, `a@Y`, `b@X` records no edge, while `a
 
 `feeds.url` is `UNIQUE`, so a device that would come to hold both feeds at one URL observes the collision in that
 merge, and the edge it records reaches every other device. A device that never observes it holds the two feeds at
-different URLs. When no device ever observes it, every device therefore holds the same two rows: nothing diverges
-and nothing is lost — the feed is only duplicated.
+different URLs. When no device ever observes it, every device therefore holds the same two rows once every device
+has synced the same changes and none holds a change it has not yet sent: nothing diverges and nothing is lost — the
+feed is only duplicated.
 
 ### Ruled out
 
