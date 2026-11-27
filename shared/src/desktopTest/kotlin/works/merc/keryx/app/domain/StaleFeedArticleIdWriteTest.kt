@@ -232,6 +232,24 @@ class StaleFeedArticleIdWriteTest {
         assertTrue(db.articlesQueries.getByFeedAndGuid("f-old", "g1").executeAsList().isEmpty())
     }
 
+    /** The occupied guid above is the conflict case; a guid the canonical feed does not hold yet is inserted under it. */
+    @Test
+    fun insertIfAbsentUnderStaleFeedIdInsertsAGuidTheCanonicalFeedLacksUnderTheCanonicalFeed() = withDb { driver, db ->
+        staleFeed(driver, db)
+
+        db.articlesQueries.insertIfAbsent(
+            id = "a-fresh", feed_id = "f-old", guid = "g-new", url = "https://z", title = "Fresh",
+            summary = null, content = null, author = null, published_at = null,
+            thumbnail_url = null, is_read = 0L, read_at = null, is_starred = 0L, starred_at = null,
+            cached_at = 0L, search_text = "", updated_at = 70L, created_at = 0L,
+        )
+
+        val inserted = db.articlesQueries.getByFeedAndGuid("f-new", "g-new").executeAsList().single()
+        assertEquals("a-fresh", inserted.id)
+        assertEquals("f-new", inserted.feed_id)
+        assertTrue(db.articlesQueries.getByFeedAndGuid("f-old", "g-new").executeAsList().isEmpty())
+    }
+
     @Test
     fun updateReadStatusByStaleArticleIdMarksTheCanonicalArticle() = withDb { driver, db ->
         db.insertFeed("f1")

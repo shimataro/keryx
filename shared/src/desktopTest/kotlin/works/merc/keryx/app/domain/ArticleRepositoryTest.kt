@@ -752,6 +752,52 @@ class ArticleRepositoryTest {
     }
 
     /**
+     * The statement-level bound the chunking exists for: no single `updateReadStatusByIds` statement
+     * binds more parameters than SQLite's default limit (999) — the desktop test driver would accept
+     * more, so the row states alone cannot tell a chunked write from an unchunked one — and the ids
+     * are split into the documented chunks of 450 (each id is bound twice).
+     */
+    @Test
+    fun markArticlesAsReadBindsNoMoreThanTheParameterLimitInAnySingleStatement() {
+        for (count in listOf(449, 450, 451, 900, 901, 1351)) {
+            val (rawDriver, _) = inMemoryDb()
+            val driver = ParameterCountingDriver(rawDriver)
+            val db = KeryxDatabase(driver)
+            try {
+                db.insertFeed("f1")
+                val ids = (1..count).map { "a$it" }
+                db.transaction { ids.forEach { db.insertArticle(it, "f1") } }
+                driver.statements.clear()
+
+                newRepo(db, driver).markArticlesAsRead(ids)
+
+                val updates = driver.statements.filter { (sql, _) -> "UPDATE articles" in sql && "IN (" in sql }
+                assertEquals((count + 449) / 450, updates.size, "one statement per 450 ids, count=$count")
+                assertTrue(updates.all { (_, parameters) -> parameters <= 999 }, "parameters per statement: ${updates.map { it.second }}")
+                assertEquals(0, ids.count { db.articlesQueries.getById(it).executeAsOne().is_read != 1L }, "all $count ids marked read")
+            } finally {
+                rawDriver.close()
+            }
+        }
+    }
+
+    /** Passes every statement through, recording each `execute`'s SQL and bound-parameter count. */
+    private class ParameterCountingDriver(private val delegate: app.cash.sqldelight.db.SqlDriver) :
+        app.cash.sqldelight.db.SqlDriver by delegate {
+        val statements = java.util.concurrent.CopyOnWriteArrayList<Pair<String, Int>>()
+
+        override fun execute(
+            identifier: Int?,
+            sql: String,
+            parameters: Int,
+            binders: (app.cash.sqldelight.db.SqlPreparedStatement.() -> Unit)?,
+        ): app.cash.sqldelight.db.QueryResult<Long> {
+            statements += sql to parameters
+            return delegate.execute(identifier, sql, parameters, binders)
+        }
+    }
+
+    /**
      * The ids can come from optimistic in-memory pins that outrun the DB, so the write itself must
      * leave a tombstoned or already-read row alone rather than stamp a read event the user never
      * made (its read_at/updated_at would ride the next sync).
