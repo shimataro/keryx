@@ -586,8 +586,10 @@ display on every device) hold for any statement added or changed:
 
 - Every synced column belongs to exactly one field group with one stamp (or an explicit OR rule); a column in no group
   changes only through an explicit fold rule (`RowFold`: the earliest `created_at`, an article's latest `cached_at` /
-  `updated_at`, the greatest non-NULL `v2_id`), and one with neither diverges between devices. A key column (an id, or a
-  reference to one such as `feed_tags.feed_id`) is not a value: an identity merge moves it onto the canonical id.
+  `updated_at`, the greatest non-NULL `v2_id`), and one with neither diverges between devices. A column of the row's
+  key — its id, or a key column such as `feed_tags.feed_id` / `tag_id` (the primary key) or `articles.feed_id` (part of
+  `UNIQUE(feed_id, guid)`) — is not a value: an identity merge moves it onto the canonical id. A reference that is a
+  value, such as a feed's folder assignment, still needs its field group.
 - The tie rule is a total order on values (`SyncLww`), so arrival order never decides the result.
 - A statement that drops, folds or re-keys rows moves their children (articles, `feed_tags`, fetch state, raw folder
   assignment) first.
