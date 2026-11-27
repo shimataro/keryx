@@ -129,6 +129,12 @@ the sync bookkeeping tables / `articles_fts` (virtual).
   (`etag` / `last_modified`) would make this device send a conditional request for content it never fetched, and an
   error belongs to the device that saw it. A row is created on the first fetch; a feed without one is treated as
   "never fetched, no errors".
+- The validators belong to the url they were fetched from, so **a change of the feed's `url` drops them** (trigger
+  `ks_fetch_state_validators_url_change`; `error_count` and `last_error` stay): whatever changes the url — a sync merge
+  taking another device's url, a feed identity merge giving the canonical feed the other feed's url or moving the other
+  feed's fetch state onto it, a permanent redirect — the next fetch is unconditional rather than a conditional request
+  that a `304` could answer for content never fetched from the new url. A refresh stores its response's validators after
+  its own url write, so those of a redirect's target survive.
 - The feed list flags a feed as erroring whenever `error_count > 0` (or the feed is gone, see below) — that is,
   when fetching it failed **on this device**. `FEED_TIMEOUT_RETRY_COUNT` is a separate, unrelated constant — the
   fetch-attempt retry budget `FeedFetcher` spends before giving up on a single fetch (`core/Constants.kt`).

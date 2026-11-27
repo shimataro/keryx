@@ -171,8 +171,10 @@ class FeedIdentityMergeTest {
         val local = localDb(*common(), *qRows(), "INSERT INTO feed_fetch_state (feed_id, etag, error_count) VALUES ('fq', 'q-etag', 2)")
         merge(local, deltaOf(*pRows()))
         assertFolded(local)
-        // The canonical feed existed only in the cloud file: main's device-local fetch state moves over.
-        assertEquals(listOf("fp|q-etag|2"), rows(local, "SELECT feed_id, etag, error_count FROM feed_fetch_state"))
+        // The canonical feed existed only in the cloud file: main's device-local fetch state moves over, but
+        // without its validators — the moving feed's url was set aside by the re-key, and a validator
+        // belongs to the url it was fetched from — while its error count stays.
+        assertEquals(listOf("fp|null|2"), rows(local, "SELECT feed_id, etag, error_count FROM feed_fetch_state"))
         assertTrue("ap1" in searchPendingIds(local), "the survivor's merged body must be re-indexed")
     }
 
@@ -198,6 +200,24 @@ class FeedIdentityMergeTest {
         assertEquals(listOf("fp|p-etag"), rows(local, "SELECT feed_id, etag FROM feed_fetch_state"))
         assertEquals(listOf("fp"), rows(local, "SELECT id FROM feeds"))
         assertEquals(emptyList(), foreignKeyViolations(local))
+    }
+
+    /**
+     * The canonical feed's validators describe the url it was fetched from. The other feed's newer content
+     * gives the merged feed that feed's url, so the validators are dropped (the next fetch is
+     * unconditional) — and kept where the merged feed still holds its own url (the test above).
+     */
+    @Test
+    fun theCanonicalFeedTakingTheOtherFeedsUrlLosesItsValidators() {
+        val local = localDb(
+            *common(),
+            feed("fp", url = "https://old/feed", updatedAt = 100),
+            feed("fq", url = "https://new/feed", updatedAt = 200),
+            "INSERT INTO feed_fetch_state (feed_id, etag, last_modified, error_count) VALUES ('fp', 'p-etag', 'p-lm', 3)",
+        )
+        merge(local, transportFile(deltaName(DEV_A, 1), "INSERT INTO feed_edges (a, b) VALUES ('fp', 'fq')"))
+        assertEquals(listOf("fp|https://new/feed"), rows(local, "SELECT id, url FROM feeds"))
+        assertEquals(listOf("fp|null|null|3"), rows(local, "SELECT feed_id, etag, last_modified, error_count FROM feed_fetch_state"))
     }
 
     @Test

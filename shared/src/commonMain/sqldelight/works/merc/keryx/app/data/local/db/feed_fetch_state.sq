@@ -25,6 +25,20 @@ CREATE TABLE feed_fetch_state (
     last_error    TEXT
 );
 
+-- The validators belong to the URL they were fetched from. Whatever changes a feed's url — a sync
+-- merge taking another device's url, the identity step giving the canonical feed the other feed's url,
+-- a permanent redirect — leaves the stored etag / last_modified describing the old url, and sending
+-- them to the new one could be answered 304 for content this device never fetched there. So a url
+-- change drops them (the next fetch is unconditional). A refresh stores the validators of its own
+-- response after its url write, so a redirect's own validators survive. Not a capture trigger: the
+-- fetch state is device-local and never recorded.
+CREATE TRIGGER ks_fetch_state_validators_url_change AFTER UPDATE ON feeds
+WHEN old.url IS NOT new.url
+BEGIN
+    UPDATE feed_fetch_state SET etag = NULL, last_modified = NULL
+    WHERE feed_id = new.id AND (etag IS NOT NULL OR last_modified IS NOT NULL);
+END;
+
 getByFeedId:
 SELECT * FROM feed_fetch_state WHERE feed_id = ?;
 

@@ -44,6 +44,7 @@ import works.merc.keryx.app.fileDb
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
 import works.merc.keryx.app.insertFeedTag
+import works.merc.keryx.app.setFeedFetchState
 import works.merc.keryx.app.insertFolder
 import works.merc.keryx.app.insertTag
 import works.merc.keryx.app.ftsManagerIndexed
@@ -3493,6 +3494,52 @@ class FeedRepositoryTest {
             runCatching { other.createStatement().use { it.execute("ROLLBACK") } }
             other.close()
             rawDriver.close()
+        }
+    }
+
+    /**
+     * A permanent redirect moves the feed's url, and the validators it had were fetched from the old one:
+     * an answer of 304 carries none of its own, so the old ones are dropped (the next fetch is
+     * unconditional) rather than kept for a url they were never sent to.
+     */
+    @Test
+    fun aRedirectAnsweredNotModifiedDropsTheValidatorsOfTheOldUrl(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f-q", now = 100, url = "https://ex.com/old")
+            driver.setFeedFetchState("f-q", etag = "old-etag", lastModified = "old-lm")
+            val repo = newRepo(db, driver, redirectFetcher("https://ex.com/old", "https://ex.com/new", status = HttpStatusCode.NotModified))
+
+            assertIs<Result.Ok<Int>>(repo.refreshFeed(db.feedsQueries.getById("f-q").executeAsOne()))
+
+            assertEquals("https://ex.com/new", db.feedsQueries.getById("f-q").executeAsOne().url)
+            assertEquals(listOf("f-q|null|null"), driver.rows("SELECT feed_id, etag, last_modified FROM feed_fetch_state"))
+        } finally {
+            driver.close()
+        }
+    }
+
+    /** The validators of the response that follows the redirect belong to the new url, and are kept. */
+    @Test
+    fun aRedirectedRefreshKeepsTheValidatorsOfTheResponseFromTheNewUrl(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f-q", now = 100, url = "https://ex.com/old")
+            driver.setFeedFetchState("f-q", etag = "old-etag")
+            val fetcher = fetcherWith { request ->
+                if (request.url.toString() == "https://ex.com/old") {
+                    respond("", HttpStatusCode.MovedPermanently, headersOf(HttpHeaders.Location, "https://ex.com/new"))
+                } else {
+                    respond(rssG1G2G5, HttpStatusCode.OK, headersOf(HttpHeaders.ETag, "new-etag"))
+                }
+            }
+            val repo = newRepo(db, driver, fetcher)
+
+            assertIs<Result.Ok<Int>>(repo.refreshFeed(db.feedsQueries.getById("f-q").executeAsOne()))
+
+            assertEquals(listOf("f-q|new-etag"), driver.rows("SELECT feed_id, etag FROM feed_fetch_state"))
+        } finally {
+            driver.close()
         }
     }
 

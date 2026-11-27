@@ -1091,6 +1091,38 @@ class SyncMergerTest {
     }
 
     /**
+     * A feed's validators describe the url they were fetched from: a merge that takes another device's url
+     * drops them (the next fetch is unconditional), and keeps them — and the error count — where the url
+     * stays.
+     */
+    @Test
+    fun aMergeChangingAFeedsUrlDropsItsValidatorsAndOneKeepingItKeepsThem() {
+        val (cloudFile, cloudDriver, cloudDb) = fileDb()
+        cloudDb.insertFeed("moved", now = 500, url = "https://new/moved")
+        cloudDb.insertFeed("same", now = 500, url = "https://same")
+        cloudDriver.close()
+
+        val (localFile, localDriver, localDb) = fileDb()
+        localDb.insertFeed("moved", now = 100, url = "https://old/moved")
+        localDb.insertFeed("same", now = 100, url = "https://same")
+        localDriver.setFeedFetchState("moved", etag = "m-etag", lastModified = "m-lm", errorCount = 2)
+        localDriver.setFeedFetchState("same", etag = "s-etag", lastModified = "s-lm", errorCount = 1)
+        localDriver.close()
+
+        DatabaseMerger.merge(localFile.absolutePath, cloudFile.absolutePath, KeryxDatabase.Schema.version, MergeSql.all)
+
+        val (_, verifyDriver, verifyDb) = reopen(localFile)
+        try {
+            assertEquals("https://new/moved", verifyDb.feedsQueries.getById("moved").executeAsOne().url)
+            val states = verifyDb.feed_fetch_stateQueries.getAll().executeAsList().associateBy { it.feed_id }
+            assertEquals(listOf(null, null, 2L), states.getValue("moved").let { listOf(it.etag, it.last_modified, it.error_count) })
+            assertEquals(listOf("s-etag", "s-lm", 1L), states.getValue("same").let { listOf(it.etag, it.last_modified, it.error_count) })
+        } finally {
+            verifyDriver.close()
+        }
+    }
+
+    /**
      * A version-2 cloud file (written by an older build) is migrated to version 3 by the merge's own
      * migrateCloudIfOlder and merged: its feeds, tags and folders arrive with their values and the
      * per-field stamps its migration initialized, while its fetch state stays behind — a feed's

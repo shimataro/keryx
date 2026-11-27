@@ -109,8 +109,9 @@ class SchemaV3MigrationTest {
         // capture triggers (ks_v2_edge, ks_feed_edge), and the eight that keep
         // feeds.folder_id resolved from ks_feed_folder_raw (its creation with the feed, and resolution
         // on a raw row's insert/update, a folder's insert and liveness change, and a folder entry of
-        // ks_id_remap's insert/update/delete); the one view is ks_feed_folder_resolved.
-        assertEquals(23, (created["triggers"] as List<*>).size)
+        // ks_id_remap's insert/update/delete), and the one that drops a feed's validators when its url
+        // changes; the one view is ks_feed_folder_resolved.
+        assertEquals(24, (created["triggers"] as List<*>).size)
         assertEquals(listOf("ks_feed_folder_resolved"), (created["views"] as List<*>).map { (it as List<*>)[0] })
     }
 
@@ -574,6 +575,32 @@ class SchemaV3MigrationTest {
             assertEquals(listOf(listOf<Any?>(3)), conn.rows("PRAGMA user_version"))
         }
         assertEquals(schemaOf(createdDb()), schemaOf(file))
+    }
+
+    /** A url change drops the feed's validators, created and migrated alike; nothing else of the fetch state. */
+    @Test
+    fun aFeedUrlChangeDropsItsValidatorsInACreatedAndInAMigratedDatabase() {
+        for (file in listOf(createdDb(), migratedDb())) {
+            withConnection(file) { conn ->
+                conn.createStatement().use {
+                    it.execute(
+                        "INSERT INTO feeds (id, url, title, updated_at, created_at, sort_order) VALUES ('f1', 'https://a', 'T', 1, 1, 0)",
+                    )
+                    it.execute("INSERT INTO feed_fetch_state (feed_id, etag, last_modified, error_count) VALUES ('f1', 'e', 'lm', 2)")
+                    it.execute("UPDATE feeds SET title = 'T2' WHERE id = 'f1'")
+                }
+                assertEquals(
+                    listOf(listOf<Any?>("e", "lm", 2)),
+                    conn.rows("SELECT etag, last_modified, error_count FROM feed_fetch_state"),
+                    "a change of another column keeps the validators",
+                )
+                conn.createStatement().use { it.execute("UPDATE feeds SET url = 'https://b' WHERE id = 'f1'") }
+                assertEquals(
+                    listOf(listOf<Any?>(null, null, 2)),
+                    conn.rows("SELECT etag, last_modified, error_count FROM feed_fetch_state"),
+                )
+            }
+        }
     }
 
     /** `ks_feed_edge(a, b)` with the composite primary key and its capture trigger, created and migrated alike. */

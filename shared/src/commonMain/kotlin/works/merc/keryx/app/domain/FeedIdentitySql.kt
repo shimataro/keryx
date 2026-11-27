@@ -77,7 +77,8 @@ import app.cash.sqldelight.db.SqlDriver
  * 3. `feed_tags` move to the canonical feed, a link colliding with one the canonical feed already has
  *    folding into it by [SyncLww.FEED_TAG]; only `feed_id` changes, so a tag reference main already
  *    held orphaned is not checked. `feed_fetch_state` (device-local) keeps the canonical feed's row if
- *    it has one, else takes over one moving feed's (the smallest id's).
+ *    it has one, else takes over one moving feed's (the smallest id's) — without its validators, which
+ *    the url change of a moving feed (set aside in step 1) drops, `ks_fetch_state_validators_url_change`.
  * 4. The not-yet-sent `sync_outbox` entries naming a moving id are rewritten (`pk` of `feeds`,
  *    `feed_tags` and `articles`; a `feed_tags` entry's tag in `pk2` is untouched).
  * 5. Every feed and article id whose canonical id is another one — main's, and aliases only the cloud

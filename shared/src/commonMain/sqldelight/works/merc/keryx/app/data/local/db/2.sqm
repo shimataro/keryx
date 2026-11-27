@@ -457,3 +457,11 @@ INSERT INTO ks_feed_folder_raw (feed_id, folder_updated_at, folder_id)
 SELECT f.id, f.folder_updated_at,
     CASE WHEN EXISTS (SELECT 1 FROM folders d WHERE d.id = f.folder_id) THEN f.folder_id END
 FROM feeds f;
+
+-- 7. A url change drops the feed's validators (feed_fetch_state.sq).
+CREATE TRIGGER ks_fetch_state_validators_url_change AFTER UPDATE ON feeds
+WHEN old.url IS NOT new.url
+BEGIN
+    UPDATE feed_fetch_state SET etag = NULL, last_modified = NULL
+    WHERE feed_id = new.id AND (etag IS NOT NULL OR last_modified IS NOT NULL);
+END;

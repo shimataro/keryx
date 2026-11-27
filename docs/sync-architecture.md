@@ -723,7 +723,7 @@ Merge SQL (`MergeSql`) key points:
      into it and deleted, every remaining row whose id is not its key's canonical id takes it in place (the rowid
      stays), and the articles of moving feeds take the canonical feed id; (c) `feed_tags` move to the canonical feed,
      a link colliding with one it already has folding into it by last-write-wins, and `feed_fetch_state` (device-local)
-     keeps the canonical feed's row if it has one, else the smallest moving id's; (d) the unsent `sync_outbox` entries
+     keeps the canonical feed's row if it has one, else the smallest moving id's — without its validators, which belong to the url they were fetched from and are dropped by any change of a feed's `url` (see "feed_fetch_state" in [db-schema.md](db-schema.md)); (d) the unsent `sync_outbox` entries
      naming a moving feed or article id are rewritten; (e) every feed and article id whose canonical id is another one
      — main's, and aliases only the file used or only an edge names — is recorded in `ks_id_remap` as kind `feed` /
      `article` (chains folded); (f) the old feed rows are deleted, every child having moved off them.
