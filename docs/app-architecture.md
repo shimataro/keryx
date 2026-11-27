@@ -43,12 +43,12 @@ actuals — see "Apple targets in `:shared`" below.
                   CloudFileTransfer, SecretStoreTokenStorage
     data/cloud/nextcloud/  NextcloudStorage (WebDAV), NextcloudLoginFlow (Login Flow v2), NextcloudServerProbe (status.php), normalizeNextcloudUrl, revokeNextcloudAppPassword — see "Nextcloud (Login Flow v2)" in sync-architecture.md
     data/opml/    OpmlCodec
-    domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, V2IdentitySql (the sync merge's identity step: moves every row of one tag/folder identity onto its canonical id), TagFolderIdRekey (`KERYX_SCHEMA_CALLBACKS`: the v2→v3 re-key of tags/folders onto their name-derived ids, run by every platform's database driver and by `DatabaseMerger`), IdRemapSql/TagFolderIdRemaps (tag/folder id re-keys — see "Tag/folder id re-keys" below), CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport (interface + CustomUri), AuthorizationLauncher (interface + schemeOf — how OAuthConnectFlow opens the authorize URL; desktop/Android default to the system browser, the Apple app hands it to Swift instead, see "KeryxSdk" below), LoginPageLauncher (interface + BrowserLoginPageLauncher — how Nextcloud's Login Flow v2 shows its sign-in page and gets back from it), OAuthCallbackParams, OAuthUriParser (parseOAuthUri, shared by every `keryx://` and loopback redirect handler), StartupMaintenanceTasks (runStartupMaintenance/checkForUpdateAndNotify/maybeRebuildFtsIndex), BackgroundRefreshLoop (backgroundUpdateLoop — the desktop app's own polling loop, also used by the Apple app's `KeryxSdk.startMaintenance()`; Android has no equivalent, since it schedules through `WorkManager` instead), RefreshCycleRunner (the refresh → notify → sync cycle every refresh path shares), NetworkUsagePolicy (which automatic network work the current network allows — see "Network Gate" in sync-architecture.md), UpdateChecker/UpdateRepository/UpdateAsset/UpdateInstallPolicy/UpdateInstaller(expect-like interface)/AvailableUpdate/UpdateState (in-app update — see "In-App Update" below)
+    domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, V2IdentitySql (the sync merge's identity step: moves every row of one tag/folder identity onto its canonical id), TagFolderIdRekey (`KERYX_SCHEMA_CALLBACKS`: the v2→v3 re-key of tags/folders onto their name-derived ids, run by every platform's database driver and by `DatabaseMerger`), FeedIdentitySql (the sync merge's and a redirect merge's feed/article identity step: moves every feed of one identity, and its articles, onto the canonical ids), RowFold (the fold rules the transport fold and the identity steps share), IdRemapSql/IdRemaps (tag, folder, feed and article id re-keys — see "Id re-keys" below), CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport (interface + CustomUri), AuthorizationLauncher (interface + schemeOf — how OAuthConnectFlow opens the authorize URL; desktop/Android default to the system browser, the Apple app hands it to Swift instead, see "KeryxSdk" below), LoginPageLauncher (interface + BrowserLoginPageLauncher — how Nextcloud's Login Flow v2 shows its sign-in page and gets back from it), OAuthCallbackParams, OAuthUriParser (parseOAuthUri, shared by every `keryx://` and loopback redirect handler), StartupMaintenanceTasks (runStartupMaintenance/checkForUpdateAndNotify/maybeRebuildFtsIndex), BackgroundRefreshLoop (backgroundUpdateLoop — the desktop app's own polling loop, also used by the Apple app's `KeryxSdk.startMaintenance()`; Android has no equivalent, since it schedules through `WorkManager` instead), RefreshCycleRunner (the refresh → notify → sync cycle every refresh path shares), NetworkUsagePolicy (which automatic network work the current network allows — see "Network Gate" in sync-architecture.md), UpdateChecker/UpdateRepository/UpdateAsset/UpdateInstallPolicy/UpdateInstaller(expect-like interface)/AvailableUpdate/UpdateState (in-app update — see "In-App Update" below)
     di/           SharedModule (sharedModule + updateModule + presentationModule) and HttpClientFactory [:shared]; AppModule (+ expect platformModule) and ImageLoaderSetup [:composeApp]
     presentation/ [:shared] UI-framework-free screen state shared by every UI: home/ (HomeViewModel — the
                   home screen's filter/selection/article list/search/unread-only/new-article state and
                   actions; ArticleContentCache, HomeRefreshController, NewArticleTracking; FeedListExpansion —
-                  which folders/tags are collapsed/expanded, persisted device-locally; NameOrdinals — the "(2)" ordinal that tells same-named tags/folders apart, decided once for both UIs (`tagFolderLabels`); TagFolderIdRemapping — moves every tag/folder id `HomeViewModel` holds onto the id a merge re-keyed it to; SelectionReadIntents —
+                  which folders/tags are collapsed/expanded, persisted device-locally; NameOrdinals — the "(2)" ordinal that tells same-named tags/folders apart, decided once for both UIs (`tagFolderLabels`); IdRemapping — moves every tag, folder and feed id `HomeViewModel` holds onto the id a merge re-keyed it to; SelectionReadIntents —
                   the explicit read/unread actions taken while a selection's body is still loading, so they win
                   over that selection's implicit read; FeedListModel —
                   FeedListRowSelection and the feed-list ordering/grouping rules; ArticleListModel; ReaderPaging —
@@ -1129,7 +1129,7 @@ showing takes the header over at once rather than returning the reader to the pr
 another grace period. Compose's single reader and the macOS SwiftUI reader both render it; the iOS pager does
 not (a page with no body yet shows only the reader's background, as before).
 
-### Tag/folder id re-keys
+### Id re-keys
 
 **Layering exception: the `DatabaseDriverFactory` actuals depend on `domain/`.** Every platform's
 `DatabaseDriverFactory` actual (`data/local/`) installs `KERYX_SCHEMA_CALLBACKS`, whose `TagFolderIdRekey`
@@ -1142,32 +1142,67 @@ swap which layer points the wrong way, at the cost of a wide package rename.
 
 A tag's or folder's id can move: the v2→v3 migration re-keys every row onto its name-derived id, and a sync merge
 moves a row onto its identity's canonical id (`domain/V2IdentitySql.kt`; "Identities of tags and folders" in
-[sync-architecture.md](sync-architecture.md)). Every move is recorded in `ks_id_remap` through
-`domain/IdRemapSql.kt`, which folds chains so an old id maps in one hop to the id its row has now (see
+[sync-architecture.md](sync-architecture.md)). So can a feed's and an article's: a sync merge, or a refresh whose
+same-host permanent redirect lands on another feed's URL, moves every feed of one identity onto its canonical id and
+each of its articles onto the canonical id of its `(feed, guid)` key (`domain/FeedIdentitySql.kt`; "Identities of
+feeds and articles" there). Every move is recorded in `ks_id_remap` (kind `tag`, `folder`, `feed` or `article`)
+through `domain/IdRemapSql.kt`, which folds chains so an old id maps in one hop to the id its row has now (see
 [db-schema.md](db-schema.md)). What holds such an id outside the database follows it, so a re-key never strands a
 selection or a user's write:
 
-- **Publication.** `domain/TagFolderIdRemaps` (a Koin single) holds the whole folded table as a `StateFlow`
-  (`TagFolderIdRemap`: old → new, per kind). `DeltaSync` calls `publishFromDb()` after every merge's commit (a
-  receive's and the pre-delta migration's), never inside it; a failure is logged and does not fail the sync, since
-  the next merge or launch catches up and every write resolves a stale id itself.
+- **Publication.** `domain/IdRemaps` (a Koin single) holds the tag, folder and feed moves of the folded table as a
+  `StateFlow` (`IdRemap`: old → new, per kind), read with `idRemapPublished`. `DeltaSync` calls `publishFromDb()`
+  after every merge's commit (a receive's and the pre-delta migration's), and `FeedRepository` after a refresh's
+  redirect merge has committed, never inside either; a failure is logged and does not fail the sync or the refresh,
+  since the next merge or launch catches up and every write resolves a stale id itself. A redirect merge's own
+  generated statements notify the lists at its commit, before the publish, and a sync merge's lists can be re-run by
+  another write before it, so a holder that finds an id gone first catches the map up from the database (below).
+  Article moves are deliberately left out: a feed merge moves every article of the folded feeds, far more than
+  anything outside the database holds, so the few article ids held across time are resolved from the database one
+  at a time instead (see "Articles" below).
   A whole-map `StateFlow` rather than a stream of batches is deliberate: a holder that starts collecting late still
   gets every re-key so far, a superseded value is contained in the newer one, and applying a value again changes
   nothing (the map is folded and no live row carries an old id), so nothing is lost and nothing is double-applied.
-- **Local settings.** `SettingsRepository` applies the table to `lastFilter`, `collapsedFolderIds` and
-  `expandedTagIds` at construction (read from the table itself) and again for every published value — one rewrite
-  for both, persisted only when it changes something.
-- **`HomeViewModel`.** On each published value it moves the selected filter and row (`filterSelection`,
-  `_selectedRowInstance`, including a feed row nested under a re-keyed tag) onto the new ids — directly, not through
+- **Local settings.** `SettingsRepository` applies the published value to `lastFilter` (a `tag:`, `folder:` or
+  `feed:` filter), `collapsedFolderIds`, `expandedTagIds` and the feed keys of `faviconMissedAt` (two folded feeds
+  that both had a miss keep the earlier one) — one rewrite for the loaded table and every later value, persisted only
+  when it changes something. `lastArticleId` is not rewritten: `HomeViewModel` resolves it when it restores it.
+- **`HomeViewModel`.** On each published value (`presentation/home/IdRemapping.kt`) it moves the selected filter and
+  row (`filterSelection`, `_selectedRowInstance` — a feed row, nested under a folder or a re-keyed tag, included)
+  onto the new ids — directly, not through
   `selectFilter`, so the selection does not fall back to All Feeds and its article, pins and cursor stay (external-spec
   §9, "Least surprise") —, moves a pending pull's filter with it (`HomeRefreshController.remapPulls`; pulls are
   tracked by a token of their own, so the pull's end still removes it), remaps `FeedListExpansion`'s collapsed/expanded sets, and moves pending delete fallbacks
   (`DeletedItemFallback.remapPending`) onto the id the deleted item has now, whose fallback then compares and
   forgets that id. A row the feed list rendered before the re-key may still be clicked with its old id, so
   `selectFilter`, the folder/tag toggles and `revealFeedListRow` resolve the ids they are given through the current
-  value as well.
-- **Writes.** Every repository write that takes a tag or folder id resolves it in the write statement itself
-  (`tags.sq` / `folders.sq` / `feeds.sq` / `feed_tags.sq` / `articles.sq`), so a rename field left open, a queued
+  value as well. Feed ids also follow in the selected article's feed name and favicon and in the per-row refresh
+  spinner (a refresh counts its feeds under the ids it started with). A saved feed filter is restored through
+  `feeds.resolveId`, so it survives a merge made while the app was closed even before the published map has loaded,
+  and a refresh started from a row rendered before the move resolves its id (`FeedRepository.resolveFeedId`).
+  Before it decides that a held tag, folder or feed is gone — a pending delete's fallback, an inline rename's row —
+  it catches the map up from the database (`catchUpIdRemapFromDb`), since the lists can reach it ahead of the map.
+- **Articles.** An article id held across time is resolved from the database the moment it stops naming a row,
+  rather than through a published map. When the pin/selection reconcile (run on every `articles` write) finds a held
+  id with no visible row, it first asks which of those ids moved (`articles.movedIdsIn`, through
+  `ArticleRepository.movedArticleIds`) and carries every holder over to the id each has now (`remapHeldArticleIds`):
+  the read-state and unstarred pins, the selection, its cursor (without counting as a selection, so the list does not
+  scroll), pending row and header, the read/star intents and write generations, the new-articles tracking and its
+  viewport, and the saved article — only then is anything left taken for deleted. Each move is kept, folded, for the
+  session, and an operation started before it (a body lookup, a read/star write's completion or revert) translates
+  the ids it captured through `currentArticleId`, which is public so the SwiftUI reader can compare its saved scroll
+  position's article with the selection. The selection's body lookup and the launch-time restore read the row through
+  `articles.getByIdResolved`, so a lookup racing the merge lands on the article it became. The article list's
+  new-article diff asks `articles.rekeysOnto` which candidate ids a move landed on, and treats those as the article
+  it already showed, carrying its unseen state, so a merged article is not counted as a new arrival.
+- **"Show feed".** A notification's `ShowFeedDetail` keeps the id the feed had when the notification was raised.
+  `HomeViewModel.showFeedDetail` — the one implementation both UIs call, each then focusing its own pane — catches the
+  re-key map up from the database first and then selects the feed through `selectFilter`, so it lands on the feed's
+  canonical row even when a merge has moved it since and not yet published the move.
+- **Writes.** Every repository write that takes a tag, folder, feed or article id resolves it in the write
+  statement itself (`tags.sq` / `folders.sq` / `feeds.sq` / `feed_fetch_state.sq` / `feed_tags.sq` / `articles.sq`;
+  the statements are listed in [db-schema.md](db-schema.md)), so a refresh that fetched under a feed id a merge moved
+  meanwhile, a rename field left open, a queued
   `SerialWriteQueue` item or a drag that predates the re-key applies to the row it became, instead of matching
   nothing or failing a foreign key (which would be a local-write failure). Being part of the statement, the
   resolution adds no read ahead of a transaction's first write. `FolderRepository.reorderFolders` also resolves its
@@ -1191,16 +1226,20 @@ selection or a user's write:
 - **The feed list stays put too.** `HomeViewModel.selectedRowGeneration` counts the user's selections of a row, and the
   feed list's scroll-into-view (Compose's `FeedListPane`, macOS's `FeedListView`) keys on it rather than on
   `selectedRowInstance`, whose id a re-key replaces. An inline rename keeps naming its row by the id it started under and
-  is compared with rows through `HomeViewModel.tagFolderIdRemap` (the lists and the map reach the UI on separate flows,
+  is compared with rows through `HomeViewModel.idRemap`, a tag, folder or feed row alike (Compose's
+  `InlineEditTarget.remappedBy` / `resolvedIn`; the lists and the map reach the UI on separate flows,
   in either order), and the text typed so far is held by the pane (`InlineEditState`, `SidebarDialogState.renamingDraft`)
   so the row composed afresh under the new id carries on from it; an editor taken out of the composition by a re-key
   does not count as losing focus, so it commits nothing. Tag and folder names are rendered only from
   `HomeViewModel.tagFolderLabels` — one flow of each row's name together with its ordinal — so a name and its ordinal never
   come from two snapshots.
 
-The Apple app holds no tag or folder id of its own beyond what it reads from `HomeViewModel` and transient UI state
-(an inline rename's row key, a pending delete confirmation's row, a drag), whose action goes through the resolving
-writes above.
+The Apple app holds no tag, folder or feed id of its own beyond what it reads from `HomeViewModel` and transient UI
+state (an inline rename's row key, a pending delete confirmation's row, a drag), whose action goes through the
+resolving writes above; the sidebar compares a held row key with the rows through `SidebarIdRemap`, which carries the
+tag, folder and feed re-keys of `HomeViewModel.idRemap`. Its one article id of its own, the iOS reader's saved scroll
+position, is compared with the selection through `HomeViewModel.currentArticleId`, and its notification row's "show
+feed" calls `HomeViewModel.showFeedDetail`.
 
 ## Navigation
 

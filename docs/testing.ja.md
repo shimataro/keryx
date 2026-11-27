@@ -117,8 +117,8 @@
   違反するデータを保持できる）、バイトを改変した破損ファイル、ローカルより新しい `PRAGMA user_version`）
   に対して `merge` を直接呼び、投げられる例外の型を検証する。`UNIQUE(url)` を外した `feeds` テーブルは、もう
   違反のケースではない: 畳み込んだ転送ファイルはそうした重複を正当に持ちうるので、
-  `duplicateUniqueKeysInsideCloudMergeOnlyTheirWinner`
-  が、その勝者だけがマージされることを検証する。手作りのファイルは現行スキーマのすべての列（`articles.body_updated_at`
+  `duplicateUniqueKeysInsideCloudMergeOntoTheSmallestId`
+  が、マージがそれらを 1 つのフィードの同一性として記録し、その最小の id へ畳むことを検証する。手作りのファイルは現行スキーマのすべての列（`articles.body_updated_at`
   を含む）を持たなければならない。そうでないと、検証したいケースに届く前に、検証で破損と判定される。`SyncRepositoryTest.kt` はクラウドファイルの分類を
   `sync()` 経由でエンドツーエンドに、`DatabaseMergerTest` は転送モード（`mergeTransport`: ファイルにローカルの
   マイグレーションを行わないこと、新しい `user_version` が `SchemaVersionException` になること、転送用の表が欠けて

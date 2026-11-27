@@ -111,8 +111,8 @@ New tests are placed at the same relative path as the code under test.
   `NOT NULL` constraints so it can hold data that violates the real schema, a byte-
   flipped corrupt file, a `PRAGMA user_version` newer than local), and assert the thrown exception
   type. A `feeds` table missing `UNIQUE(url)` is no longer a violation case: a folded transport file
-  legitimately holds such duplicates, and `duplicateUniqueKeysInsideCloudMergeOnlyTheirWinner` checks that only their
-  winner is merged.
+  legitimately holds such duplicates, and `duplicateUniqueKeysInsideCloudMergeOntoTheSmallestId` checks that the merge
+  records them as one feed identity and folds them onto its smallest id.
   The hand-built files must carry every column of the current schema (`articles.body_updated_at` included),
   or validation reports them as corrupt before the case under test is reached; `SyncRepositoryTest.kt` covers the cloud-file classification end-to-end through `sync()`, and `DatabaseMergerTest` the transport mode (`mergeTransport`: no local migration on the file, a newer `user_version` as `SchemaVersionException`, a missing transport table as incompatible). The decision
   itself is a pure function tested in commonTest (`MergeFailureClassifierTest`: the category verdicts and

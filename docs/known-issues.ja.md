@@ -419,7 +419,7 @@ read を行っている箇所:
 その read からトランザクションまでの間 `feedPlacementMutex` を保持するので、同じグループへフィードを
 配置する購読と交互に実行されることはない。read はトランザクションの外に置いたままである。）
 フィード更新の反映トランザクション（`FeedRepository.kt` の `applyFetch` 周辺）も write のみで
-該当しない。`TagRepository.createTagAndAttach` と `FolderRepository.createFolderAndMoveFeed` は先に書き
+該当しない。最初の文は、リダイレクトのときも書き込みである（リダイレクト自身の読み取りはその後に来る）。`TagRepository.createTagAndAttach` と `FolderRepository.createFolderAndMoveFeed` は先に書き
 （名前の `upsertByName`）、その後で読むので、最初の文から書き込みロックを持つ。
 
 ### テスト側でどう回避したか
@@ -472,56 +472,51 @@ read を行っている箇所:
 保証（分類のトランザクション内のチェックを含む）と、マージの後に `search_text` の再計算と `indexMissing()` を行うという
 FTS の規則をすべて保つ必要がある。
 
-## URL が同じで id が違うフィードは、先に届いた方が残る
+## リフレッシュのコンテンツ書き込みが、送られない `feeds.updated_at` を動かすことがある
 
-**状態**: 未修正 — 塞ぐにはフィードとそれを参照するものすべてを正規の id に付け替える必要があり、見つけた変更の範囲を
-超える再設計になる（「本当の修正に必要なこと」を参照）。このようなフィードについて、マージの可換性と結合性
-（[sync-architecture.ja.md](sync-architecture.ja.md) の「設計方針」）を破る。
+**状態**: 未修正 — 塞ぐガードは、古い snapshot でのリフレッシュが書く内容を変える。リフレッシュが毎サイクルでフィードの
+内容を書き直すことを前提にしたテストと同期の記述が、今の挙動に依存している（「本当の修正に必要なこと」を参照）。
 
 ### 症状
 
-URL が同じで id が違う 2 つのフィードが、別々のファイルで端末に届く。先にマージした方が記事ごと残り、もう一方は、それに
-属する記事やタグの付与も含めてずっと読み飛ばされる。逆の順にマージすればもう一方が残り、両方のファイルを畳み込んでから
-マージすると `updated_at`（次に id）の大きい方が残る。ファイルを異なる順で受け取った端末は違うフィードを持ち続け、
-落ちた側のフィードで既読やスターにした記事は、それらの端末では欠けたままになる。
+`feeds.updated_at` はコンテンツのグループの last-write-wins のスタンプで、キャプチャ用のトリガーはこの列を見ない
+（`SyncCaptureTriggerTest.aFeedUpdateIsRecordedOnlyWhenASyncedColumnOtherThanUpdatedAtChanges`）。行が既に持つ内容と
+同じ内容を書くリフレッシュは、スタンプだけを動かし、送るものを何も記録しない。そのためこの端末は、他のどの端末も持たない
+コンテンツのスタンプを持つことになる。そのあとで別の端末が、古いスタンプと今の時刻の間のスタンプでタイトルや説明を
+変えると、ここでは負け、向こうでは勝つ。より新しい変更が両方に届くまで、端末同士はそのフィードの内容で食い違う。
 
 ### 診断
 
-フィードの id は購読時に `IdGenerator.feedId(url)`（UUIDv5）で決まるが、301/308 のリダイレクトは id を保ったまま URL を
-書き換える（`feeds.sq` の `updateUrl`）。そのため、リダイレクトされたフィードと、その新しい URL の新規購読は、違う id で
-同じ URL を持つ。マージのガード（`NOT EXISTS … l2.url = c.url AND l2.id <> c.id`）は、main が別の id で既に持つ URL の
-クラウドのフィードを読み飛ばし、`winnerAmong` はクラウド内の重複を `updated_at` で選ぶ。`updated_at` はファイルごと、
-main ごとに違うので、どちらが残るかは順序で決まる。
+`FeedRepository.applyFetch` は、`feeds.updateContent` を呼ぶかどうかを、受け取った `Feeds` の行——フェッチの段階の前に
+`refreshFeeds` が取った snapshot——と取得した値の比較で決めていて、今の行とは比べていない。その間に同期のマージ（や別の
+リフレッシュ）が同じ内容を保存していると、snapshot は取得した値と違うので `updateContent` が走り、ほかに何も変わらずに
+`updated_at` だけが動く。`feeds.upsert` と `feeds.updateUrl` は文そのものが実際の変更でだけ書くようにガードされているが、
+`updateContent` はされていない。
 
 ### 本当の修正に必要なこと
 
-- 順序に依存しない、URL ごとの正規の id。`IdGenerator.feedId(url)` と等しい id があればそれ、なければ最大の id。
-- マージの中で、負けた側のフィードを main とクラウドの行の両方で正規の id に付け替えること。記事は
-  `IdGenerator.articleId(正規の id, guid)` に移るが、SQLite はこれを計算できないので、決定的な SQL 関数をすべてのマージ用
-  接続（desktop の JDBC、Android の requery、Apple の `RawSqliteConnection`）に登録する必要がある。`feed_tags`、
-  `feed_fetch_state`、未送信の `sync_outbox`、検索インデックス、`local_settings.lastFilter` も一緒に移し、子の行を移した
-  後で古いフィードの行を物理削除する。
-
-それでも、付け替えた後に負けた側の URL がまた変わると別のフィードとして戻ってくるし、pre-delta のクラウドファイルは
-書き換えられないので、これらの場合は端末間で食い違う余地が残る。
+`updateContent` を、値が実際に変わるときだけ書くようにする。`updateUrl` が URL でやっているのと同じように、3 つの列が行と
+違うことを文の `WHERE` に入れ、古い snapshot がスタンプだけを動かせないようにする。あわせて、リフレッシュが毎サイクル
+内容を書き直すことを前提にしているテストと記述を直す。
 
 ## Home の構築中に、メインスレッドでデータベースを読む
 
 **状態**: 未修正 — 最初のデータベースのオープンと最初の読み取りをメインスレッドから外すには起動の流れ全体を設計し直す
-必要があり、見つけた変更の範囲を超える（「本当の修正に必要なこと」を参照）。タグ/フォルダー id の振り直しマップの
-読み込み（`TagFolderIdRemaps`）はバックグラウンドへ移したが、以下の読み取りは残っている。
+必要があり、見つけた変更の範囲を超える（「本当の修正に必要なこと」を参照）。振り直しマップの
+読み込み（`IdRemaps`）はバックグラウンドへ移したが、以下の読み取りは残っている。
 
 ### 症状
 
 `HomeViewModel` の構築はメインスレッド（最初のコンポジション中の `koinViewModel`）で走り、データベースを同期的に読む。
-復元する選択記事（`restoredArticle`。`lastArticleId` の `ArticleRepository.getArticleById`）と、フィードのフィルターや、
-振り直しマップが読み込み済みのタグ/フォルダーのフィルターの対象（`validateFilterTarget`）である。Android のドライバーは
+復元する選択記事（`restoredArticle`。`lastArticleId` の `ArticleRepository.getArticleByIdResolved`）と、フィルターの対象
+（`validateFilterTarget`）である。フィードのフィルターは常に読む（フィードの id は、振り直しマップが読み込み済みかに
+かかわらずデータベースから解決する）。タグ/フォルダーのフィルターは、マップが読み込み済みのときに読む。Android のドライバーは
 最初のクエリでファイルを開き、スキーマの移行も遅延して実行するので、更新後の最初の起動ではその作業がメインスレッドで
 走りうる。移行が長いと、起動の固まりや ANR として現れる。
 
 ### 診断
 
-振り直しマップの読み込み（`App.kt` → `koinInject<SettingsRepository>()` → `TagFolderIdRemaps`。同じスレッドのコンストラクターで
+振り直しマップの読み込み（`App.kt` → `koinInject<SettingsRepository>()` → `IdRemaps`。同じスレッドのコンストラクターで
 `ks_id_remap` を読んでいた）を追っていて見つかった。`HomeViewModel` の読み取りは振り直しの作業より前からある。最初のクエリまでの
 経路にディスパッチャーの切り替えは無い。ViewModel が構築時に復元済みのフィルターと記事を必要とするのは、
 `filterRestoredOnLaunch`・`articleRestoredOnLaunch`・`initialHomePane` がそれらから決まり、記事一覧の最初の発行が復元記事を
