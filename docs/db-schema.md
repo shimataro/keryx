@@ -76,7 +76,8 @@ through it rather than composing `AppDirs.appDataDir()` with the filename themse
   migrations) and the capture triggers' column lists must be updated in lockstep. A new synced table or column also gets
 its merge field group and stamp in the same change: a column in no group changes only through an explicit fold rule
 (`RowFold`: the earliest `created_at`, an article's latest `cached_at` / `updated_at`, the greatest non-NULL `v2_id`),
-and one with neither diverges between devices.
+and one with neither diverges between devices. (A key column — an id, or a reference to one such as `feed_tags.feed_id` —
+is not a value: an identity merge moves it onto the canonical id.)
   A file whose `user_version` is newer than the running build's schema is never opened: desktop throws
   `DatabaseTooNewException` (`data/local/DatabaseSchemaGuard.kt`) before writing anything; Apple does the same through
   the same guard — `DatabaseDriverFactory.apple.kt`'s `createDriver` calls `requireSupportedSchemaVersion` on the
