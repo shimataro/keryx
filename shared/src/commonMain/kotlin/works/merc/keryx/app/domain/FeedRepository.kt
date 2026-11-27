@@ -387,8 +387,11 @@ class FeedRepository(
         val feedId = written.feedId
         val wasNewlyCreated = written.wasNewlyCreated
         syncScheduler.scheduleSync()
+        // Resolved in the statement: the write has committed, and a feed identity merge can commit before this
+        // read and move the row onto its canonical id (deleting the one this subscription wrote), which an
+        // exact-id read would then miss — the subscription succeeded, so the caller gets the feed it became.
         return FeedWriteOutcome(
-            Result.Ok(feeds.getById(feedId).executeAsOne()),
+            Result.Ok(feeds.getByIdResolved(feedId).executeAsOne()),
             hadArticles = fetched.articles.isNotEmpty(),
             wasNewlyCreated = wasNewlyCreated,
         )

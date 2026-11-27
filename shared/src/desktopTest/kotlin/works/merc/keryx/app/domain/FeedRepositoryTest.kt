@@ -1339,6 +1339,33 @@ class FeedRepositoryTest {
         }
     }
 
+    /**
+     * A feed identity merge that commits between a subscription's write and its final read moves the new
+     * row onto the canonical id and deletes it. The subscription succeeded, so the caller is handed the
+     * feed it became instead of an exception from reading the id that is gone.
+     */
+    @Test
+    fun aSubscriptionWhoseFeedAMergeMovedBeforeTheFinalReadReturnsTheFeedItBecame(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val url = "https://ex.com/feed"
+            val written = IdGenerator.feedId(url)
+            // Sorts before every generated id, so it is the canonical one.
+            db.insertFeed("!holder", now = 100L, url = "https://other.example/feed")
+            val repo = newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK) }, syncScheduler = SyncScheduler {
+                // Called once the subscription has committed, right before its final read.
+                db.transaction { FeedIdentitySql.mergeLocally(driver, written, "!holder") }
+            })
+
+            val outcome = repo.writePrefetchedSubscription(repo.prefetchSubscription(url))
+
+            assertEquals("!holder", assertIs<Result.Ok<*>>(outcome.result).value.let { (it as works.merc.keryx.app.data.local.db.Feeds).id })
+            assertNull(db.feedsQueries.getById(written).executeAsOneOrNull(), "the id the subscription wrote is gone")
+        } finally {
+            driver.close()
+        }
+    }
+
     /** A feed with no fetch state yet (one a sync merge brought in) fetches without validators. */
     @Test
     fun aFeedWithoutFetchStateIsFetchedUnconditionally(): Unit = runBlocking {
