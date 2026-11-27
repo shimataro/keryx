@@ -3672,6 +3672,8 @@ class FeedRepositoryTest {
             assertIs<Result.Ok<Int>>(repo.refreshFeed(db.feedsQueries.getById("f-q").executeAsOne()))
 
             assertEquals(mapOf("t-old" to "t1"), remaps.current.value.tagIds)
+            // The feed re-key the merge recorded reaches the holders too, not only the table.
+            assertEquals(mapOf("f-q" to "f-p"), remaps.current.value.feedIds)
             assertEquals(listOf("feed|f-q|f-p"), driver.rows("SELECT kind, old_id, new_id FROM ks_id_remap WHERE kind = 'feed'"))
         } finally {
             driver.close()
