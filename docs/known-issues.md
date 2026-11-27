@@ -488,35 +488,6 @@ Classification" in [sync-architecture.md](sync-architecture.md) — including th
 in-transaction checks — and the FTS rule that the merge is followed by the `search_text` recomputation and
 `indexMissing()`.
 
-## A refresh's content write can move `feeds.updated_at` without sending it
-
-**Status**: not fixed — the guard that closes it changes what a refresh writes when its snapshot is stale, and
-the tests and the sync notes that describe a refresh as rewriting a feed's content on every cycle assume the
-current behavior (see "What a real fix would need").
-
-### Symptom
-
-`feeds.updated_at` is the content group's last-write-wins stamp, and the capture trigger does not watch it
-(`SyncCaptureTriggerTest.aFeedUpdateIsRecordedOnlyWhenASyncedColumnOtherThanUpdatedAtChanges`). A refresh that
-writes content identical to what the row already holds moves the stamp and records nothing to send, so this
-device holds a content stamp no other device has. A peer's later title or description change stamped between the
-two then loses here and wins there, and the devices stop agreeing on that feed's content until a newer change
-reaches both.
-
-### Diagnosis
-
-`FeedRepository.applyFetch` decides whether to call `feeds.updateContent` by comparing the fetched values with
-the `Feeds` row it was handed — a snapshot `refreshFeeds` took before the fetch phase — not with the row as it
-is now. When a sync merge (or another refresh) stored the same content meanwhile, the snapshot differs from the
-fetched values, `updateContent` runs, and it sets `updated_at` with nothing else changing. `feeds.upsert` and
-`feeds.updateUrl` are guarded on a real change in the statement itself; `updateContent` is not.
-
-### What a real fix would need
-
-Make `updateContent` write only when a value actually changes, in the statement (a `WHERE` on the three columns
-differing from the row, as `updateUrl` does for the URL), so a stale snapshot cannot move the stamp alone — and
-update the tests and the notes that expect a refresh to rewrite the content every cycle.
-
 ## Home reads the database on the main thread while it is constructed
 
 **Status**: not fixed — moving the first database open and the first reads off the main thread needs the

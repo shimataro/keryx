@@ -154,8 +154,15 @@ WHERE id = COALESCE((SELECT id FROM feeds WHERE id = :id), (SELECT new_id FROM k
 -- deleted_at / sort_order / custom_title / folder_id / favicon_url (favicon has its own
 -- updateFaviconUrlIfMissing), so a concurrent unsubscribe / reorder / rename can't be reverted by a refresh
 -- that started from a now-stale snapshot.
+-- Writes only when one of the three columns actually changes, so updated_at (the content group's
+-- last-write-wins stamp, which the capture trigger does not watch) never moves without a captured
+-- change sent with it: a refresh compares the fetched values with its snapshot, and a sync merge or
+-- another refresh may have stored the same values meanwhile. A stamp moved without being sent would
+-- beat a peer's later content change here and lose to it there (as for updateUrl).
 updateContent:
-UPDATE feeds SET site_url = ?, title = ?, description = ?, updated_at = ? WHERE id = COALESCE((SELECT id FROM feeds WHERE id = :id), (SELECT new_id FROM ks_id_remap WHERE kind = 'feed' AND old_id = :id), :id);
+UPDATE feeds SET site_url = :site_url, title = :title, description = :description, updated_at = :updated_at
+WHERE id = COALESCE((SELECT id FROM feeds WHERE id = :id), (SELECT new_id FROM ks_id_remap WHERE kind = 'feed' AND old_id = :id), :id)
+  AND (site_url IS NOT :site_url OR title IS NOT :title OR description IS NOT :description);
 
 -- Writes only when the url actually changes, so updated_at (the content group's last-write-wins stamp,
 -- which the capture trigger does not watch) never moves without a captured change sent with it: a

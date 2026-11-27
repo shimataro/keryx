@@ -121,8 +121,8 @@ class SyncCaptureTriggerTest {
         db.insertFeed("f1", now = 100)
         enableCapture()
 
-        // What a refresh writes for an unchanged feed: the same content, a newer updated_at.
-        db.feedsQueries.updateContent(site_url = null, title = "Feed f1", description = null, updated_at = 200, id = "f1")
+        // Only updated_at moves (no query writes that alone, so raw SQL): nothing to record.
+        driver.execute(null, "UPDATE feeds SET updated_at = 200 WHERE id = 'f1'", 0)
         assertEquals(emptyList(), outbox())
 
         db.feedsQueries.updateContent(site_url = null, title = "Renamed upstream", description = null, updated_at = 300, id = "f1")

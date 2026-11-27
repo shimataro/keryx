@@ -7275,8 +7275,10 @@ class HomeViewModelTest {
         assertEquals(listOf("f1"), vm.structuralFeeds.value.map { it.id })
         val afterLoad = emissions.size
 
-        // The same content, stamped later: what a refresh's updateContent writes for an unchanged feed.
-        db.feedsQueries.updateContent(site_url = null, title = "Feed f1", description = null, updated_at = 1_000L, id = "f1")
+        // The same content, stamped later (no query writes updated_at alone, so raw SQL; the lists re-run
+        // on the notification).
+        driver.execute(null, "UPDATE feeds SET updated_at = 1000 WHERE id = 'f1'", 0)
+        driver.notifyListeners("feeds")
         testScheduler.advanceUntilIdle()
         assertEquals(1_000L, vm.feeds.value.single().updated_at)
         assertEquals(afterLoad, emissions.size)

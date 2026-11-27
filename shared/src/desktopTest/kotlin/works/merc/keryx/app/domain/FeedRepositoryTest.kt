@@ -1303,6 +1303,48 @@ class FeedRepositoryTest {
         }
     }
 
+    /**
+     * A refresh whose snapshot is stale — a sync merge stored the very content it fetches in between —
+     * writes no content: `feeds.updated_at` is not captured, so moving it alone would leave this device
+     * with a content stamp no other device has.
+     */
+    @Test
+    fun aRefreshFromAStaleSnapshotDoesNotMoveTheContentStampAlone(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f1", now = 500L, url = "https://ex.com/feed")
+            val snapshot = db.feedsQueries.getById("f1").executeAsOne()
+            // What RSS carries (site https://ex.com, title "Feed", no description), stored meanwhile.
+            db.feedsQueries.updateContent("https://ex.com", "Feed", null, 700L, "f1")
+            val repo = newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK) }, clock = Clock { 2000L })
+
+            repo.refreshFeed(snapshot)
+
+            val row = db.feedsQueries.getById("f1").executeAsOne()
+            assertEquals("Feed", row.title)
+            assertEquals(700L, row.updated_at)
+        } finally {
+            driver.close()
+        }
+    }
+
+    /** `updateContent` writes, and stamps, only a change; the same values leave the row alone. */
+    @Test
+    fun updateContentWritesOnlyAChange(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f1", now = 500L)
+            db.feedsQueries.updateContent(null, "Feed f1", null, 700L, "f1")
+            assertEquals(500L, db.feedsQueries.getById("f1").executeAsOne().updated_at)
+            db.feedsQueries.updateContent(null, "Feed f1", "New description", 800L, "f1")
+            val row = db.feedsQueries.getById("f1").executeAsOne()
+            assertEquals("New description", row.description)
+            assertEquals(800L, row.updated_at)
+        } finally {
+            driver.close()
+        }
+    }
+
     @Test
     fun refreshFeedTimeoutIsAlsoCountedAsAnError(): Unit = runBlocking {
         val (driver, db) = inMemoryDb()
@@ -2483,7 +2525,7 @@ class FeedRepositoryTest {
             now = 3000L
             // A refresh of the same feed commits meanwhile: its validators, and its content stamp.
             db.feed_fetch_stateQueries.upsertValidators("f1", "refreshed", null)
-            db.feedsQueries.updateContent(null, "Feed f1", null, 3000L, "f1")
+            db.feedsQueries.updateContent(null, "Refreshed f1", null, 3000L, "f1")
             now = 4000L
 
             placement.unlock()
