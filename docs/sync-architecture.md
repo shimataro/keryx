@@ -50,8 +50,8 @@ pre-delta migration and the legacy watch), `domain/MergeSql.kt`,
   deletion removes it. Losing a concurrent write to such a rule is not a loss; a row, child row or value that no rule supersedes disappearing from any device is. Identity merges (feeds, articles, tags, folders) move
   children onto the surviving id instead of dropping them.
 - **Every device ends with the same data and the same display.** Once the same files have been merged — including
-  the deltas that carry the identity edges merges discovered (see the feeds bullet above) — every device holds the same
-  synced rows, and everything a user sees that derives from them — names, the sort order of feeds, folders and tags,
+  the deltas that carry the identity edges merges discovered (see the feeds bullet above) — and no device holds a local
+  change it has not yet sent, every device holds the same synced rows, and everything a user sees that derives from them — names, the sort order of feeds, folders and tags,
   folder assignment, the numbering of same-named rows — is identical. No row exists on only some devices and no name
   differs between devices. Device-local data (fetch state, the search index, `local_settings.json`) never feeds a synced
   value or what is displayed from synced data; the feed list's fetch-problem indicator, search results and view
