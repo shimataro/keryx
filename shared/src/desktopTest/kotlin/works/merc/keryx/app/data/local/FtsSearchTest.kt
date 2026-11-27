@@ -684,4 +684,30 @@ class FtsSearchTest {
             driver.close()
         }
     }
+
+    /**
+     * A feed merge moved the feed the search is scoped to onto another id (`ks_id_remap`): the scope still
+     * finds the feed's articles, now under the new id, on the trigram path and the short-term LIKE path alike
+     * — as the feed's own article list does — and an id nothing moved still matches only its own feed.
+     */
+    @Test
+    fun aFeedScopeNamingAnIdAMergeMovedFindsTheFeedItBecame() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f-new")
+            db.insertFeed("f-other")
+            db.insertArticle("a1", "f-new", "Kotlin one", "shared body")
+            db.insertArticle("a2", "f-other", "Kotlin two", "shared body")
+            driver.execute(null, "INSERT INTO ks_id_remap (kind, old_id, new_id) VALUES ('feed', 'f-old', 'f-new')", 0)
+            ftsManagerIndexed(driver)
+
+            for (id in listOf("f-old", "f-new")) {
+                assertEquals(listOf("a1"), FtsSearch(driver).search("Kotlin", ArticleFilter.Feed(id)).map { it.id }, "id=$id")
+                assertEquals(listOf("a1"), FtsSearch(driver).search("ot", ArticleFilter.Feed(id)).map { it.id }, "LIKE, id=$id")
+            }
+            assertEquals(listOf("a2"), FtsSearch(driver).search("Kotlin", ArticleFilter.Feed("f-other")).map { it.id })
+        } finally {
+            driver.close()
+        }
+    }
 }
