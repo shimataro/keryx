@@ -68,8 +68,8 @@ it covers is a destructive-action decision, not a refactor.
   unless its field group's own rule (last-write-wins, an article body's `content` precedence), an explicit `RowFold`
   rule (the earliest `created_at`, the latest `cached_at` / `updated_at`, the greatest `v2_id`) or a logical deletion
   supersedes it; losing a concurrent write to such a rule is not a loss.
-- **Every device ends identical.** After the same files are merged and no device holds a local change it has not
-  yet sent, all devices hold and show the same synced data (names and numbering included); device-local data never
+- **Every device ends identical.** After the same files are merged — including the deltas that carry the identity
+  edges merges discovered — and no device holds a local change it has not yet sent, all devices hold and show the same synced data (names and numbering included); device-local data never
   leaks into it.
 
 See "Design Philosophy" and "Conditions every merge rule must meet" in `docs/sync-architecture.md`.
