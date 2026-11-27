@@ -22,7 +22,7 @@ import works.merc.keryx.app.data.local.LocalSettingsStore
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.domain.FeedIdentitySql
 import works.merc.keryx.app.domain.IdRemaps
-import works.merc.keryx.app.inMemoryDb
+import works.merc.keryx.app.fileDb
 import works.merc.keryx.app.insertFeed
 import works.merc.keryx.app.platform.AppDirs
 import works.merc.keryx.app.platform.FileIO
@@ -57,7 +57,9 @@ class HomeViewModelArticleRekeyTest {
     fun setUp() {
         scheduler = TestCoroutineScheduler()
         Dispatchers.setMain(StandardTestDispatcher(scheduler))
-        val (raw, _) = inMemoryDb()
+        // A file, not memory: a test here runs the ViewModel's queries on real threads beside the test's own
+        // (aLookupThatReadAnIdAMergeThenMovedOn...), which one shared in-memory connection cannot serve safely.
+        val (_, raw, _) = fileDb(foreignKeys = true)
         driver = ArticleLookupHookDriver(raw)
         db = KeryxDatabase(driver)
         db.insertFeed("f0")
