@@ -66,7 +66,8 @@
   バージョンを導出。）スキーマを変える場合は `.sqm` ファイル（`<移行元バージョン>.sqm`）を追加すればバージョンは自動で
   上がる。あわせて `domain/MergeSchema.EXPECTED_SCHEMAS`（`DatabaseMerger.validateSchema` が参照する期待スキーマ）、
   `domain/TransportSchema`（差分ファイルのスキーマとそのマイグレーション）、記録用トリガーが比較する列の一覧を
-  一緒に更新すること。
+  一緒に更新すること。同期対象のテーブルや列を新しく足すときは、同じ変更でそのマージのフィールドグループとスタンプも
+  定める：どのグループにも属さない列は挿入後に上書きされず、端末間で食い違う。
   `user_version` が実行中ビルドのスキーマより新しいファイルは決して開かない：desktop は何も書き込む前に
   `DatabaseTooNewException`（`data/local/DatabaseSchemaGuard.kt`）を投げる。Apple も同じガードで同様に拒否する——
   `DatabaseDriverFactory.apple.kt` の `createDriver` が `NativeSqliteDriver` でファイルを開く前に、ファイルの

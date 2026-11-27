@@ -62,6 +62,15 @@ action — a new generation replaces the cloud data by this device's state, ever
 rejoins with a full send, and an unusable `keryx.db.gz` is archived and stubbed), so widening what
 it covers is a destructive-action decision, not a refactor.
 
+## Invariants every change must keep
+
+- **No data is lost.** Nothing a merge, fold or garbage collection does may remove a row, value, body or link that no
+  newer version of its field group or logical deletion supersedes; losing a concurrent write to last-write-wins is not a loss.
+- **Every device ends identical.** After the same files are merged, all devices hold and show the same synced data
+  (names and numbering included); device-local data never leaks into it.
+
+See "Design Philosophy" and "Conditions every merge rule must meet" in `docs/sync-architecture.md`.
+
 ## Read the full design before changing any of this
 
 `docs/sync-architecture.md` is **not** imported into the session (it is well over 100KB, so

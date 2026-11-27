@@ -42,6 +42,16 @@ pre-delta migration and the legacy watch), `domain/MergeSql.kt`,
     so it can come out in the other feed's folder (or, by a newer unsubscribe, unsubscribed). A collision no device
     ever observes — both feeds always seen holding the URL at different times — is missed everywhere (see
     [known-issues.md](known-issues.md)).
+- **No data is lost by a sync.** A merge, fold or garbage collection never removes a row, a field value, an article
+  body or a link (tag attachment, folder assignment) unless a newer version of the same field group supersedes it or a
+  logical deletion removes it. Losing a concurrent write to last-write-wins is not a loss; a row, child row or value
+  that no rule supersedes disappearing from any device is. Identity merges (feeds, articles, tags, folders) move
+  children onto the surviving id instead of dropping them.
+- **Every device ends with the same data and the same display.** Once the same files have been merged, every device
+  holds the same synced rows, and everything a user sees that derives from them — names, order, folder assignment, the
+  numbering of same-named rows — is identical. No row exists on only some devices and no name differs between devices.
+  Device-local data (fetch state, the search index, `local_settings.json`) never feeds a synced or displayed value. The
+  only exception is an identity collision no device ever observes (see the feeds bullet above).
 - **Only local changes are sent.** A change that arrived through a merge is never re-sent, so changes do not echo
   back and forth between devices. The one exception is a feed identity edge a merge discovers (a URL collision
   between main and the file): it is recorded for sending even inside the merge, since another device may never
@@ -566,6 +576,18 @@ and the ambiguous `SQLITE_ERROR` case of the classification below is checked aga
 
 > [!IMPORTANT]
 > SQLDelight's JVM `JdbcSqliteDriver` opens a new connection per statement for file DBs. Therefore, executing `ATTACH` through the driver makes it invisible to subsequent merge statements (`no such table: cloud.*`). The merge is done on a **single dedicated connection** in `platform/DatabaseMerger`: attach → version check → merge (transaction) → detach.
+
+**Conditions every merge rule must meet**, so that the guarantees in "Design Philosophy" (no data lost, the same data and
+display on every device) hold for any statement added or changed:
+
+- Every synced column belongs to exactly one field group with one stamp (or an explicit OR rule); a column in no group
+  is never overwritten after insert and so diverges between devices.
+- The tie rule is a total order on values (`SyncLww`), so arrival order never decides the result.
+- A statement that drops, folds or re-keys rows moves their children (articles, `feed_tags`, fetch state, raw folder
+  assignment) first.
+- Folding (`ReduceSql`) and garbage collection obey the same rules, so a fold equals the files it replaces.
+- A derived cache (`feeds.folder_id`) is computed from synced state alone, and a displayed name or its numbering
+  derives from synced data only.
 
 Merge SQL (`MergeSql`) key points:
 
