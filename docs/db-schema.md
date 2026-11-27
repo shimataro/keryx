@@ -78,8 +78,8 @@ its merge field group and stamp in the same change: a column in no group changes
 (`RowFold`: the earliest `created_at`, an article's latest `cached_at` / `updated_at`, the greatest non-NULL `v2_id`),
 and one with neither diverges between devices. (The identity merge moves a row's id, and the references
 it rewrites (`feed_tags.feed_id` / `tag_id`, `articles.feed_id`), onto the canonical id; that is not a fold rule, so every
-other column — a `UNIQUE` one such as `feeds.url`, or a reference that is a value such as a feed's folder assignment —
-still needs its field group.)
+other column that has no fold rule — a `UNIQUE` one such as `feeds.url`, or a reference that is a value such as a feed's
+folder assignment — still needs its field group.)
   A file whose `user_version` is newer than the running build's schema is never opened: desktop throws
   `DatabaseTooNewException` (`data/local/DatabaseSchemaGuard.kt`) before writing anything; Apple does the same through
   the same guard — `DatabaseDriverFactory.apple.kt`'s `createDriver` calls `requireSupportedSchemaVersion` on the

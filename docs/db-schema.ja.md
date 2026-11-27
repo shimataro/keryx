@@ -70,8 +70,9 @@
   定める：どのグループにも属さない列は、明示した畳み込み規則（`RowFold`：最も早い `created_at`、記事の最も遅い
   `cached_at` / `updated_at`、NULL 以外で最大の `v2_id`）でしか変わらず、グループにも畳み込み規則にも属さない列は
   端末間で食い違う。（同一性のマージは、行の id と、それが書き換える参照（`feed_tags.feed_id` /
-  `tag_id`、`articles.feed_id`）を正規の id へ移す。これは畳み込み規則ではないので、ほかの列——`feeds.url` のような
-  `UNIQUE` の列や、フォルダー割り当てのような値としての参照——には、なおフィールドグループが要る。）
+  `tag_id`、`articles.feed_id`）を正規の id へ移す。これは畳み込み規則ではないので、畳み込み規則を持たないほかの
+  列——`feeds.url` のような `UNIQUE` の列や、フォルダー割り当てのような値としての参照——には、なおフィールドグループが
+  要る。）
   `user_version` が実行中ビルドのスキーマより新しいファイルは決して開かない：desktop は何も書き込む前に
   `DatabaseTooNewException`（`data/local/DatabaseSchemaGuard.kt`）を投げる。Apple も同じガードで同様に拒否する——
   `DatabaseDriverFactory.apple.kt` の `createDriver` が `NativeSqliteDriver` でファイルを開く前に、ファイルの

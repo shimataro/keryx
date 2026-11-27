@@ -590,8 +590,8 @@ display on every device) hold for any statement added or changed:
   changes only through an explicit fold rule (`RowFold`: the earliest `created_at`, an article's latest `cached_at` /
   `updated_at`, the greatest non-NULL `v2_id`), and one with neither diverges between devices. The identity merge
   moves a row's id, and the references it rewrites (`feed_tags.feed_id` / `tag_id`, `articles.feed_id`), onto the
-  canonical id; that is not a fold rule, so every other column — a `UNIQUE` one such as `feeds.url`, or a reference that
-  is a value such as a feed's folder assignment — still needs its field group.
+  canonical id; that is not a fold rule, so every other column that has no fold rule — a `UNIQUE` one such as
+  `feeds.url`, or a reference that is a value such as a feed's folder assignment — still needs its field group.
 - The tie rule is a total order on values (`SyncLww`), so arrival order never decides the result.
 - A statement that drops, folds or re-keys rows moves their children (articles, `feed_tags`, fetch state, raw folder
   assignment) first.
