@@ -35,8 +35,13 @@ CREATE INDEX tags_name ON tags(name);
 --            (SELECT new_id FROM ks_id_remap WHERE kind = 'tag' AND old_id = :id), :id)
 -- An existing row's id resolves to itself. 'tag' is ID_REMAP_KIND_TAG (TagFolderIdRekey.kt).
 
+-- The display order is decided by synced values alone: sort_order, then the name (NOCASE, then
+-- byte-wise, so names differing only by case still order), then created_at and the id — the order
+-- the ordinals number same-named rows by (NameOrdinals). Same-named rows coexist (a rename crossing
+-- a same-named creation) and two offline creations take the same sort_order, so without the
+-- tiebreakers the order would fall to each device's own rowid order and diverge.
 watchAll:
-SELECT * FROM tags WHERE deleted_at IS NULL ORDER BY sort_order ASC, name COLLATE NOCASE ASC;
+SELECT * FROM tags WHERE deleted_at IS NULL ORDER BY sort_order ASC, name COLLATE NOCASE ASC, name ASC, created_at ASC, id ASC;
 
 getById:
 SELECT * FROM tags WHERE id = ?;
