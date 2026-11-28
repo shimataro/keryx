@@ -2985,8 +2985,10 @@ class FeedRepositoryTest {
             assertEquals(listOf("f1", newFeed.id, "f2", "f3"), ordered.map { it.id })
 
             // f1 keeps index 0 (unchanged), so it must be left completely untouched. f2 and f3 both
-            // shift down by one index, so they (like the new feed's own row) get rewritten.
-            assertEquals(0L, db.feedsQueries.getById("f1").executeAsOne().updated_at)
+            // shift down by one index, so they (like the new feed's own row) get rewritten. (f1's stamp
+            // is 1, not the seeded 0: the fixture's own folder write at that same stamp moves it forward
+            // one, MAX(now, previous + 1) — and the subscribe must not move it further.)
+            assertEquals(1L, db.feedsQueries.getById("f1").executeAsOne().updated_at)
             assertEquals(999L, db.feedsQueries.getById("f2").executeAsOne().updated_at)
             assertEquals(999L, db.feedsQueries.getById("f3").executeAsOne().updated_at)
         } finally {

@@ -1,6 +1,9 @@
 package works.merc.keryx.app.platform
 
+import app.cash.sqldelight.db.AfterVersion
+import app.cash.sqldelight.db.QueryResult
 import app.cash.sqldelight.db.SqlDriver
+import app.cash.sqldelight.driver.native.NativeSqliteDriver
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.coroutines.test.runTest
 import platform.Foundation.NSFileManager
@@ -102,6 +105,60 @@ class AppleDatabaseTest {
                 setOf(listOf<String?>("folder", "d1", dId), listOf<String?>("tag", "t1", tId)),
                 db.queryRowsStrict("SELECT kind, v2_id, id FROM ks_v2_edge").toSet(),
             )
+        }
+    }
+
+    /**
+     * The v2->v3 migration is atomic on Apple: `2.sqm`, the `AfterVersion(2)` callback and the
+     * `user_version` bump run in one transaction inside [NativeSqliteDriver], so a callback that
+     * throws leaves the file at version 2 with none of `2.sqm`'s tables — the next launch migrates
+     * it again from scratch instead of finding a half-migrated file stamped (or not) as version 3.
+     * The failure must be the injected one, raised after the callback was reached: a `2.sqm`
+     * statement failing earlier would roll back on its own and prove nothing about the transaction.
+     */
+    @Test
+    fun aMigrationWhoseCallbackFailsLeavesTheFileAtVersionTwo() {
+        RawSqliteConnection.open(path("atomic.db"), create = true).use { db ->
+            SCHEMA_V2_STATEMENTS.forEach { db.exec(it) }
+            db.exec("PRAGMA user_version = 2")
+            db.exec("INSERT INTO feeds (id, url, title, updated_at, created_at) VALUES ('f1', 'https://a', 'A', 10, 1)")
+        }
+
+        var callbackReached = false
+        val failing = arrayOf(
+            AfterVersion(2) {
+                callbackReached = true
+                error(INJECTED_FAILURE)
+            },
+        )
+        var driver: SqlDriver? = null
+        val failure = assertFailsWith<Throwable> {
+            val opened = NativeSqliteDriver(
+                schema = KeryxDatabase.Schema,
+                name = "atomic.db",
+                maxReaderConnections = 1,
+                onConfiguration = { config ->
+                    config.copy(extendedConfig = config.extendedConfig.copy(basePath = dir, foreignKeyConstraints = true))
+                },
+                callbacks = failing,
+            )
+            driver = opened
+            opened.executeQuery(null, "SELECT 1", { QueryResult.Unit }, 0)
+        }
+        runCatching { driver?.close() }
+
+        assertTrue(callbackReached, "the migration must reach AfterVersion(2)")
+        assertTrue(
+            generateSequence(failure) { it.cause }.any { it.message?.contains(INJECTED_FAILURE) == true },
+            "the open must fail with the injected callback failure (possibly wrapped), not $failure",
+        )
+        assertEquals(2, RawSqliteConnection.userVersionOf(path("atomic.db")))
+        RawSqliteConnection.open(path("atomic.db")).use { db ->
+            assertEquals(
+                emptyList(),
+                db.queryRowsStrict("SELECT name FROM sqlite_master WHERE name = 'ks_feed_folder_raw'"),
+            )
+            assertEquals(listOf(listOf<String?>("f1")), db.queryRowsStrict("SELECT id FROM feeds"))
         }
     }
 
@@ -607,5 +664,8 @@ class AppleDatabaseTest {
         /** Extended result codes (`SQLITE_CONSTRAINT | n << 8`). */
         const val SQLITE_CONSTRAINT_FOREIGNKEY = 787
         const val SQLITE_CONSTRAINT_PRIMARYKEY = 1555
+
+        /** The message of the failure the migration-atomicity test injects into `AfterVersion(2)`. */
+        const val INJECTED_FAILURE = "injected AfterVersion(2) failure"
     }
 }

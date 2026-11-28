@@ -33,8 +33,13 @@ CREATE INDEX folders_name ON folders(name);
 --            (SELECT new_id FROM ks_id_remap WHERE kind = 'folder' AND old_id = :id), :id)
 -- An existing row's id resolves to itself. 'folder' is ID_REMAP_KIND_FOLDER (TagFolderIdRekey.kt).
 
+-- The display order is decided by synced values alone: sort_order, then the name (NOCASE, then
+-- byte-wise, so names differing only by case still order), then created_at and the id — the order
+-- the ordinals number same-named rows by (NameOrdinals). Same-named rows coexist (a rename crossing
+-- a same-named creation) and two offline creations take the same sort_order, so without the
+-- tiebreakers the order would fall to each device's own rowid order and diverge.
 watchAll:
-SELECT * FROM folders WHERE deleted_at IS NULL ORDER BY sort_order ASC, name COLLATE NOCASE ASC;
+SELECT * FROM folders WHERE deleted_at IS NULL ORDER BY sort_order ASC, name COLLATE NOCASE ASC, name ASC, created_at ASC, id ASC;
 
 getById:
 SELECT * FROM folders WHERE id = ?;
@@ -50,7 +55,7 @@ SELECT id, sort_order,
     CAST(CASE WHEN :target IS NULL THEN 0
         ELSE id = COALESCE((SELECT f.id FROM folders f WHERE f.id = :target), (SELECT m.new_id FROM ks_id_remap m WHERE m.kind = 'folder' AND m.old_id = :target), :target)
     END AS INTEGER) AS is_target
-FROM folders WHERE deleted_at IS NULL ORDER BY sort_order ASC, name COLLATE NOCASE ASC;
+FROM folders WHERE deleted_at IS NULL ORDER BY sort_order ASC, name COLLATE NOCASE ASC, name ASC, created_at ASC, id ASC;
 
 -- The id a folder id given to a write resolves to (see the note above): the id itself while a row
 -- has it, else the id ks_id_remap maps it to, else the id unchanged.
