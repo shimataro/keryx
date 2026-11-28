@@ -30,7 +30,10 @@
   前に進め、直後に行った編集が必ず最新になるようにしている。
 - **ほかの last-write-wins のタイムスタンプも、すべて同じように行の上で前にしか進まない**（`MAX(今の時刻, 前の値 + 1)`）。
   `feeds.custom_title_updated_at` / `folder_updated_at` / `sort_order_updated_at`（`updateCustomTitle`、`updateFolder`、
-  `updateSortOrder`、`updateFolderAndSortOrder`）、`articles.read_at` / `starred_at`（`updateReadStatus`、
+  `updateSortOrder`、`updateFolderAndSortOrder`）、feeds 行自身の `updated_at`——コンテンツ グループのスタンプ
+  （`upsert`、`softDelete`、`reviveAfterMerge`、`updateFaviconUrlIfMissing`、`updateContent`、`updateUrl`、
+  `updateCustomTitle`、`updateFolder`、`updateSortOrder`、`updateFolderAndSortOrder`。capture トリガーが監視する列が
+  一緒に変わったときだけ進める）——、`articles.read_at` / `starred_at`（`updateReadStatus`、
   `updateReadStatusByIds`、`updateStarStatus`、`markAllRead*` の各クエリ）と `deleted_updated_at`（`softDeleteExpired`）
   （と、`updateStarStatus` のスター解除が打刻する削除の取り消し）——スターと削除はマージで別々のグループなので、
   それぞれ自分の前の値より大きく打刻する——、`articles.body_updated_at`（記事の upsert。本文の列が変わったときだけ進める）、
@@ -120,7 +123,9 @@
   変更と一緒にしか動かさない: `upsert` は書く列が変わったときだけこれを動かし、`updateUrl` は URL が変わるとき
   だけ（かつ別のフィードがそれを持っていない間だけ）書き、`updateContent`（リフレッシュの内容の書き込み）はサイトの URL、
   タイトル、説明のどれかが変わるときだけ書く。送られずに動いたスタンプは、ほかの端末の後の内容の変更に、
-  この端末では勝ち、向こうでは負けてしまう。
+  この端末では勝ち、向こうでは負けてしまう。動くときは前にしか進まない（`MAX(今の時刻, 前の値 + 1)`。
+  上に挙げたほかの last-write-wins のスタンプと同じ）: マージが取り込んだ時刻以上の時刻の書き込み——
+  この端末の時計が送信側より遅い場合——は、次のマージでマージ済みの内容に負けてしまう。
 - `deleted_at` で論理削除。再購読時に NULL へ戻す。
 - `folder_id` はフィードが属するフォルダー（1フィード = 最大1フォルダー）。タグ（`feed_tags`、多対多）とは
   独立した分類軸。`feeds.upsert`（購読・リフレッシュ用）はこの列に一切触れない設計にしており、
