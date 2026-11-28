@@ -1,5 +1,7 @@
 package works.merc.keryx.app.domain
 
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import works.merc.keryx.app.core.CloudStorageType
 import works.merc.keryx.app.data.cloud.CloudCredentials
 
@@ -23,8 +25,17 @@ class CloudConnectionService(
 ) {
 
     /**
-     * Records a successful authorization for [type]: saves [credentials], selects [type] as the active
-     * provider in the device-local settings, and flushes those settings to disk.
+     * Records a successful authorization for [type]: clears the previous connection's sync state,
+     * saves [credentials], selects [type] as the active provider in the device-local settings, and
+     * flushes those settings to disk.
+     *
+     * A new authorization never inherits the previous connection's sync state
+     * ([SyncRepository.clearSyncFailureState], which waits out a sync in flight). [tearDown] clears it
+     * too, but a teardown that never finished (the process ended after the tokens were deleted), or a
+     * connect with no teardown before it, would otherwise leave `ks_generation` and `ks_last_seq >= 1`
+     * behind: the first sync against the new provider's empty folder would then just create a pointer
+     * to that old generation and never send a full base, so this device's data would never reach it.
+     * Cleared here, the first sync joins a fresh generation and makes the full send.
      *
      * The flush is load-bearing and must complete before the caller starts any sync. The tokens
      * are written durably to the secure store first, but the provider selection would otherwise
@@ -33,6 +44,7 @@ class CloudConnectionService(
      * later sync silently does nothing.
      */
     suspend fun completeConnect(type: CloudStorageType, credentials: CloudCredentials) {
+        syncRepository.clearSyncFailureState()
         cloudSession.saveCredentials(type, credentials)
         settingsRepository.mutateLocalSettings { it.copy(cloudStorageType = type.id) }
         settingsRepository.flush()
@@ -43,8 +55,13 @@ class CloudConnectionService(
      * tokens (revoked first), the sync failure state and per-provider sync markers (see
      * [SyncRepository.clearSyncFailureState] — which waits out a sync in flight, since it takes the
      * sync's own lock), and the persisted provider selection.
+     *
+     * Runs to completion even if the caller is cancelled (a UI scope closing while this waits for the
+     * sync lock): stopped after the tokens are gone, it would leave capture on with no provider to send
+     * to, the old provider still selected, and the old generation's markers in place. The only
+     * network call, the revoke, is bounded by the HTTP timeouts.
      */
-    suspend fun tearDown(type: CloudStorageType) {
+    suspend fun tearDown(type: CloudStorageType) = withContext(NonCancellable) {
         cloudSession.disconnect(type)
         syncRepository.clearSyncFailureState()
         settingsRepository.mutateLocalSettings { it.copy(cloudStorageType = null) }

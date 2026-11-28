@@ -428,6 +428,13 @@ thresholds; deltas a base covers are not downloaded. That is at most about 1.25�
   `ks_feed_folder_raw` stays too, on a disconnect as on joining: it is this device's data — each feed's folder
   assignment, which `feeds.folder_id` is resolved from and the next full send carries — not a record of the files
   merged, so a new generation's files are ranked against the same value this device sends.
+  The teardown runs to completion even if its caller is cancelled (`CloudConnectionService.tearDown`, under
+  `NonCancellable`), and a new authorization clears the same state again before its credentials are saved
+  (`CloudConnectionService.completeConnect`): a new connection never inherits the previous one's sync state. A
+  teardown cancelled or cut short by the process ending after the tokens were deleted would otherwise leave
+  `ks_generation` and `ks_last_seq ≥ 1` behind, and the first sync against the next provider's empty folder would
+  take the "no pointer, own generation already sent into" branch — create a pointer to the old generation without
+  ever sending a full base — so this device's data would never reach the new provider.
 
 ### Validating Cloud Files
 
