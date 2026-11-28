@@ -113,6 +113,8 @@ class AppleDatabaseTest {
      * `user_version` bump run in one transaction inside [NativeSqliteDriver], so a callback that
      * throws leaves the file at version 2 with none of `2.sqm`'s tables — the next launch migrates
      * it again from scratch instead of finding a half-migrated file stamped (or not) as version 3.
+     * The failure must be the injected one, raised after the callback was reached: a `2.sqm`
+     * statement failing earlier would roll back on its own and prove nothing about the transaction.
      */
     @Test
     fun aMigrationWhoseCallbackFailsLeavesTheFileAtVersionTwo() {
@@ -122,9 +124,15 @@ class AppleDatabaseTest {
             db.exec("INSERT INTO feeds (id, url, title, updated_at, created_at) VALUES ('f1', 'https://a', 'A', 10, 1)")
         }
 
-        val failing = arrayOf(AfterVersion(2) { error("injected AfterVersion(2) failure") })
+        var callbackReached = false
+        val failing = arrayOf(
+            AfterVersion(2) {
+                callbackReached = true
+                error(INJECTED_FAILURE)
+            },
+        )
         var driver: SqlDriver? = null
-        assertFailsWith<Throwable> {
+        val failure = assertFailsWith<Throwable> {
             val opened = NativeSqliteDriver(
                 schema = KeryxDatabase.Schema,
                 name = "atomic.db",
@@ -139,6 +147,11 @@ class AppleDatabaseTest {
         }
         runCatching { driver?.close() }
 
+        assertTrue(callbackReached, "the migration must reach AfterVersion(2)")
+        assertTrue(
+            generateSequence(failure) { it.cause }.any { it.message?.contains(INJECTED_FAILURE) == true },
+            "the open must fail with the injected callback failure (possibly wrapped), not $failure",
+        )
         assertEquals(2, RawSqliteConnection.userVersionOf(path("atomic.db")))
         RawSqliteConnection.open(path("atomic.db")).use { db ->
             assertEquals(
@@ -651,5 +664,8 @@ class AppleDatabaseTest {
         /** Extended result codes (`SQLITE_CONSTRAINT | n << 8`). */
         const val SQLITE_CONSTRAINT_FOREIGNKEY = 787
         const val SQLITE_CONSTRAINT_PRIMARYKEY = 1555
+
+        /** The message of the failure the migration-atomicity test injects into `AfterVersion(2)`. */
+        const val INJECTED_FAILURE = "injected AfterVersion(2) failure"
     }
 }
